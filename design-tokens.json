@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "_meta": {
+    "direction": "TO BE SET BY DESIGNER AGENT — e.g. 'modern minimal SaaS', 'editorial', 'brutalist', etc.",
+    "references": [
+      "TO BE SET — 2-3 reference apps/sites that exemplify the direction"
+    ],
+    "anti_patterns": [
+      "TO BE SET — what would break this direction if applied"
+    ],
+    "accessibility": "WCAG 2.0 AA minimum (AODA requirement for Ontario public-facing services)"
+  },
+
+  "color": {
+    "background": {
+      "primary": "#ffffff",
+      "secondary": "#f5f5f5",
+      "tertiary": "#eeeeee"
+    },
+    "foreground": {
+      "primary": "#0a0a0a",
+      "secondary": "#525252",
+      "tertiary": "#a3a3a3"
+    },
+    "accent": {
+      "default": "#0066cc",
+      "hover": "#0052a3",
+      "active": "#003d7a"
+    },
+    "semantic": {
+      "success": "#15803d",
+      "warning": "#a16207",
+      "error": "#b91c1c",
+      "info": "#1d4ed8"
+    },
+    "border": {
+      "subtle": "#e5e5e5",
+      "default": "#d4d4d4",
+      "strong": "#a3a3a3"
+    },
+    "_accessibility_pairs": {
+      "_comment": "Verified WCAG AA pairs. Add or remove during designer agent invocation.",
+      "foreground.primary_on_background.primary": "21:1 (AAA)",
+      "foreground.secondary_on_background.primary": "7.4:1 (AAA)",
+      "foreground.tertiary_on_background.primary": "3.5:1 (AA large text only)",
+      "accent.default_on_background.primary": "5.9:1 (AA)"
+    }
+  },
+
+  "typography": {
+    "family": {
+      "sans": "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+      "serif": "Georgia, Cambria, 'Times New Roman', serif",
+      "mono": "ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+    },
+    "size": {
+      "xs": "0.75rem",
+      "sm": "0.875rem",
+      "base": "1rem",
+      "lg": "1.125rem",
+      "xl": "1.25rem",
+      "2xl": "1.5rem",
+      "3xl": "1.875rem",
+      "4xl": "2.25rem",
+      "5xl": "3rem"
+    },
+    "weight": {
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    },
+    "leading": {
+      "tight": 1.2,
+      "normal": 1.5,
+      "loose": 1.75
+    }
+  },
+
+  "spacing": {
+    "_base": "4px scale",
+    "0": "0",
+    "1": "0.25rem",
+    "2": "0.5rem",
+    "3": "0.75rem",
+    "4": "1rem",
+    "6": "1.5rem",
+    "8": "2rem",
+    "12": "3rem",
+    "16": "4rem",
+    "24": "6rem"
+  },
+
+  "radius": {
+    "none": "0",
+    "sm": "0.125rem",
+    "default": "0.375rem",
+    "md": "0.5rem",
+    "lg": "0.75rem",
+    "full": "9999px"
+  },
+
+  "shadow": {
+    "none": "none",
+    "sm": "0 1px 2px rgba(0,0,0,0.05)",
+    "default": "0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06)",
+    "md": "0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)",
+    "lg": "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)"
+  },
+
+  "motion": {
+    "duration": {
+      "instant": "0ms",
+      "fast": "150ms",
+      "normal": "250ms",
+      "slow": "400ms"
+    },
+    "easing": {
+      "linear": "linear",
+      "in": "cubic-bezier(0.4, 0, 1, 1)",
+      "out": "cubic-bezier(0, 0, 0.2, 1)",
+      "in_out": "cubic-bezier(0.4, 0, 0.2, 1)"
+    },
+    "_reduced_motion": "When prefers-reduced-motion: reduce, use duration.instant for all transitions"
+  },
+
+  "breakpoint": {
+    "sm": "640px",
+    "md": "768px",
+    "lg": "1024px",
+    "xl": "1280px",
+    "2xl": "1536px"
+  }
+}
