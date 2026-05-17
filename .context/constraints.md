@@ -13,8 +13,10 @@ review the actual compliance posture.
 - **Primary:** Canada (federal) + Ontario (provincial)
 - **PIPEDA** applies to all commercial activity involving personal information
 - **Ontario regimes** layer on for specific data types (see below)
-- **Quebec Law 25** applies if any users are in Quebec — stricter than PIPEDA
-- **Other provinces:** BC (PIPA), Alberta (PIPA), Nova Scotia (PIIDPA for public bodies) have their own regimes if users are there
+- **Quebec Law 25:** out of scope — no Quebec users. Revisit before serving
+  any Quebec resident; the regime is stricter than PIPEDA.
+- **Other provinces** (BC PIPA, Alberta PIPA, Nova Scotia PIIDPA): out of scope.
+  Revisit if audience expands outside Ontario.
 
 ---
 
@@ -70,17 +72,22 @@ Every feature touching personal information must satisfy the ten fair-informatio
 
 ---
 
-## Quebec Law 25 (if any Quebec users)
+## Financial / Payment Data
 
-Now the strictest privacy regime in Canada. If serving Quebec users:
+**Trigger:** any storage, processing, or transmission of payment card data
+(PAN, expiry, CVV) or bank account information.
 
-- **Privacy impact assessment (PIA) required** before any new tech project involving personal information
-- Designated privacy officer with published contact
-- **Confidentiality incident register** maintained
-- Specific, separate consent for sensitive information
-- Right to data portability
-- Right to be informed when a decision is based solely on automated processing
-- Cross-border transfers require PIA showing comparable protection
+- **PCI DSS** compliance required. Prefer a hosted payment provider
+  (Stripe, Moneris, Square) that keeps card data off our servers — this
+  scopes us to SAQ-A rather than full PCI DSS.
+- **Never log card numbers**, even in encrypted form. Never log full bank
+  account numbers.
+- **Tokenize at the boundary**; persist only the provider's token, not the PAN.
+- Heightened PIPEDA sensitivity expectations apply to financial information.
+- A breach involving financial data almost always meets the "real risk of
+  significant harm" threshold — assume notification is required.
+- Reconciliation, refunds, and chargebacks need an audit trail separate
+  from application logs.
 
 ---
 
@@ -129,7 +136,6 @@ Non-negotiable for any app handling personal information:
 - Vendor risk assessment before integrating any subprocessor
 - Data processing agreements in place
 - Cross-border transfers documented; PIPEDA-comparable safeguards verified
-- Quebec users: PIA required for cross-border transfers
 
 ### Incident response
 - Written incident response plan with named contacts and escalation path
@@ -159,6 +165,6 @@ These never get automated, regardless of how much the system has learned:
 - Approving the data retention schedule
 - Approving any cross-border data transfer
 - Approving access by a new subprocessor or third party
-- Responding to a regulator (OPC, IPC, CAI for Quebec)
+- Responding to a regulator (OPC federal, IPC Ontario)
 - Breach notification decisions
 - Production deploys of changes touching auth, billing, or personal data
