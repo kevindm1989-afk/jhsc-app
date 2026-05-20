@@ -132,6 +132,12 @@ if [ "$has_rust" = true ]; then
   run_gate "clippy"     cargo clippy --all-targets --all-features -- -D warnings
 fi
 
+# Token consumption — enforces design-tokens.json as the only source of UI values.
+# Skipped when no UI source dirs exist. Override with TOKEN_AUDIT_SKIP=1.
+if [ -f "scripts/token-audit.sh" ]; then
+  run_gate_shell "token-audit" "bash scripts/token-audit.sh"
+fi
+
 # Bail early if Tier 1 failed
 if [ "$overall_status" -ne 0 ]; then
   echo
