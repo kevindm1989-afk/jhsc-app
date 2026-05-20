@@ -82,6 +82,9 @@ hiring, novel domains) that no agent system can or should replace.
 
 scripts/
   verify.sh                        ← gate stack
+  token-audit.sh                   ← enforces design-tokens.json as the
+                                     only source of UI values; auto-skips
+                                     when no UI source exists
 
 workflows/
   orchestration                    ← how agents wire together
@@ -103,6 +106,95 @@ Makefile
 README.md, QUICKSTART.md, RELIABILITY.md, COVERAGE.md, KNOWN-GAPS.md
 SECURITY.md, LICENSE, CONTRIBUTING.md, CHANGELOG.md
 ```
+
+---
+
+## Agent design
+
+Every agent in the pack follows the same shape, so behaviour is predictable
+and cross-references between agents are load-bearing rather than aspirational:
+
+1. **Discovery** — read upstream artifacts (briefing, ADRs, threat model,
+   design tokens, prior tests) before producing anything. Ask if the inputs
+   are ambiguous; do not guess.
+2. **Process** — explicit phases with concrete outputs at each step.
+3. **Self-validation** — re-check own output before declaring done (token
+   audit, AC traceability, state coverage, etc.).
+4. **Explicit handoffs** — name the downstream agents and the artifacts they
+   receive.
+5. **Hard rules** — no escape hatches; the bar does not move.
+6. **Anti-patterns** — common failure modes for that agent's role, listed
+   so they're refused on sight.
+7. **Output format** — concrete shape so the next agent can act without
+   re-asking.
+8. **Stop conditions** — situations where the agent refuses and routes back
+   upstream rather than producing garbage.
+
+The librarian is called first by every other agent and surfaces human-gate
+triggers at the top of its briefing.
+
+---
+
+## How the chain wires together
+
+A typical task flows through the pack like this:
+
+```
+librarian            briefs the next agent with constraints + relevant context
+   ↓
+architect            NFRs, system design, capacity/cost, ordered task list
+   ↓ trust boundaries, PI marking
+threat-modeler       STRIDE per component → testable mitigations
+   ↓ audience, primary task, content shape
+designer             discovery + full token set + every component state
+   ↓ a11y handoff (mandatory)
+accessibility-       reviews every defined state; blocks if AODA not met
+specialist
+   ↓ ACs + state spec
+test-writer          1:1 AC→test mapping; coverage by category; determinism rules
+   ↓ failing tests
+implementer          reads full design system; token-audit on own diff;
+                     state-completeness mandatory
+   ↓ implementation
+verifier   ──┐       Tier 1 (incl. token-audit) → Tier 5; skipped critical
+             │        gates = FAIL; overrides surfaced
+security-    ├── parallel; each cross-references threat-model.md and
+reviewer     │        decisions.md; false-positive padding rejected
+privacy-     ┤
+reviewer     │
+adversarial- ┘
+reviewer
+   ↓ green reviews + verifier report
+release-manager      flag + auto-rollback wired and synthetically tested
+                     before any user sees the change
+   ↓ release plan
+deployer             reads actual reports (no trusting claims), captures
+                     pre-deploy state, concrete post-deploy acceptance
+                     metrics
+```
+
+When something goes wrong:
+
+```
+incident-responder        ranked hypotheses (mechanism / evidence-for /
+                          evidence-against / cheapest test)
+   ↓ if rollback is the answer
+rollback-orchestrator     re-confirms auth before each destructive step;
+                          PIPEDA breach trigger surfaced immediately if PI
+                          was involved
+```
+
+Weekly:
+
+```
+memory-curator       proposes additions / prunings to .context/ with date
+                     citations; never auto-applies; net reduction over time
+```
+
+The cross-references are enforced, not optional. The test-writer refuses
+vague ACs and returns to the architect. The implementer refuses missing
+tokens and returns to the designer. The deployer refuses to trust
+"verifier passed" without the report. This is where the rigor comes from.
 
 ---
 
@@ -160,6 +252,11 @@ Regardless of how comprehensive the agent roster, these stay your decision:
 
 See `QUICKSTART.md`. The minimum useful subset for a new project is the
 17 core agents; specialists join when relevant.
+
+The verification gate stack (`scripts/verify.sh`) and the token-consumption
+audit (`scripts/token-audit.sh`) are project-portable — drop the pack into
+a new repo and they run with no further setup. The token audit auto-skips
+when there's no UI source, so it's safe to enable from day one.
 
 ---
 
