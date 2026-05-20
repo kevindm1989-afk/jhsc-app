@@ -24,10 +24,15 @@
    is already set up. Verify the agents load by running `/agents` in
    Claude Code.
 
-5. **Make the verify script executable**:
+5. **Make the verify scripts executable**:
    ```
-   chmod +x scripts/verify.sh
+   chmod +x scripts/verify.sh scripts/token-audit.sh
    ```
+   `scripts/verify.sh` runs the full gate stack on demand and in CI.
+   `scripts/token-audit.sh` is wired into Tier 1 and enforces that UI
+   code consumes `design-tokens.json` rather than inventing hex / rgb /
+   px values. It auto-skips when no UI source dirs exist, so it's safe
+   to leave enabled from day one.
 
 6. **Install verification tools** (as your project takes shape):
    - For Node: `eslint`, `prettier`, `typescript`
@@ -46,17 +51,23 @@
 
 2. Claude (the main session, acting as orchestrator) will:
    - Ask clarifying questions
-   - Call the **architect**, **threat-modeler**, and **designer** in sequence
+   - Call the **architect** (discovery → NFRs → design → ADRs → ordered task list)
+   - Hand off to the **threat-modeler** (STRIDE per component → testable mitigations)
+   - Hand off to the **designer** (discovery → full token set → every component state) which auto-invokes the **accessibility-specialist**
    - Synthesize the plan and ask for your approval **(HUMAN GATE)**
 
 3. After you approve, the orchestrator loops through tasks:
-   - **test-writer** writes failing tests
-   - **implementer** makes them pass
-   - **verifier** runs the gate stack
-   - **security-reviewer + privacy-reviewer + adversarial-reviewer** in parallel
+   - **test-writer** writes failing tests with 1:1 AC traceability and state coverage
+   - **implementer** makes them pass; runs `token-audit` on its own diff; refuses missing tokens
+   - **verifier** runs the gate stack; skipped critical gates count as FAIL
+   - **security-reviewer + privacy-reviewer + adversarial-reviewer** in parallel; each cross-checks the threat model
    - You review the PR **(HUMAN GATE)**
 
-4. When ready to ship, the **deployer** prepares a deploy plan. For anything
+4. When ready to ship, the **release-manager** produces the rollout
+   strategy (feature flag, stages, auto-rollback wired BEFORE the
+   rollout starts); the **deployer** executes against the plan, reads
+   the actual verifier and reviewer reports (no trusting claims), and
+   captures pre-deploy state as the rollback baseline. For anything
    touching auth, billing, or personal data, you approve explicitly
    **(HUMAN GATE)**.
 
