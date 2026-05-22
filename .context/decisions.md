@@ -566,9 +566,11 @@ the crypto core stays the same.
 
 # ADR-0010: Error tracking — Sentry SaaS with strict PI scrubbing
 
-**Status:** Accepted
-**Date:** 2026-05-22
-**Decider(s):** architect
+**Status:** Accepted — **Amended 2026-05-22 (F-D + F-H, observability-setup pass #2)**
+**Date:** 2026-05-22 (original); amendment 2026-05-22
+**Decider(s):** architect; amendment per F-D + F-H from observability-setup pass #2
+
+**Amendment note (2026-05-22):** see "Amendment: Edge Function logging contract + Phase-0 tracing deferral" block at the end of this ADR. Original Sentry SaaS decision unchanged; the amendment adds (a) architectural ratification of the Edge Function structured-logging contract that `observability/logging.md` §4 had been treating as "applies until contradicted", and (b) an explicit note that distributed tracing is deferred to Phase 4 (sre-specialist) — `request_id` is wired across all three observability pillars to make the future introduction mechanical.
 
 ## Context
 
@@ -703,6 +705,87 @@ to migrate.
 - [ ] T02 — observability-setup writes the `beforeSend` scrubber + CI test.
 - [ ] Add Sentry to `SUBPROCESSORS.md`.
 - [ ] Semgrep rule prohibits non-allowlisted extras.
+
+---
+
+## Amendment: Edge Function logging contract + Phase-0 tracing deferral (2026-05-22, F-D + F-H)
+
+**Amends ADR-0010** above. Triggers:
+- **F-D** (observability-setup pass #2): `observability/logging.md` §4 specifies the Edge Function structured-logging contract as "applies until contradicted." The substance is in the spec; the architectural pointer is missing. Without ratification, a downstream agent could plausibly reach for a different logging library, a different scrubber, or `console.log(req.body)` patterns without tripping a clear ADR-level rule.
+- **F-H** (observability-setup pass #2): distributed tracing is deferred to Phase 4 (sre-specialist) per `observability/README.md` §1; at 12-active-user scale this is acceptable. The deferral is a deliberate Phase-0 simplification, not an oversight; recording it here gives the future sre-specialist a clear handoff anchor.
+
+### F-D — Edge Function logging contract ratified
+
+The substance lives in `observability/logging.md` §4 (Edge Functions are the highest-risk logging surface; they handle ciphertext payloads, and a careless `console.log(req)` leaks payload shape + provenance even when no plaintext is present). This amendment ratifies the load-bearing rules so they have ADR-level weight:
+
+**Rule 1 — No PI in Edge Function logs, ever.** The PI inventory (`.context/decisions.md` §System Design "PI inventory" table) is the closed denylist. Anything in the C2/C3/C4 columns or their adjacent field names is forbidden from any Edge Function log line. Auth material (cookies, JWTs, TOTP codes, passkey assertions, recovery passphrases) is in the same denylist.
+
+**Rule 2 — Scrubbing happens BEFORE the log call, not in a pipeline downstream.** The structured logger (`apps/web/src/lib/log/` + `supabase/functions/_shared/log.ts`) enforces an `safeFields` allowlist at the emit point. The logger does NOT trust the caller; unknown keys are dropped at emit, AND a CI-visible WARN is raised in test environments. There is no downstream "scrubbing pipeline" that the logger relies on; if the call site emits PI, it is the call site that violates the contract, and CI catches it via semgrep rules `no-pi-in-log-attrs`, `no-console-log-req`, `no-debug-in-prod`, and the canary fixture test.
+
+**Rule 3 — `request_id` propagates through every pillar for correlation.** Browser generates a UUIDv4 per logical request and sends it as the `X-Request-ID` header; Edge Functions read and propagate it (or generate one if absent); the server returns it in the response so the browser can log its tail of the request under the same id. Every audit-log row written during that request carries the same `request_id` in its `meta` jsonb. Every Sentry event carries `tags.request_id`. This makes a single error correlatable across (Sentry event → Edge Function log line → audit-log row) without introducing a tracing tool.
+
+**Rule 4 — Edge Function log retention matches the audit-log retention floor, subject to F-F (privacy-reviewer pass).** `observability/README.md` §1 currently records: Sentry 30 days for errors / 7 days for breadcrumbs, Supabase Edge Function logs 7 days on Pro tier, audit-log 24 months. The retention values are NOT changed by this amendment. The pointer to **F-F (privacy-reviewer pass — open, see below)** is recorded explicitly so a future change to audit-log retention triggers a re-read of these values for consistency.
+
+**Architectural enforcement (binding for the implementer and verifier):**
+- Every Edge Function imports the shared logger module; direct `console.*` calls in `supabase/functions/` fail CI via semgrep.
+- The shared logger's `safeFields` allowlist is the union allowlist (browser + server + Edge Functions); no per-surface relaxation.
+- The canary-PII test fixture (T02 acceptance) traverses every Edge Function path and asserts the canary is absent from Supabase function logs. F-09 (`.context/threat-model.md` §3.1) is the test obligation; this amendment is the ADR-level commitment.
+- The shared `observability/sentry-scrub.ts` `beforeSend` is re-used in Edge Functions when they capture an exception to Sentry; the same scrubbing contract applies.
+
+**Reversibility:** Easy on tooling (the shared logger is a single module); hard on the architectural rule (rules 1–4 are non-negotiable while the E2EE posture of ADR-0001 + ADR-0003 holds).
+
+### F-H — Phase-0 tracing deferral (acknowledged, not a new decision)
+
+**No distributed tracing in Phase 0.** OpenTelemetry, custom span propagation, or vendor tracing tools (Datadog, Honeycomb, etc.) are NOT in scope until the sre-specialist (Phase 4) has 90 days of real production data and a defensible SLO target.
+
+**Why this is acceptable at v1:**
+- Scale is 12 active committee members; the audit log IS the trace for trust-changing events (every meaningful action is hash-chained, pseudonym-attributed, timestamped). At this concurrency, an incident-responder can walk a `request_id` across Sentry → Edge Function log → audit row by hand.
+- Adding a tracing vendor would be a new PI-adjacent subprocessor (see ADR-0010 main body — Sentry is the only one approved, and adding another triggers a flagged human-gate decision per `.context/constraints.md` rule 3).
+- The cost of introducing tracing later is **mechanical**: `request_id` is already wired through all three pillars (browser → Edge Function → audit log → Sentry) per F-D Rule 3. The sre-specialist's introduction of a tracing tool fills in the spans without re-architecting the correlation key.
+
+**Re-open trigger:** any of the following indicates Phase 4 should consider tracing:
+- Sustained traffic where the audit log's volume (today's enum vocabulary, including the Amendment A extensions) is insufficient to localize a slow request.
+- An incident where a slow Edge Function → Postgres query path cannot be diagnosed from `request_id` correlation alone.
+- A formal SLO target (per `observability/README.md` §7 placeholder) that requires latency-percentile observability the structured logger does not provide.
+
+**Owner of the next pass:** **sre-specialist (Phase 4)**. The architect does not pre-select a tracing tool; the sre-specialist re-runs the cost/PI-subprocessor evaluation against then-current options.
+
+### F-B (cross-pollination) — canonical event name for offline-queue HMAC failure
+
+This is a mechanical cross-reference, not a substantive ADR change, but it lands in this amendment because the same observability pass surfaced it:
+
+**Canonical event name: `queue.integrity_fail`** (matches ADR-0014 as the load-bearing source).
+
+The alias `inspection.synced.hmac_fail` was used in `observability/audit-log.md` §1 as an alternative name for the same event; this amendment confirms `queue.integrity_fail` is the single canonical name, and `inspection.synced.hmac_fail` is a **forbidden alias**. The verifier (Phase 2) wires a semgrep rule that fails CI on any reference to the alias in code, tests, migrations, or documentation outside of:
+- This file (this amendment block documenting the deprecation).
+- ADR-0014 (the source of truth — already uses `queue.integrity_fail`).
+- `observability/audit-log.md` §6 finding #2 (which already flagged this duplication; the verifier rule's allowlist for the alias string is exactly these three files until the audit-log spec drops the alias in a subsequent observability-setup pass — observability-setup files are not modified by the architect per this pass's hard rules).
+
+**Follow-up:** observability-setup, on its next pass, removes the alias text from `observability/audit-log.md` §1 (inspections section) and §6 finding #2; the architect's enum in ADR-0003 Amendment A is unaffected (it already uses `queue.integrity_fail`).
+
+### F-E / F-F (routed to privacy-reviewer — NOT decided here)
+
+Two findings from the observability-setup pass surface privacy-substantive questions that the architect explicitly does NOT decide on this pass. They are recorded here so the privacy-reviewer (running in parallel after the threat-modeler's second pass) picks them up:
+
+- **F-E — `reprisal.created` audit-log row visibility:** the audit-log RLS makes `reprisal.created` rows readable by all active members (the social-norm-backstop design, per Amendment B's HG-6 surface and RA-1's post-export rep notification pattern). A rep entering a reprisal may reasonably expect more discretion than "every active member sees that someone entered a reprisal." **The architect does NOT modify ADR-0003 Amendment B or the audit-log RLS in this pass.** The privacy-reviewer is asked to confirm or amend: (a) is "all active members see `reprisal.created`" the right default, (b) if not, what RLS / role-scoping change preserves the social-norm property while narrowing the visibility, (c) does the privacy notice need to name this explicitly. If the privacy-reviewer concludes the visibility should narrow, a future architect pass amends ADR-0003 Amendment B and the audit-log spec accordingly.
+- **F-F — Audit-log retention at 24 months vs `.context/constraints.md` floor "at least 1 year":** `observability/README.md` §1 records 24 months for `audit_log`. `.context/constraints.md` requires a 1-year floor. Both values are consistent (24 ≥ 12); the question is whether 24 is the right value given the OHSA limitation profile of the audit-log content (which is C1, not the C3/C4 content on the 7y schedule). **The architect does NOT change the retention value in this pass.** The privacy-reviewer is asked to confirm 24 months is appropriate before launch; if the privacy-reviewer concludes a different value (e.g., 12 months floor, or 36 months for PIPEDA breach-record alignment), a future architect pass amends the retention spec accordingly.
+
+Both items are privacy-review checkpoints, not architecture decisions. They are visible here so the privacy-reviewer's pass knows where to land its findings; nothing in this amendment depends on the resolution.
+
+### Compliance check additions
+
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+- [x] Ratifies the existing `observability/logging.md` §4 contract at ADR level.
+- [x] Phase-0 tracing deferral is consistent with the "no premature distribution" hard rule.
+- [x] F-E and F-F are flagged for privacy-reviewer; the architect is not pre-deciding privacy-substantive questions.
+
+### Follow-ups
+
+- [ ] **T02 acceptance (existing, no change needed here — observability/* files not modified per this pass's hard rules):** the canary-PII test in `observability/sentry-scrub.ts` and the Edge Function canary test in `observability/logging.md` §4 already test the substance of Rules 1–4. The ADR-level ratification adds no new task; it adds reviewer authority.
+- [ ] **Privacy-reviewer pass (next, parallel with threat-modeler second pass):** F-E and F-F land in their output.
+- [ ] **Verifier (Phase 2):** semgrep rule `no-inspection-synced-hmac-fail-alias` (the F-B forbidden-alias rule) added to `scripts/verify.sh`.
+- [ ] **sre-specialist (Phase 4):** tracing re-evaluation per F-H re-open triggers.
 
 ---
 
@@ -1574,6 +1657,47 @@ it right.
 - [x] PIPEDA Principle 9 (Individual Access) — key-material events are part of "what was done with your data" attribution.
 - [x] Strengthens T4 (insider compromise) detection surface.
 
+### Amendment A (extended 2026-05-22, F-C / observability-setup pass #2): chain-emission vs structured-log-event vocabulary split + C3 read enum additions
+
+**Why amended again:** observability-setup pass #2 surfaced two enum gaps and one architectural question about what the audit-log chain is *for*. The strengthening below resolves both.
+
+**The architectural rule (declared explicitly here, so downstream agents stop deriving it from context):**
+
+> *"The tamper-evident hash-chained audit log captures **trust-changing** events: key-material mutations, C3/C4 reads, destructive ops on C4, exports, retention deletions, integrity-relevant cache and queue failures, and the alert-pipeline echo. High-frequency volumetric telemetry — including but not limited to per-request authentication assertions — does NOT participate in the hash chain and lives only in the structured-log surface (observability/logging.md). The chain is a forensic record, not an activity stream."*
+
+This rule is the closed test: any new event proposed for audit-log emission MUST be classifiable as trust-changing under the criteria above OR be downgraded to structured-log-only. The verifier enforces this by reading the chain-emission enum as a closed allowlist (CHECK constraint per audit-log.md §1) and by treating any code path that calls `audit_emit(...)` with a value not on the allowlist as a CI failure.
+
+**Enum additions (chain-participating; appended to the closed allowlist):**
+
+| Enum value | Class | When emitted | Required fields |
+|---|---|---|---|
+| `work_refusal.read` | C3 read (T14) | Server-emitted from the `SECURITY DEFINER` view `work_refusal_read_audited`, atomic with the SELECT (same enforcement shape as Amendment B). | `work_refusal_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
+| `s51_evidence.read` | C3 read (T14) | Server-emitted from the `SECURITY DEFINER` view `s51_evidence_read_audited`, atomic with the SELECT. | `s51_evidence_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
+
+These two values bring T14's `work_refusal` and `s51_evidence` C3-read paths under the same server-enforced indirection as Amendment B's `reprisal.read` (HG-6). T14 acceptance is amended accordingly (see Task-list amendments at end). The audit-log spec (`observability/audit-log.md` §1) already anticipates this extension; this amendment ratifies it as part of the closed enum.
+
+**Structured-log-only event vocabulary (NOT chain-participating; documented here so the boundary is unambiguous):**
+
+The following events are emitted via the structured logger (`observability/logging.md` §2 / §3) only. They do NOT call `audit_emit(...)`. They do NOT appear in `audit_log`. Attempts to add them to the chain-emission allowlist fail CI.
+
+| Structured-log event | Why structured-log-only | Where it lives |
+|---|---|---|
+| `auth.passkey.assert` | High-frequency per-request authentication assertion. Volumetric (every request that performs WebAuthn assertion emits one). The trust-changing auth events — `auth.passkey.enrolled`, `auth.passkey.revoked`, `session.revoked` — DO chain-participate (already in the audit-log §1 Auth + session enum); the per-request assertion does not. | `observability/logging.md` §3 "Auth (T05)" — `auth.method`, `auth.result`, `auth.session_id_pseudonym` attributes on a structured-log line at INFO level. |
+
+Other high-frequency events that are NOT chain-participating include: rate-limit-hit events, retry-success events, cache-hit telemetry, feature-flag-evaluation events. These are NOT exhaustively enumerated here (the negative space would be infinite); the rule is the architectural rule stated above, and the verifier's CHECK constraint on `audit_log.event_type` is the structural enforcement.
+
+**Testable assertions (added to T07/T14/T18 acceptance — see Task-list amendments at end):**
+
+- *Closed-enum coverage:* an integration test enumerates every code path that calls `audit_emit(...)` and asserts each `event_type` argument is on the closed allowlist. Any new caller introducing a non-allowlisted value fails CI.
+- *Volumetric-event exclusion:* an integration test executes 100 successful WebAuthn assertions and asserts zero new rows in `audit_log` with `event_type = 'auth.passkey.assert'` (this value never reaches the chain). Counter-test: assert 100 structured-log lines with `event = 'auth.passkey.assert'` were emitted at INFO level.
+- *T14 server-enforced C3 read:* identical test shape to Amendment B's HG-6 tests, applied to `work_refusal_read_audited` and `s51_evidence_read_audited`. Direct SELECT bypass returns zero rows + no audit row; indirection success returns exactly one corresponding `work_refusal.read` / `s51_evidence.read` row with same-transaction timestamp; atomicity failure rolls back both.
+
+**Reversibility:** Easy on enum values (additive). The chain-vs-structured-log architectural rule is *hard* to reverse — moving a high-frequency event into the chain would explode storage and erode the chain's forensic value; we won't.
+
+**Compliance check additions:**
+- [x] PIPEDA Principle 4 (Limiting Collection) — volumetric telemetry stays in the time-bounded log retention (7 days on Supabase Edge logs per `observability/README.md` §1), not in the 24-month audit-log retention. Less data, longer-lived, only where the data matters.
+- [x] Strengthens T4 (insider compromise) detection surface on T14 paths (matches Amendment B's posture on T13).
+
 ---
 
 ## Amendment B (2026-05-22, HG-6): Invariant 7 strengthened — server-side enforced C4 read-audit
@@ -1622,6 +1746,70 @@ it right.
 **Compliance check additions:**
 - [x] T11 (compelled access detection) materially strengthened: a coerced member cannot bypass the audit by tweaking the client.
 - [x] T4 (insider compromise) detection surface strengthened: server-emitted audit is the source of truth.
+
+---
+
+## Amendment C (2026-05-22, F-G / a11y A-2): Protected-modal focus trap is synchronous with mount — coercion-resistance invariant
+
+**Amends ADR-0003** above. Trigger: a11y review Advisory A-2 (`.context/a11y-review.md` §A-2) — the reduced-motion fallback for `modal_enter` collapses to a 100ms opacity transition; on the five **protected modals** (`export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`), even a 100ms gap between mount and focus-trap engagement is a window in which a scripted dismissal can race the user. This is cross-cutting: it is an accessibility correctness issue AND a coercion-resistance issue, and it affects how the threat-modeler's RA-1 compensating controls (export interstitial), HG-6 surfaces (sensitive-read prompts), and HG-7 surfaces (4-eyes "needs second member" UX) actually behave under attack.
+
+The threat-modeler is running a parallel second pass to confirm the threat-model implications; the architectural invariant below is independently load-bearing and ratified here so downstream agents (designer, design-system spec, test-writer, implementer) have an authoritative pointer.
+
+### Invariant 9 — Protected-modal accessibility and coercion-resistance behavior is synchronous with mount
+
+**Testable invariant (canonical wording):** *"For every modal in the protected-modal list (`export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`), the focus trap engages, the `aria-labelledby` is announced, and Escape / backdrop-click handlers are bound **synchronously with mount** — i.e., during the same task tick that adds the modal DOM node. The opacity transition (and any other entrance animation) is decorative and runs independently; it does NOT gate the accessibility or coercion-resistance behavior. The animation may complete before, during, or after focus trap engagement; the user-perceived semantics of "the modal is open" are owned by mount, not by transition completion."*
+
+**Operational rules (binding for the design-system spec, the implementer, and the test-writer):**
+
+1. **Focus trap engages on `modal.show()` (mount), not on `transitionend`.** The implementer wires the focus trap inside the same microtask that inserts the modal node; the focus-trap library's first focusable-element search runs against the just-mounted subtree. The animation (opacity, scale, slide) starts on the next paint and runs without blocking the focus contract.
+2. **`aria-labelledby` announcement is synchronous with mount.** Screen readers should announce the modal's title on mount; the announcement does not wait for the entrance animation.
+3. **Escape and backdrop-click handlers are bound on mount.** A scripted dismissal of a protected modal during the entrance animation MUST be blocked the same way it would be after the animation completes — the protected-modal list per the design system already specifies that Escape and backdrop-click are *no-ops* on these five variants (they require an explicit dismissal action). That rule applies from mount, not from transition end.
+4. **The animation MAY be skipped without changing behavior.** Under `prefers-reduced-motion`, or in a test harness that disables animations, the modal is fully functional with no visible transition. The focus trap is unaffected (it never depended on the transition firing).
+5. **Tests assert mount-time behavior.** The test-writer adds, for each of the five protected modals, a test that: (a) mounts the modal; (b) within the same task tick, assertions that the focus trap is active (focus is inside the modal subtree), that `document.activeElement` is the modal's first focusable element, and that a programmatic Escape keydown does NOT close the modal; (c) optionally awaits `transitionend` and re-asserts the same; (d) the assertions in (b) must pass even when animations are disabled (CSS `animation: none !important` test mode).
+
+### Coercion-resistance reading (why this is in ADR-0003 and not only in the design system)
+
+The protected-modal list exists because each of these five modals gates an irreversible or trust-changing action:
+
+- `export_interstitial` — the only egress to B3 (worker/employer boundary). Compensating-control surface for RA-1.
+- `reauth_prompt` — the re-auth challenge that RA-1 binds to the act of export (passkey assertion at the moment of action, not stale session).
+- `passphrase_prompt` — the per-record passphrase gate for C4 reveals (concern source reveal, reprisal access).
+- `destructive_confirm` — the entry point for 4-eyes destructive ops (HG-7 soft-delete gating, T13 destructive ops on C4).
+- `four_eyes_pending` — the "needs second member" UX surface for HG-7 status-flip gating and existing T13 4-eyes deletions.
+
+A scripted dismissal that closes any of these modals between mount and transition-end would: (a) bypass the user's deliberate confirmation step, (b) escape the audit-emission path that the modal's confirm-action triggers, (c) for `export_interstitial` specifically, defeat the visible concern-derived-items flag (RA-1 compensating control #3) by closing before the user reads it. Amendment C makes the timing non-negotiable.
+
+The invariant is a hard rule on `protected modals only` — the design system's other modals (informational, non-destructive, non-trust-changing) MAY treat focus on transition-end if a reviewer prefers; the protected list MUST mount synchronously.
+
+### Testable assertions (added to design-system rules and to the test-writer's pre-T11/T13 obligations)
+
+- *Per-modal mount-time test (5 variants):* for each of `export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`, assert focus inside the modal within the same task tick as mount; assert Escape and backdrop-click are bound and no-op; assert `aria-labelledby` announcement was queued.
+- *Animation-disabled run:* same assertions hold when CSS animations are disabled at the test layer (no `transitionend` ever fires; the modal still works).
+- *Scripted-dismissal race test (coercion case):* mount the modal, immediately dispatch `keydown: Escape` AND `click` on the backdrop in the same task tick; assert the modal remains open and `document.activeElement` remains inside the modal subtree. Repeat with the animation set to 1000ms to exaggerate the window; same assertion.
+- *Synchronous mount of audit prerequisites:* for `export_interstitial`, assert that the audit-emission preflight (the "I confirm this export" handler binding, the `derived_from_concerns` flag rendering — per RA-1 compensating controls) is *also* synchronous with mount; an attacker who races a confirm-click against the entrance transition cannot trigger an export that pre-empts the visible flag.
+
+### Cross-references
+
+- `.context/a11y-review.md` §A-2 (the original finding; advisory in the a11y pass, ratified to invariant here).
+- RA-1 in this file (the export interstitial's compensating controls).
+- `.context/threat-model.md` parallel second pass (running concurrently; if its conclusions diverge from this invariant, they get reconciled in the next architect pass — but Invariant 9 is independently load-bearing and stands until then).
+- The design-system spec at `.context/design-system.md` §3.1, §3.2 (protected-modal list) — the line A-2 recommended adding ("Focus trap engages and `aria-labelledby` is announced on `modal.show()`, not on transition end. The opacity transition is decorative; accessibility behavior is synchronous with mount.") is the user-facing surface of this invariant. The architect does NOT modify design-system.md (per the hard rules of this pass); the designer or design-system-owner folds the language into §3.1 / §3.2 in their next pass, with Amendment C as the pointer.
+
+### Reversibility
+
+**Hard** on the invariant itself (reverting would degrade both accessibility and coercion-resistance). **Easy** on the implementation (the focus-trap binding site is one module).
+
+### Compliance check additions
+
+- [x] WCAG 2.0 AA 2.4.3 Focus Order, 4.1.3 Status Messages (advisory in a11y pass; now structurally enforced).
+- [x] T11 (compelled access detection) — the per-record passphrase prompt and the destructive_confirm modal cannot be raced by a scripted dismissal in their entrance window.
+- [x] RA-1 compensating control #3 (visible concern-derived-items flag in the export interstitial) — the flag is present and rendered before any confirm action becomes interactable.
+
+### Follow-ups
+
+- [ ] Designer (next pass): fold the Amendment C language into `.context/design-system.md` §3.1 and §3.2; cross-reference this ADR amendment from the protected-modal list.
+- [ ] Test-writer (pre-T11/T13): the five mount-time + scripted-dismissal-race tests above land before the corresponding feature implementer touches the protected modals.
+- [ ] Implementer (T11, T13): focus-trap library wired at mount, not on `transitionend`; CI tests above are gating.
 
 ---
 
@@ -1924,6 +2112,81 @@ scenarios; if we ever do, we do it deliberately, not under pressure.
 # Risk acceptances
 
 Deliberate, named risk acceptances. Each one is a place where the user chose a posture that the threat-modeler (or another reviewer) flagged as weaker than an available alternative. Recording them here makes the tradeoff visible, the compensating controls explicit, and the re-open triggers concrete — so the next reviewer (security, privacy, or a successor user) can revisit with full context rather than discovering the gap by surprise.
+
+Newest on top.
+
+---
+
+## RA-2 (F-A, 2026-05-22): Audit-row signature deferred — v1 ships hash-only chain
+
+**Linked ADRs:** ADR-0003 Amendment A (Invariant 8 — key-material mutation audit-log enum and the chain it lives on); ADR-0001 (the hosting tradeoff that places `audit_writer_role` credentials on a CLOUD-Act-reachable platform); ADR-0010 (Sentry is the only non-Supabase PI-adjacent subprocessor — re-opening that to introduce an external KMS / signer would itself be a flagged human-gate decision).
+**Linked observability findings:** F-A (observability-setup pass #2); audit-log.md §6 finding #1; audit-log.md §2 "Signature (deferred — flagged finding)".
+**Linked threat-model items:** A5 (platform admin / hosting-provider compromise — already in-scope per §1); T4 (insider compromise via co-opted rep).
+**Linked tasks:** T18 (audit-log integrity check job — hash-chain only at v1); T07 (key-material enum emissions land on the same hash-only chain).
+
+### The decision
+
+The `audit_log` table reserves a `signature bytea` column for a server-side Ed25519 signature over `hash`. **At v1, that column ships unfilled.** The tamper-evidence story for v1 is the BLAKE2b-256 hash chain alone: each row's `hash` is computed over the canonical-JSON serialization of its content plus `prev_hash`, by the `SECURITY DEFINER` `audit_emit(...)` function whose owner is `audit_writer_role`. Clients cannot forge a hash; downstream verifiers (the T18 integrity job; the post-rotation and post-export triggered checks per F-50) detect any in-place mutation of an existing row.
+
+**This is NOT:**
+- A claim that the audit log is non-repudiable against a platform admin. It is not.
+- A claim that no signer mechanism will ever exist. The column is reserved precisely so that v2 can fill it without a migration.
+
+### The observability-setup agent's stance (recorded; not the decision)
+
+The observability-setup agent surfaced this gap in their pass-#2 findings (F-A): "A platform admin (A5) with `audit_writer_role` could forge an internally-consistent chain. The signature would close that gap by requiring a key the platform admin doesn't have." The recommendation was either (a) ship Ed25519 row signing in v1 with key escrow in 1Password + a `pg_cron` signer function, or (b) external signer (KMS) — explicitly noting that (b) is effectively blocked by ADR-0010's "Sentry is the only non-Supabase subprocessor" posture without re-opening that decision.
+
+### The architect's rationale (accepted)
+
+Three reasons v1 ships hash-only:
+
+1. **A5 is already in scope and load-bearing-mitigated elsewhere.** The threat model treats `A5 — Hosting provider compromise / rogue admin` as a credible adversary (threat-model §1). The primary control against A5 is **E2EE (ADR-0003)**: A5 with full platform access sees ciphertext for C3/C4 data and metadata + audit content for C1. The audit-log forgery vector under RA-2 is bounded by what A5 can already do — they can produce a *consistent record*, but they cannot fabricate plaintext content (none is present in the audit log; rows are PI-free by schema per audit-log.md §1) and they cannot fabricate the ciphertext rows the audit log references (those are RLS- and crypto-bound). RA-2's residual is therefore: A5 can rewrite the *narrative* of who did what, when. That is real harm, but it is a narrative-harm bounded by the absence of content.
+2. **Option (b) crosses a hard rule.** Introducing an external KMS / signer is a new PI-adjacent subprocessor (the signer would see audit-row hashes — not PI, but it would be a service in the trust chain). ADR-0010 documents the "single non-Supabase subprocessor" posture and the conditions under which it can be revisited. Re-opening that posture for a v1 hardening of a residual that A5 already partly owns is the wrong tradeoff at v1 scale (12 active users). The constraint is recorded; if it changes, RA-2 is re-opened in the same PR that changes ADR-0010.
+3. **Option (a) adds ops surface in the part of the system least-suited for it.** A `pg_cron`-driven signer reaching into a 1Password-held Ed25519 key requires either an in-database secret (defeats the point — the key is colocated with the role that needs to be defended against) OR an out-of-band signer process the team-of-one operates (cron job freshness, key rotation, recovery drill, alert wiring). The threat-modeler's "compelling" case for v1 (per §6 Invariants 7 + 8) is the chain itself; the signature is the v2 strengthening, not the v1 floor.
+
+### Residual risk (what RA-2 leaves unmitigated)
+
+A platform admin (A5) — or anyone who has compromised `audit_writer_role` credentials (the role's grants are documented in audit-log.md §3 and §4) — can:
+
+- Forge a new row at the end of the chain (legitimate INSERT path; the `audit_emit` function will hash-chain it correctly because the function is what computes the hash).
+- More dangerously: with raw Postgres `BYPASSRLS` superuser access (i.e., the platform admin role, not just the `audit_writer_role`), rewrite the chain end-to-end — compute new `hash`/`prev_hash` for every row from a chosen pivot forward, producing a chain that internally validates against itself.
+
+In both cases, **the v1 detection surface is**:
+
+- The T18 chain-integrity job (runs daily + post-rotation + post-export per F-50) detects any *in-place* mutation that breaks the chain. Crucially, this does NOT catch the second case above (where the attacker re-hashes the chain forward from the pivot) — that attack rewrites the chain consistently.
+- **External witnesses**: any out-of-band copy of `(id, ts, hash)` triplets — printed daily summary, the deployer's incident log, a member's exported "my audit feed" snapshot — that diverges from the current chain at the same `id` is evidence of pivot-rewrite. The architect commits to documenting this as a manual control in the T18 deliverable (a daily "head pointer" — the highest `id` and its `hash` — emailed to the worker co-chair's off-app address, weekly review). This is not a formal control; it is a backstop that surfaces in the re-open triggers below.
+- The pg_dump backup (ADR-0012, amended HG-8): the nightly dump captures the chain state at 03:00 ET. A pivot-rewrite that happens between 03:00 yesterday and 03:00 today is detectable by comparing yesterday's dump (Object-Locked, governance-mode-protected for 35 days) to today's live state for any row older than yesterday's dump. **This makes the backup the de-facto secondary witness for the audit-log integrity story until v2 signing ships.**
+
+### Compensating controls (in plan, must remain — RA-2 is acceptable only while these hold)
+
+1. **`audit_writer_role` is non-login** (audit-log.md §3). The role's grants are reachable only via `SECURITY DEFINER` functions; no JWT can present as `audit_writer_role`. Forging a row requires platform-side access, not a stolen session.
+2. **UPDATE on `audit_log` is REVOKED from every role**, including `audit_writer_role`, `c4_read_service`, and `retention_service_role` (audit-log.md §4). The only legitimate state change is INSERT (new row) and DELETE (retention service role on aged-out rows). In-place mutation requires bypassing RLS at the Postgres level — i.e., the A5 capability.
+3. **The T18 chain-integrity job runs at least daily** and on every key rotation and every export (F-50). Detection latency upper bound: 5 minutes for the post-trigger checks; 24 hours for scheduled checks.
+4. **The pg_dump backup is the secondary witness.** ADR-0012's Object-Lock-protected nightly dumps mean a pivot-rewrite is detectable by cross-referencing the live chain against yesterday's locked dump for any row older than 24 hours. The T18 deliverable adds an "audit-log vs latest backup diff" check to the daily integrity job (additive; recorded in this RA's follow-ups).
+5. **No `audit_writer_role` credential is held outside Supabase Cloud.** The role's grants are migration-defined; no CI service account, deployer's laptop, or escrow vault carries them. This narrows the credential-compromise surface to the Supabase platform itself.
+6. **The `signature` column is reserved at v1, not added in v2.** The schema field exists; v2 fills it without a migration. This keeps the v2 upgrade path mechanical.
+
+### Triggers that re-open RA-2 (any one requires architect + security-reviewer to re-evaluate, default response: implement Ed25519 row signing per observability-setup Option (a))
+
+1. **Any indication of platform-admin compromise** — credentials, role grants, or Supabase platform incidents that indicate `audit_writer_role` or `BYPASSRLS` access was held by an unauthorized party. Re-evaluation considers (a) immediate signer rollout, (b) re-hash-and-re-issue of the chain from the last-known-good backup, (c) external witness publication.
+2. **Any inspection, audit, or s.51 prosecution where audit-log authenticity is challenged.** If a counterparty (employer, MoL, court) disputes the chain's integrity, the v1 posture's defensibility is materially reduced. The default response is "ship the signer before next renewal of any matter relying on the audit log."
+3. **Any divergence between the live chain and the most recent pg_dump backup for a row older than the dump.** This is the v1 detection mechanism firing. The first such firing re-opens RA-2 regardless of whether the divergence is attributed (operator error, platform bug, or attack) — the residual is no longer hypothetical.
+4. **Any change that materially expands `audit_writer_role`'s reach** — new SECURITY DEFINER functions, new callers, new grants. Each such change is a compensating-control change, which by the structure of this RA re-opens it.
+5. **A change to ADR-0010 that admits a new subprocessor capable of acting as an external signer.** If ADR-0010 is re-opened for an independent reason and a KMS becomes available, the cost balance of Option (b) shifts and RA-2 should be re-considered in the same pass.
+6. **Annual review.** RA-2 is reconsidered at the annual threat-model review (next due 2027-05-22 per `.context/threat-model.md`), even if no trigger has fired.
+
+### Re-opening procedure
+
+If any trigger fires:
+1. Architect + security-reviewer + (if available) the threat-modeler agent review the trigger and the post-incident evidence (which copy of the chain is authoritative).
+2. **Default response: ship Ed25519 row signing per observability-setup Option (a)** — keypair in 1Password, signer invoked via `pg_cron`-loaded `SECURITY DEFINER` function whose owner is a new `audit_signer_role` (distinct from `audit_writer_role`; INSERT-without-sign is preserved as a fallback for the brief migration window). The schema is already ready (the `signature` column).
+3. A new ADR amendment (or a successor RA) records the new posture and the trigger that prompted it.
+
+### Follow-ups (additive to T18 acceptance — not a re-amendment of T18 itself; surfaced for test-writer)
+
+- T18 daily integrity job adds an "audit-log vs latest backup head diff" check that compares the chain state at the latest available `pg_dump` (per ADR-0012) against the live chain for all rows whose `ts < (latest_dump_ts - 1 hour)`. Any mismatch on `hash` or `prev_hash` for a row older than the dump fires `A-AUDIT-001` (or a sibling alert id; observability-setup names it).
+- T18 deliverable includes a weekly "head pointer" extraction surface: the latest `(id, ts, hash)` triplet emitted to the worker co-chair's off-app address (chosen by the co-chair, not stored in the app) as a manual external witness. Not a control under RA-2's compensating-controls list (so its absence does not re-open RA-2 by itself), but documented here as the backstop.
+- No new task is added; both items are within T18's existing scope per `observability/README.md` §10 finding interpretation.
 
 ---
 
@@ -2798,10 +3061,20 @@ protected notes (C4); Ministry-of-Labour notification timing for s.51.
   path.
 - Ministry notification deadline countdown surfaced; user actions are
   off-app (the app does not call the Ministry).
+- **(Amended 2026-05-22, F-C / ADR-0003 Amendment A extension) Server-side enforced C3 read-audit on T14 tables — identical posture to T13's HG-6:**
+  - Direct SELECT on `work_refusal` and `s51_evidence` is **revoked** from `authenticated`, `anon`, `service_role`. Only `c4_read_service` (the existing non-login role from HG-6) has SELECT on the underlying tables.
+  - Clients read through `SECURITY DEFINER` views `work_refusal_read_audited` and `s51_evidence_read_audited` that perform SELECT + audit INSERT atomically in a single transaction; audit-emission failure rolls back the SELECT.
+  - The audit INSERT uses the chain-emission enum values `work_refusal.read` and `s51_evidence.read` per ADR-0003 Amendment A extension (added to the closed allowlist this amendment pass).
+  - **Test (direct bypass):** with a valid authorized certified_member's JWT, attempt `SELECT * FROM work_refusal` directly (bypassing the view); assert zero rows AND no audit row. Same test on `s51_evidence`.
+  - **Test (indirection success):** SELECT from `work_refusal_read_audited` as an authorized member; assert (a) row returned, (b) exactly one `work_refusal.read` audit-log row with matching `target_id`, `actor_pseudonym`, same-transaction timestamp. Same on `s51_evidence_read_audited`.
+  - **Test (atomicity):** induce a `jhsc_log_sensitive_read` failure for the `work_refusal_read_audited` path; assert SELECT rolls back; no row returned; no partial audit row. Same on `s51_evidence_read_audited`.
+  - **Test (coverage):** `pg_proc` + `information_schema` enumeration in CI asserts both T14 C3 tables have corresponding `*_read_audited` views AND underlying-table SELECT GRANT for `authenticated`/`anon`/`service_role` is empty.
+- **(Amended 2026-05-22, HG-5 / ADR-0011 amendment, cross-reference) EXIF / IPTC / XMP / GPS strip on s.51 evidence photos:**
+  - s.51 evidence photo capture uses the same `src/lib/photo/sanitize.ts` pipeline as T10 inspections — strip + canvas re-encode before encryption. Already implied by "s.51 evidence photo capture goes through inspection's encrypted-upload path" above; this bullet makes the dependency explicit so the test-writer carries the round-trip and byte-grep tests from T10 over to T14 fixtures.
 
 **Extras:** **second-opinion-reviewer** + **privacy-reviewer**.
 
-**Risk:** High. **Estimate:** L (4 days).
+**Risk:** High. **Estimate:** L (4 days; +0.5 day for T14 C3-read indirection mirroring T13 HG-6 posture).
 
 ### T15 — Training records + document library + reminders
 
@@ -2870,10 +3143,18 @@ quarterly restore drill into a scratch project; alert if backup is stale.
 - Audit log uses prev-hash chain; CI test covers tampering detection.
 - Integrity job runs daily; alerts on mismatch.
 - T11 test passes.
+- **(Amended 2026-05-22, F-A / RA-2) Audit-log secondary witness via backup diff:**
+  - The daily integrity job, in addition to the in-place hash-chain check, computes a diff against the most recent available `pg_dump` backup (ADR-0012, Object-Lock-protected per the HG-8 amendment): for all rows whose `ts < (latest_dump_ts - 1 hour)`, compare `(id, hash, prev_hash)` between live and backup. Any mismatch fires `A-AUDIT-001` (or sibling alert id named by observability-setup) — this is the v1 detection mechanism for the pivot-rewrite case RA-2 leaves unmitigated by the chain-alone check.
+  - **Test (live-vs-backup-diff alert):** in a scratch project, take a `pg_dump` snapshot; mutate a row in the live `audit_log` for an `id` older than the snapshot (savepoint-bypass of UPDATE revocation, same shape as the in-place mutation test); run the diff check; assert the alert fires within the F-50 5-minute window.
+  - **Test (no false-positive on rows newer than dump):** insert new rows after the snapshot; run the diff check; assert no alert (the diff only covers rows older than the dump by ≥1 hour).
+  - **Manual control (documented in the runbook, not a code deliverable):** weekly extraction of the latest `(id, ts, hash)` head pointer emitted to the worker co-chair's off-app address as a manual external witness. Not a control under RA-2's compensating-controls list (so its absence does not re-open RA-2 by itself); the runbook documents the procedure.
+- **(Amended 2026-05-22, F-C / ADR-0003 Amendment A extension) Volumetric-event exclusion from the chain:**
+  - **Test:** execute 100 successful WebAuthn `auth.passkey.assert` events; assert zero new rows in `audit_log` with `event_type = 'auth.passkey.assert'` (per the chain-vs-structured-log architectural rule). Counter-test: assert 100 structured-log lines with `event = 'auth.passkey.assert'` were emitted at INFO level by the structured logger.
+  - **Test (closed-enum coverage):** enumerate every code path that calls `audit_emit(...)` and assert each `event_type` argument is on the closed allowlist (the union of the existing enum + Amendment A's 8 key-material values + Amendment A extension's `work_refusal.read` and `s51_evidence.read`). Any new caller introducing a non-allowlisted value fails CI.
 
 **Extras:** **adversarial-reviewer**.
 
-**Risk:** Medium. **Estimate:** S (1.5 days).
+**Risk:** Medium. **Estimate:** S (1.5 days; +0.5 day for RA-2 backup-diff check + F-C closed-enum coverage tests).
 
 ### T19 — Session revocation, panic wipe, onboarding copy
 
@@ -3063,3 +3344,78 @@ Designer must capture: (a) the export interstitial UX with explicit field-list d
 Observability-setup must build: the `beforeSend` scrubber with allowlist + canary-PII test (T02 existing); the structured logger with `safeFields`; the audit-log integrity-alert wire (F-50 alerts within 5 minutes of triggers); **the alerting wire for the new audit-log enum values from Invariant 8 (HG-2)**; **the alerting wire for `queue.integrity_fail` from ADR-0014 (HG-4)**; **the alerting wire for `client.cache_policy_violation` from ADR-0013 (HG-3)**; **the alerting wire for the bucket-config drift check from ADR-0012 amendment (HG-8)**; **the "recent sensitive activity" feed that reads the server-emitted `sensitive.read` rows from ADR-0003 Amendment B (HG-6) AND surfaces the post-export rep notification per RA-1 (HG-1)**.
 
 These two agents run in parallel; their outputs do not block each other.
+
+---
+
+# Amendment pass #2 summary (2026-05-22)
+
+Observability-setup completed Phase-0 wiring and surfaced 8 findings in `observability/README.md` §10 and `observability/audit-log.md` §6. The a11y review pass surfaced Advisory A-2 in parallel, which cross-cuts coercion-resistance and is handled here. This amendment pass processes F-A through F-H and folds in A-2 as ADR-0003 Amendment C. F-E and F-F are routed to the privacy-reviewer (running in parallel after the threat-modeler second pass) and are NOT decided here.
+
+| Finding | Source | Amendment artifact | Downstream task(s) |
+|---|---|---|---|
+| **F-A** (audit-row signature posture) | `observability/audit-log.md` §6 finding #1; `observability/README.md` §10 finding #1 | **RA-2** (new entry in "Risk acceptances", placed above RA-1) — v1 ships hash-only chain; signature deferred to v2; A5 detection backstop = `pg_dump` diff + manual head-pointer extraction; six re-open triggers documented. Threat-modeler's stance (A5 in scope, signing is the proper v2 strengthening) and the rationale for not crossing ADR-0010's no-new-PI-subprocessor posture are captured. | **T18 acceptance amended** — daily audit-log-vs-backup diff check added; runbook captures the weekly head-pointer extraction as a manual external witness. |
+| **F-B** (event-name dedupe: `queue.integrity_fail` vs `inspection.synced.hmac_fail`) | `observability/audit-log.md` §6 finding #2; `observability/README.md` §10 finding #1 | **ADR-0010 amendment** (F-B cross-pollination block) — `queue.integrity_fail` is canonical (matches ADR-0014 source of truth); `inspection.synced.hmac_fail` is a forbidden alias caught by semgrep. | **Verifier (Phase 2):** new semgrep rule `no-inspection-synced-hmac-fail-alias` in `scripts/verify.sh`. **observability-setup (next pass):** removes the alias text from `observability/audit-log.md` §1 and §6 finding #2. |
+| **F-C** (missing audit enum values + chain-vs-structured-log boundary) | `observability/audit-log.md` §6 finding #3; `observability/README.md` §10 (auth.passkey.assert recommendation) | **ADR-0003 Amendment A extended** (in-place under Amendment A) — closed allowlist gains `work_refusal.read` and `s51_evidence.read`; the chain-vs-structured-log architectural rule is declared explicitly ("the chain captures trust-changing events; volumetric auth telemetry is structured-log only"); `auth.passkey.assert` is listed in the structured-log-only event vocabulary table. | **T14 acceptance amended** — `work_refusal_read_audited` and `s51_evidence_read_audited` `SECURITY DEFINER` views and same-transaction audit emission, identical posture to T13 HG-6. **T18 acceptance amended** — volumetric-event exclusion test (100 WebAuthn assertions, zero `audit_log` rows of that type) + closed-enum coverage test for every `audit_emit(...)` caller. |
+| **F-D** (Edge Function logging contract not in any ADR) | `observability/README.md` §10 finding #1; `observability/logging.md` §4 "applies until contradicted" | **ADR-0010 amendment** — Edge Function structured-logging contract ratified: Rule 1 no PI ever, Rule 2 scrubbing at emit-point (not downstream), Rule 3 `request_id` propagation, Rule 4 retention pointer (subject to F-F). The substance was already in `observability/logging.md` §4; this gives it ADR-level authority. | **T02 acceptance (existing, unchanged):** the canary-PII tests in `observability/sentry-scrub.ts` and the Edge Function canary test in `observability/logging.md` §4 already cover the substance. No new task; reviewer authority added. |
+| **F-E** (`reprisal.created` visibility) | `observability/audit-log.md` §6 finding #4 | **NOT DECIDED — routed to privacy-reviewer.** Recorded in ADR-0010 amendment "F-E / F-F" block. ADR-0003 Amendment B and the audit-log RLS unchanged. | **Privacy-reviewer pass (next, parallel with threat-modeler second pass):** confirm or amend the "all active members see `reprisal.created`" default; if narrowing, a future architect pass amends ADR-0003 Amendment B. |
+| **F-F** (audit-log retention 24mo vs `.context/constraints.md` "at least 1 year" floor) | `observability/README.md` §10 finding #2 | **NOT DECIDED — routed to privacy-reviewer.** Recorded in ADR-0010 amendment "F-E / F-F" block. Retention value unchanged. | **Privacy-reviewer pass:** confirm 24mo or recommend an alternative value before launch. |
+| **F-G** (modal focus-trap timing — a11y A-2; cross-cutting to coercion-resistance) | `.context/a11y-review.md` §A-2; cross-references RA-1 export interstitial + HG-6/HG-7 protected modals | **ADR-0003 Amendment C** — Invariant 9: "Protected-modal focus trap and announce-on-open behavior MUST be synchronous with mount; the opacity transition is decorative and does not gate accessibility or coercion-resistance behavior." Per-modal mount-time tests + animation-disabled tests + scripted-dismissal-race test specified. Threat-modeler is running a parallel second pass; Amendment C stands independently. | **Designer (next pass):** fold the Amendment C language into `.context/design-system.md` §3.1 / §3.2 (architect does NOT modify design-system.md per this pass's hard rules). **Test-writer (pre-T11/T13):** five mount-time tests + scripted-dismissal-race test land before the feature implementer touches the protected modals. **Implementer (T11, T13):** focus trap wired at mount, not on `transitionend`. |
+| **F-H** (no tracing in Phase 0 — acknowledge only) | `observability/README.md` §10 finding #3 | **ADR-0010 amendment** — Phase-0 tracing deferral acknowledged explicitly. `request_id` is wired across all three pillars per F-D Rule 3, making the future sre-specialist introduction mechanical. Three re-open triggers documented. | **No new task.** **sre-specialist (Phase 4):** owner of the tracing re-evaluation per the documented triggers. |
+
+**New artifacts in this file (pass #2):**
+- **RA-2** in the "Risk acceptances" section, placed above RA-1 (newest on top per file convention).
+- **ADR-0003 Amendment A extension** (in-place under Amendment A; the original 8-value enum is preserved verbatim; the extension adds two C3-read enum values, the chain-vs-structured-log architectural rule, the structured-log-only event vocabulary table, and three new test obligations).
+- **ADR-0003 Amendment C** (Invariant 9 — protected-modal focus trap synchronous with mount).
+- **ADR-0010 amendment block** (Edge Function logging contract + Phase-0 tracing deferral + F-B canonical-name cross-pollination + F-E/F-F routing-to-privacy-reviewer pointer).
+- **T14 acceptance amended** (C3 read-audit indirection mirroring T13 HG-6, using the new `work_refusal.read` / `s51_evidence.read` enum values; cross-reference to HG-5 EXIF strip).
+- **T18 acceptance amended** (RA-2 backup-diff check; F-C volumetric-event exclusion test + closed-enum coverage test).
+
+**No ADR-0015 added.** Per the user's instruction, F-D was folded into ADR-0010 (which already owns Sentry SaaS for application errors; Edge Function logging is a sibling pillar) rather than creating a new top-of-file ADR. Reversibility: if F-D ever needs to grow beyond a sibling-pillar treatment (e.g., a different log-shipping vendor), ADR-0015 can be added at the top in a future pass.
+
+**Reversibility note (pass #2):** all amendments use the additive "amends" / "extends" pattern; original ADR text is preserved. RA-2 has six explicit re-open triggers; the observability-setup agent's recommended Option (a) (Ed25519 row signing per `pg_cron` + 1Password key) is the documented default upgrade path. Amendment C's invariant is hard to reverse (it would degrade both accessibility and coercion-resistance), but the implementation site is one module. ADR-0010's amendment is easy to reverse on tooling (the logger is one module) and hard to reverse on the architectural rules (1–4 are non-negotiable while ADR-0001 + ADR-0003 hold).
+
+**Locked decisions from plan §13 were not re-opened.** No new locked decisions introduced. No new cross-border transfers. No new PI subprocessors. ADR-0010's "Sentry is the only non-Supabase PI-adjacent subprocessor" posture is preserved and explicitly cited in RA-2's rationale for declining Option (b) (external KMS / signer).
+
+**Files NOT modified by this pass (per hard rules):** `JHSC-APP-PLAN.md`, `.context/threat-model.md`, `.context/constraints.md`, `.context/preferences.md`, `.context/a11y-review.md`, `observability/*`, `i18n/*`, `design-tokens.json`, `.context/design-system.md`. All cross-references in this amendment pass point to the existing content in those files; the next-pass owners (designer for design-system; observability-setup for the audit-log doc; privacy-reviewer for any privacy-substantive changes) fold the pointers in.
+
+---
+
+# Handoff (re-stated for amendment pass #2)
+
+The amendment pass #2 closes F-A (RA-2), F-B (canonical name + verifier rule), F-C (Amendment A extension + T14 + T18 acceptance), F-D (ADR-0010 amendment), F-G (ADR-0003 Amendment C), and F-H (ADR-0010 amendment acknowledgment). F-E and F-F are routed to the privacy-reviewer — not decided here.
+
+**Sequence (NOT parallel for this round):**
+
+1. **First: privacy-reviewer pass.** Inputs:
+   - `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
+     - **F-E** routed in ADR-0010 amendment "F-E / F-F" block — confirm or amend the "all active members see `reprisal.created`" default RLS posture.
+     - **F-F** routed in ADR-0010 amendment "F-E / F-F" block — confirm 24-month audit-log retention or recommend an alternative value.
+     - **RA-1** — confirm the post-export rep notification + visible concern-derived-items flag UX is privacy-adequate.
+     - **RA-2** — confirm the v1 hash-only audit-log posture is acceptable for the privacy notice; the residual ("A5 can rewrite the narrative but not the content") is what users are told.
+     - The PI inventory and retention table — confirm no field is mis-classified.
+   - `/home/user/agent-os/.context/threat-model.md` — for cross-reference.
+   - `/home/user/agent-os/.context/constraints.md` — PIPEDA / Ontario baseline.
+   - `/home/user/agent-os/JHSC-APP-PLAN.md` §8 (retention) and §13 (locked decisions).
+
+2. **In parallel with the privacy-reviewer: threat-modeler second pass.** Inputs:
+   - `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
+     - **RA-2** — confirm the threat-modeler's stance recorded in the RA-2 rationale ("A5 in scope; signing is the proper v2 strengthening") matches the threat-modeler's actual position; if not, file a finding.
+     - **ADR-0003 Amendment C** (F-G) — confirm the coercion-resistance reading of Invariant 9; if the second pass surfaces additional coercion-resistance implications for the five protected modals, file findings on top of Amendment C (do NOT modify Amendment C; the next architect pass folds the findings).
+     - **ADR-0003 Amendment A extension** (F-C) — confirm `work_refusal.read` and `s51_evidence.read` are correctly classified as C3 read enums under the same posture as `reprisal.read` (HG-6).
+   - `/home/user/agent-os/.context/a11y-review.md` §A-2 — the original A-2 finding the threat-modeler's parallel pass is examining.
+
+3. **After both: test-writer.** Test-writer is **next after the privacy-reviewer and threat-modeler second-pass complete.** Inputs:
+   - `/home/user/agent-os/.context/decisions.md` (this file, final state including any privacy-reviewer + threat-modeler amendments to come).
+   - `/home/user/agent-os/.context/threat-model.md` §8 (test obligations per task ID — already pre-loaded by the threat-modeler first pass; the second pass may add).
+   - `/home/user/agent-os/observability/audit-log.md` §5 (test obligations for T07, T13, T18).
+   - `/home/user/agent-os/observability/sentry-scrub.ts` (the scrub fixture spec).
+   - `/home/user/agent-os/observability/logging.md` (the structured-logger contract; F-D-ratified rules).
+   - `/home/user/agent-os/observability/README.md` §9 "For the test-writer (next in line)" — the pre-task test-artifact obligations enumerated per T0x.
+
+   Specifically, the test-writer adds, before any implementer touches the corresponding code:
+   - **RA-2 tests (T18):** live-vs-backup-diff alert test; no-false-positive-on-newer-rows test; closed-enum coverage test enumerating every `audit_emit(...)` caller; volumetric-event exclusion test for `auth.passkey.assert`.
+   - **F-C tests (T14):** direct-bypass test, indirection-success test, atomicity test, coverage-via-`pg_proc` test on `work_refusal_read_audited` and `s51_evidence_read_audited` — same shape as the existing T13 HG-6 tests.
+   - **F-G / Amendment C tests (T11, T13, and any feature touching a protected modal):** for each of `export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending` — mount-time focus-trap test, animation-disabled test, scripted-dismissal-race test, synchronous-mount-of-audit-prerequisites test.
+   - **F-B verifier rule:** semgrep rule `no-inspection-synced-hmac-fail-alias` in `scripts/verify.sh` with the documented allowlist for the three files where the alias string is permitted (this ADR, ADR-0014, `observability/audit-log.md` §6 finding #2).
+
+**Not routed here (already covered by the original handoff, pass #1):** designer is queued behind the threat-modeler's first-pass output and is unaffected by this pass except for the Amendment C language fold into `.context/design-system.md` §3.1 / §3.2; observability-setup completed Phase 0 (this pass processes their findings) — their next pass (if needed) is post-test-writer, alongside the implementer of T02.
