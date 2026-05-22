@@ -2422,16 +2422,18 @@ notice referencing ADR-0001 tradeoff.
 
 # Open question for the user
 
-**Q1: Backup bucket provider — Backblaze B2 (Canadian region) or AWS S3 ca-central-1?**
+**All resolved 2026-05-22 — user confirmed architect's defaults across Q1, Q2, and explicitly confirmed Sentry SaaS (ADR-0010) over self-hosted GlitchTip. These are no longer open.**
+
+**Q1: Backup bucket provider — Backblaze B2 (Canadian region) or AWS S3 ca-central-1?** → **RESOLVED: Backblaze B2, Canadian region.**
 
 Both work. B2 has lower egress costs and is a smaller, simpler vendor.
 AWS S3 is the boring choice. Since the bucket holds ciphertext blobs only
 (not a PI processor for plaintext), the choice is operational, not
 privacy-substantive. Decision needs to be made before T17 ships.
-**Default if you don't reply:** Backblaze B2 in Canadian region (lower
+~~Default if you don't reply:~~ Backblaze B2 in Canadian region (lower
 cost, smaller subprocessor footprint). This is reversible easily.
 
-**Q2: Minimum-supported-browser baseline.**
+**Q2: Minimum-supported-browser baseline.** → **RESOLVED: architect's default.**
 
 Passkeys / WebAuthn need a fairly modern browser. Proposed baseline:
 - Safari 16.4+ (iOS 16.4+ for PWA push).
@@ -2440,7 +2442,7 @@ Passkeys / WebAuthn need a fairly modern browser. Proposed baseline:
 - Android: 12+.
 
 Older browsers are blocked at first launch with a "your browser is too
-old, here's why" screen. **Default if you don't reply:** the above. This
+old, here's why" screen. ~~Default if you don't reply:~~ the above. This
 is reversible by changing one constant. Surface if any committee member
 is known to be on older hardware.
 
