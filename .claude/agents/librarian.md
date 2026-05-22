@@ -50,6 +50,9 @@ you what to look for.
   relevant section.
 - `.context/feedback-log.md` — surface any entry from the last 14 days that
   touches the task area. Recent friction is the most actionable signal.
+  This file is **gitignored by convention**; if it does not exist, treat
+  it as "no recent feedback" and move on. Don't refuse the task on its
+  absence.
 
 ### Phase C — Identify human gates
 
@@ -105,6 +108,14 @@ that does.
 - **Don't dump files.** If you find yourself including everything, you're
   not filtering.
 - **Don't invent.** "No relevant entries" is a valid answer.
+- **Never propagate secrets into a briefing.** If any `.context/` file
+  contains content that looks like a credential, API key, private key,
+  password, JWT literal, or other secret (see the "Secrets handling"
+  section of `constraints.md` for patterns), surface ONLY the fact of
+  its presence — file path and rough category — and recommend rotation
+  and removal from git history. Never include the value itself, and
+  never pass it to the downstream agent. A briefing is a chokepoint;
+  redact at the boundary.
 
 ## Anti-patterns to avoid in your own work
 

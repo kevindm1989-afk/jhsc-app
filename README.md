@@ -11,6 +11,44 @@ hiring, novel domains) that no agent system can or should replace.
 
 ---
 
+## Jurisdiction note — read before adopting
+
+This pack is built around **Canadian (federal PIPEDA + Ontario)** privacy
+and security requirements. That shape is load-bearing: it appears in
+`.context/constraints.md`, in the privacy-reviewer and threat-modeler
+prompts, in the human-gate list, and in breach-notification language
+throughout.
+
+**If your project ships to a different jurisdiction, the compliance shape
+is wrong for you. You MUST replace `.context/constraints.md` with your
+own jurisdiction's requirements before relying on the privacy / security
+agents** — otherwise the privacy-reviewer will miss real obligations and
+pass code that should not be passing.
+
+Common substitutions:
+
+- **EU / UK** — GDPR + UK GDPR + Data Protection Act 2018; 72-hour breach
+  notification, DPO designation, lawful-basis analysis per processing
+  activity, DPIAs for high-risk processing, SCCs for transfers.
+- **US (federal sectoral)** — HIPAA (health), GLBA (finance), COPPA
+  (children under 13), FERPA (education). No general federal privacy law.
+- **US (state patchwork)** — CCPA / CPRA (California), VCDPA (Virginia),
+  CPA (Colorado), CTDPA (Connecticut), UCPA (Utah), and the rest. Each
+  with its own consumer rights and breach-notification timelines.
+- **Quebec (Law 25)** — stricter than PIPEDA: mandatory privacy officer,
+  automated-decision disclosure, cross-border transfer impact assessments,
+  shorter breach-response expectations.
+- **Other Canadian provinces** — BC PIPA, Alberta PIPA, NS PIIDPA layer
+  over PIPEDA for residents.
+- **Ontario healthcare** — PHIPA already layered in; verify it applies.
+
+Not legal advice. For any commercial launch, get a privacy lawyer to
+review the actual compliance posture in your jurisdiction. This pack
+gives you a defensible baseline shape, not a substitute for legal
+review.
+
+---
+
 ## Coverage by area
 
 | Area | Coverage | Agents involved |

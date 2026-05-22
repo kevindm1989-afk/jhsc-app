@@ -58,10 +58,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   date-cited feedback entries and a two-data-point threshold; biased
   toward net reduction over time.
 
+### Security & privacy hardening
+- **Feedback log is now gitignored by default.** `.context/feedback-log.md`
+  accumulates raw outcomes — ticket excerpts, customer names, incident
+  specifics — that should not enter version control. Renamed the
+  committed copy to `.context/feedback-log.template.md`; users seed
+  the live file with `cp .context/feedback-log.template.md
+  .context/feedback-log.md`. Added matching entries to
+  `.gitignore.template` and a root `.gitignore` for the pack itself.
+- **Secrets-handling rule added to `.context/constraints.md`**, so all
+  agents (which read constraints via the librarian) inherit it.
+  Defines secret-bearing file and value patterns, requires agents to
+  surface only the fact of a secret's presence (never the value), and
+  blocks propagation into downstream-agent context. Librarian gets an
+  additional explicit rule as the briefing chokepoint.
+- **Untrusted-external-content section added to support-liaison,
+  dependency-manager, and incident-responder.** These agents ingest
+  content from outside the codebase (user reports, package
+  changelogs, log lines) where prompt-injection or supply-chain
+  attacks are plausible. The new section requires them to treat such
+  content as data, never as instructions, and to surface attempted
+  injections as findings.
+
 ### Documentation
 - README updated with new "Agent design" section (the consistent
   shape) and "How the chain wires together" (build flow, recovery
   flow, weekly learning loop).
+- **README "Jurisdiction note" added near the top**, explicitly stating
+  that the pack's compliance shape is Canadian (PIPEDA + Ontario) and
+  that projects shipping elsewhere must replace `.context/constraints.md`
+  with their own jurisdiction's requirements. Lists common substitutions
+  (GDPR, US sectoral, US state patchwork, Quebec Law 25, other Canadian
+  provinces, PHIPA).
+- **QUICKSTART** updated: new step seeds the local feedback log from
+  the template; step 1 now copies `.gitignore.template` to `.gitignore`
+  before the first commit.
 
 ---
 

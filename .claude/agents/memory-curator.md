@@ -25,7 +25,10 @@ Your output is judged on:
 ### Phase A — Discovery
 
 1. Read `.context/feedback-log.md` since the last review. Default to
-   the last 7 days; the user may specify a different range.
+   the last 7 days; the user may specify a different range. The file is
+   **gitignored by convention**; if it does not exist, report
+   "no feedback log yet — recommend `cp .context/feedback-log.template.md
+   .context/feedback-log.md` to begin capturing entries" and stop.
 2. Read all current `.context/` files to know what already exists.
 3. Read the recent commit history for context (changes that didn't
    make it into feedback but matter).

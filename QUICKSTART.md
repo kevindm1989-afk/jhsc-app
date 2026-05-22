@@ -7,10 +7,14 @@
    mkdir my-new-project
    cd my-new-project
    tar -xzf /path/to/agent-os.tar.gz --strip-components=1
+   cp .gitignore.template .gitignore
    git init && git add . && git commit -m "Agent OS scaffold"
    ```
    The `--strip-components=1` flag extracts the pack contents directly into
    the current directory rather than into a nested `agent-os/` subfolder.
+   Copying `.gitignore.template` → `.gitignore` **before** the first
+   commit keeps secrets, build artifacts, and the (later-seeded) local
+   feedback log from ever entering history.
 
 2. **Edit `.context/preferences.md`** — fill in the blanks under code style,
    architecture taste, and risk posture. Be specific. This is the seed every
@@ -24,7 +28,17 @@
    is already set up. Verify the agents load by running `/agents` in
    Claude Code.
 
-5. **Make the verify scripts executable**:
+5. **Seed the local feedback log** (gitignored, stays on your machine):
+   ```
+   cp .context/feedback-log.template.md .context/feedback-log.md
+   ```
+   The feedback log accumulates raw outcomes from agent runs, which often
+   include ticket excerpts, customer names, or incident specifics. The
+   pack's `.gitignore.template` keeps this file local; only the curated,
+   sanitized output from the weekly review (in `lessons.md`,
+   `patterns.md`, `decisions.md`) gets committed.
+
+6. **Make the verify scripts executable**:
    ```
    chmod +x scripts/verify.sh scripts/token-audit.sh
    ```
@@ -34,7 +48,7 @@
    px values. It auto-skips when no UI source dirs exist, so it's safe
    to leave enabled from day one.
 
-6. **Install verification tools** (as your project takes shape):
+7. **Install verification tools** (as your project takes shape):
    - For Node: `eslint`, `prettier`, `typescript`
    - For Python: `ruff`, `mypy`, `pytest`
    - Cross-language: `semgrep`, `gitleaks` (install via your OS package manager)

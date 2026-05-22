@@ -109,5 +109,13 @@ junit.xml
 *.tmp
 *.temp
 
+# Agent OS — keep raw learning substrate local
+# The feedback log accumulates raw outcomes: real ticket excerpts,
+# customer names, incident specifics. Only the curated, sanitized lessons
+# (in lessons.md / patterns.md / decisions.md) get committed. The
+# template lives at .context/feedback-log.template.md; the live file is
+# created by `cp` and stays local.
+.context/feedback-log.md
+
 # Project-specific
 # Add anything specific to this project below.

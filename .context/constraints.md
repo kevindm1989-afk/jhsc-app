@@ -144,6 +144,46 @@ Non-negotiable for any app handling personal information:
 
 ---
 
+## Secrets handling — applies to all agents
+
+Files and inline values that look like credentials, API keys, private
+keys, passwords, or session tokens must never be summarized, quoted, or
+echoed by any agent. If an agent reads such content (intentionally or
+incidentally), it must:
+
+- **Refuse to include the secret value** in any output — briefing,
+  review comment, generated code, commit message, PR description, log
+  line, or downstream-agent context.
+- **Surface only the FACT** that a secret was encountered: file path,
+  rough category (e.g. "AWS access key", "private key", "generic API
+  token"), and a recommendation to rotate-and-remove.
+- **Never propagate the value** to a downstream agent's context. The
+  librarian and memory-curator are the most likely chokepoints — they
+  must redact at the boundary.
+
+Patterns that count as secret-bearing:
+
+- Files: `.env`, `.env.*` (not `.env.example`); `*.pem`, `*.key`,
+  `*.p12`, `*.pfx`, `*.jks` (not `*.example.*`); files with names
+  containing `secret`, `credential`, `token`, `password`, `apikey` /
+  `api_key` / `api-key`; cloud credential paths
+  (`~/.aws/credentials`, `~/.config/gcloud/`, `~/.kube/config`,
+  `~/.netrc`).
+- Inline values: AWS keys (`AKIA[0-9A-Z]{16}`), GitHub tokens (`ghp_*`,
+  `gho_*`, `ghu_*`, `ghs_*`, `github_pat_*`), Stripe live keys
+  (`sk_live_*`, `pk_live_*`, `rk_live_*`), Google API keys
+  (`AIza[0-9A-Za-z-_]{35}`), Slack tokens (`xox[abprs]-*`), private-key
+  headers (`-----BEGIN ... PRIVATE KEY-----`), JWTs hard-coded as
+  literals in source.
+
+If a secret appears inside any `.context/` file, treat that as a
+finding in itself: those files were meant to capture institutional
+knowledge, not credentials. Recommend immediate rotation **and** removal
+from git history (the value is already exposed to anyone who can clone
+the repo).
+
+---
+
 ## Hard Rules for Agents
 
 Every agent working on this project must:
