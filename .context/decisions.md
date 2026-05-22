@@ -25,11 +25,236 @@ pointing to the new one. The history is the value.
 
 ---
 
-# ADR-0012: Backup strategy and recovery-testing cadence
+# ADR-0014: Offline queue HMAC integrity for IndexedDB inspection queue
 
 **Status:** Accepted
 **Date:** 2026-05-22
-**Decider(s):** architect (ratifying), user (locked in plan §7)
+**Decider(s):** architect (amendment pass per HG-4), user (approved)
+
+**Threat-model trigger:** F-44 (IndexedDB inspection queue tampered to inject false photos / notes) / O-11 / HG-4.
+
+## Context
+
+T10 (inspections offline + sync) queues inspection entries — checklist items, notes, and encrypted photos — into IndexedDB while signal is unavailable. The encryption pipeline (per ADR-0003) sealing entries to the committee public key protects confidentiality, but it does **not** establish authorship: an attacker with local device access (malicious extension, transient physical access, T2 employer-device residual) can write a forged inspection row into the queue. On sync, the row uploads as if authored by the authenticated session — because the only check on the wire is the JWT, and the JWT belongs to the legitimate user.
+
+F-44 surfaces this as Medium residual. The fix is integrity-on-the-queue: tag every queued entry with a MAC keyed by a per-user device-bound secret, and verify on sync.
+
+## Decision drivers
+
+- Prevent a local attacker from injecting attacker-controlled plaintext that becomes "the inspector's note."
+- HMAC key must NEVER leave the device — escrowing it server-side defeats the point.
+- Use the libsodium primitives already in the stack (ADR-0003 Invariant 4); no new crypto library.
+- Mismatch must fail closed: rejected entry, audit row, user notification — not silent drop.
+- Verifiable deterministically in tests.
+
+## Options considered
+
+### Option A: Per-entry HMAC keyed by HKDF off the user's identity private key (chosen)
+
+**Description:**
+- At session start (after the identity-key self-test passes per F-03), derive a session-scoped HMAC key:
+  `K_hmac = HKDF-BLAKE2b(salt = "jhsc.queue.hmac.v1", ikm = identity_privkey, info = user_id || device_id)`.
+- For each queued entry, compute `tag = BLAKE2b-256-keyed(K_hmac, sequence_number || user_id || ciphertext)`.
+- Store `{ciphertext, sequence_number, user_id, tag}` in IndexedDB; `K_hmac` lives only in memory.
+- On sync, server reads `tag` and the wire payload, recomputes via a server-side verification path: the server cannot recompute `K_hmac` (it's derived from a private key the server never sees), so the server's role is **forwarder + recorder**, while the client posts the tag alongside the JWT and the server records the verification outcome.
+- Actual MAC verification happens client-side BEFORE the entry is shipped: the queue-drain step recomputes the tag from the in-memory K_hmac and the stored ciphertext, asserts equality, and only then POSTs. A mismatch fails closed.
+- Optional second verifier: the server stores the tag alongside the row; on subsequent client reads, the same client can re-verify the tag matches the ciphertext it now sees back from the server — detecting in-transit/at-rest tampering as well.
+- Algorithm: **BLAKE2b-256 keyed** (`libsodium.crypto_generichash` with `key` parameter). Already in the stack via libsodium-wrappers (ADR-0003 Invariant 4).
+
+**Pros:**
+- Key never leaves the device; T1/T5 reach to plaintext still requires breaking E2EE *and* the HMAC chain.
+- Uses libsodium primitives we already trust.
+- Deterministic, testable in CI.
+- Detects both injection (local attacker writes a forged row) and replay-from-another-device (copy queue from device B to device A — user_id mismatch fails).
+
+**Cons:**
+- If identity_privkey is unavailable at queue-drain time (lock screen, expired session), the queued entry cannot be verified and the user must re-auth to sync. Acceptable; matches the rest of the session model.
+- Server cannot itself verify the MAC; it relies on the client's verification + records the tag for downstream re-verification. This is acceptable because the threat is local device tampering, which is fundamentally a client-side detection problem.
+
+### Option B: Signed-by-identity-key per entry (Ed25519 signature)
+
+**Description:** Sign each queued entry with the identity private key directly (Ed25519). Server holds identity public key; verifies signature on sync.
+
+**Pros:**
+- Server-side verification possible.
+- Stronger non-repudiation.
+
+**Cons:**
+- Mixes signing key with sealing key — identity privkey already does too much (sealing C3, unwrapping committee key); adding signing widens the blast radius of a privkey compromise.
+- Slower per-entry; signing in the offline hot path on a shop-floor Android is noticeable.
+- Adds an Ed25519 keypair to the user model OR forces dual-use of X25519, which libsodium handles but is a footgun.
+
+### Option C: No MAC; rely on JWT only
+
+**Description:** Status quo. Trust the JWT for authorship.
+
+**Cons:**
+- Exactly the F-44 finding. Local attacker injects rows; JWT proves the user was logged in, not that the user authored the entry.
+
+## Decision
+
+**We choose Option A.**
+
+### Rationale
+
+The threat is local device tampering; client-side verification is the right place to catch it. Option B over-loads the identity privkey for marginal gain. Option C is the finding.
+
+**Operational rules:**
+- HMAC algorithm: `libsodium.crypto_generichash` (BLAKE2b-256) with the `key` parameter set to `K_hmac` (32 bytes).
+- HKDF construction: `K_hmac = crypto_generichash(key = identity_privkey, msg = user_id_bytes || device_id_bytes, outlen = 32, personalisation = "jhsc.queue.hmac.v1")` — single-step KDF using BLAKE2b's keyed mode is acceptable (libsodium pattern; the same pattern libsodium uses internally for sub-keys).
+- HMAC scope: `(sequence_number_u64_be || user_id_uuid_bytes || ciphertext)`. The sequence number prevents reordering; user_id prevents cross-device replay.
+- Verification step: in-memory recomputation before drain; mismatch → entry quarantined to a `rejected_queue_entries` IndexedDB object store + audit-log POST `{action: 'queue.integrity_fail', sequence_number, user_id}` on next online + user notification banner.
+- The server stores the tag alongside the row (column `client_integrity_tag BYTEA`); client can re-verify on read.
+
+### Reversibility
+
+**Medium.** Removing HMAC later is trivial (don't write the column). Migrating to a different MAC algorithm (Option B) is a queue-drain + re-derive job; not painful at our scale.
+
+## Consequences
+
+### Positive
+- Local-tampering injection detected before it pollutes the inspection record.
+- No new key material to manage (derived from existing identity key).
+- Same crypto library; no new dependency.
+
+### Negative / accepted tradeoffs
+- Cannot verify server-side; the server is a recorder, not a judge. Acceptable; the threat is local.
+- A user who restores from device backup AND has a wrong device_id will see queue entries fail integrity. Acceptable: prompt re-enter.
+
+### Risks
+- HKDF parameter accident (wrong personalisation string) makes verification non-deterministic across versions. Mitigated by versioning the salt (`jhsc.queue.hmac.v1`) and refusing to verify entries tagged with an unknown version.
+
+## Compliance check
+
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+- [x] Uses libsodium-only primitives per ADR-0003 Invariant 4.
+- [x] Audit-log entries for integrity failures aligned with §6 Invariant 8.
+
+## Follow-ups
+
+- [ ] **T10 acceptance amended** — HMAC integrity tests added (see Task-list amendments below).
+- [ ] Test-writer: deterministic-tamper test — corrupt a byte in `ciphertext`; assert verification fails before POST; assert `queue.integrity_fail` audit row queued for next online; assert user banner shown.
+- [ ] Test-writer: cross-device-replay test — copy a queue entry from device B's IndexedDB to device A; on device A drain, assert user_id mismatch fails verification.
+- [ ] Schema migration: add `client_integrity_tag BYTEA NOT NULL` to `inspections` queue-bound columns.
+
+---
+
+# ADR-0013: Service-worker plaintext-cache allowlist (PWA on-device cache policy)
+
+**Status:** Accepted
+**Date:** 2026-05-22
+**Decider(s):** architect (amendment pass per HG-3), user (approved)
+
+**Threat-model trigger:** F-10 (Service worker caches plaintext responses for offline) / O-10 / HG-3.
+
+## Context
+
+SvelteKit's service worker can be configured to cache responses for offline use. Without an explicit policy, default routing rules may cache decrypted API responses, leaving plaintext sensitive content on disk in the browser's Cache Storage — readable on T2 (employer-owned device) or T6 (theft) without re-auth. The architect's prior note in the system design ("no plaintext caching server-side") is silent on **client-side service-worker caches**. F-10 raises this as a Medium gap.
+
+This ADR specifies exactly what the PWA service worker is allowed to cache in plaintext on the device, what it must hold only as ciphertext, and what it must NEVER cache.
+
+## Decision drivers
+
+- T2 / T6 risk: anything in Cache Storage is at-rest on the device with no re-auth gate.
+- Offline UX still needs to work — static assets and operational metadata must be cacheable.
+- The architect's E2EE invariants (ADR-0003) constrain C3/C4 to never leave the browser RAM in plaintext between sessions.
+- Detection by snapshot in CI is feasible (Cache Storage is enumerable from a test harness).
+
+## Decision
+
+**Service-worker cache policy is a strict allowlist, by data classification:**
+
+| Asset class | Cache plaintext? | Strategy | Notes |
+|---|---|---|---|
+| **Static assets** (HTML shell, JS bundles, CSS, fonts, web manifest, icons) | **YES** | Cache-first; versioned by build hash | App shell PWA pattern. No PI. |
+| **C0 public content** (document library: OHSA quick-ref text, i18n catalogs) | **YES** | Stale-while-revalidate | Public regulatory text; nothing to protect. |
+| **C1 operational metadata** (feature flags, schema version, route map, locale list) | **YES, time-bound** | Cache with `max-age=86400` (24h max) then revalidate | Bounded; no PI. |
+| **C2 worker-side PI** (display name, off-employer contact) | **NEVER plaintext** | Not cached by service worker. If retained at all on-device, only inside the encrypted IndexedDB layer keyed by the session/passkey wrap. | Worker-side identifying data must not survive in Cache Storage. |
+| **C3 sensitive worker content** (concerns body, minutes, inspections, recommendations) | **NEVER plaintext** | Not cached by service worker. Ciphertext payloads MAY appear in IndexedDB queues (per T10) but never in Cache Storage. | E2EE confined to browser RAM and ciphertext-only IndexedDB. |
+| **C4 highest sensitivity** (reprisal_log, work_refusal, s51_evidence, source_name) | **NEVER, period** | Not cached by service worker. Not in IndexedDB at all except as transient, session-scoped ciphertext for an open record; cleared on lock/logout/panic. | If anything looking like a C4 response slips into the SW fetch handler, the handler rejects (sanity check; defense in depth). |
+
+**Service-worker fetch-handler rules (enforced in code):**
+
+1. The service worker's cache routing is a **closed allowlist** of URL patterns: `/`, `/index.html`, `/_app/**` (build output), `/favicon.*`, `/manifest.webmanifest`, `/locales/*.json`, `/library/*` (C0), `/feature-flags` (with 24h max-age), `/schema-version`.
+2. ANY response from `/api/**` is **not cached** by the service worker. Period.
+3. **Sanity check on responses:** the fetch handler inspects response headers for `X-Data-Class: C3` or `X-Data-Class: C4`. If present, the response is forwarded to the page but NOT placed in any cache. If a future bug routes such a response through a cacheable handler, the sanity check rejects it (logged as `client.cache_policy_violation` for audit-on-next-online).
+4. **On lock / logout / panic-wipe:** all caches whose names are not in the static-asset allowlist are deleted; IndexedDB session-scoped stores cleared.
+5. **Service-worker version bump invalidates everything**: a build-hash mismatch forces a full cache rebuild (no stale C0/C1 carrying over silently).
+
+## Options considered
+
+### Option A: Strict allowlist as specified above (chosen)
+
+**Pros:**
+- Snapshot-testable: a CI fixture installs the SW in a clean Cache Storage, hits a known set of routes, then enumerates Cache Storage and compares to a frozen JSON snapshot.
+- Defense in depth: the `X-Data-Class` header check catches accidental cacheable C3/C4 responses even if the URL allowlist is wrong.
+- Aligns with ADR-0011 (PWA-only) and ADR-0008 (session hygiene).
+
+**Cons:**
+- Slightly more verbose service-worker code than a "cache everything" default.
+- One more thing for the implementer to get right (mitigated by the snapshot test).
+
+### Option B: Default cache + per-route opt-out
+
+**Description:** Cache everything by default; mark specific routes as "no-store" via a `Cache-Control` header.
+
+**Cons:**
+- Inverts the safe default. A missing header = leaked plaintext. The whole point of the threat model is fail-closed.
+
+### Option C: No service-worker caching at all
+
+**Description:** Disable the cache; no offline UX beyond what IndexedDB provides.
+
+**Cons:**
+- Breaks offline-first inspection workflow (T10).
+- The app shell can't load offline either; users on shop-floor signal-gaps see "no internet" pages.
+
+## Decision
+
+**We choose Option A.**
+
+### Reversibility
+
+**Easy.** Service-worker code is a single module; policy is a single allowlist constant. Changing the allowlist is a one-PR change with an updated snapshot test.
+
+## Consequences
+
+### Positive
+- Plaintext C2/C3/C4 cannot persist in Cache Storage by construction.
+- T2 / T6 attacker reading Cache Storage offline sees only static assets + C0/C1 (already public or non-sensitive).
+- Snapshot test makes regression a CI failure, not a runtime surprise.
+
+### Negative / accepted tradeoffs
+- A new C0/C1 route added later that the dev forgets to allowlist won't be cached — slower first-load but not a leak. Safe direction.
+
+### Risks
+- A future PR adds a route to the allowlist that returns C2+ content. Mitigated by:
+  - Reviewer (security-reviewer) checks every SW-allowlist diff.
+  - The `X-Data-Class` header sanity check catches the response even if the URL was mis-allowlisted.
+  - The snapshot test rejects unexpected cache entries unless the snapshot is also updated (forcing reviewer attention).
+
+## Compliance check
+
+- [x] No new third-party processor.
+- [x] No PI in Cache Storage by construction.
+- [x] Consistent with ADR-0003 (E2EE), ADR-0008 (session hygiene), ADR-0011 (PWA).
+
+## Follow-ups
+
+- [ ] **T10 acceptance amended** (or new T20 sub-task — see Task-list amendments below) — service-worker policy + snapshot test.
+- [ ] Server emits `X-Data-Class: <class>` header on responses returning rows from `concerns`, `reprisal_log`, `work_refusal`, `s51_evidence`, `minutes.final`, `recommendations` so the SW sanity check has signal. C0/C1 routes can omit the header (no signal = no rejection).
+- [ ] Implementer: SW snapshot fixture in `apps/web/test/sw-cache.snapshot.test.ts` — install SW in a cold cache, run a scripted login + visit, enumerate Cache Storage, assert exact match.
+
+---
+
+# ADR-0012: Backup strategy and recovery-testing cadence
+
+**Status:** Accepted — **Amended 2026-05-22 (HG-8)**
+**Date:** 2026-05-22 (original); amendment 2026-05-22
+**Decider(s):** architect (ratifying), user (locked in plan §7); amendment per HG-8, user-approved
+
+**Amendment note (2026-05-22, HG-8):** see "Amendment: Object Lock + versioning + lifecycle hard-delete" block at the end of this ADR. Threat-model trigger: F-49 / O-15. Original ADR text unchanged; the amendment adds operational rules.
 
 ## Context
 
@@ -170,11 +395,39 @@ playbook stays the same.
 
 ---
 
+## Amendment: Object Lock + versioning + lifecycle hard-delete (2026-05-22, HG-8)
+
+**Amends ADR-0012** above. Trigger: threat-model F-49 (backup bucket credential compromise enables ransomware-style delete) / O-15 / HG-8. Q1 has resolved the bucket provider as **Backblaze B2 (Canadian region)**; the amendment binds the bucket's operational settings.
+
+**Added operational rules on top of the original:**
+
+1. **Object Lock — governance mode, 35-day retention per object.** Every `pg_dump` object written to the bucket is created with an Object Lock retain-until of `now + 35 days`. Governance mode (not compliance mode) is chosen so an explicit override path exists for a legitimate operational need (e.g., a dump containing a known-bad PII leak that itself needs purging), gated by an additional credential held only by the user (root account, not the workflow's write credential). Retention matches the rolling backup window from plan §7 / §8.
+2. **Versioning enabled.** Every overwrite creates a new version; prior versions are listable and restorable until lifecycle deletes them. A malicious or accidental overwrite is recoverable.
+3. **Lifecycle policy — hard delete at 35 + 7 = 42 days.** Versions whose object-creation timestamp is older than 42 days are hard-deleted by the bucket lifecycle rule (35-day retention window + 7-day grace for a missed restore drill or in-flight investigation). The hard delete is **required** for crypto-shred-on-retention to hold: if old encrypted backups linger indefinitely, the crypto-shred protection (committee-key rotation destroying old wraps) erodes as long-tail backups still contain the old wraps. See F-06 / O-2 for the existing forward-secrecy gap which this caps.
+4. **Credential separation.** The nightly-dump workflow's write credential is scoped: PutObject + GetObject + ListObjects only. It explicitly does **not** carry `DeleteObject`, `BypassGovernanceRetention`, or `PutObjectLockConfiguration` rights. Lifecycle deletes are executed by the bucket itself, not by the workflow credential.
+5. **Bucket-config drift check (CI).** Weekly CI job reads bucket configuration via Backblaze admin API and asserts: (a) versioning enabled, (b) Object Lock enabled with default retention = 35 days governance, (c) lifecycle rule deletes versions older than 42 days, (d) the workflow credential's grants match the scoped list. Drift triggers an alert.
+
+**Reversibility:** Easy on bucket settings (a configuration change). Hard to retroactively apply Object Lock to existing objects, so this is set at bucket creation (T17 acceptance pre-flight) before the first nightly dump.
+
+**Compliance check additions:**
+- [x] Crypto-shred-on-retention is preserved (old backups hard-deleted on schedule).
+- [x] Ransomware-class delete defeated within the 35-day window.
+- [x] No new subprocessor; B2 still holds ciphertext-of-ciphertext only.
+
+**Follow-ups (amend T17 acceptance — see Task-list amendments at end):**
+- [ ] **T17 amended:** bucket created with Object Lock (governance, 35d), versioning ON, lifecycle 42d hard delete; CI drift check operational; restore-drill playbook covers the case "Object Lock prevents drill-bucket cleanup."
+- [ ] Recovery-drill procedure documents: how to restore a *specific version* of a dated dump under Object Lock (read path is unchanged; write/delete is the gated path).
+- [ ] Test (F-49 mitigation): with the regular workflow write credential, attempt to overwrite an existing object — assert it creates a NEW version, prior version still listable. Attempt to DELETE a version under retention — assert denied with the expected error code.
+
+---
+
 # ADR-0011: No native iOS/Android apps in v1 — PWA only
 
-**Status:** Accepted
-**Date:** 2026-05-22
-**Decider(s):** user (locked in plan §13 item 10), architect ratifying
+**Status:** Accepted — **Amended 2026-05-22 (HG-5)**
+**Date:** 2026-05-22 (original); amendment 2026-05-22
+**Decider(s):** user (locked in plan §13 item 10), architect ratifying; amendment per HG-5, user-approved
+
+**Amendment note (2026-05-22, HG-5):** see "Amendment: EXIF/IPTC/XMP/GPS strip on photos" block at the end of this ADR. Threat-model trigger: F-46 / O-9. Original PWA-only decision unchanged; the amendment binds the photo-capture pipeline that runs inside the PWA.
 
 ## Context
 
@@ -281,6 +534,33 @@ the crypto core stays the same.
 - [ ] Onboarding copy explains why no store install (links to this ADR
       in plain English).
 - [ ] `KNOWN-GAPS.md` lists native as v2.
+
+---
+
+## Amendment: EXIF / IPTC / XMP / GPS strip on photos (2026-05-22, HG-5)
+
+**Amends ADR-0011** above. Trigger: threat-model F-46 (GPS metadata leak through opt-in poorly defaulted) / O-9 / HG-5.
+
+**Problem:** Photos taken for inspections (T10) and s.51 evidence (T14) can carry GPS coordinates, device identifiers, timestamps, and other metadata in EXIF / IPTC / XMP blocks that identify the photographer, the device, or the precise location of the workplace floor. Plan §8 turns the app-level GPS toggle off by default but does NOT strip embedded EXIF coming from the camera. A worker who shoots an inspection photo on a personal phone with system-level location enabled will produce a JPEG whose EXIF GPS tag pinpoints the shop floor — exfiltrating that to the employer (via subpoena over a backup, or via an export bug) is exactly the T1/T3 risk profile.
+
+**Added operational rules:**
+
+1. **Strip ALL metadata client-side, before encryption.** All EXIF, IPTC, and XMP blocks are removed from every image accepted into the inspection / s.51 / any photo pipeline. The strip happens in the same module that encrypts the photo (`src/lib/photo/sanitize.ts`), executed BEFORE the libsodium `crypto_secretbox` call. No path uploads or persists a raw-from-camera image.
+2. **GPS coordinates explicitly removed.** Even if a worker WANTS the inspection record to capture a location, location is entered as a free-text field (e.g., "South dock, line 3, near the hydraulic press") OR selected from the `location_id` enum (C1 metadata). It is never derived from EXIF. The app-level GPS toggle (plan §8 opt-in per inspection) remains independent of EXIF and continues to be opt-in, off by default.
+3. **Re-encode through canvas.** To defend against EXIF-strip libraries that miss exotic markers or app-specific segments, the sanitize step re-encodes the image through an HTMLCanvasElement (decode -> canvas -> JPEG/PNG encode) at a configured quality. This is destructive to ALL metadata as a side-effect; the canvas pipeline cannot carry EXIF/IPTC/XMP across.
+4. **Round-trip verification test (mandatory).** Test-writer adds a fixture: feed a photo with known EXIF GPS, IPTC by-line, XMP creator-tool tags through the pipeline; capture the ciphertext blob; decrypt with the test committee key; pass the decrypted bytes through an EXIF / IPTC / XMP parser; assert ZERO tags present and ZERO GPS coordinates anywhere in the byte stream.
+5. **Defensive byte-grep for coordinate-shaped strings.** As a sanity check, after decrypt-in-test, grep the decrypted bytes for patterns matching decimal-degrees (e.g., `/[0-9]{1,3}\.[0-9]{4,}/` near known city-scale bounding boxes for the workplace's province); assert none present. Catches "GPS leaked through a non-EXIF channel (e.g., embedded comment) that the parser missed."
+
+**Reversibility:** Easy. The sanitize module is one file; changing the strip strategy is a one-PR change.
+
+**Compliance check additions:**
+- [x] Data minimization (PIPEDA Principle 4): location data not collected unless explicitly entered by the user.
+- [x] Mitigates F-46.
+- [x] Reduces the T3 export risk surface (an exported photo cannot smuggle GPS to the employer).
+
+**Follow-ups (amend T10 acceptance — see Task-list amendments at end):**
+- [ ] **T10 amended:** EXIF/IPTC/XMP strip + canvas re-encode + round-trip test; same pipeline applies to T14 (s.51 evidence photos).
+- [ ] Designer: photo-capture UI labels include "GPS off; location is free-text or from the location list."
 
 ---
 
@@ -1110,9 +1390,15 @@ property). Not a thing we'd reverse.
 
 # ADR-0003: E2EE key model — per-user identity + per-committee data key
 
-**Status:** Accepted
-**Date:** 2026-05-22
-**Decider(s):** user (locked in plan §13 item 9), architect ratifying
+**Status:** Accepted — **Amended 2026-05-22 (HG-2 + HG-6)**
+**Date:** 2026-05-22 (original); amendment 2026-05-22
+**Decider(s):** user (locked in plan §13 item 9), architect ratifying; amendments per HG-2 + HG-6, user-approved
+
+**Amendment note (2026-05-22):** two amendments at the end of this ADR.
+1. **HG-2 amendment** adds **Invariant 8** (key-material mutation audit-log enum) — trigger F-07 / O-12 / threat-model §6 "Additional invariant to add".
+2. **HG-6 amendment** strengthens **Invariant 7** (C4 second-decrypt audit) to require server-side enforcement via a `SECURITY DEFINER` view, closing the client-cooperative-logging gap — trigger F-33 / O-14 / threat-model §6 Invariant 7 strengthened.
+
+Original invariants 1–7 text is preserved verbatim; amendments add testable strengthenings.
 
 ## Context
 
@@ -1255,6 +1541,90 @@ it right.
 
 ---
 
+## Amendment A (2026-05-22, HG-2): Invariant 8 — Key-material mutation audit-log enum
+
+**Amends ADR-0003** above. Trigger: threat-model F-07 (re-wrap or rotation lacks attribution) / O-12 / §6 "Additional invariant to add". Without an explicit audit-log enum for key mutations, forensic questions ("who re-wrapped for member N? when? in which rotation?") cannot be answered, and a co-opted member (A3) can mutate key material with low traceability.
+
+### Invariant 8 — Key-material mutations have a defined audit-log enum
+
+**Testable invariant (canonical wording):** *"Every mutation of key material — identity-keypair generation, identity-private-key recovery-blob write or restore, committee-data-key wrap creation, committee-data-key unwrap (read of own wrap), committee-data-key rotation lifecycle, and member-revocation key teardown — emits exactly one audit-log row drawn from a closed enum, hash-chained to the previous audit row, with actor_id, target ids, and rotation_id where applicable."*
+
+**Audit-log enum values (closed allowlist; appended to the existing audit-log `action` enum, not replacing):**
+
+| Enum value | When emitted | Required fields |
+|---|---|---|
+| `identity_keypair.created` | New user generates their identity keypair at first-login enrollment (per §2.1 of threat model). | `actor_id`, `target_user_id` (= actor), `ident_pubkey_fingerprint` |
+| `identity_privkey.recovery_blob.written` | User completes recovery-passphrase enrollment and posts the wrapped privkey backup (F-08 pipeline). | `actor_id`, `target_user_id`, `kdf_params_version` |
+| `identity_privkey.recovery_blob.restored` | User triggers passphrase-based recovery to restore identity privkey on a new device. | `actor_id`, `target_user_id`, `device_fingerprint` |
+| `committee_data_key.wrapped_for_member` | An existing member wraps the committee data privkey for a new (or re-added) member. | `actor_id`, `target_member_id`, `committee_key_id`, `rotation_id?` |
+| `committee_data_key.unwrap` | A member opens their own wrap to recover the committee privkey for the session (the "read your own wrap" path). | `actor_id`, `committee_key_id` |
+| `committee_data_key.rotation.started` | First step of rotation: advisory lock acquired, new keypair generated. | `actor_id`, `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `trigger` ∈ {`member_removal`,`scheduled`,`incident`} |
+| `committee_data_key.rotation.completed` | Final step of rotation: new wraps in place for all remaining members; previous wraps in `committee_key_history`. | `actor_id`, `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `members_rewrapped_count` |
+| `committee_data_key.member_revoked` | The removed member's wrap row is deleted (atomic with rotation per Invariant 6). | `actor_id`, `removed_member_id`, `committee_key_id`, `rotation_id` |
+
+**Testable assertions (T07 + T18 acceptance amended — see Task-list amendments at end):**
+- For each enum value above, fire the corresponding flow in an integration test and assert exactly one audit-log row appears with that action, the required fields populated, and a valid `prev_hash` linking to the previous row.
+- Negative: corrupt the audit-log emission path for `committee_data_key.rotation.completed`; assert the rotation flow is aborted (audit emission is a precondition, not a side effect).
+- Coverage: every code path that mutates `committee_key.*`, `users.identity_pubkey`, or `users.identity_privkey_recovery_blob` is grepped in CI; any path not paired with an emission of one of the enum values fails CI.
+- Alerting: per F-50 / T18, the audit-log integrity check job alerts on (a) gaps in the enum sequence within a `rotation_id` (e.g., `started` without a matching `completed` within 5 minutes), (b) any `committee_data_key.member_revoked` without a paired `rotation.completed` in the same `rotation_id`, (c) any `committee_data_key.wrapped_for_member` for a `target_member_id` who is not `committee_membership.active = true` at the time of emission.
+
+**Reversibility:** Easy on enum values (additive); medium on retroactive recoverage (would require migration of existing audit rows — none at time of amendment).
+
+**Compliance check additions:**
+- [x] PIPEDA Principle 9 (Individual Access) — key-material events are part of "what was done with your data" attribution.
+- [x] Strengthens T4 (insider compromise) detection surface.
+
+---
+
+## Amendment B (2026-05-22, HG-6): Invariant 7 strengthened — server-side enforced C4 read-audit
+
+**Amends ADR-0003** above. Trigger: threat-model F-33 (Reprisal-log read not surfaced as a sensitive event because the audit-log write is bypassed by a malicious or buggy client) / O-14 / §6 Invariant 7 strengthened.
+
+### Invariant 7 (strengthened) — C4 read-audit is server-side enforced, in-transaction
+
+**Original Invariant 7 wording (preserved):** "C4 records require a second decrypt step logged in the audit log."
+
+**Strengthened wording (replaces the operational reading of Invariant 7):**
+
+*"Every read of a C4 row writes a `sensitive.read` audit-log row in the same database transaction as the SELECT, regardless of client cooperation. Direct SELECT on the underlying C4 table is revoked from every Postgres role except a single `c4_read_service` role used only by the indirection layer. Clients access C4 rows exclusively through a `SECURITY DEFINER` view (or equivalent Edge Function indirection) that performs the SELECT and the audit-log INSERT atomically; failure of either step rolls back both. Bypassing the indirection layer with any other role's JWT returns zero rows (RLS + GRANT-revoke)."*
+
+**Operational implementation:**
+
+1. **Underlying C4 tables (`reprisal_log`, `work_refusal`, `s51_evidence`):** `REVOKE SELECT ON ... FROM authenticated, anon, service_role` (i.e., every public-API-reachable role). The only role with SELECT is `c4_read_service`, a non-login role created by migration, owned by `migration_role`.
+2. **Indirection layer:** a `SECURITY DEFINER` view per C4 table (e.g., `reprisal_log_read_audited`) owned by `c4_read_service`. The view's SQL is:
+   ```sql
+   -- pseudo-SQL; final form in T13 migration
+   CREATE VIEW reprisal_log_read_audited
+   WITH (security_invoker = false) -- definer
+   AS
+   SELECT r.*,
+          jhsc_log_sensitive_read('reprisal_log', r.id, auth.uid()) AS _audit_token
+   FROM   reprisal_log r
+   WHERE  jhsc_caller_can_read_reprisal(r.id, auth.uid()); -- existing RLS predicate inlined
+   ```
+   `jhsc_log_sensitive_read(...)` is a `SECURITY DEFINER` function owned by `c4_read_service` that INSERTs a `sensitive.read` row into `audit_log` (action enum unchanged from original spec) with `{actor_id, target_table, target_id, ts}` and returns a non-null token (the function side-effect is the audit; the return value is discarded by the client). The function raises and rolls back if the INSERT fails, which rolls back the enclosing transaction — so a failed audit emission means the read does NOT return data.
+3. **GRANT shape:** `GRANT SELECT ON reprisal_log_read_audited TO authenticated;` — clients SELECT from the view; the view's `SECURITY DEFINER` posture runs as `c4_read_service` which holds the underlying SELECT. No direct table SELECT path exists for clients.
+4. **RLS on the view:** RLS predicates that previously gated `reprisal_log` (`author OR co-chair OR certified_member`) are inlined into the view's WHERE clause via `jhsc_caller_can_read_reprisal(...)`. A caller who is not authorized sees zero rows AND no audit row is emitted (the WHERE filters before the function call).
+5. **Alternative: Edge Function indirection.** If a view-based path proves limiting (e.g., for paginated reads with row counts), an Edge Function `/api/sensitive/read` may be used instead, with identical semantics: it executes inside a single Postgres transaction, calls `jhsc_log_sensitive_read` and then SELECTs from the underlying table via the `c4_read_service` connection. The Edge Function never sees plaintext (per Invariant 3); it streams ciphertext through.
+6. **No client-trusted audit.** The previous "client POSTs the audit row before rendering plaintext" pattern is **removed** as a primary control; if retained at all, it is only as a hint for "intent to read", not the canonical audit. The canonical audit row is the server-emitted one inside the SELECT transaction.
+
+**Testable assertions (T13 acceptance amended — see Task-list amendments at end):**
+
+- *Direct-SELECT bypass test:* with a valid member JWT, attempt `SELECT * FROM reprisal_log` directly (bypassing the view). Assert zero rows returned (GRANT-revoke holds) and no audit row written.
+- *Indirection-path success:* SELECT from `reprisal_log_read_audited` with an authorized member's JWT. Assert (a) row returned, (b) exactly one `sensitive.read` audit-log row appears with the matching `target_id` and `actor_id` and the same transaction's timestamp.
+- *Atomicity test:* simulate a `jhsc_log_sensitive_read` failure (e.g., revoke INSERT on audit_log to `c4_read_service` for the test); assert the SELECT rolls back and the client receives an error; no row returned, no partial audit.
+- *Bypass via Edge Function:* if used, the Edge Function path is covered by the same three tests.
+- *Coverage:* `pg_proc` enumeration in CI asserts every C4 table has a corresponding `*_read_audited` view (or documented Edge Function) and that the underlying table's SELECT GRANT is empty for `authenticated`, `anon`, `service_role`.
+- *F-50 alerting:* if the daily audit-log integrity job detects a row in `reprisal_log` SELECT-able by the audit-log query but with no matching `sensitive.read` row for that read window, it alerts (defense-in-depth check; should be zero matches in practice).
+
+**Reversibility:** Medium. The view + role layer is straightforward to refactor, but reverting to client-cooperative logging would be a security regression we wouldn't do.
+
+**Compliance check additions:**
+- [x] T11 (compelled access detection) materially strengthened: a coerced member cannot bypass the audit by tweaking the client.
+- [x] T4 (insider compromise) detection surface strengthened: server-emitted audit is the source of truth.
+
+---
+
 # ADR-0002: Authentication — passkeys (WebAuthn) only, via Supabase Auth
 
 **Status:** Accepted
@@ -1377,9 +1747,11 @@ passkeys would be a security regression we wouldn't do.
 
 # ADR-0001: Hosting on Supabase Cloud (ca-central-1) with E2EE as load-bearing mitigation
 
-**Status:** Accepted
-**Date:** 2026-05-22
+**Status:** Accepted — **Note added 2026-05-22 (HG-1 linked risk acceptance)**
+**Date:** 2026-05-22 (original); note added 2026-05-22
 **Decider(s):** user (locked in plan §13 item 2), architect ratifying
+
+**Linked risk acceptances:** This ADR is the load-bearing hosting decision. The defensibility of Option A rests on (a) ADR-0003 (E2EE) holding, and (b) the worker/employer trust boundary (B3, the export path) remaining narrow and auditable. The user has accepted a deliberate friction-vs-reprisal-resistance tradeoff at B3 — **see "Risk acceptances" section appended after the ADRs (RA-1, HG-1)**: single-signer co-chair passkey re-auth at export, instead of the threat-modeler's recommended full 4-eyes. The compensating controls (closed export allowlist F-19, audit log per F-32, visible concern-derived-items flag in the export interstitial, post-export rep notification) live downstream in T11/T12 acceptance criteria. If RA-1 is ever re-opened (per the triggers documented there), this ADR's defensibility posture should be re-reviewed alongside.
 
 ## Context
 
@@ -1546,6 +1918,74 @@ scenarios; if we ever do, we do it deliberately, not under pressure.
 - [ ] `SUBPROCESSORS.md` to list Supabase, Sentry, backup bucket.
 - [ ] Region-pin CI check in T01.
 - [ ] Plain-language privacy-policy paragraph explaining the tradeoff.
+
+---
+
+# Risk acceptances
+
+Deliberate, named risk acceptances. Each one is a place where the user chose a posture that the threat-modeler (or another reviewer) flagged as weaker than an available alternative. Recording them here makes the tradeoff visible, the compensating controls explicit, and the re-open triggers concrete — so the next reviewer (security, privacy, or a successor user) can revisit with full context rather than discovering the gap by surprise.
+
+---
+
+## RA-1 (HG-1, 2026-05-22): Single-signer co-chair passkey re-auth at export — not full 4-eyes
+
+**Linked ADRs:** ADR-0001 (hosting tradeoff — B3 is the only path off the worker side), ADR-0003 (E2EE — export is the legitimate plaintext-leaving-the-system path).
+**Linked threat-model items:** F-29 (4-eyes on export described as optional) / O-8 / HG-1; cross-references F-19 (export field allowlist — LAUNCH BLOCKER), F-32 (export audit logging), F-22 (co-chair role gating).
+**Linked tasks:** T11 (meeting prep + draft minutes + finalize-and-export), T12 (recommendations to employer + 21-day timer).
+
+### The decision
+
+For the export function — the only path off the worker side at the B3 trust boundary — authentication of the act of exporting is **single-signer co-chair passkey re-auth at the moment of export**. Specifically:
+
+- The acting principal MUST be `worker_co_chair` and MUST be currently active (RLS gates the read of finalized minutes / recommendations; F-22).
+- The export interstitial requires a fresh WebAuthn passkey assertion (re-auth), not a stale session — i.e., the existing access-token JWT alone is NOT sufficient; the co-chair physically/biometrically asserts at the moment of export.
+- The audit-log row records `approver_id = actor_id` (a single signer; explicit, not implicit).
+
+**This is NOT:**
+- A stale-session click-through. Re-auth is required at the moment of export; a long-running session cannot click "Export" without a fresh assertion.
+- Full 4-eyes. A second active member's passkey assertion is NOT required for v1.
+
+### The threat-modeler's recommendation
+
+The threat-modeler explicitly recommended **full 4-eyes** for `recommendations.export` and `minutes.final` exports (threat-model §9 HG-1): the export is rare, low-friction relative to the threat profile (employer adversary, single co-opted co-chair = A3), and 4-eyes is exactly what mitigates that. The threat-modeler's reasoning is sound and is preserved here as the alternative.
+
+### The user's rationale (accepted)
+
+The user has accepted the lower-friction tradeoff for two operational reasons:
+1. Reps are occasionally absent (illness, shift, leave). A 4-eyes requirement that cannot be satisfied stalls a legitimate export — a real workflow harm against an OHSA-bound timeline (e.g., 21-day recommendation response clock in T12 cannot be advanced if the export can't go out).
+2. The act of export is a co-chair function (s.9 minute-signing role); pairing it with a second member's assertion feels procedurally backwards for the user's committee's working pattern.
+
+This is recorded as a deliberate, named risk acceptance — not an oversight. The threat-modeler's recommendation remains visible in §9 of `.context/threat-model.md`.
+
+### Residual risk (what RA-1 leaves unmitigated)
+
+A single co-opted or coerced co-chair (A3 — "under-duress rep" archetype) can produce an export that crosses B3, carrying anything inside the export allowlist (F-19) to the employer. The threat-modeler's 4-eyes proposal would have required a second member's collusion to achieve this; under RA-1, one co-chair under coercion is sufficient.
+
+### Compensating controls (in plan, must remain)
+
+These are the load-bearing reasons RA-1 is acceptable. If any one of them weakens, RA-1 is re-opened.
+
+1. **Closed-allowlist export fields (F-19, LAUNCH BLOCKER).** Source identities (`source_name_ct`) and all C4 fields are structurally absent from every export allowlist. A coerced co-chair can export what's in the allowlist (joint minutes, recommendations to employer) — they CANNOT silently exfiltrate reprisal entries, work-refusal notes, s.51 evidence, or source identities through the export path because those fields don't exist in any allowlist. Enforced by ESLint rule + snapshot test + PDF text-grep test (T11/T12 acceptance).
+2. **Every export remains in the tamper-evident audit log (F-32 / Invariant 8).** Each export emits an audit row with actor, target_id, field_set_hash, ts, recipient_role; the row is hash-chained per ADR-0003 Amendment A and visible to all active members. Audit-log POST succeeds BEFORE the Blob URL is created (F-24); a failed audit emission aborts the export.
+3. **Visible "concern-derived items" flag in the export interstitial (added by this RA).** If any item being exported was derived from a concern (e.g., a recommendation that references a concern_id chain), the interstitial flags this visibly — listing the originating concern IDs and their hazard_class metadata — so the co-chair must actively confirm what is leaving the worker side. The flag is informational (concern-derived items are still allowable in the export); the point is no quiet inclusion. **Implementation:** the export builder computes a `derived_from_concerns: concern_id[]` field; the interstitial renders it as a labelled section before the "I confirm this export" button; the audit-log row captures the array.
+4. **Post-export rep notification (added by this RA).** Within 60 seconds of a successful export, every active member receives a "recent sensitive activity" notification (same surface as T11 / T18 sensitive-read notification): `{actor_id = co-chair, action = 'export.minutes' | 'export.recommendation', target_id, derived_from_concerns?, ts}`. This is the social-norm backstop: the committee sees the export happened, in near-real-time, even though no second signer was required at the moment of export.
+5. **Re-auth at the moment of export, not stale session.** A passive-session attacker (T6 device theft within the 15-minute window before lock) cannot trigger an export without the passkey assertion. This raises the bar above "stolen JWT" but does not reach "second member's involvement."
+
+### Triggers that re-open RA-1 (any one of these requires architect + privacy-reviewer to re-evaluate, possibly upgrading to full 4-eyes)
+
+1. **Any reprisal incident traced through an export.** If an audit-log review (post-incident) shows an export carried information that became a reprisal vector — even within the allowlist — the export path's posture is re-examined. The default response is "upgrade to 4-eyes for `recommendations.export` and `minutes.final`."
+2. **Any indication co-chair credentials were compromised** (passkey loss, suspected device-side compromise, suspected coercion event). Re-evaluation considers (a) immediate temporary disable of the export endpoint pending review, (b) upgrade to 4-eyes as a hard requirement.
+3. **Any change in committee composition that includes a known-coerced rep** (e.g., a co-chair under documented duress, a co-chair who has reported being pressured by the employer). Same re-evaluation as #2.
+4. **A change to the export allowlist that adds a field touching C4 or source identity.** F-19's allowlist closure is part of RA-1's compensating controls; any expansion of the allowlist requires re-opening RA-1 in the same PR.
+5. **Loss of the post-export notification surface or the audit-log emission** (any change that makes the export less observable to the rest of the committee). The social-norm backstop is what makes RA-1 defensible without 4-eyes; removing it changes the calculus.
+6. **Annual review.** RA-1 is reconsidered at the annual threat-model review (next due 2027-05-22 per `.context/threat-model.md`), even if no trigger has fired.
+
+### Re-opening procedure
+
+If any trigger fires:
+1. Architect + privacy-reviewer + (if available) the threat-modeler agent review the trigger and the post-incident audit-log evidence.
+2. Default response: upgrade to full 4-eyes for `minutes.final` and `recommendations.export`. The implementation cost is documented (F-29 Option B test): "Same actor cannot be approver; actor attempts to approve own export -> 403."
+3. A new ADR amendment (or a successor RA) records the new posture and the trigger that prompted it.
 
 ---
 
@@ -2194,10 +2634,16 @@ rotation on member removal.
   readable to remaining members via the rotated wrap chain.
 - No private key material in any URL, query string, log line, or
   Sentry event (canary test).
+- **(Amended 2026-05-22, HG-2 / ADR-0003 Amendment A) Invariant 8 — key-material mutation audit-log enum:**
+  - Every code path that mutates `committee_key.*`, `users.identity_pubkey`, or `users.identity_privkey_recovery_blob` emits exactly one audit-log row drawn from the closed enum {`identity_keypair.created`, `identity_privkey.recovery_blob.written`, `identity_privkey.recovery_blob.restored`, `committee_data_key.wrapped_for_member`, `committee_data_key.unwrap`, `committee_data_key.rotation.started`, `committee_data_key.rotation.completed`, `committee_data_key.member_revoked`}, hash-chained to the previous row, with the required fields per ADR-0003 Amendment A.
+  - Integration tests fire each of the 8 flows and assert the corresponding audit row appears with valid `prev_hash`, `actor_id`, target ids, and `rotation_id` where applicable.
+  - CI grep test: any code path mutating key-material columns that is NOT paired with one of the 8 enum emissions fails CI.
+  - Negative test: corrupt the audit-emission path for `committee_data_key.rotation.completed`; assert the rotation is aborted (audit is precondition, not side-effect).
+  - **F-50 alert wiring**: the audit-log integrity check job (T18) alerts on (a) `committee_data_key.rotation.started` without a matching `.completed` within 5 minutes, (b) any `committee_data_key.member_revoked` without a paired `.rotation.completed` in the same `rotation_id`, (c) any `committee_data_key.wrapped_for_member` for a `target_member_id` whose `committee_membership.active` is false at emission time. T07 emits the enum; T18 wires the alerts; both tests required.
 
 **Extras:** **second-opinion-reviewer** mandatory (crypto). **security-reviewer + adversarial-reviewer** with heightened scrutiny. **privacy-reviewer** signs off.
 
-**Risk:** High. **Estimate:** L (5 days).
+**Risk:** High. **Estimate:** L (5 days; +0.5 day for Invariant 8 enum + alert wiring).
 
 ### T08 — Member concern intake (anonymous-by-default) + hazard register read
 
@@ -2246,10 +2692,33 @@ photo capture; client-side encryption before upload; sync queue.
 - Sync on reconnect; conflicts surfaced for user review.
 - GPS off by default; opt-in per inspection.
 - Photos in Supabase Storage are ciphertext.
+- **(Amended 2026-05-22, HG-4 / ADR-0014) Offline-queue HMAC integrity:**
+  - Every queued entry in IndexedDB is tagged with a BLAKE2b-256 keyed MAC under a per-user device-bound key derived via HKDF from the identity private key (HMAC key never leaves the device). Algorithm: `libsodium.crypto_generichash` with `key` parameter; HKDF construction per ADR-0014.
+  - Tag scope: `(sequence_number_u64_be || user_id_uuid_bytes || ciphertext)`.
+  - On queue drain (before POST): client recomputes the tag from in-memory K_hmac; mismatch quarantines the entry to `rejected_queue_entries` IndexedDB store + posts `queue.integrity_fail` audit row + surfaces a user banner. No POST.
+  - Server stores `client_integrity_tag BYTEA NOT NULL` alongside the row for downstream re-verification.
+  - **Test (deterministic tamper):** offline-queue entry is written; one byte of `ciphertext` is corrupted in IndexedDB between queue-and-sync; verification fails on drain; assert no POST occurs, the `queue.integrity_fail` audit row queues for next online, and the user-visible banner appears.
+  - **Test (cross-device replay):** copy a queue entry from device B's IndexedDB into device A's IndexedDB; on device A drain, the `user_id` field in the MAC scope does not match A's K_hmac derivation; verification fails; entry rejected.
+  - **Test (positive):** un-tampered entry drains, server stores `client_integrity_tag`, subsequent client read re-verifies tag matches the ciphertext read back.
+- **(Amended 2026-05-22, HG-5 / ADR-0011 amendment) EXIF / IPTC / XMP / GPS strip on photos:**
+  - All photo input (camera capture, file upload) is passed through `src/lib/photo/sanitize.ts` which (a) strips EXIF, IPTC, XMP via known-good library, (b) re-encodes through HTMLCanvasElement (decode → canvas → JPEG/PNG re-encode at configured quality) for defense-in-depth metadata removal.
+  - Sanitize step runs BEFORE the libsodium `crypto_secretbox` call; no path uploads or persists raw-from-camera bytes.
+  - GPS coordinates are explicitly removed; if a worker wants to record a location, they enter free text or select from the `location_id` enum (C1 metadata). The app-level GPS toggle remains opt-in, off by default, and is independent of EXIF.
+  - **Test (round-trip):** feed a photo with known EXIF GPS tags (lat/lon at workplace coords), IPTC by-line, XMP creator-tool tags through the pipeline; capture ciphertext blob; decrypt with the test committee key; pass decrypted bytes through an EXIF/IPTC/XMP parser; assert ZERO tags present and ZERO GPS coords.
+  - **Test (defensive byte-grep):** decrypted bytes grepped for decimal-degree-shaped strings within the workplace's province bounding box; assert none present.
+- **(Amended 2026-05-22, HG-3 / ADR-0013) Service-worker plaintext-cache allowlist:**
+  - Service-worker fetch handler implements a closed URL-pattern allowlist per ADR-0013: `/`, `/index.html`, `/_app/**`, `/favicon.*`, `/manifest.webmanifest`, `/locales/*.json`, `/library/*`, `/feature-flags`, `/schema-version` are cacheable; everything else (especially `/api/**`) is not cached by the service worker.
+  - Fetch handler inspects response headers for `X-Data-Class: C3` or `X-Data-Class: C4`; if present, the response is forwarded to the page but NOT cached. Server emits `X-Data-Class` on every response returning rows from C3/C4 tables.
+  - On lock / logout / panic-wipe: all caches outside the static-asset allowlist deleted; session-scoped IndexedDB stores cleared.
+  - Build-hash bump invalidates everything (no stale carryover).
+  - **Test (snapshot — required):** SW snapshot fixture in `apps/web/test/sw-cache.snapshot.test.ts`. Install the service worker in a cold Cache Storage; execute a scripted login + visit-each-route flow; enumerate Cache Storage contents post-flow; assert exact match against a frozen JSON snapshot of allowed entries. Any unexpected cache entry fails CI; any missing expected entry fails CI. Updating the snapshot requires reviewer approval in the PR.
+  - **Test (sanity check):** craft a fake response with `X-Data-Class: C3`; route it through the fetch handler; assert the response is not placed in any cache and a `client.cache_policy_violation` audit row queues.
 
-**Extras:** **security-reviewer + accessibility-specialist** (mobile UX).
+**Extras:** **security-reviewer + accessibility-specialist** (mobile UX); **second-opinion-reviewer** on the HMAC integrity module (crypto-adjacent).
 
-**Risk:** Medium. **Estimate:** L (4 days).
+**Risk:** Medium-High (raised from Medium given HMAC + SW policy). **Estimate:** L (5 days; +1 day for HG-3/HG-4/HG-5 amendments).
+
+**Note:** The service-worker policy work originally proposed as a new T20 sub-task is folded into T10 above. There is no separate T20; the snapshot test and policy module live in the T10 deliverable. The service-worker file itself is created during T00/T09 scaffolding work but the policy / allowlist / snapshot test is binding from T10 onward and must pass before T10 ships.
 
 ### T11 — Meeting prep + draft minutes + finalize-and-export
 
@@ -2296,10 +2765,26 @@ mitigation).
 - Reads are audit-logged with high salience; T11 test passes.
 - Author can read; co-chair can read; certified_member can read.
 - No automatic inclusion in any export.
+- **(Amended 2026-05-22, HG-6 / ADR-0003 Amendment B) Server-side enforced C4 read-audit:**
+  - Direct SELECT on `reprisal_log` (and other C4 tables) is **revoked** from `authenticated`, `anon`, `service_role`. Only `c4_read_service` (a non-login role owned by `migration_role`) has SELECT on the underlying table.
+  - Clients read C4 rows exclusively through a `SECURITY DEFINER` view `reprisal_log_read_audited` (or equivalent Edge Function indirection) that performs SELECT + `sensitive.read` audit INSERT atomically in a single transaction. Audit-emission failure rolls back the SELECT.
+  - **Test (direct bypass):** with a valid authorized member's JWT, attempt `SELECT * FROM reprisal_log` directly (not through the view); assert zero rows AND no audit row.
+  - **Test (indirection success):** SELECT from `reprisal_log_read_audited` as an authorized member; assert (a) row returned, (b) exactly one `sensitive.read` audit-log row appears with matching `target_id`, `actor_id`, and same-transaction timestamp.
+  - **Test (atomicity):** induce a `jhsc_log_sensitive_read` failure (e.g., temporarily revoke INSERT on `audit_log` for `c4_read_service`); assert the SELECT rolls back; no row returned; no partial audit row.
+  - **Test (coverage):** `pg_proc` + `information_schema` enumeration in CI asserts every C4 table (`reprisal_log`, `work_refusal`, `s51_evidence`) has a corresponding `*_read_audited` view (or documented Edge Function path) AND the underlying table's SELECT GRANT for `authenticated`/`anon`/`service_role` is empty.
+  - The previous client-cooperative pattern (client POSTs the audit row before rendering plaintext) is downgraded to a UX hint only; canonical audit is the server-emitted row.
+- **(Amended 2026-05-22, HG-7) Soft-delete gating — status-flip equivalent to DELETE:**
+  - Any UPDATE on `reprisal_log` that flips `status` to any "removed-like" value (`deleted`, `archived`, `redacted`, `tombstoned`) requires the same 4-eyes flow as a hard DELETE: a row in `pending_destructive_ops` with two distinct `approver_id`s.
+  - RLS / CHECK constraint reads `pending_destructive_ops` and rejects the UPDATE if quorum is not present.
+  - True hard-DELETE on `reprisal_log` rows is fired only by the retention job (T16) when the entry has aged out; never by user action.
+  - **Test (single-rep status flip):** as a single co-chair, attempt UPDATE `status = 'deleted'`; assert RLS denies with a clear "needs second member" error path (the implementer's choice between RLS-deny + structured error vs. RPC indirection — either way, the user-facing message names that a second member is required).
+  - **Test (4-eyes status flip):** propose status-flip via `pending_destructive_ops`; second distinct active member approves; UPDATE succeeds; audit log captures two rows (`proposal`, `approval`) with both members named, hash-chained.
+  - **Test (self-approve denied):** proposing member attempts to approve their own proposal; RLS denies.
+  - **Test (retention-only hard-delete):** a user attempting `DELETE FROM reprisal_log` directly is denied regardless of role (per the existing "Co-chair only with 4-eyes" RLS, now tightened so even the 4-eyes flow does NOT permit hard DELETE — only the retention job's service role does); the retention job at T16, on aged-out entries, performs the hard DELETE.
 
 **Extras:** **second-opinion-reviewer** + **privacy-reviewer** + **adversarial-reviewer** all with heightened scrutiny.
 
-**Risk:** High. **Estimate:** L (4 days).
+**Risk:** High. **Estimate:** L (5 days; +1 day for HG-6 server-side indirection + HG-7 status-flip gating).
 
 ### T14 — Work refusal (s.43) + critical injury (s.51) checklists
 
@@ -2360,10 +2845,21 @@ quarterly restore drill into a scratch project; alert if backup is stale.
 - Restore playbook produces a signed report.
 - First end-to-end drill executed and signed before launch (human gate per plan §13.F).
 - `SUBPROCESSORS.md` updated with backup bucket.
+- **(Amended 2026-05-22, HG-8 / ADR-0012 amendment) Object Lock + versioning + lifecycle hard-delete:**
+  - Bucket provisioned in Backblaze B2 Canadian region with:
+    - **Object Lock enabled, governance mode, default retention 35 days** per object. Every nightly dump is written with retain-until = now + 35 days.
+    - **Versioning enabled.**
+    - **Lifecycle rule:** hard-delete versions whose object-creation timestamp is older than 35 + 7 = 42 days. The hard delete preserves crypto-shred-on-retention (old encrypted backups cannot linger past the rotation window).
+    - **Workflow credential scoped to PutObject + GetObject + ListObjects only**; no DeleteObject, no BypassGovernanceRetention, no PutObjectLockConfiguration.
+  - **Test (overwrite creates new version):** with the workflow write credential, overwrite an existing object; assert a NEW version is created and the prior version remains listable.
+  - **Test (delete denied under retention):** with the workflow write credential, attempt to DeleteObject (or DeleteObjectVersion) on a version still within the 35-day retention; assert the call is denied with the expected error code (Object-Lock retention violation).
+  - **Test (lifecycle hard-delete):** integration fixture or scheduled CI check verifies that an object aged > 42 days is no longer present in the bucket (a hold-out test object created during initial setup is verified to be gone after the lifecycle window in a delayed-assertion test, OR the lifecycle config itself is verified via Backblaze admin API in CI to delete > 42 days).
+  - **Test (drift check, weekly CI):** read bucket config via Backblaze admin API; assert (a) versioning enabled, (b) Object Lock enabled with default retention = 35d governance, (c) lifecycle rule deletes versions > 42d, (d) the workflow credential's grants match the scoped list. Drift triggers an alert.
+  - **Recovery-drill procedure update:** the drill playbook explicitly documents (a) how to restore a specific version of a dated dump under Object Lock — the read path is unchanged, only the write/delete is gated; (b) the operational override path for governance-mode (using the user's root credential held outside the workflow) for the rare case of a legitimate need to purge a specific dump containing a known-bad PII leak, with privacy-reviewer + user sign-off required.
 
 **Extras:** **security-reviewer**.
 
-**Risk:** Medium. **Estimate:** M (2 days).
+**Risk:** Medium. **Estimate:** M (2.5 days; +0.5 day for HG-8 bucket config + drift check + drill amendments).
 
 ### T18 — Audit log integrity check job + sensitive-read notification
 
@@ -2497,3 +2993,73 @@ Output goes to `.context/threat-model.md` per plan §11.
 After the threat-modeler completes, the orchestrator routes to:
 - **designer** (audience, primary task, content shape — plan §11.3 task 5).
 - **observability-setup** (T02 scope — Sentry scrubber + structured logs).
+
+---
+
+# Amendment pass summary (2026-05-22)
+
+Threat-modeler completed STRIDE on the Phase-1 architecture and surfaced 10 human-gate items in `.context/threat-model.md` §9. HG-1 was answered by the user (RA-1 captured below). HG-2 through HG-8 are processed in this amendment pass. HG-9 and HG-10 remain as pre-launch human gates already in plan §13 and are unchanged.
+
+| HG | Threat-model finding(s) | Amendment artifact | Downstream task(s) |
+|---|---|---|---|
+| HG-1 | F-29 / O-8 (4-eyes on export) | **RA-1** (new "Risk acceptances" section between ADR-0001 and System Design) — single-signer co-chair passkey re-auth at export; compensating controls + re-open triggers documented. **ADR-0001 amended** with a "Linked risk acceptances" pointer. | T11, T12 — compensating controls (closed allowlist F-19, audit log F-32, visible concern-derived-items flag in interstitial, post-export rep notification) must be present in T11/T12 acceptance and tests. |
+| HG-2 | F-07 / O-12 (key-material mutation audit-log enum) | **ADR-0003 Amendment A** — Invariant 8 added with closed enum: `identity_keypair.created`, `identity_privkey.recovery_blob.written`, `identity_privkey.recovery_blob.restored`, `committee_data_key.wrapped_for_member`, `committee_data_key.unwrap`, `committee_data_key.rotation.started`, `committee_data_key.rotation.completed`, `committee_data_key.member_revoked`. | **T07 acceptance amended** — each enum value emits an audit row on the corresponding flow; CI grep coverage; F-50 alert wiring (T18 wires the alerts). |
+| HG-3 | F-10 / O-10 (service-worker plaintext cache policy) | **New ADR-0013** — Service-worker plaintext-cache allowlist (closed URL-pattern allowlist; `X-Data-Class: C3/C4` sanity check; clear on lock/logout/panic; snapshot test mandatory). | **T10 acceptance amended** (T20 folded into T10 per the user's "create T20 or fold into T09 PWA scaffold" instruction — folded into T10; the service worker file may be scaffolded earlier but the policy + snapshot test bind at T10). |
+| HG-4 | F-44 / O-11 (offline-queue HMAC integrity) | **New ADR-0014** — HMAC-tag every queued IndexedDB entry with BLAKE2b-256 keyed (libsodium `crypto_generichash`), key HKDF-derived from identity privkey, scoped over (seq, user_id, ciphertext); client verifies before drain; server stores tag. | **T10 acceptance amended** — deterministic-tamper test + cross-device-replay test + positive round-trip. |
+| HG-5 | F-46 / O-9 (EXIF/IPTC/XMP/GPS strip on photos) | **ADR-0011 amended** — EXIF/IPTC/XMP strip + canvas re-encode before encryption; GPS coords explicitly removed; round-trip and byte-grep tests. | **T10 acceptance amended** (also implicitly applies to T14 s.51 photos which go through the same upload pipeline). |
+| HG-6 | F-33 / O-14 (C4 server-side read-audit enforcement, Invariant 7 strengthen) | **ADR-0003 Amendment B** — Invariant 7 strengthened: all C4 reads go through a `SECURITY DEFINER` view (`reprisal_log_read_audited` and equivalents) that writes the `sensitive.read` audit row atomically with the SELECT, in the same transaction; direct table SELECT revoked from `authenticated`, `anon`, `service_role`. | **T13 acceptance amended** — direct-bypass test, indirection-success test, atomicity test, coverage-via-`pg_proc` test. Same pattern applied to `work_refusal` and `s51_evidence` in T14. |
+| HG-7 | F-36 / O-16 (soft-delete-as-delete gating) | **T13 amendment** — UPDATE on `reprisal_log` that flips `status` to any removed-like value requires the same 4-eyes flow as DELETE; user-triggered hard DELETE blocked entirely; only the retention job (T16) hard-deletes aged-out entries. | **T13 acceptance amended** — single-rep status-flip denied with clear "needs second member" error; 4-eyes status-flip succeeds with both members named in audit log; self-approve denied; retention-only hard-delete. |
+| HG-8 | F-49 / O-15 (Object Lock + versioning on backup bucket) | **ADR-0012 amended** — Object Lock governance mode 35d retention; versioning enabled; lifecycle hard-deletes versions > 42d (preserves crypto-shred on retention); workflow credential scoped (no Delete, no Bypass); weekly CI drift check. | **T17 acceptance amended** — bucket-config tests, overwrite-creates-new-version test, delete-denied-under-retention test, drift check, restore-drill procedure updated. |
+| HG-9 | (pre-existing per plan §13.D) | Unchanged. | Retention schedule final approval before launch. |
+| HG-10 | (pre-existing per plan §13.B/C) | Unchanged. | Privacy lawyer + labour lawyer review before Phase 3 ship. |
+
+**New artifacts in this file:**
+- ADR-0014 (offline queue HMAC integrity) — top of file.
+- ADR-0013 (service-worker plaintext-cache allowlist).
+- ADR-0012 amendment block (Object Lock + versioning + lifecycle).
+- ADR-0011 amendment block (EXIF strip).
+- ADR-0003 Amendment A (Invariant 8) and Amendment B (Invariant 7 strengthened).
+- ADR-0001 "Linked risk acceptances" note pointing to RA-1.
+- "Risk acceptances" section (RA-1, HG-1) between ADR-0001 and System Design.
+- T07, T10, T13, T17 acceptance criteria amended (in-place, with explicit "Amended 2026-05-22, HG-X" labels on each new bullet).
+
+**Reversibility note:** all amendments use the "amends" / "supersedes" pointer pattern. Original ADR text is preserved verbatim; amendments are additive blocks at the end of each ADR. RA-1 has explicit re-open triggers; the threat-modeler's alternative (full 4-eyes) is preserved in the section as the documented alternative posture.
+
+**Locked decisions from plan §13 were not re-opened.** No new locked decisions introduced. No new cross-border transfers. No new PI subprocessors.
+
+---
+
+# Handoff (re-stated for amendment pass)
+
+The amendment pass closes HG-2 through HG-8 and records HG-1 as RA-1. Phase-1 architecture is now ready for the parallel handoff originally planned by the threat-modeler (`.context/threat-model.md` §10).
+
+**Run in parallel:**
+
+**Agent: designer.** Inputs:
+- `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
+  - **RA-1** (the export interstitial UX is materially affected: the interstitial must list every included field by label per F-19, AND visibly flag "this export contains concern-derived items" with the originating concern_ids, AND record post-export rep notification — these are compensating controls for the single-signer posture).
+  - ADR-0007 (concern intake, anonymous-toggle-default-ON form treatment).
+  - ADR-0008 (device posture, onboarding copy).
+  - ADR-0011 (PWA-only onboarding copy) and its EXIF amendment (photo-capture UI labels include "GPS off; location is free-text or from the list").
+  - **ADR-0013** (service-worker cache policy informs offline-state UX — what's available offline, what isn't, what to surface when the SW rejects a response).
+  - ADR-0003 Amendment B (C4 read-audit) — the sensitive-read notification surface design must reflect that the canonical audit is server-emitted (no spinner waiting for client-POST; the row is already there when the SELECT returns).
+  - T13 (reprisal log) HG-6 + HG-7 amendments — the "needs second member" error surface for soft-delete status flips needs a designed UX (clear, non-blame-y, with a way to nominate the second member).
+- `/home/user/agent-os/.context/threat-model.md` — §3.3 (export STRIDE), §3.2 (concern intake STRIDE), §3.4 (reprisal log STRIDE), §10 (handoff).
+- `/home/user/agent-os/JHSC-APP-PLAN.md` §9 (accessibility) and §3.2 (worker-side-only).
+
+Designer must capture: (a) the export interstitial UX with explicit field-list display **and the concern-derived-items flag from RA-1** (F-19 + RA-1), (b) the sensitive-read notification surface that reflects the server-emitted audit (F-33 / Amendment B), (c) anonymous-toggle-defaults-ON form treatment (T3), (d) onboarding copy that names the ADR-0001 tradeoff and the ADR-0008 device posture, (e) the recovery-passphrase print-and-type-back flow (F-08), (f) per-record passphrase prompts (F-34) WITHOUT implying they are the crypto gate, (g) the photo-capture UI's GPS / location messaging (HG-5 amendment to ADR-0011), (h) the "needs second member" UX for both DELETE proposals and soft-delete status flips on `reprisal_log` (HG-7), (i) the offline-state messaging consistent with the service-worker cache allowlist (HG-3 / ADR-0013).
+
+**Agent: observability-setup.** Inputs:
+- `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
+  - ADR-0010 (Sentry scrubbing) and T02 acceptance (existing).
+  - **ADR-0003 Amendment A** (Invariant 8 enum) — the audit-log-integrity check job in T18 alerts on the F-50 patterns documented in T07's amended acceptance (rotation-started-without-completed, member-revoked-without-rotation-completed, wrap-for-inactive-member).
+  - **ADR-0003 Amendment B** (Invariant 7 strengthened) — the audit-log pipeline now has server-emitted `sensitive.read` rows from inside the `SECURITY DEFINER` view. The observability surface (T18 "recent sensitive activity" feed) reads these.
+  - **ADR-0013** — the SW must emit `client.cache_policy_violation` audit rows when the sanity-check rejects a response; observability surface ingests these.
+  - **ADR-0014** — `queue.integrity_fail` audit rows from HMAC mismatch on offline-queue drain; observability ingests + alerts.
+  - **ADR-0012 amendment** — backup bucket weekly drift check is an alert-emitting check; the alert pipeline carries it.
+- `/home/user/agent-os/.context/threat-model.md` — §3.1 F-09 (Edge Function log scrubbing), §6 Invariant 1 strengthened (private-key-shape canary), §3.6 F-50 (audit-log integrity alert wiring).
+- `/home/user/agent-os/JHSC-APP-PLAN.md` §6 (no PI in logs).
+
+Observability-setup must build: the `beforeSend` scrubber with allowlist + canary-PII test (T02 existing); the structured logger with `safeFields`; the audit-log integrity-alert wire (F-50 alerts within 5 minutes of triggers); **the alerting wire for the new audit-log enum values from Invariant 8 (HG-2)**; **the alerting wire for `queue.integrity_fail` from ADR-0014 (HG-4)**; **the alerting wire for `client.cache_policy_violation` from ADR-0013 (HG-3)**; **the alerting wire for the bucket-config drift check from ADR-0012 amendment (HG-8)**; **the "recent sensitive activity" feed that reads the server-emitted `sensitive.read` rows from ADR-0003 Amendment B (HG-6) AND surfaces the post-export rep notification per RA-1 (HG-1)**.
+
+These two agents run in parallel; their outputs do not block each other.
