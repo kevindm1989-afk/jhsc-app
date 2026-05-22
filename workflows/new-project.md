@@ -136,9 +136,12 @@ autonomous.
 
 ## 6. After shipping
 
-- Append outcome to `.context/feedback-log.md`
+- Append outcome to `.context/feedback-log.md` (the file is gitignored;
+  seed it with `cp .context/feedback-log.template.md
+  .context/feedback-log.md` if you haven't yet)
 - If anything notable happened (bug found, surprise, new pattern), add
-  to the appropriate `.context/` file
+  to the appropriate `.context/` file — these *are* committed, so
+  paraphrase and scrub names rather than pasting raw entries
 - Continue with next task
 
 ---

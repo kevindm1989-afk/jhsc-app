@@ -58,6 +58,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   date-cited feedback entries and a two-data-point threshold; biased
   toward net reduction over time.
 
+### Upgrading from prior versions
+
+If you were running an earlier version of the pack and already had
+`.context/feedback-log.md` tracked in git, pulling this update leaves
+you with the file still committed AND a gitignore rule that hides
+future changes. Run once:
+
+```
+git rm --cached .context/feedback-log.md
+cp .context/feedback-log.template.md .context/feedback-log.md   # if no live file yet
+git commit -m "Untrack feedback log; live file is now local-only"
+```
+
+After that, edits to `.context/feedback-log.md` stay local and only
+the curated lessons travel via commits to `lessons.md` / `patterns.md`
+/ `decisions.md`.
+
 ### Security & privacy hardening
 - **Feedback log is now gitignored by default.** `.context/feedback-log.md`
   accumulates raw outcomes — ticket excerpts, customer names, incident

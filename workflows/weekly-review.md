@@ -6,6 +6,12 @@
 
 Open `.context/feedback-log.md`. Read every entry since last review.
 
+> The feedback log is **gitignored on purpose** — it accumulates raw
+> entries that may include ticket excerpts, names, and incident
+> specifics. First-time setup: `cp .context/feedback-log.template.md
+> .context/feedback-log.md`. If the file isn't there, you haven't
+> seeded it yet.
+
 ## 2. Find the patterns
 
 For each task, ask:
