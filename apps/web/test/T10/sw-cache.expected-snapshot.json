@@ -1,0 +1,12 @@
+[
+  { "cache_name": "static-assets-build-test", "url": "/" },
+  { "cache_name": "static-assets-build-test", "url": "/_app/chunk-app.[hash].js" },
+  { "cache_name": "static-assets-build-test", "url": "/_app/chunk-vendor.[hash].js" },
+  { "cache_name": "static-assets-build-test", "url": "/_app/style.[hash].css" },
+  { "cache_name": "static-assets-build-test", "url": "/favicon.ico" },
+  { "cache_name": "static-assets-build-test", "url": "/manifest.webmanifest" },
+  { "cache_name": "locales-build-test", "url": "/locales/en-CA.json" },
+  { "cache_name": "dynamic-build-test", "url": "/feature-flags" },
+  { "cache_name": "dynamic-build-test", "url": "/library/ohsa-quickref" },
+  { "cache_name": "static-assets-build-test", "url": "/schema-version" }
+]
