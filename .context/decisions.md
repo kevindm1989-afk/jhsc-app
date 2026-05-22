@@ -25,6 +25,159 @@ pointing to the new one. The history is the value.
 
 ---
 
+# ADR-0015: Per-event-type audit-log retention schedule (HG-14)
+
+**Status:** Accepted
+**Date:** 2026-05-22
+**Decider(s):** architect (amendment pass #3 per privacy-review Q2 APPROVED-WITH-CHANGES); **HG-14 — user ratification of the per-event-type schedule before T16 ships.**
+
+**Source:** privacy-review §3.1 / §3.3 / §3.4 / §3.5 / §7 (test obligations 7–11); threat-model F-51 / F-52 / O-14 (cross-reference); supersedes the uniform 24-month posture previously documented in `observability/README.md` §1 (which is corrected by observability-setup on its next pass — architect does NOT edit `observability/*` per amendment pass #3 hard rules).
+
+## Context
+
+The audit log was specified at a uniform 24-month retention in `observability/README.md` §1, with the reasoning "PIPEDA s.10.1 breach-record floor." Privacy-review Q2 confirmed that 24 months is **defensible at the PIPEDA Principle 4.5 floor but not minimized** and is **incoherent with the underlying records' retention** (concerns at 7y post-closure, reprisal_log at active matter + 7y, etc.).
+
+The privacy-reviewer's APPROVED-WITH-CHANGES verdict on Q2 blocks T16 (retention job) until:
+1. A per-event-type retention schedule is ratified.
+2. The "audit row cannot outlive linked record" ceiling rule is encoded.
+3. User ratifies the schedule (HG-14, formerly HG-9 in the wider plan; HG-9 remains the high-level retention sign-off for plan §8 / §13.D, of which this is a part).
+4. `observability/audit-log.md` §3 and `observability/README.md` §1 are updated to match (downstream task for observability-setup; architect records the pointer here).
+
+This ADR ratifies the schedule.
+
+## Decision drivers
+
+- **PIPEDA Principle 4.5 (Limiting Use, Disclosure, Retention) — 4.5.2, 4.5.3:** retain "only as long as necessary for the fulfilment of those purposes." Per-event purposes diverge by 2+ orders of magnitude (an auth-event purpose decays in ~90 days; a key-rotation event's forensic purpose runs for the duration of any record encrypted under the rotated key).
+- **PIPEDA Principle 4.9 (Individual Access):** a user has the right to know what was done with their data; the audit row covering an underlying record must remain queryable as long as the underlying record lives.
+- **OHSA s.50 + Ontario Labour Relations Board:** reprisal complaints to the OLRB are governed by an effectively-7y limitation profile (active matter + 7y per plan §8); the audit-of-creation row for `reprisal.created` must not age out before the underlying entry.
+- **PIPEDA s.10.1 breach-record floor (24 months):** retains as the floor for `alert.fired` (alert events feed breach response) — not the ceiling for the audit log in general.
+- **`.context/constraints.md` audit-log floor:** "at least 1 year." Every value in the schedule below meets or exceeds this.
+- **Crypto-shred-on-retention coherence with backups (ADR-0012 / HG-8):** old encrypted backups (35-day rolling, hard-deleted at 42d per ADR-0012 amendment) cannot leave "events we cannot explain" if the longest audit-log event retention is bounded — see ADR-0012 cross-reference below.
+
+## Options considered
+
+### Option A: Uniform 24-month retention (status quo — rejected)
+
+The pre-amendment posture. Defensible at the floor but not minimized. Treats `auth.passkey.enrolled` (low-sensitivity, short-purpose) the same as `committee_data_key.member_revoked` (high-value forensic anchor). Creates the Principle 4.9 gap where a 7y underlying record's audit row ages out at 24mo.
+
+### Option B: Per-event-type retention schedule, schedule-table-driven, with underlying-record-ceiling rule (chosen)
+
+Each enum value in `audit_log.event_type` is mapped to a retention interval. The retention job reads the schedule from a `audit_log_retention_schedule` table (version-controlled migration; one row per enum value). The underlying-record-ceiling rule per §3.5 caps audit rows linked via `target_id` at the linked record's retention + 30 days.
+
+### Option C: Match every audit row to its linked record's retention (rejected)
+
+Simplest rule, but loses the per-event-type forensic floor — e.g., `committee_data_key.member_revoked` has no `target_id` link to a single record; it's a key-history anchor whose forensic value persists regardless of what record it relates to.
+
+## Decision
+
+**We choose Option B.**
+
+### The schedule (verbatim from privacy-review §3.3; the authoritative table)
+
+| Event type | Retention | PIPEDA 4.5 justification |
+|---|---|---|
+| `identity_keypair.created` | **7 years** (membership + 7y) | Co-anchored to forensic identity attribution. If a reprisal entry is challenged in OLRB years later, the question "did this user even hold an identity key at the time?" must be answerable for the lifetime of the C4 records they could have authored. |
+| `identity_privkey.recovery_blob.written` | **Membership + 24 months** | F-08 brute-force anchor; supports access-by-user investigation. Aligns with the recovery blob's own retention. |
+| `identity_privkey.recovery_blob.restored` | **Membership + 24 months** | Same as above; restoration is a candidate-coercion signal (T6, T11) but loses forensic value once membership ends. |
+| `identity_privkey.recovery_blob.viewed` | **Membership + 24 months** | F-54 / M-54b — recovery-passphrase "show again" reveal event. Forensic value tracks the same window as `recovery_blob.written` since each reveal is an enrollment-session-bounded action; loses value when the user's membership ends. Added in this pass per ADR-0003 Amendment F. |
+| `committee_data_key.wrapped_for_member` | **7 years from rotation** | Key-history forensic anchor. If a removed-member-decrypted-old-data incident surfaces (F-06 / O-2), the wrap-history must be reconstructable for at least the active-matter + civil-limitation period. |
+| `committee_data_key.unwrap` | **24 months** | Read-of-own-wrap; high-volume, low-target-individuating. 24 months is enough to spot misuse patterns. |
+| `committee_data_key.rotation.started` / `.completed` | **7 years** | The rotation lifecycle is the load-bearing forward-secrecy event (Invariant 6); must outlive every record encrypted under the old key. Anchors crypto-shred-on-retention claims (ADR-0012 cross-reference). |
+| `committee_data_key.member_revoked` | **7 years** | Same as rotation; the revocation is a corner-stone forensic fact. |
+| `auth.passkey.enrolled` / `.revoked` | **90 days** | Auth events are operationally useful for ~90 days for misuse investigation; longer retention does not serve the purpose. |
+| `session.revoked` | **90 days** | Same as above. |
+| `concern.created` | **Match underlying concern record (7y post-closure)** | The concern is C3; the audit row for its creation should not outlive the concern. The reverse (audit gone, concern still present) breaks Principle 4.9. |
+| `concern.source_revealed` | **Match underlying concern record (7y post-closure)** | C4-adjacent (the reveal of source is the event that surfaces C4). |
+| `inspection.synced` | **Match underlying inspection (7y)** | Inspections are 7y per plan §8. |
+| `queue.integrity_fail` | **Match underlying inspection (7y)** | Same. (Canonical name per ADR-0010 F-B; alias `inspection.synced.hmac_fail` is forbidden.) |
+| `recommendation.created` / `recommendation.employer_response_logged` | **Match underlying recommendation (7y)** | Recommendations are 7y per plan §8. |
+| `reprisal.created` | **Match underlying record (Active matter + 7y)** | C4. The audit-of-creation must match the entry while the entry lives. Subject to Amendment D pseudonymization in the visible feed. |
+| `reprisal.read` | **Match underlying record (Active matter + 7y)** | Server-emitted under ADR-0003 Amendment B / HG-6. |
+| `reprisal.status_changed.4eyes_pending` / `.4eyes_completed` | **Match underlying record (Active matter + 7y)** | 4-eyes-on-soft-delete events per HG-7; Principle 4.9 traceability requires they outlive nothing the underlying record outlives. |
+| `work_refusal.*` / `s51_evidence.*` (T14 enumerations) | **Match underlying record (Active matter + 7y)** | C4; same justification. Includes the `work_refusal.read` / `s51_evidence.read` enums added by ADR-0003 Amendment A extension. |
+| `export.generated` | **7 years** | OHSA s.9(20) recommendations and s.9(21) minutes are 7y. The export is the only B3 egress; the audit of that must persist as long as the record being exported. |
+| `export.contained_concern_derived_items` | **7 years** | RA-1 compensating control; same justification. |
+| `retention.deleted` | **7 years** (independent; **carve-out — no `target_id` link**) | F-52 anchor. The retention summary must outlive the records it describes by enough margin to defend against "did the deletion actually happen?" challenges. **Exempt from the underlying-record-ceiling rule** in §3.5 because it has no `target_id`. |
+| `member.added` / `.removed` | **Membership + 7 years** | Membership history is an OHSA accountability anchor; outlives membership for the same reasons as `identity_keypair.created`. |
+| `committee.key_rotated` | **7 years** | Same as `committee_data_key.rotation.completed`. |
+| `client.cache_policy_violation` | **90 days** | Operational-defense event; SW policy regression detector. Forensic value decays fast. |
+| `client.identity_selftest_fail` | **90 days** | F-03 detection signal; investigation-window-bound. |
+| `alert.fired` | **24 months** | Matches the PIPEDA s.10.1 breach-record floor since alerts often precede or accompany breach analysis. |
+| `audit.forensic_reveal.4eyes_pending` / `.4eyes_completed` | **7 years** | Forensic-reveal audit events (Amendment E) gate post-incident attribution; same forensic profile as `committee_data_key.rotation.completed`. Added in this pass per ADR-0003 Amendment E. |
+
+### The underlying-record-ceiling rule (verbatim from privacy-review §3.5)
+
+**Audit-log rows linked via `target_id` to a record in another table MUST NOT outlive the linked record by more than 30 days.** The retention pass deletes orphaned audit rows within 30 days of the linked record's deletion. This is a Principle 4.5 **ceiling**, not a floor — the per-event-type schedule above gives the floor for each event type, and the ceiling caps any audit row whose linked record is gone.
+
+**Carve-out:** `retention.deleted` summary rows are independently retained at 7 years (no `target_id`).
+
+### Schema requirements
+
+1. **`audit_log.retention_class text NOT NULL`** column, populated by the `audit_emit` `SECURITY DEFINER` function at write time. Value is keyed off `event_type` against the schedule table. **CHECK constraint** references the schedule table (or the closed enum; final form chosen by migration-handler in T16). Adding `retention_class` now is cheap; adding it after rows exist requires backfill. Per privacy-review §4 cross-cutting observation #1.
+2. **`audit_log_retention_schedule` table** — one row per `event_type` enum value with `retention_interval` (e.g., interval, "membership + 7y" encoded as a small structured value, or "match_target" + the target table reference). Version-controlled migration.
+3. **CI drift assertion** — every value in the `event_type` CHECK constraint has exactly one row in `audit_log_retention_schedule`; every row in the schedule table references a value in the enum. Drift fails CI. Per privacy-review §3.4.
+4. **`retention.deleted` jsonb shape** — `meta.deleted_per_table.audit_log_per_event_type` is a jsonb of `{event_type: count}` per pass (replaces the prior single-count shape). Per privacy-review §3.4.
+
+### Retention job behaviour (T16, amended in this pass)
+
+The single `WHERE ts < now() - interval '24 months'` filter (`observability/audit-log.md` §3) is replaced by an `event_type`-keyed retention function reading the schedule. The function applies the per-event floor; then applies the underlying-record-ceiling rule (any audit row whose `target_id`'s linked record has been deleted for >30 days is queued for deletion on the next pass).
+
+The retention pass continues to emit exactly one `retention.deleted` summary row per pass (F-52).
+
+### Reversibility
+
+**Easy** on schedule values (one row per enum value in a migrated table; changes are additive migrations). **Hard** to reverse the schema additions (`retention_class` column, schedule table); these are part of the chain-of-custody story and are non-negotiable once data is in the table.
+
+## Consequences
+
+### Positive
+
+- Each event type's retention is minimized to its actual forensic purpose (Principle 4.5).
+- Principle 4.9 traceability holds: audit rows live as long as the underlying record they describe.
+- Crypto-shred-on-retention is coherent: ADR-0012's 42-day backup hard-delete cannot leave audit events "we cannot explain" because no audit-log event type outlives the longest backup-retained content (see ADR-0012 cross-reference).
+- Schedule is data-driven (version-controlled migration), not code-driven (one constant in a function). Drift is structurally caught.
+
+### Negative / accepted tradeoffs
+
+- More complex retention job than a single timestamp filter.
+- Backfill required on `retention_class` column if any audit rows already exist at the time of T16 migration (no rows at amendment time; mitigated by ordering — schedule lands before T18 first writes).
+
+### Risks
+
+- A new event type added to the enum without a corresponding schedule row would either fail CI (if drift check holds) or default to an unintended retention (if drift check is bypassed). Mitigated by the drift check and the test-writer's coverage assertion per privacy-review §7 test obligation 10.
+- Backup-restore window vs schedule rules: a restore from a 35-day-old backup (ADR-0012) brings back audit rows that the live schedule may have already aged out. The retention job's next pass cleans them up; transient inconsistency is acceptable.
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.5 (Limiting Retention): minimized per event type.
+- [x] PIPEDA Principle 4.9 (Individual Access): audit rows live as long as underlying records.
+- [x] PIPEDA s.10.1: 24-month breach-record floor preserved for `alert.fired`.
+- [x] `.context/constraints.md` "at least 1 year" audit-log floor: every entry meets or exceeds.
+- [x] OHSA s.50 / OLRB limitation profile: C4 audit retentions match record retention.
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+- [x] Coherent with ADR-0012 crypto-shred-on-retention (cross-reference added to ADR-0012 in this pass).
+
+## Cross-references
+
+- **privacy-review §3.1 / §3.3 / §3.4 / §3.5 / §7** — the source review; the §3.3 table is reproduced here verbatim.
+- **ADR-0003 Amendment A** — closed enum of `event_type` values; this ADR adds retention metadata to each.
+- **ADR-0003 Amendment A extension** — `work_refusal.read` / `s51_evidence.read` enum values (T14 / HG-6 mirror).
+- **ADR-0003 Amendment D** — `audit.forensic_reveal.4eyes_pending` / `.4eyes_completed` enum values (7y retention; added in this pass).
+- **ADR-0003 Amendment F** — `identity_privkey.recovery_blob.viewed` enum value (membership + 24mo; added in this pass).
+- **ADR-0012 amendment** — backup hard-delete at 42 days; crypto-shred-on-retention coherence note added in this pass.
+- **`observability/README.md` §1** — currently records "24 months" with a reasoning text that **mis-attributes** the 24mo to PIPEDA s.10.1 audit-log floor (privacy-review §4 cross-cutting observation #4). The reasoning is wrong; PIPEDA s.10.1's 24-month floor is for **breach records** specifically, not audit logs in general. The architect does NOT edit `observability/*` per amendment pass #3 hard rules; **observability-setup on its next pass corrects the reasoning text** to "matched to the breach-record retention because audit log feeds the breach-response process, not because PIPEDA s.10.1 requires 24mo for audit logs."
+- **`observability/audit-log.md` §3** — single 24mo filter; observability-setup next pass replaces with a pointer to the schedule table.
+
+## Follow-ups (T16 acceptance amended — see Task-list amendments at end)
+
+- [ ] **T16 acceptance amended** — per-event-type retention; `retention_class` column; schedule table; underlying-record-ceiling rule; `retention.deleted` jsonb shape per privacy-review §3.4 / §3.5.
+- [ ] **HG-14 — user ratification** of the per-event schedule before T16 ships. The schedule table is the authoritative artifact; the user reviews the values in this ADR as the proposed final state and ratifies or proposes per-row changes.
+- [ ] **observability-setup next pass:** corrects `observability/README.md` §1 reasoning text (cross-cutting observation #4) and replaces `observability/audit-log.md` §3 single-filter spec with a pointer to the schedule table.
+- [ ] **Test-writer (test obligations 7–11 from privacy-review §7):** per-event retention schedule honored; audit-row-cannot-outlive-target rule; `retention.deleted` summary row retention at 7y; schedule-table-vs-enum drift CI assertion; `retention.deleted` per-event-type counts in the summary row's jsonb.
+
+---
+
 # ADR-0014: Offline queue HMAC integrity for IndexedDB inspection queue
 
 **Status:** Accepted
@@ -418,6 +571,28 @@ playbook stays the same.
 - [ ] **T17 amended:** bucket created with Object Lock (governance, 35d), versioning ON, lifecycle 42d hard delete; CI drift check operational; restore-drill playbook covers the case "Object Lock prevents drill-bucket cleanup."
 - [ ] Recovery-drill procedure documents: how to restore a *specific version* of a dated dump under Object Lock (read path is unchanged; write/delete is the gated path).
 - [ ] Test (F-49 mitigation): with the regular workflow write credential, attempt to overwrite an existing object — assert it creates a NEW version, prior version still listable. Attempt to DELETE a version under retention — assert denied with the expected error code.
+
+---
+
+## Amendment: Crypto-shred-on-retention coherence with audit-log per-event retention (2026-05-22, amendment pass #3)
+
+**Amends ADR-0012** above. Trigger: privacy-review §5 fold-in item 4 — "extend the crypto-shred-on-retention story to cover the new per-event audit-log retention schedule." Cross-references **ADR-0015** (per-event-type audit-log retention schedule); privacy-review §3.3 / §3.5; threat-model F-06 / O-2.
+
+**The coherence note.** The Object-Lock-protected backup bucket holds nightly `pg_dump` ciphertext blobs with a hard delete at 42 days (35d retention + 7d grace). For the crypto-shred-on-retention claim to hold end-to-end, **no audit-log event-type retention value may exceed the longest underlying-record retention that any backup can carry** — otherwise a hard-deleted backup at day 42 would leave audit events on the live system referencing records that no longer exist (in either the live DB or backup), but with no provenance trace.
+
+The schedule in ADR-0015 satisfies this by construction:
+- The longest-lived audit-log event types are 7 years (e.g., `committee_data_key.rotation.completed`, `member.added/.removed`, `audit.forensic_reveal.4eyes_*`, `retention.deleted`).
+- Every backup older than 42 days is hard-deleted; backups older than 42d cannot exist.
+- Every audit row whose `target_id` references a record in another table is bounded by the underlying-record-ceiling rule (privacy-review §3.5, encoded in ADR-0015): audit row outlives linked record by at most 30 days.
+
+**Concrete invariant:** *"Backups older than the longest audit-log event retention can be hard-deleted without leaving 'events we cannot explain' on the live system; conversely, no live audit row references a deleted underlying record older than 30 days."* The two retention regimes (live audit-log schedule + backup lifecycle) are coherent.
+
+**No new test obligation specific to ADR-0012**; the coherence is structurally enforced by ADR-0015's schedule and the existing T17 / T16 acceptance tests. Cross-reference recorded so a future amendment to either ADR-0015 (changing an event-type retention) or this ADR (changing the 42d hard-delete window) triggers a re-read of the coherence claim.
+
+**Reversibility:** N/A — this is a documented architectural cross-reference, not a new operational rule. The reversibility is governed by ADR-0015 and the original ADR-0012 amendment.
+
+**Compliance check additions:**
+- [x] Audit-log per-event retention (ADR-0015) and backup hard-delete (this ADR) are coherent — no orphan audit events at any retention horizon.
 
 ---
 
@@ -1023,9 +1198,11 @@ behavior choices, not data choices.
 
 # ADR-0007: Concern intake — committee-members-only, no public endpoint
 
-**Status:** Accepted
-**Date:** 2026-05-22
-**Decider(s):** user (locked in plan §13 item 3), architect ratifying
+**Status:** Accepted — **Amended 2026-05-22 (amendment pass #3, scope extension to reprisal-log intake consent surface)**
+**Date:** 2026-05-22 (original); amendment 2026-05-22
+**Decider(s):** user (locked in plan §13 item 3), architect ratifying; amendment scope extension per privacy-review §5 fold-in item 2
+
+**Amendment note (2026-05-22, amendment pass #3):** see "Amendment: Reprisal-log intake consent surface (HG-13)" block at the end of this ADR. Trigger: privacy-review Q1 APPROVED-WITH-CHANGES / §2.4 / §5 fold-in item 2 — the consent-surface copy for the reprisal-entry intake form is procedurally an extension of concern intake (the rep submits on behalf of the affected worker) and is folded into ADR-0007 rather than a new ADR-0016 per the privacy-reviewer's preferred shape. Original concern-intake decision unchanged; the amendment adds the reprisal-intake consent surface contract.
 
 ## Context
 
@@ -1118,6 +1295,71 @@ with a fresh threat model. Don't.
 
 - [ ] T08 — intake form built with anonymous toggle defaulted ON.
 - [ ] Route inventory test in CI fails on any new public POST route.
+
+---
+
+## Amendment: Reprisal-log intake consent surface (2026-05-22, amendment pass #3, HG-13 cross-reference)
+
+**Amends ADR-0007** above. Trigger: privacy-review §2.4 (draft consent-surface copy) / §5 fold-in item 2 / §7 test obligation 5 (consent surface presence). Cross-references **ADR-0003 Amendment D** (pseudonymized reprisal-feed projection — the consent surface names what other members will and will NOT see, which is the visible behaviour Amendment D ratifies) and **HG-13** (architect-owned gate covering Amendment D + this consent surface).
+
+**Why ADR-0007 (and not a new ADR-0016).** Reprisal-log intake is procedurally an extension of concern intake: the rep mediates submission on behalf of the affected worker; same auth gate (committee-members-only); same anonymous-toggle pattern (the reprisal entry itself carries an author rather than an anonymous-source toggle, but the same "members-only intake, no public form" posture). Extending ADR-0007 keeps the architectural shape one decision instead of two and matches the privacy-reviewer's recommendation in §5.
+
+**Scope of this amendment.** The reprisal-log intake form (Surface C in the design system) MUST render a consent surface to the submitting rep BEFORE the "Save entry" button becomes enabled. The consent surface names what is encrypted, what other active committee members will see in the recent-activity feed (per ADR-0003 Amendment D pseudonymized projection), what they will NOT see, why the feed exists at all (social-norm backstop against coerced authorship — Amendment D §rationale), and the OHSA s.50 reprisal-protection reminder.
+
+**Draft consent-surface copy (verbatim from privacy-review §2.4; for the labour-lawyer review under HG-10 and accessibility-specialist sign-off):**
+
+> **Before you log a reprisal**
+>
+> A reprisal entry is the most sensitive record this app holds. Here is exactly what happens when you save it.
+>
+> **What is encrypted and only readable by the committee:** the entry body, any names, dates, witnesses, and any details you write or attach. These are sealed to the committee key and never readable by the employer, the hosting provider, or anyone outside the committee.
+>
+> **What other active committee members will see in the recent-activity feed:** that a reprisal entry exists, when it was created (to the nearest hour), and the reprisal entry's ID. **They will NOT see who created it.** Forensic review can identify the author only after a two-member committee approval, the same way reprisal entries are deleted.
+>
+> **Why other members see the entry exists:** to deter anyone — including a co-opted committee member — from quietly logging or reading reprisal entries on someone else's behalf. The committee acts as a check on itself.
+>
+> **What other members will NOT see:** your name, your pseudonym, the content of the entry, or any worker named in the entry.
+>
+> **OHSA s.50 reminder:** reprisal against you for using this app is itself an OHSA offence. The committee can pursue a s.50 complaint to the Ontario Labour Relations Board.
+>
+> [ ] I understand what other committee members will see, and I want to save this entry.
+
+The copy lives in `i18n/en-CA/reprisal-intake.json` (or the localization-specialist's chosen surface key per ADR-0009). The architect does not modify `i18n/*` per amendment pass #3 hard rules; the localization-specialist + designer fold this into the catalog on the next pass.
+
+**Architectural contract (binding for the implementer and the test-writer):**
+
+1. **The "Save entry" button is `aria-disabled=true` and the form's submit is gated** until the consent checkbox is checked. The gating is a structural form invariant (the submit handler short-circuits unless the consent flag is true), not a CSS-only disable.
+2. **The four "what other members will / will NOT see" bullets MUST be rendered before the consent checkbox.** A snapshot test asserts the i18n key resolves and the four bullets are present in the DOM in their order. Per privacy-review §7 test obligation 5.
+3. **The consent surface is rendered every time** the reprisal-entry intake form is opened. No "I've already seen this" suppression flag; the surface re-renders on every intake (the design system's Surface C state machine).
+4. **The consent surface is reviewable by screen reader.** WCAG 2.0 AA per JHSC-APP-PLAN.md §9 / `.context/constraints.md` AODA section. The accessibility-specialist signs off on the surface before T13 ships (HG-10 + accessibility-specialist gate, NOT architect-owned).
+5. **The labour lawyer (HG-10) reviews the copy** before T13 ships. The copy may evolve through labour-lawyer review; the architectural contract (bullets 1–4 above) does not.
+
+**Out of scope for this amendment (deliberately not decided here):**
+- The exact final wording is **not** an architect decision; the labour-lawyer's review (HG-10) and the accessibility-specialist's plain-language review own the final copy. This amendment ratifies the architectural shape (the gating, the four-bullets contract, the per-intake re-render).
+- The visual treatment of the consent surface is the designer's, per the design system Surface C spec.
+
+**Reversibility:** **Easy** on copy text (one i18n catalog key). **Medium** on the structural gating (the submit-handler short-circuit pattern + the snapshot test); **Hard** on the architectural posture that "reprisal intake requires informed consent at every intake" — reversing this would re-introduce the PIPEDA Principle 4.3.6 gap that privacy-review Q1 identified.
+
+**Compliance check additions:**
+- [x] PIPEDA Principle 4.3 (Consent), 4.3.6 (sensitivity-appropriate consent) — informed, meaningful, per-intake consent for C4 disclosure.
+- [x] PIPEDA Principle 4.4 (Limiting Collection) — the consent surface names exactly what disclosure occurs.
+- [x] PIPEDA Principle 4.5 (Limiting Use, Disclosure, Retention) — disclosure scope (pseudonymized feed projection per Amendment D) is the narrowest viable.
+- [x] OHSA s.50 — reprisal-protection reminder named in the surface.
+- [x] WCAG 2.0 AA / AODA — accessibility-specialist sign-off (HG-10 + AODA gate, NOT architect-owned).
+
+**Cross-references:**
+- **ADR-0003 Amendment D** — the architectural mechanism (pseudonymized projection view) the consent surface names as "they will NOT see who created it."
+- **ADR-0003 Amendment E** — the forensic-reveal 4-eyes procedure the consent surface names as "Forensic review can identify the author only after a two-member committee approval."
+- **HG-10** — labour-lawyer + privacy-lawyer review (already pre-launch per plan §13).
+- **HG-13** — architect-owned gate covering Amendment D + this consent surface (see amendment pass #3 summary).
+- **privacy-review §2.4 (copy draft) / §5 fold-in item 2 / §7 test obligation 5.**
+
+**Follow-ups (T13 acceptance amended — see Task-list amendments at end):**
+- [ ] **T13 acceptance amended** — the four-bullets snapshot test + the structural gating test on the submit button + the per-intake re-render test.
+- [ ] **localization-specialist (next pass):** adds `reprisal-intake` i18n keys to `i18n/en-CA/` catalog with the §2.4 copy (subject to labour-lawyer review).
+- [ ] **designer (next pass):** Surface C spec covers the consent surface placement, the four-bullets layout, the consent-checkbox + "Save entry" gating UX.
+- [ ] **accessibility-specialist (HG-10-adjacent gate):** WCAG 2.0 AA review of the consent surface before T13 ships.
+- [ ] **labour-lawyer (HG-10):** review and ratify the §2.4 copy.
 
 ---
 
@@ -1810,6 +2052,297 @@ The invariant is a hard rule on `protected modals only` — the design system's 
 - [ ] Designer (next pass): fold the Amendment C language into `.context/design-system.md` §3.1 and §3.2; cross-reference this ADR amendment from the protected-modal list.
 - [ ] Test-writer (pre-T11/T13): the five mount-time + scripted-dismissal-race tests above land before the corresponding feature implementer touches the protected modals.
 - [ ] Implementer (T11, T13): focus-trap library wired at mount, not on `transitionend`; CI tests above are gating.
+
+---
+
+### Amendment C extension (2026-05-22, amendment pass #3, HG-11 / threat-model F-53 M-53a/b/c enumeration)
+
+**Extends Amendment C above.** Trigger: threat-model F-53's three testable mitigations M-53a, M-53b, M-53c (`/home/user/agent-os/.context/threat-model.md` §3.3 lines ~477–484) and **HG-11** (already permanent in threat-model §9). The original Invariant 9 wording covered the "synchronous with mount" property (M-53a). The threat-modeler's second-pass M-53b and M-53c added two additional load-bearing properties — announce-on-open promise gating, and underlying-surface `inert` from t=0 — that the original Amendment C wording did NOT fully capture. This extension enumerates the three sub-invariants explicitly so the test-writer has unambiguous targets.
+
+**The original Invariant 9 wording is preserved verbatim above and remains the high-level statement.** This extension makes the three sub-invariants explicit and binds them to the threat-modeler's testable assertion shapes.
+
+#### Invariant 9.a — Trap engages on `modal.show()` (covered by the original Invariant 9 wording; explicitly named here)
+
+*"For every modal in the protected-modal list (`export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`), the focus trap, the Escape-handler binding, the click-outside-no-op binding, and the `aria-modal=true` / `aria-labelledby` announcement MUST be installed synchronously with `modal.show()`, before the next animation frame, and BEFORE any opacity transition begins. The opacity transition is decorative-only."*
+
+This is the threat-modeler's M-53a (`.context/threat-model.md` §3.3) restated as an ADR-level invariant; the original Amendment C already covered this property. Tests per `.context/threat-model.md` §8 T11 / F-53 M-53a entry.
+
+#### Invariant 9.b — Announce-on-open `ready` promise gates input acceptance (NEW — adds explicit coverage for M-53b)
+
+*"Protected modals MUST NOT accept any keyboard or pointer input that resolves to a primary or secondary action until the announce-on-open contract has resolved. The announce-on-open contract is: `aria-modal=true` is set, `aria-labelledby` is wired to the headline element, and the headline element is present in the accessibility tree. The implementer represents this as a `ready` promise; primary/secondary action handlers MUST await this promise before dispatching. For `export_interstitial` specifically: a confirm before `ready` resolves results in NO `export.minutes` / `export.recommendation` audit-log row AND no Blob URL creation."*
+
+**Operational rule.** The `ready` promise resolves when the modal's title/label element is in the accessibility tree AND the screen-reader announcement has been queued (the implementer's choice between aria-live region or `aria-modal` + `aria-labelledby` reachability check; final form per design-system spec). Primary/secondary action handlers MUST `await` this promise. The button's `aria-disabled` SHOULD also flip to `false` only when `ready` resolves; the handler-await is the load-bearing control (a scripted click that bypasses the disabled state still hits an await).
+
+This is the threat-modeler's M-53b restated as an ADR-level sub-invariant. Tests per `.context/threat-model.md` §8 T11 / F-53 M-53b entry.
+
+#### Invariant 9.c — Underlying surface is `inert` from t=0; scrim captures keydown + pointer during transition (NEW — adds explicit coverage for M-53c)
+
+*"When a protected modal mounts, the underlying surface MUST be marked `aria-hidden=true` AND `inert` (or polyfilled equivalent) AND its focusable descendants MUST have `tabindex=-1` applied synchronously with `modal.show()`. The scrim MUST have `pointer-events: auto` and a `keydown` capture-phase handler that swallows Tab/Enter/Space/Escape targeted at the underlying surface during the transition."*
+
+**Operational rule.** The underlying surface is rendered `inert` (or a polyfill emulating its behaviour on browsers without native `inert` support) at the same task tick as the modal mount. The scrim DOM node is part of the modal mount and has `pointer-events: auto` AND a capture-phase `keydown` listener from t=0 that swallows Tab/Enter/Space/Escape; click events at scrim coordinates land on the scrim, not on the underlying surface beneath. Programmatic `.focus()` calls (e.g., from a malicious extension) on underlying-surface elements MUST NOT move `document.activeElement` to those elements; the focus-trap library's underlying-subtree filter rejects such moves.
+
+This is the threat-modeler's M-53c restated as an ADR-level sub-invariant. Tests per `.context/threat-model.md` §8 T11 / F-53 M-53c entry.
+
+### Cross-references for the extension
+
+- **threat-model §3.3 F-53 M-53a / M-53b / M-53c** — the threat-modeler's testable assertion shapes (the test-writer's canonical reference).
+- **threat-model §8 T11 F-53 M-53a/b/c** — the test-writer's checklist entries (one bullet per sub-invariant).
+- **threat-model §9 HG-11** — the human gate "Protected-modal trap-engagement contract" (permanent in threat-model.md; threat-modeler-owned).
+- **threat-model §10 / §11 second-pass summary** — context for why M-53b and M-53c added on the second pass.
+- **`.context/design-system.md` §3.1, §3.2** — the user-facing surface of these invariants; the designer folds the M-53a/b/c language in on the next pass. The architect does NOT modify design-system.md per amendment pass #3 hard rules.
+- **RA-1** (this file) — the export interstitial's compensating controls; F-53 materially narrows RA-1's margin per the threat-modeler's second pass. The extension's Invariant 9.b is the load-bearing control preventing a sub-200ms scripted-confirm bypass.
+
+### Reversibility (for the extension)
+
+**Hard** on the three sub-invariants (reverting either 9.b or 9.c would degrade both accessibility and coercion-resistance; they are non-negotiable while RA-1 holds as single-signer and while the protected-modal list exists). **Easy** on the implementation (each sub-invariant maps to one or two lines of the focus-trap / scrim modules).
+
+---
+
+# ADR-0003 Amendment D (2026-05-22, amendment pass #3, HG-13): Pseudonymized reprisal-feed projection
+
+**Amends ADR-0003** above. Trigger: privacy-review Q1 APPROVED-WITH-CHANGES (§2.1–§2.4, §4 cross-cutting observations #1, #2, #5, §5 fold-in items 1 + 5, §7 test obligations 1–6). Cross-references threat-model F-30 / F-31 / F-32 / F-33 / F-36 / O-4 (reprisal-log STRIDE); ADR-0003 Amendment B (HG-6 server-side C4 read-audit — the architectural pattern this Amendment mirrors for write events); RA-1 (the social-norm-backstop logic for reads, now mirrored for writes); **HG-13** (architect-owned gate, formerly proposed by privacy-reviewer as HG-11, renumbered per amendment-pass #3 directive G to HG-13 since threat-modeler's writes landed first with HG-11/HG-12 in `.context/threat-model.md` §9).
+
+### The problem
+
+The pre-amendment audit-log RLS (`observability/audit-log.md` §3 / `observability/README.md` §1) made `reprisal.created` rows readable by all active members with the full payload — `{ts, actor_pseudonym, target_id, target_class}`. Privacy-review Q1 found that this **bundled** the social-norm-backstop benefit (other members see "reprisal activity is happening") with **disclosure of authorship** (every active member sees that *rep X* logged a reprisal at *time T*) — exposing the most-likely target of reprisal (the rep themselves) to the rest of the committee, including any co-opted member (threat-model A3 / O-4).
+
+The fix mirrors Amendment B's HG-6 pattern: a `SECURITY DEFINER` view that projects the audit row with the load-bearing columns suppressed.
+
+### The amendment — author-pseudonymized projection via SECURITY DEFINER view
+
+**Testable invariant (canonical wording):** *"Reprisal write-event RLS projections (`reprisal.created`, `reprisal.read`, `reprisal.status_changed.4eyes_pending`, `reprisal.status_changed.4eyes_completed`, and the analogous `work_refusal.*` and `s51_evidence.*` write events once T14 enumerates them) MUST suppress `actor_pseudonym` and bucket `ts` to the hour in the feed visible to active committee members; the underlying `audit_log` row retains `actor_pseudonym` and the original microsecond `ts` for forensic use; un-projected access requires the 4-eyes forensic-reveal procedure (Amendment E)."*
+
+### Operational implementation
+
+1. **Underlying table.** `audit_log` schema unchanged — `actor_pseudonym` and microsecond `ts` continue to be stored on every row. The pseudonym is the HMAC pseudonym per `observability/README.md` §2.
+
+2. **Pseudonymized projection view.** New `SECURITY DEFINER` view `reprisal_audit_feed_pseudonymized` owned by `c4_read_service` (the existing non-login role from Amendment B). The view's projection:
+
+   ```sql
+   -- pseudo-SQL; final form in T13 migration
+   CREATE VIEW reprisal_audit_feed_pseudonymized
+   WITH (security_invoker = false) -- definer
+   AS
+   SELECT
+     id,
+     event_type,
+     date_trunc('hour', ts) AS ts_bucketed_to_hour,
+     target_id,
+     target_class,
+     -- actor_pseudonym SUPPRESSED — not selected
+     prev_hash,
+     hash
+   FROM   audit_log
+   WHERE  event_type IN (
+            'reprisal.created',
+            'reprisal.read',
+            'reprisal.status_changed.4eyes_pending',
+            'reprisal.status_changed.4eyes_completed'
+            -- extension for T14 enumerations:
+            -- 'work_refusal.created', 'work_refusal.read', 'work_refusal.status_changed.4eyes_*',
+            -- 's51_evidence.created', 's51_evidence.read', 's51_evidence.status_changed.4eyes_*'
+          )
+     AND  jhsc_caller_can_read_reprisal_feed(auth.uid()); -- RLS predicate inlined
+   ```
+
+3. **GRANT / REVOKE shape.** Direct SELECT of `actor_pseudonym` (and rows whose `event_type LIKE 'reprisal.%' OR LIKE 'work_refusal.%' OR LIKE 's51_evidence.%'`) is REVOKED from `authenticated`, `anon`, `service_role`. Concretely:
+   - `REVOKE SELECT (actor_pseudonym) ON audit_log FROM authenticated, anon, service_role;` (column-level revoke on the pseudonym column for the targeted event types — implementation choice is migration-handler's; equivalent path is row-level RLS rejecting reads where these event types are present unless via the view).
+   - `GRANT SELECT ON reprisal_audit_feed_pseudonymized TO authenticated;` — active members read through the view.
+4. **Default list payload (privacy-review §4 cross-cutting observation #5; mirrors F-18 from threat-model).** The default `audit_log` list payload for `reprisal.*` events — including when the user is querying for their own activity — comes from `reprisal_audit_feed_pseudonymized`, NEVER the raw table. Even a rep viewing "my recent audit-log activity" sees the pseudonymized projection of their own reprisal write-events (the underlying row still ties to their `actor_pseudonym`, but the projection does not surface it; the rep knows what they did, the projection's columns are unchanged regardless of caller).
+5. **Forensic access path.** Un-projected access (i.e., recovery of `actor_pseudonym` for a specific reprisal write-event) requires the 4-eyes forensic-reveal procedure documented in **Amendment E**. The `forensic_read_service` role (new; created in Amendment E) has SELECT on the underlying `audit_log` `actor_pseudonym` column scoped to rows surfaced by an approved forensic-reveal proposal. No other role has un-projected SELECT.
+6. **Coverage of the C4 write-event family.** T13's reprisal-log write events are covered by Amendment D at amendment time. T14's `work_refusal.*` and `s51_evidence.*` write events are folded into the view's event-type list when T14 enumerates them (the view's `event_type IN (...)` predicate is amended in T14's migration; the architectural shape is identical). The test-writer's coverage of T14 mirrors T13.
+
+### Why pseudonymized projection (Option (c) in privacy-review Q1)
+
+- **Option (a) status quo + consent — rejected.** Even with explicit consent at intake, Principle 4.3.6 (sensitivity-appropriate consent) for C4 disclosure to ~12 people is a high bar. Reducing disclosure first (4.4 / 4.5 minimization) and layering consent on top (ADR-0007 amendment) is the PIPEDA-defensible order.
+- **Option (b) visible to other worker reps of same caucus — rejected.** Worker-side-only by design (plan §3.2); "same caucus" = "every active member"; collapses to (a) and gains nothing.
+- **Option (c) author-pseudonymized projection — chosen.** Preserves the social-norm-backstop (members see reprisal activity is happening) while suppressing the load-bearing inference vector (who logged what). Time bucketing prevents shift-pattern inference. Mirrors the Amendment B HG-6 pattern (server-emitted, view-projected, definer-owned).
+- **Option (d) no visibility — rejected.** Loses the social-norm benefit; coerced-fabricated-reprisal (F-17 analogue) becomes harder to detect.
+
+### Testable assertions (T13 acceptance amended — see Task-list amendments at end; mirrors privacy-review §7 test obligations 1–4 and 6)
+
+- **Pseudonymized feed projection (privacy-review §7 obligation 1).** SELECT from `reprisal_audit_feed_pseudonymized` as an active member. Assert the returned columns contain `{id, event_type, ts_bucketed_to_hour, target_id, target_class, prev_hash, hash}` and do NOT contain `actor_pseudonym`.
+- **Direct-audit-log bypass for reprisal events (privacy-review §7 obligation 2).** As an active member, attempt `SELECT actor_pseudonym FROM audit_log WHERE event_type LIKE 'reprisal.%'`. Assert either zero rows returned (RLS denial path) or the `actor_pseudonym` column is NULL/absent (GRANT-revoke path); the test-writer covers both architectural paths per privacy-review §7 closing note. Repeat for `work_refusal.%` and `s51_evidence.%` once T14 enumerates.
+- **Time bucketing (privacy-review §7 obligation 3).** Emit a `reprisal.created` row at a specific microsecond (e.g., `'2026-05-22 14:37:42.123456+00'`). SELECT from the feed view; assert `ts_bucketed_to_hour = '2026-05-22 14:00:00+00'`. SELECT from underlying via forensic-reveal path (Amendment E); assert original microsecond `ts` retained.
+- **Consent surface presence (privacy-review §7 obligation 5).** Cross-references ADR-0007 amendment (this pass) — covered there.
+- **Default-list-payload exclusion (privacy-review §4 cross-cutting observation #5).** A GET that returns the user's "my activity" feed for reprisal events comes from `reprisal_audit_feed_pseudonymized`, not from the raw `audit_log`. Test: query the user's activity slice for a reprisal write-event; assert the response shape matches the projection (no `actor_pseudonym`, hour-bucketed `ts`).
+- **Coverage of write-events for T14 (privacy-review §7 obligation 6).** Test obligations 1–3 above repeated for `work_refusal.*` and `s51_evidence.*` write events when T14 enumerates; T14 acceptance carries the same shape as T13.
+
+### Cross-references
+
+- **privacy-review §2.3** (Option (c) recommendation), **§2.4** (consent-surface copy, folded into ADR-0007 amendment in this pass), **§4 cross-cutting observations #1 / #2 / #5**, **§5 fold-in items 1 + 5**, **§7 test obligations 1–6**.
+- **threat-model §3.4 F-30 / F-31 / F-32 / F-33 / F-36 / O-4** — the reprisal-log STRIDE family Amendment D defends.
+- **ADR-0003 Amendment B (HG-6)** — the architectural pattern (SECURITY DEFINER view, `c4_read_service` role, atomic in-transaction audit) Amendment D mirrors for write events.
+- **ADR-0003 Amendment E** — the 4-eyes forensic-reveal procedure that gates un-projected access to `actor_pseudonym`.
+- **ADR-0007 amendment (this pass)** — the consent surface naming the projection's behaviour to the submitting rep.
+- **ADR-0015 (this pass)** — `reprisal.*` events retention is "Match underlying record (Active matter + 7y)"; Amendment D's projection does not change retention, only visibility.
+- **HG-13** — architect-owned gate covering Amendment D + Amendment E + ADR-0007 amendment as a bundled human gate. The privacy-reviewer originally proposed it as HG-11; renumbered to HG-13 because the threat-modeler's second pass wrote HG-11/HG-12 first per amendment-pass #3 directive G.
+
+### Reversibility
+
+**Medium.** The view + GRANT-revoke layer is one migration; reverting to a raw-row-visible posture would be a security regression we wouldn't do. The schedule of `event_type` values in the view's WHERE clause is additive (extends naturally for T14 enumerations).
+
+### Compliance check additions
+
+- [x] PIPEDA Principle 4.3 (Consent) — load-bearing for the consent-surface contract in ADR-0007 amendment.
+- [x] PIPEDA Principle 4.4 / 4.5 (Limiting Collection / Use / Disclosure) — disclosure scope is minimized to the pseudonymized projection.
+- [x] OHSA s.50 — the inference-disclosure vector (rep logging reprisal = rep is the target) is closed structurally, not policy-only.
+- [x] Threat-model A3 / O-4 (co-opted rep / co-chair-and-author collusion) — closes the inference channel.
+- [x] T11 (compelled access detection) and T4 (insider compromise) — strengthened.
+
+### Follow-ups (T13 acceptance amended — see Task-list amendments at end)
+
+- [ ] **T13 acceptance amended** — `reprisal_audit_feed_pseudonymized` view + GRANT-revoke + default-list-payload + four-tests-from-§7 in `privacy-review.md`.
+- [ ] **T14 acceptance amended** — Amendment D's projection extended to `work_refusal.*` and `s51_evidence.*` write events; same test shape.
+- [ ] **observability-setup (next pass):** updates `observability/audit-log.md` §3 to document the projection view alongside the raw table and updates §1 to reflect the projection-default for the visible feed (downstream of architect; observability-setup owns the file per amendment pass #3 hard rules).
+- [ ] **Test-writer:** privacy-review §7 test obligations 1–4 and 6 are top-priority (per §7 closing note: tests 1–4 + 7–8 are highest-priority new obligations).
+
+---
+
+# ADR-0003 Amendment E (2026-05-22, amendment pass #3, HG-13): Forensic-reveal 4-eyes procedure
+
+**Amends ADR-0003** above (sibling of Amendment D, ratified together as **HG-13**). Trigger: privacy-review §4 cross-cutting observation #2 — Amendment D's pseudonymized projection creates a new forensic-reveal surface ("I need to know who logged this reprisal"); without a documented gating procedure, the only paths to recover `actor_pseudonym` are (a) un-gated admin access (A5 surface; defeats the purpose) or (b) un-documented ad-hoc reveals that the audit-log integrity story cannot describe. Amendment E provides the gated procedure.
+
+**Cross-references:** privacy-review §4 cross-cutting observation #2; ADR-0003 Amendment D (the projection that creates the need); existing `pending_destructive_ops` 4-eyes pattern (the architectural pattern Amendment E mirrors); ADR-0003 Amendment A (audit-log enum closed allowlist — Amendment E adds two new values); ADR-0015 (the new enum values' retention).
+
+### The procedure — 4-eyes forensic-reveal, modelled on `pending_destructive_ops`
+
+1. **`pending_forensic_reveals` table.** New table, schema mirrors `pending_destructive_ops`:
+   - `id uuid primary key`
+   - `target_audit_log_id uuid not null` (the specific `audit_log` row whose `actor_pseudonym` is to be revealed)
+   - `proposer_id uuid not null` (the active member proposing the reveal)
+   - `proposed_at timestamptz not null default now()`
+   - `proposer_reason text not null` (free-text justification; visible in the audit chain)
+   - `approver_id uuid` (NULL until a distinct second member approves)
+   - `approved_at timestamptz`
+   - `revealed_actor_pseudonym text` (populated atomically with approval; available to the proposer + approver for the duration of the open reveal session, then expired)
+   - `expires_at timestamptz` (default `approved_at + interval '24 hours'`)
+   - `expired_at timestamptz` (set when the reveal session expires; row retained for audit chain integrity)
+2. **Two distinct approvers.** RLS denies approval where `approver_id = proposer_id` — same-member-cannot-approve-own-proposal, mirroring the existing 4-eyes pattern. For dual-co-chair committees the requirement is "co-chair + co-chair" (two distinct co-chairs); for single-co-chair committees the requirement is "co-chair + one certified_member" (privacy-review §4 cross-cutting observation #2 wording). The RLS predicate encodes both forms.
+3. **`forensic_read_service` role.** New non-login Postgres role owned by `migration_role`. Has SELECT on the underlying `audit_log` `actor_pseudonym` column. The role is invoked exclusively via the `SECURITY DEFINER` function `jhsc_forensic_reveal_actor_pseudonym(target_audit_log_id uuid)` whose body verifies (a) a `pending_forensic_reveals` row exists for `target_audit_log_id` with `approver_id IS NOT NULL` AND `approver_id != proposer_id`, (b) the current `auth.uid()` is either `proposer_id` or `approver_id`, (c) `now() < expires_at`. Only then does the function return the un-projected `actor_pseudonym`.
+4. **Two new audit-log enum values** (appended to the closed allowlist per ADR-0003 Amendment A's enum):
+   - `audit.forensic_reveal.4eyes_pending` — emitted when a proposer creates a `pending_forensic_reveals` row.
+   - `audit.forensic_reveal.4eyes_completed` — emitted when a distinct approver approves.
+   Both events are hash-chained per ADR-0003 Amendment A; both carry `{actor_id, target_audit_log_id, proposer_id, approver_id?, proposer_reason}` in their meta. Both have **7-year retention** per ADR-0015 (added to the schedule in the same pass).
+5. **No external KMS / external signer involvement.** Like Amendment B's `c4_read_service`, the `forensic_read_service` is a Postgres role; the 4-eyes gate is the RLS + check function. Consistent with ADR-0010's "Sentry is the only non-Supabase subprocessor" posture.
+6. **Reveal-session expiry.** A successful reveal exposes `actor_pseudonym` to the proposer and approver for 24 hours via the `pending_forensic_reveals.revealed_actor_pseudonym` column (RLS-scoped to those two members). After 24 hours the row's `expired_at` is set by a scheduled job and the column is cleared; further reveals require a new 4-eyes proposal. The audit-chain rows remain at 7y retention.
+
+### Testable assertions (T13 acceptance amended — see Task-list amendments at end; mirrors privacy-review §7 test obligation 4)
+
+- **Proposer cannot self-approve.** Active member M proposes a forensic reveal for `audit_log_id = X`; same member M attempts to approve own proposal. Assert RLS denies; no `audit.forensic_reveal.4eyes_completed` row written.
+- **Distinct-member approval succeeds.** Active member M proposes; distinct active member N approves (where the role-pairing is co-chair + co-chair or co-chair + certified_member per the committee's composition). Assert (a) `audit.forensic_reveal.4eyes_pending` row written on proposal AND (b) `audit.forensic_reveal.4eyes_completed` row written on approval AND (c) both rows hash-chain correctly AND (d) the `revealed_actor_pseudonym` column is populated AND (e) M and N can read it via the function for ≤24h.
+- **Non-pair attempt denied.** Active member M proposes; active member N attempts to approve where N is a non-co-chair worker-member and the committee is single-co-chair (so the rule requires co-chair + certified_member). Assert RLS denies the approval.
+- **Reveal-session expiry.** Approved reveal where `now() > expires_at`; assert the function returns NULL (or an error) and the column is cleared by the expiry job.
+
+### Cross-references
+
+- **privacy-review §4 cross-cutting observation #2** — the source recommendation.
+- **threat-model F-32 / F-33 / O-4 / HG-6** — the reprisal-log adversary model context.
+- **ADR-0003 Amendment A** — closed-enum allowlist (Amendment E adds two values).
+- **ADR-0003 Amendment D** — the projection Amendment E forensic-gates.
+- **ADR-0015** — retention of the two new enum values (7y); added to the schedule in this pass.
+- **existing `pending_destructive_ops`** (System Design §RLS outline) — the architectural pattern Amendment E mirrors.
+- **HG-13** — bundled gate covering Amendment D + Amendment E + ADR-0007 amendment.
+
+### Reversibility
+
+**Medium.** The table + role + function + two enum values are additive migrations; reverting would be a security regression (architecturally inferior to "no forensic recovery path at all," which loses incident-response capability).
+
+### Compliance check additions
+
+- [x] PIPEDA Principle 4.5 — forensic recovery is bounded (24h reveal session, two-member gate, audit-chained).
+- [x] PIPEDA Principle 4.9 — the reveal is itself an audit event the user can see in their own audit feed (the proposer/approver pair is visible).
+- [x] OHSA s.50 — un-projected `actor_pseudonym` exposure requires two distinct committee members; one co-opted member cannot unilaterally compromise an author's anonymity.
+
+### Follow-ups (T13 acceptance amended — see Task-list amendments at end)
+
+- [ ] **T13 acceptance amended** — `pending_forensic_reveals` table + `forensic_read_service` role + `jhsc_forensic_reveal_actor_pseudonym` function + 4 tests above + retention coverage for the two new enum values.
+- [ ] **observability-setup (next pass):** wires alerts for `audit.forensic_reveal.4eyes_pending` rows that age beyond `expires_at` without an approval (signals coercion or abandoned proposals); same alert pipeline as F-50.
+- [ ] **designer (next pass):** Surface for "I need to know who logged this entry" — the proposer flow + approver flow + reveal-session view. The architect does NOT decide the UX shape here; only the architectural contract (4-eyes, 24h session, two audit rows).
+
+---
+
+# ADR-0003 Amendment F (2026-05-22, amendment pass #3, HG-12): Recovery-passphrase show-again accommodation
+
+**Amends ADR-0003** above. Trigger: threat-model F-54 (`/home/user/agent-os/.context/threat-model.md` §3.1 lines ~263–325) / O-18 / **HG-12** (permanent in threat-model §9). Amendment F is filed as a sibling of Amendment D / Amendment E rather than folded into Amendment D, per the amendment-pass #3 directive F option. Cross-references **a11y-review A-5** (the original accessibility finding); design-system §4.D (Surface D, recovery-passphrase enrollment, D.4–D.7); **F-08** (recovery-blob KDF + type-back); **F-41 / O-1** (printed-sheet coercion accepted as v2 duress mode); ADR-0008 (personal-device advisory posture carries forward).
+
+### The problem
+
+Design-system Surface D.6 hides the just-shown recovery passphrase (per D.5 print + D.6 type-back verify) and offers only a punitive "fail 3 wrong attempts → return to D.4 (re-display)" path back to re-display. Accessibility-review A-5 identifies this as discriminatory against low-vision, dyslexic, and cognitively-impaired workers who may not be able to read the printed sheet (D.5) and would otherwise have to deliberately enter incorrect input to gain access to an accommodation they need.
+
+Threat-model F-54 STRIDE-walked the accommodation options and chose hold-to-reveal + per-enrollment-session cap + audit-log emission. The threat-modeler's reasoning (verbatim from §3.1 F-54): audio-narration mode rejected (widens threat space via ambient mics, MDM screen-with-audio, coerced read-aloud); second-device path rejected (BYOD-MDM-adjacent); skip-verification rejected (loses F-08 mitigation); chosen path is hold-to-reveal (≥1500ms) + per-enrollment-session cap of 3 + server-instrumented audit-log emission + no TTS / no clipboard on the reveal surface.
+
+### The amendment — show-again accommodation with four invariants
+
+**Architectural contract.** Surface D.6 gains a "show passphrase again" secondary link that returns to a constrained D.4-variant (the reveal surface). The reveal is gated by:
+
+1. **Hold-to-reveal (≥1500ms).** Sustained pointer-down OR Space-keydown OR Enter-keydown for ≥1500ms continuously; release cancels the reveal immediately. Per threat-model M-54a.
+2. **Per-enrollment-session cap of 3 reveals.** Restart-enrollment from D.1 emits its own audit event and resets the counter for the new session. Per threat-model M-54c.
+3. **Audit-log emission gates the reveal.** Each reveal emits `identity_privkey.recovery_blob.viewed` to the audit log BEFORE the passphrase becomes visible in the DOM, with `{actor_id, enrollment_session_id, reveal_count_in_session, ts}`. Per threat-model M-54b. Failure of the audit-log endpoint blocks the reveal.
+4. **No TTS, no clipboard on the reveal.** No `SpeechSynthesisUtterance`, no `window.speechSynthesis`, no clipboard-copy affordance on the reveal surface. The largest typography token and the highest-contrast pairing are the supported accommodations. Per threat-model M-54d.
+
+### Adding the audit-log enum value
+
+The closed allowlist of `event_type` values per ADR-0003 Amendment A gains one new value:
+
+| Enum value | When emitted | Required fields |
+|---|---|---|
+| `identity_privkey.recovery_blob.viewed` | Every successful invocation of "show passphrase again" on Surface D.6. Emitted by the server-instrumented logging path BEFORE the DOM render. | `actor_id`, `enrollment_session_id`, `reveal_count_in_session`, `ts` |
+
+**Pre-enrollment scoping.** Pre-enrollment users have a special enrollment-scoped logging path (the audit-log row is committed under the partially-enrolled user's id, which is bound to the TOTP-invite-consumed session per ADR-0002). The architecture treats this as an authenticated event under the partially-enrolled identity; the audit chain hash-chains normally.
+
+**Retention.** Per ADR-0015, `identity_privkey.recovery_blob.viewed` retains for **membership + 24 months**, same window as `recovery_blob.written` and `recovery_blob.restored` — the forensic value tracks the same enrollment-session-bounded window.
+
+### Operational rules (binding for the implementer, the test-writer, the designer of Surface D.6)
+
+1. **Hold-to-reveal gating (M-54a).** The "show again" control reveals the passphrase only while pointer-down OR Space-keydown OR Enter-keydown is sustained for ≥1500ms continuously. Release hides within 50ms. Reveal control's label and helper text MUST name the consequence in plain language (en-CA i18n keys: `onboarding.recovery.show_again.label`, `onboarding.recovery.show_again.helper`).
+2. **Audit-log emission precedes DOM render (M-54b).** The reveal control invokes a server-side log endpoint; the passphrase is rendered only after the endpoint returns 200. Endpoint failure (5xx) → no render + danger toast. Reveal-count increments per successful row.
+3. **Cap (M-54c).** Three successful reveals per enrollment session. Fourth attempt: control is `aria-disabled=true`, no audit row, helper text directs to restart enrollment. Restart resets the counter.
+4. **No TTS, no clipboard on reveal (M-54d).** The reveal surface MUST NOT offer a clipboard-copy button (clipboard remains a coercion / exfil channel; clipboard-copy was already available at D.4 once, per design-system D.4 secondary action — not re-exposed at the D.6 reveal). The reveal surface MUST NOT invoke `SpeechSynthesisUtterance` or any TTS API. Static lint: zero matches for `SpeechSynthesisUtterance`, `window.speechSynthesis`, `tts` in `src/lib/onboarding/recovery/*` outside test fixtures.
+5. **Largest typography token + highest-contrast pairing.** The reveal surface uses the design system's largest typography token and the highest-contrast color pairing per the existing design tokens. The architect does NOT modify `design-tokens.json` or `.context/design-system.md` per amendment pass #3 hard rules; the designer folds the reveal-surface treatment into the design system on the next pass.
+6. **Post-enrollment, the reveal surface is gone.** A user who completes D.7 cannot invoke "show again" from settings — there is no settings surface for it. Post-enrollment recovery still relies on the printed sheet (F-41 / O-1, accepted residual) or, in v2, the duress-mode work. This bounds the F-54 threat space to the enrollment session window.
+
+### Testable assertions (T07 / T19 acceptance amended — see Task-list amendments at end; mirrors threat-model §8 T07 F-54 entries M-54a/b/c/d)
+
+- **Hold-to-reveal (M-54a).** Click without hold (release within 100ms) → passphrase NEVER rendered (no `data-testid='recovery-passphrase-onscreen'` becomes visible). Hold 1500ms → passphrase rendered after 1500ms. Release → hidden within 50ms. Hold 5000ms → continued visibility. Keyboard: Space-keydown for 1500ms reveals; Space-keyup hides.
+- **Audit-log emission (M-54b).** One successful reveal → exactly one `identity_privkey.recovery_blob.viewed` row for the current `enrollment_session_id` with `reveal_count_in_session = 1`. Endpoint returns 500 → passphrase NOT rendered AND danger toast shown. Three successful reveals → `reveal_count_in_session` = 1, 2, 3.
+- **Cap (M-54c).** Three successful reveals → all succeed. Fourth attempt → control `aria-disabled=true` AND no audit row emitted AND helper text directs to restart enrollment. Restart enrollment → fresh `enrollment_session_id` AND "show again" invocable again up to 3 times in the new session.
+- **No TTS, no clipboard (M-54d).** Surface D.6 reveal state → no element with `data-testid='copy-passphrase'`. Static lint: zero matches for `SpeechSynthesisUtterance`, `window.speechSynthesis`, `tts` in recovery-flow modules outside test fixtures.
+- **T19 onboarding integration test** — full D.1 → D.7 flow including a "show again" invocation; audit row appears under the partially-enrolled user; flow completes; reveal-count counter resets after D.7.
+
+### Cross-references
+
+- **threat-model F-54** (`/home/user/agent-os/.context/threat-model.md` §3.1) — the STRIDE walkthrough and option-rejection rationale.
+- **threat-model §8 T07 / T19 F-54 entries M-54a/b/c/d** — the test-writer's canonical assertion shapes.
+- **threat-model §9 HG-12** — the human gate (permanent in threat-model.md, threat-modeler-owned).
+- **threat-model §11 second-pass summary** — context for F-54's chosen mitigation.
+- **a11y-review §A-5** — the original accessibility finding the threat-modeler's pass confirmed.
+- **F-08 / F-41 / O-1** — adjacent recovery-passphrase findings (F-08 type-back KDF; F-41 printed-sheet coercion accepted as v2 duress).
+- **ADR-0008** — personal-device advisory posture; carries forward to the reveal surface (the warning text about who can see the screen).
+- **ADR-0003 Amendment A** — closed-enum allowlist; Amendment F adds one value.
+- **ADR-0015** — `identity_privkey.recovery_blob.viewed` retention (membership + 24mo); added to the schedule in this pass.
+- **`.context/design-system.md` §4.D** — Surface D spec; the designer folds the reveal-surface treatment in on the next pass. The architect does NOT modify design-system.md per amendment pass #3 hard rules.
+- **`i18n/en-CA/`** — en-CA plain-language strings (`onboarding.recovery.show_again.label`, `.helper`) added by localization-specialist; architect does NOT modify `i18n/*` per amendment pass #3 hard rules.
+
+### Reversibility
+
+**Hard** on the architectural contract (M-54a/b/c/d are non-negotiable while the AODA + accessibility posture in `JHSC-APP-PLAN.md` §9 holds and while F-08 remains the load-bearing recovery model). **Easy** on the implementation site (one module: `src/lib/onboarding/recovery/`).
+
+### Compliance check additions
+
+- [x] WCAG 2.0 AA / AODA — the show-again accommodation closes A-5 without introducing a punitive "fail 3 times" path.
+- [x] PIPEDA Principle 4.7 (Safeguards) — every reveal is server-audited; silent extraction is structurally impossible.
+- [x] Threat-model A2 / A3 — bounded threat-space widening (enrollment-session-bounded; hold-to-reveal; 3-cap; audit-logged).
+- [x] PIPEDA Principle 4.9 (Individual Access) — the user can see their own `recovery_blob.viewed` events in their audit feed.
+
+### Follow-ups (T07 + T19 acceptance amended — see Task-list amendments at end)
+
+- [ ] **T07 acceptance amended** — M-54a/b/c/d tests + the `identity_privkey.recovery_blob.viewed` enum addition + the en-CA i18n key contract for the reveal-control label and helper text. Surface D.6 ships before T19 (T19 owns the onboarding handoff per threat-model §8 T19 F-54 cross-reference).
+- [ ] **T19 acceptance amended** — full D.1 → D.7 integration test including a "show again" invocation; audit row appears under the partially-enrolled user; reveal-count counter resets after D.7.
+- [ ] **designer (next pass):** Surface D.6 reveal control with largest typography + highest-contrast pairing; "show again" secondary-link spec; D.6 state machine update.
+- [ ] **localization-specialist (next pass):** en-CA strings for `onboarding.recovery.show_again.label`, `.helper`, and the cap-reached helper.
+- [ ] **observability-setup (next pass):** `identity_privkey.recovery_blob.viewed` recognized by the integrity checker (F-50) and the retention job (F-51 / F-52) per its ADR-0015 retention.
+- [ ] **accessibility-specialist (HG-10 + AODA gate):** WCAG 2.0 AA review of Surface D.6 reveal surface and the secondary-link UX. NOT architect-owned; flagged here for the handoff.
 
 ---
 
@@ -2903,10 +3436,18 @@ rotation on member removal.
   - CI grep test: any code path mutating key-material columns that is NOT paired with one of the 8 enum emissions fails CI.
   - Negative test: corrupt the audit-emission path for `committee_data_key.rotation.completed`; assert the rotation is aborted (audit is precondition, not side-effect).
   - **F-50 alert wiring**: the audit-log integrity check job (T18) alerts on (a) `committee_data_key.rotation.started` without a matching `.completed` within 5 minutes, (b) any `committee_data_key.member_revoked` without a paired `.rotation.completed` in the same `rotation_id`, (c) any `committee_data_key.wrapped_for_member` for a `target_member_id` whose `committee_membership.active` is false at emission time. T07 emits the enum; T18 wires the alerts; both tests required.
+- **(Amended 2026-05-22, amendment pass #3, HG-12 / ADR-0003 Amendment F) Recovery-passphrase show-again accommodation:**
+  - Surface D.6 gains a "show passphrase again" secondary link returning to a constrained D.4-variant (the reveal surface), gated by four invariants per ADR-0003 Amendment F.
+  - **Audit-log enum addition:** `identity_privkey.recovery_blob.viewed` added to the closed allowlist per ADR-0003 Amendment A; retention per ADR-0015 is **membership + 24 months**.
+  - **Test (M-54a hold-to-reveal):** Surface D.6 "show again" control — normal click (release <100ms) does NOT reveal the passphrase in the DOM (no `data-testid='recovery-passphrase-onscreen'` becomes visible); sustained pointer-down OR Space-keydown OR Enter-keydown for ≥1500ms reveals; release hides within 50ms.
+  - **Test (M-54b audit-log emission gates render):** every successful reveal emits exactly one `identity_privkey.recovery_blob.viewed` audit-log row BEFORE the passphrase becomes visible in the DOM with `{actor_id, enrollment_session_id, reveal_count_in_session, ts}`. Mock the audit-log endpoint to return 500; trigger "show again"; assert the passphrase is NOT rendered AND a danger toast appears. Trigger three successful reveals; assert three rows with `reveal_count_in_session` = 1, 2, 3.
+  - **Test (M-54c per-enrollment-session cap of 3):** three successful reveals succeed; fourth attempt: control is `aria-disabled=true`, no audit row, helper text directs to restart enrollment. Restart enrollment → fresh `enrollment_session_id`; "show again" invocable again up to 3 times in the new session.
+  - **Test (M-54d no TTS, no clipboard on reveal):** Surface D.6 reveal state contains no element with `data-testid='copy-passphrase'`. Static lint: zero matches for `SpeechSynthesisUtterance`, `window.speechSynthesis`, `tts` in `src/lib/onboarding/recovery/*` outside test fixtures.
+  - **i18n contract:** en-CA keys `onboarding.recovery.show_again.label` and `.helper` exist with plain-language consequence-naming text (localization-specialist owns the catalog; architect ratifies the contract).
 
-**Extras:** **second-opinion-reviewer** mandatory (crypto). **security-reviewer + adversarial-reviewer** with heightened scrutiny. **privacy-reviewer** signs off.
+**Extras:** **second-opinion-reviewer** mandatory (crypto). **security-reviewer + adversarial-reviewer** with heightened scrutiny. **privacy-reviewer** signs off. **accessibility-specialist** sign-off on Surface D.6 reveal surface (WCAG 2.0 AA per HG-10 + AODA gate, NOT architect-owned).
 
-**Risk:** High. **Estimate:** L (5 days; +0.5 day for Invariant 8 enum + alert wiring).
+**Risk:** High. **Estimate:** L (6 days; +0.5 day for Invariant 8 enum + alert wiring; +0.5 day for Amendment F M-54a/b/c/d show-again invariants + audit-log enum extension).
 
 ### T08 — Member concern intake (anonymous-by-default) + hazard register read
 
@@ -3044,10 +3585,37 @@ mitigation).
   - **Test (4-eyes status flip):** propose status-flip via `pending_destructive_ops`; second distinct active member approves; UPDATE succeeds; audit log captures two rows (`proposal`, `approval`) with both members named, hash-chained.
   - **Test (self-approve denied):** proposing member attempts to approve their own proposal; RLS denies.
   - **Test (retention-only hard-delete):** a user attempting `DELETE FROM reprisal_log` directly is denied regardless of role (per the existing "Co-chair only with 4-eyes" RLS, now tightened so even the 4-eyes flow does NOT permit hard DELETE — only the retention job's service role does); the retention job at T16, on aged-out entries, performs the hard DELETE.
+- **(Amended 2026-05-22, amendment pass #3, HG-13 / ADR-0003 Amendment D) Pseudonymized reprisal-feed projection:**
+  - New `SECURITY DEFINER` view `reprisal_audit_feed_pseudonymized` owned by `c4_read_service` projects `{id, event_type, ts_bucketed_to_hour, target_id, target_class, prev_hash, hash}` for `event_type IN ('reprisal.created', 'reprisal.read', 'reprisal.status_changed.4eyes_pending', 'reprisal.status_changed.4eyes_completed')`; `actor_pseudonym` is **suppressed in the projection**.
+  - Direct SELECT of `actor_pseudonym` for reprisal-event rows is **revoked** from `authenticated`, `anon`, `service_role` (column-level revoke OR row-level RLS; migration-handler chooses the path, but both paths must be covered by tests per privacy-review §7 closing note).
+  - GRANT SELECT on the view to `authenticated`; active members read the visible feed through the view.
+  - **Default list payload for `reprisal.*` events comes from the pseudonymized view, NEVER the raw table**, even when querying for one's own activity (privacy-review §4 cross-cutting observation #5; mirrors F-18).
+  - **Test (pseudonymized feed projection — privacy-review §7 obligation 1):** SELECT from `reprisal_audit_feed_pseudonymized` as an active member; assert the returned columns are `{id, event_type, ts_bucketed_to_hour, target_id, target_class, prev_hash, hash}` and do NOT contain `actor_pseudonym`.
+  - **Test (direct bypass — privacy-review §7 obligation 2):** as an active member, attempt `SELECT actor_pseudonym FROM audit_log WHERE event_type LIKE 'reprisal.%'`; assert RLS or GRANT-revoke returns zero rows for the `actor_pseudonym` column. Test both architectural paths.
+  - **Test (time bucketing — privacy-review §7 obligation 3):** emit a `reprisal.created` row at a known microsecond timestamp; SELECT from the feed view; assert `ts_bucketed_to_hour` is rounded to the hour AND the underlying `audit_log.ts` retains the original microsecond.
+  - **Test (default-list-payload exclusion — privacy-review §4 cross-cutting observation #5):** the "my activity" feed for reprisal events returns the projection shape, not the raw row.
+- **(Amended 2026-05-22, amendment pass #3, HG-13 / ADR-0003 Amendment E) Forensic-reveal 4-eyes procedure:**
+  - New `pending_forensic_reveals` table (mirrors `pending_destructive_ops`) — `{id, target_audit_log_id, proposer_id, proposed_at, proposer_reason, approver_id?, approved_at?, revealed_actor_pseudonym?, expires_at, expired_at?}`.
+  - New `forensic_read_service` non-login Postgres role owned by `migration_role` with SELECT on the underlying `audit_log.actor_pseudonym` column; invoked exclusively via the `SECURITY DEFINER` function `jhsc_forensic_reveal_actor_pseudonym(target_audit_log_id uuid)`.
+  - Two new audit-log enum values: `audit.forensic_reveal.4eyes_pending` (proposal) and `audit.forensic_reveal.4eyes_completed` (approval). Both hash-chained per ADR-0003 Amendment A; both retain at 7 years per ADR-0015.
+  - Approver pair: co-chair + co-chair (for dual-co-chair committees) OR co-chair + certified_member (for single-co-chair committees). RLS denies `approver_id = proposer_id`.
+  - Reveal session is bounded to 24 hours from approval; expiry job clears `revealed_actor_pseudonym` and sets `expired_at`.
+  - **Test (proposer-cannot-self-approve — privacy-review §7 obligation 4):** propose a forensic reveal for `audit_log_id = X`; same proposer attempts to approve; assert RLS denies; no `audit.forensic_reveal.4eyes_completed` row written.
+  - **Test (distinct-member approval succeeds):** member M proposes; distinct member N (per the committee's role-pair rule) approves; assert (a) `audit.forensic_reveal.4eyes_pending` row written on proposal AND (b) `audit.forensic_reveal.4eyes_completed` row written on approval AND (c) both hash-chain correctly AND (d) `revealed_actor_pseudonym` populated AND (e) M and N read it via the function for ≤24h.
+  - **Test (non-pair attempt denied):** N attempts to approve where N is a non-co-chair worker-member and the committee is single-co-chair; assert RLS denies.
+  - **Test (reveal-session expiry):** approved reveal where `now() > expires_at`; assert function returns NULL/error and the column is cleared.
+- **(Amended 2026-05-22, amendment pass #3, HG-13 / ADR-0007 amendment) Reprisal-log intake consent surface:**
+  - Surface C (reprisal-entry intake form) renders the four-bullet consent surface (verbatim text from privacy-review §2.4, folded into `i18n/en-CA/reprisal-intake.json` by the localization-specialist).
+  - The "Save entry" button is structurally gated (submit handler short-circuits) until the consent checkbox is checked.
+  - The consent surface re-renders on every intake (no "I've already seen this" suppression flag).
+  - **Test (consent surface presence — privacy-review §7 obligation 5):** snapshot test that the reprisal-intake form renders the four "what other members will / will NOT see" bullets and the consent checkbox AND the "Save entry" button is `aria-disabled=true` (or its submit short-circuits) until the checkbox is checked.
+  - **Test (per-intake re-render):** open Surface C, close without saving, reopen; assert the consent surface re-renders fresh (no suppression cookie / flag).
+- **(Amended 2026-05-22, amendment pass #3, HG-13 bundling) Coverage extension for T14:**
+  - The Amendment D pseudonymized projection is extended to `work_refusal.*` and `s51_evidence.*` write events when T14 enumerates them (the view's `event_type IN (...)` predicate is amended in T14's migration). T13 ships the projection covering reprisal-events only; T14 ships the extension. Test obligations 1–3 above repeat for T14 events (privacy-review §7 obligation 6).
 
-**Extras:** **second-opinion-reviewer** + **privacy-reviewer** + **adversarial-reviewer** all with heightened scrutiny.
+**Extras:** **second-opinion-reviewer** + **privacy-reviewer** + **adversarial-reviewer** all with heightened scrutiny. **labour-lawyer review (HG-10)** of the consent-surface copy in §2.4 of privacy-review. **accessibility-specialist sign-off** on the consent surface (WCAG 2.0 AA).
 
-**Risk:** High. **Estimate:** L (5 days; +1 day for HG-6 server-side indirection + HG-7 status-flip gating).
+**Risk:** High. **Estimate:** L (6 days; +1 day for HG-6 server-side indirection + HG-7 status-flip gating; +1 day for HG-13 pseudonymized projection + forensic-reveal 4-eyes + consent surface).
 
 ### T14 — Work refusal (s.43) + critical injury (s.51) checklists
 
@@ -3103,10 +3671,24 @@ per the schedule in plan §8.
 - Retention job runs daily; logged; alerts on failure.
 - Retention deletions are audit-logged.
 - Test fixtures simulate aged data; assert deletion.
+- **(Amended 2026-05-22, amendment pass #3, HG-14 / ADR-0015) Per-event-type audit-log retention schedule:**
+  - The retention job replaces the single `WHERE ts < now() - interval '24 months'` filter with an `event_type`-keyed retention function reading from the `audit_log_retention_schedule` table (one row per enum value with a `retention_interval` per ADR-0015's authoritative table).
+  - **Schema requirements (per ADR-0015):**
+    - `audit_log.retention_class text NOT NULL` column, populated by the `audit_emit` SECURITY DEFINER function at write time; CHECK constraint references the schedule.
+    - `audit_log_retention_schedule` table (version-controlled migration; one row per `event_type` enum value).
+    - **CI drift assertion:** every value in the `event_type` CHECK constraint has exactly one row in `audit_log_retention_schedule`; every row in the schedule table references a value in the enum. Drift fails CI.
+  - **Underlying-record-ceiling rule (privacy-review §3.5):** audit-log rows linked via `target_id` to a record in another table MUST NOT outlive the linked record by more than 30 days. The retention pass deletes orphaned audit rows within 30 days of the linked record's deletion. **Carve-out:** `retention.deleted` summary rows are independently retained at 7 years (no `target_id`).
+  - **`retention.deleted` jsonb shape:** `meta.deleted_per_table.audit_log_per_event_type` is a jsonb of `{event_type: count}` per pass (replaces the prior single-count shape).
+  - **Test (per-event retention schedule honored — privacy-review §7 obligation 7):** fixture inserts audit rows of every enum value with `ts` at 89 days, 91 days, 23 months, 25 months, 6 years 11 months, 7 years 1 month. Run retention pass in dry-run; assert the deletion set matches the ADR-0015 schedule exactly. Run live; assert the same.
+  - **Test (audit-row-cannot-outlive-target rule — privacy-review §7 obligation 8):** fixture inserts a `concern.created` audit row with `target_id = X`; the underlying concern row X is hard-deleted by an earlier retention pass. Run the next retention pass; assert the orphaned audit row is queued for deletion within 30 days of the concern's deletion.
+  - **Test (retention-pass summary row retention — privacy-review §7 obligation 9):** fixture inserts a `retention.deleted` row from 6 years ago. Run retention pass; assert the summary row is NOT deleted (7-year retention; carve-out from the ceiling rule because no `target_id`).
+  - **Test (schedule-table vs enum drift — privacy-review §7 obligation 10):** CI assertion: every value in the `event_type` CHECK constraint has exactly one row in `audit_log_retention_schedule`; every row in the schedule table references a value in the enum. Drift fails CI. (Tested by adding a phantom enum value or schedule row in a side branch; CI rejects.)
+  - **Test (`retention.deleted` per-event-type counts — privacy-review §7 obligation 11):** run a retention pass that deletes rows of three different event types; assert the emitted `retention.deleted` row's `meta.deleted_per_table.audit_log_per_event_type` jsonb correctly enumerates the counts per event type.
+  - **HG-14 — user explicitly ratifies the per-event-type retention schedule before T16 ships.** The schedule table is the authoritative artifact; ADR-0015's table is the proposed final state for ratification.
 
-**Extras:** **privacy-reviewer** owns approval.
+**Extras:** **privacy-reviewer** owns approval. **HG-14 (user ratification of ADR-0015's per-event schedule) before T16 ships.**
 
-**Risk:** Medium. **Estimate:** M (3 days).
+**Risk:** Medium. **Estimate:** M (4 days; +1 day for HG-14 / ADR-0015 per-event schedule, schema additions, drift check, and the five new test obligations).
 
 ### T17 — Backup + restore drill playbook
 
@@ -3167,10 +3749,14 @@ notice referencing ADR-0001 tradeoff.
 - T2 test passes (panic wipe).
 - Onboarding copy reviewed by tech-writer + privacy-reviewer.
 - WCAG 2.0 AA on every onboarding screen.
+- **(Amended 2026-05-22, amendment pass #3, HG-12 / ADR-0003 Amendment F) Surface D.6 integration with onboarding:**
+  - Full D.1 → D.7 enrollment flow integration test that includes at least one "show passphrase again" invocation (per ADR-0003 Amendment F M-54a/b/c/d invariants tested in T07 acceptance) AND verifies the audit row `identity_privkey.recovery_blob.viewed` appears under the partially-enrolled user.
+  - **Test:** initiate enrollment from D.1; reach D.6 (type-back verify); invoke "show again" once (hold ≥1500ms); assert audit row written with `reveal_count_in_session = 1`; complete D.6 successfully and proceed to D.7; assert the reveal-count counter resets after D.7 completion (a subsequent enrollment session gets a fresh `enrollment_session_id` and a fresh counter).
+  - The architect does NOT define the UX shape of the Surface D.6 reveal control or its placement; the designer owns Surface D.6's spec (per ADR-0003 Amendment F follow-up on the designer).
 
 **Extras:** **privacy-reviewer + accessibility-specialist + tech-writer**.
 
-**Risk:** Low. **Estimate:** S (1.5 days).
+**Risk:** Low. **Estimate:** S (2 days; +0.5 day for F-54 / Amendment F D.1 → D.7 integration test).
 
 ---
 
@@ -3419,3 +4005,155 @@ The amendment pass #2 closes F-A (RA-2), F-B (canonical name + verifier rule), F
    - **F-B verifier rule:** semgrep rule `no-inspection-synced-hmac-fail-alias` in `scripts/verify.sh` with the documented allowlist for the three files where the alias string is permitted (this ADR, ADR-0014, `observability/audit-log.md` §6 finding #2).
 
 **Not routed here (already covered by the original handoff, pass #1):** designer is queued behind the threat-modeler's first-pass output and is unaffected by this pass except for the Amendment C language fold into `.context/design-system.md` §3.1 / §3.2; observability-setup completed Phase 0 (this pass processes their findings) — their next pass (if needed) is post-test-writer, alongside the implementer of T02.
+
+---
+
+# Amendment pass #3 summary (2026-05-22)
+
+Privacy-reviewer returned two APPROVED-WITH-CHANGES verdicts (Q1 blocking T13; Q2 blocking T16) plus five cross-cutting observations plus a forensic-reveal proposal. Threat-modeler completed a second pass adding F-53 (modal trap-timing race during opacity transition) + F-54 (recovery-passphrase low-vision escape hatch) plus observations O-17 / O-18 and human gates HG-11 / HG-12 (written directly into `.context/threat-model.md` §9). Amendment pass #3 processes both sets together. Per directive G, since threat-modeler's HG-11/HG-12 writes landed first, privacy-reviewer's two proposed gates become **HG-13** (Amendment D pseudonymized projection + Amendment E forensic-reveal + ADR-0007 amendment consent surface — bundled) and **HG-14** (ADR-0015 per-event audit-log retention schedule).
+
+| Change | Source | Amendment artifact | Downstream task(s) |
+|---|---|---|---|
+| **Q1 / HG-13 — Pseudonymized reprisal-feed projection** | privacy-review Q1 / §2.1–§2.3 / §4 cross-cutting #5 / §7 obligations 1–3, 6 | **ADR-0003 Amendment D** — new `SECURITY DEFINER` view `reprisal_audit_feed_pseudonymized` projecting `{id, event_type, ts_bucketed_to_hour, target_id, target_class, prev_hash, hash}` with `actor_pseudonym` suppressed; GRANT-revoke on raw `audit_log` for the relevant event types; default-list-payload defaults to the view (mirrors F-18). | **T13 acceptance amended** — projection view, GRANT-revoke, default-list-payload, four tests from privacy-review §7. **T14 acceptance amended** (cross-reference) — extension to `work_refusal.*` and `s51_evidence.*` write events when T14 enumerates. |
+| **Q1 / HG-13 — Forensic-reveal 4-eyes procedure** | privacy-review §4 cross-cutting #2 | **ADR-0003 Amendment E** — new `pending_forensic_reveals` table, `forensic_read_service` non-login role, `jhsc_forensic_reveal_actor_pseudonym(...)` SECURITY DEFINER function; two new audit-log enum values `audit.forensic_reveal.4eyes_pending` / `.4eyes_completed`; co-chair + co-chair OR co-chair + certified_member approver pair; 24h reveal session. | **T13 acceptance amended** — `pending_forensic_reveals` table + role + function + 4 tests (proposer-cannot-self-approve, distinct-member approval succeeds, non-pair attempt denied, reveal-session expiry). |
+| **Q1 / HG-13 — Reprisal-log intake consent surface** | privacy-review §2.4 (copy draft) / §5 fold-in item 2 / §7 obligation 5 | **ADR-0007 amendment** — scope extension to cover reprisal-log intake consent surface; four-bullet contract + per-intake re-render + structural gating of "Save entry" button; §2.4 copy verbatim; labour-lawyer (HG-10) + accessibility-specialist sign-off before T13 ships. | **T13 acceptance amended** — consent-surface presence test + per-intake re-render test. **localization-specialist (next pass):** `i18n/en-CA/reprisal-intake.json` keys. **designer (next pass):** Surface C consent-surface placement + UX. |
+| **Q2 / HG-14 — Per-event-type audit-log retention** | privacy-review Q2 / §3.1 / §3.3 / §3.4 / §3.5 / §7 obligations 7–11 | **New ADR-0015** (top of file) — per-event-type schedule (privacy-review §3.3 table verbatim); `audit_log.retention_class` column; `audit_log_retention_schedule` table; underlying-record-ceiling rule (§3.5); `retention.deleted` jsonb shape (§3.4); CI drift assertion. **HG-14 — user explicitly ratifies the schedule before T16 ships.** | **T16 acceptance amended** — per-event schedule, schema additions, ceiling rule, drift check, five tests from privacy-review §7 obligations 7–11. |
+| **Cross-cutting #1 — `retention_class` column on `audit_log`** | privacy-review §4 cross-cutting #1 | Captured in **ADR-0015** schema requirements. | T16 acceptance bullet (covered in HG-14 row above). |
+| **Cross-cutting #4 — `observability/README.md` §1 reasoning correction** | privacy-review §4 cross-cutting #4 | Captured in **ADR-0015** cross-references — observability-setup's next pass corrects the reasoning text to "matched to the breach-record retention because audit log feeds the breach-response process, not because PIPEDA s.10.1 requires 24mo for audit logs." Architect does NOT edit `observability/*` per amendment pass #3 hard rules. | Follow-on for observability-setup, **not** a new task. |
+| **§5 fold-in item 4 — Crypto-shred-on-retention coherence** | privacy-review §5 fold-in item 4 | **ADR-0012 amendment** (new "Crypto-shred-on-retention coherence with audit-log per-event retention" block at the end of ADR-0012) — note that "Backups older than the longest audit-log event retention can be hard-deleted without leaving 'events we cannot explain.'" Structurally satisfied by ADR-0015 + ADR-0012 amendment HG-8. | No new test obligation; coherence is structural. |
+| **`HMAC_PSEUDONYM_KEY` escrow + rotation** | privacy-review §4 cross-cutting #3 | **NOT folded into this pass.** The recommendation (rotate quarterly with overlap window; old-era pseudonyms stay queryable in old-era space) is a substantive operational policy decision that touches ADR-0012's key escrow story; the architect surfaces this as an explicit **deferred-to-next-pass** item rather than land it half-spec'd. Rationale: the operational rotation procedure interacts with the backup window (35d) AND the live forensic procedure (Amendment E's reveal-session) AND the audit-log chain integrity (RA-2 head-pointer extraction). Half-specifying it now risks an inconsistency the test-writer would inherit. **Follow-on:** architect or security-reviewer's next pass amends ADR-0012 with the rotation cadence + overlap window + era encoding. | Tracked as a deferred follow-on; the privacy-reviewer's recommendation is preserved in their review file for the next pass to consume. |
+| **F-53 / HG-11 — M-53a/b/c enumeration in Invariant 9** | threat-model F-53 (§3.3) / O-17 / HG-11 (already in threat-model §9) | **ADR-0003 Amendment C extension** (in-place under Amendment C) — original Invariant 9 preserved verbatim; three sub-invariants added: 9.a (trap-on-mount; M-53a; was already covered), 9.b (announce-on-open `ready` promise gates input acceptance; M-53b; NEW), 9.c (underlying surface `inert` from t=0; scrim captures keydown + pointer during transition; M-53c; NEW). Cross-references threat-model M-53a/b/c assertion shapes. | **T11 + T13 acceptance amended** (cross-reference) — the three sub-invariants are already mapped in threat-model §8 T11 F-53 entries; the test-writer's checklist is unchanged in shape, but Invariant 9 now points to all three rather than just the timing property. |
+| **F-54 / HG-12 — Recovery-passphrase show-again accommodation** | threat-model F-54 (§3.1) / O-18 / HG-12 (already in threat-model §9) / a11y A-5 | **ADR-0003 Amendment F** — Surface D.6 gains "show passphrase again" hold-to-reveal (≥1500ms) + per-enrollment-session cap of 3 + audit-log emission gates render + no TTS / no clipboard on reveal + largest typography + highest-contrast pairing; new audit-log enum value `identity_privkey.recovery_blob.viewed` (added to ADR-0003 Amendment A closed allowlist; retention "membership + 24 months" per ADR-0015). | **T07 acceptance amended** — M-54a/b/c/d tests + audit-log enum addition + en-CA i18n contract for reveal-control label + helper text. **T19 acceptance amended** — full D.1 → D.7 onboarding integration test including a "show again" invocation. |
+
+**New artifacts in this file (pass #3):**
+- **ADR-0015** — Per-event-type audit-log retention schedule (HG-14). Top of file.
+- **ADR-0012 amendment** — Crypto-shred-on-retention coherence note appended at the end of ADR-0012.
+- **ADR-0007 amendment** — Reprisal-log intake consent surface (HG-13 cross-reference). Appended at the end of ADR-0007.
+- **ADR-0003 Amendment C extension** — three sub-invariants 9.a / 9.b / 9.c enumerated explicitly. Appended in-place under Amendment C.
+- **ADR-0003 Amendment D** — Pseudonymized reprisal-feed projection (HG-13). New sibling block after Amendment C.
+- **ADR-0003 Amendment E** — Forensic-reveal 4-eyes procedure (HG-13). New sibling block after Amendment D.
+- **ADR-0003 Amendment F** — Recovery-passphrase show-again accommodation (HG-12). New sibling block after Amendment E.
+- **T07 acceptance amended** — Amendment F M-54a/b/c/d tests + i18n contract.
+- **T13 acceptance amended** — Amendment D projection + Amendment E forensic-reveal + ADR-0007 amendment consent surface + extension cross-reference for T14.
+- **T16 acceptance amended** — ADR-0015 per-event schedule + schema + ceiling rule + drift check + privacy-review §7 obligations 7–11.
+- **T19 acceptance amended** — Amendment F D.1 → D.7 integration test.
+
+**Reversibility note (pass #3):** All amendments use the additive "amends" / "extends" pattern. Original ADR text is preserved verbatim. ADR-0015 is a new top-of-file ADR (no prior version to preserve). Amendment D / E / F are siblings under ADR-0003. The ADR-0007 amendment is an additive scope extension; original concern-intake decision is unchanged. The ADR-0012 amendment is a cross-reference, not a new operational rule.
+
+**Hard rules observed:**
+- Newest ADR on top — ADR-0015 placed above ADR-0014.
+- Amendments are additive blocks at the end of the original ADR (or in-place under existing amendments for the C extension); original text preserved verbatim; amended ADRs carry status lines naming the amendment date and trigger.
+- Cross-references: every amendment cites the source review file (privacy-review §X) or threat-model finding (F-xx) and the human gate (HG-xx).
+- All new dates are `2026-05-22`.
+
+**Files NOT modified by this pass (per hard rules):** `JHSC-APP-PLAN.md`, `.context/threat-model.md`, `.context/constraints.md`, `.context/preferences.md`, `.context/a11y-review.md`, `.context/privacy-review.md`, `observability/*`, `i18n/*`, `design-tokens.json`, `.context/design-system.md`. All cross-references in this amendment pass point to existing content in those files; the next-pass owners (designer for design-system + Surface C consent surface + Surface D.6 reveal control; observability-setup for `observability/audit-log.md` projection-view documentation + `observability/README.md` §1 reasoning correction; localization-specialist for `i18n/en-CA/reprisal-intake.json` + `onboarding.recovery.show_again.*`; labour-lawyer + accessibility-specialist under HG-10 for the consent-surface and Surface D.6 reveal-surface sign-off) fold the pointers in.
+
+**Locked decisions from plan §13 were not re-opened.** No new locked decisions introduced. No new cross-border transfers. No new PI subprocessors. ADR-0010's "Sentry is the only non-Supabase PI-adjacent subprocessor" posture is preserved.
+
+**Renumbering note (per directive G).** HG-11 (modal trap-engagement contract) and HG-12 (recovery-passphrase show-again) are **permanent in `.context/threat-model.md` §9** (threat-modeler-owned, written first). Privacy-reviewer's two proposed gates therefore become:
+- **HG-13** — pseudonymized reprisal-feed projection (ADR-0003 Amendment D) + forensic-reveal 4-eyes (Amendment E) + reprisal-log intake consent surface (ADR-0007 amendment) — **bundled as a single architect-owned gate**.
+- **HG-14** — per-event-type audit-log retention schedule (ADR-0015).
+
+HG-13 and HG-14 are recorded in this summary table and cross-referenced from each amendment block. They are **NOT** added to `.context/threat-model.md` §9 (the threat-modeler owns that file per amendment pass #3 hard rules); they live as architect-owned gates that point into the privacy-review. The threat-modeler's next pass, if needed, picks them up; otherwise they are picked up at HG-9 / HG-10 (the pre-launch labour-lawyer + privacy-lawyer review per plan §13.B/C) as architect-owned items in the same gate stack.
+
+**Cross-table mapping (source → amendment → task):**
+
+| Source | Amendment | Task |
+|---|---|---|
+| privacy-review §2.3 (Option c) | ADR-0003 Amendment D | T13, T14 (extension) |
+| privacy-review §2.4 (consent copy) | ADR-0007 amendment | T13 |
+| privacy-review §3.3 (per-event schedule table) | ADR-0015 | T16 |
+| privacy-review §3.5 (underlying-record-ceiling rule) | ADR-0015 | T16 |
+| privacy-review §4 cross-cutting #1 (`retention_class` column) | ADR-0015 schema | T16 |
+| privacy-review §4 cross-cutting #2 (4-eyes forensic reveal) | ADR-0003 Amendment E | T13 |
+| privacy-review §4 cross-cutting #3 (HMAC_PSEUDONYM_KEY escrow + rotation) | **DEFERRED** to next pass | n/a (deferred) |
+| privacy-review §4 cross-cutting #4 (README.md §1 reasoning correction) | ADR-0015 cross-reference; observability-setup next pass | n/a (observability follow-on) |
+| privacy-review §4 cross-cutting #5 (default list payload) | ADR-0003 Amendment D | T13 |
+| privacy-review §5 fold-in 1 (Amendment B pattern extension) | ADR-0003 Amendment D | T13 |
+| privacy-review §5 fold-in 2 (ADR-0007 extension OR ADR-0016) | ADR-0007 amendment (preferred per privacy-reviewer recommendation) | T13 |
+| privacy-review §5 fold-in 3 (plan §8 retention pointer) | ADR-0015 supersedes uniform 24mo | T16 |
+| privacy-review §5 fold-in 4 (ADR-0012 crypto-shred coherence) | ADR-0012 amendment | T16 / T17 (structural, no new test) |
+| privacy-review §5 fold-in 5 (observability/audit-log.md §3 update) | ADR-0015 cross-reference; observability-setup next pass | n/a (observability follow-on) |
+| privacy-review §5 fold-in 6 (observability/README.md §10 finding #2) | ADR-0015 cross-reference; observability-setup next pass | n/a (observability follow-on) |
+| privacy-review §5 fold-in 7 (HG-9 ratification) | ADR-0015 HG-14 (subset of HG-9 scope) | T16 |
+| privacy-review §7 test obligations 1–6 | ADR-0003 Amendment D + Amendment E + ADR-0007 amendment | T13, T14 |
+| privacy-review §7 test obligations 7–11 | ADR-0015 + T16 acceptance | T16 |
+| threat-model F-53 M-53a/b/c | ADR-0003 Amendment C extension (9.a/9.b/9.c) | T11, T13 (already in §8 test obligations) |
+| threat-model F-54 M-54a/b/c/d | ADR-0003 Amendment F | T07, T19 |
+
+---
+
+# Handoff (re-stated for amendment pass #3)
+
+The amendment pass #3 closes privacy-review Q1 (HG-13 bundling ADR-0003 Amendment D + Amendment E + ADR-0007 amendment), privacy-review Q2 (HG-14, ADR-0015), the five cross-cutting observations (with #3 deferred and #4 + #5 routed to observability-setup), and threat-model F-53 / F-54 (HG-11 / HG-12, via ADR-0003 Amendment C extension and Amendment F).
+
+**Test-writer is next.** This is the canonical handoff: privacy-reviewer and threat-modeler second-pass are both complete (this file's amendments operationalize their outputs); no further reviewer pass is required before the test-writer lands the full obligation set.
+
+**Test-writer inputs (read in this order):**
+1. `/home/user/agent-os/.context/decisions.md` (this file, final state) — particularly **ADR-0015** (per-event retention schedule + schema + ceiling rule), **ADR-0003 Amendment C extension** (Invariants 9.a/9.b/9.c), **ADR-0003 Amendment D** (pseudonymized projection), **ADR-0003 Amendment E** (forensic-reveal 4-eyes), **ADR-0003 Amendment F** (recovery-passphrase show-again), **ADR-0007 amendment** (reprisal-log intake consent surface), **ADR-0012 amendment** (crypto-shred coherence note), and the T07 / T13 / T16 / T19 amended acceptance blocks.
+2. `/home/user/agent-os/.context/threat-model.md` §8 (test obligations per task ID — pre-loaded by threat-modeler first + second passes), §3.3 (F-53 / M-53a/b/c assertion shapes), §3.1 (F-54 / M-54a/b/c/d assertion shapes), §9 (HG-11 / HG-12 permanent gates), §11 (second-pass summary).
+3. `/home/user/agent-os/.context/privacy-review.md` §7 (test obligations 1–11 — the canonical privacy test obligation list for T13 and T16).
+4. `/home/user/agent-os/observability/README.md` §11 (test obligations enumerated per task — superseded in part by the amendments in this pass; the test-writer prioritizes the amended acceptance criteria in this file over any prior observability §11 wording where they diverge, and observability-setup's next pass reconciles its §11 with the amendments).
+5. `/home/user/agent-os/observability/audit-log.md` §5 (test obligations for T07, T13, T18) — for context; the same prioritization applies (amended acceptance in this file takes precedence; observability-setup reconciles).
+6. `/home/user/agent-os/observability/sentry-scrub.ts` and `/home/user/agent-os/observability/logging.md` — scrubber + structured logger contracts (unchanged in this pass; still load-bearing).
+
+**Test-writer obligation set (full T02 / T05 / T07 / T08 / T10 / T11 / T12 / T13 / T14 / T16 / T17 / T18 / T19 — pre-implementer):**
+
+For brevity the test-writer's full obligation list is the union of:
+- threat-model §8 — every bullet, grouped by task ID.
+- privacy-review §7 — eleven obligations (1–6 to T13 + T14; 7–11 to T16).
+- observability/README.md §11 — pre-task test artifacts per task (subject to the amendment-pass #3 prioritization note above).
+- amendment-pass #3 invariants in this file — every "Test: …" bullet in the T07 / T13 / T16 / T19 amended acceptance, plus the Amendment C extension's 9.a/9.b/9.c assertion shapes, plus the Amendment D pseudonymized-projection tests, plus the Amendment E forensic-reveal 4-eyes tests, plus the Amendment F M-54a/b/c/d tests, plus the ADR-0007 amendment consent-surface tests.
+
+**Specifically (the new obligations the test-writer must add on top of what amendment pass #2 already enumerated):**
+
+- **T07 (recovery-passphrase show-again, Amendment F / HG-12):**
+  - M-54a hold-to-reveal: normal click does NOT reveal; ≥1500ms hold reveals; release hides within 50ms; keyboard Space/Enter behaviour.
+  - M-54b audit-log-gates-render: one row per reveal with `reveal_count_in_session`; endpoint 500 → no render + danger toast.
+  - M-54c cap: 3 reveals OK, 4th `aria-disabled` + no row + helper text; restart resets.
+  - M-54d no TTS / no clipboard: no `data-testid='copy-passphrase'` on reveal; static lint zero matches for `SpeechSynthesisUtterance` / `window.speechSynthesis` / `tts` outside fixtures.
+  - i18n contract: en-CA keys `onboarding.recovery.show_again.label` / `.helper` exist with consequence-naming text.
+- **T13 (Amendment D pseudonymized projection — privacy-review §7 obligations 1, 2, 3, 5):**
+  - Pseudonymized feed columns; no `actor_pseudonym` returned.
+  - Direct-`audit_log` SELECT for `actor_pseudonym` on reprisal events: both architectural paths (RLS denial / GRANT-revoke).
+  - Time bucketing to the hour in the view; raw row retains microsecond.
+  - Default-list-payload defaults to the view (mirrors F-18).
+- **T13 (Amendment E forensic-reveal 4-eyes — privacy-review §7 obligation 4):**
+  - Proposer-cannot-self-approve.
+  - Distinct-member approval succeeds; two audit rows hash-chained; reveal session readable ≤24h.
+  - Non-pair attempt denied (worker-member + co-chair on a single-co-chair committee → denied; the rule is co-chair + co-chair OR co-chair + certified_member).
+  - Reveal-session expiry → function returns NULL/error; column cleared.
+- **T13 (ADR-0007 amendment consent surface — privacy-review §7 obligation 5):**
+  - Snapshot test of four-bullets consent surface + checkbox + Save-entry gating.
+  - Per-intake re-render (no suppression flag).
+- **T13 (cross-reference into T14):**
+  - Test obligations 1–3 from privacy-review §7 repeat for `work_refusal.*` and `s51_evidence.*` write events when T14 enumerates (privacy-review §7 obligation 6).
+- **T16 (ADR-0015 per-event retention — privacy-review §7 obligations 7–11):**
+  - Per-event schedule honored: every enum value's deletion threshold matches the ADR-0015 table.
+  - Audit-row-cannot-outlive-target rule: orphaned row queued within 30 days of linked-record deletion.
+  - `retention.deleted` summary row retention at 7y (carve-out from ceiling rule).
+  - Schedule-table vs enum drift CI assertion.
+  - `retention.deleted` per-event-type counts in the summary jsonb.
+- **T19 (Amendment F D.1 → D.7 integration):**
+  - Full enrollment flow with at least one "show again" invocation; audit row written under partially-enrolled user; counter resets after D.7.
+- **T11 / T13 (Amendment C extension — already in threat-model §8 T11 F-53 M-53a/b/c entries, here re-emphasized):**
+  - Invariant 9.a tests covered (existing).
+  - Invariant 9.b NEW: `ready` promise gates handler dispatch; for `export_interstitial`, no `export.minutes` / `export.recommendation` audit row + no Blob URL before `ready` resolves.
+  - Invariant 9.c NEW: underlying surface `inert` + `tabindex=-1` from t=0; scrim capture-phase `keydown` swallows Tab/Enter/Space/Escape during transition; pointer click at underlying coordinates lands on scrim, not underlying button.
+
+**Carry-over from amendment pass #2 (still binding, restated for completeness):**
+- **RA-2 tests (T18):** live-vs-backup-diff alert; no-false-positive-on-newer-rows; closed-enum coverage enumerating every `audit_emit(...)` caller; volumetric-event exclusion for `auth.passkey.assert`.
+- **F-C tests (T14):** direct-bypass; indirection-success; atomicity; coverage-via-`pg_proc` on `work_refusal_read_audited` + `s51_evidence_read_audited`.
+- **F-B verifier rule:** semgrep `no-inspection-synced-hmac-fail-alias` with allowlist for the three permitted files.
+- **HG-1 / RA-1 tests (T11/T12):** F-19 closed-allowlist tests; F-24 audit-row-precondition; F-27 allowlist-hash mismatch; visible concern-derived-items flag; post-export rep notification within 60s.
+- **HG-2 / Invariant 8 tests (T07/T18):** 8 enum values fire on the 8 key-material flows; F-50 alerts on (a) rotation-started-without-completed, (b) member-revoked-without-rotation-completed, (c) wrap-for-inactive-member.
+- **HG-3 / ADR-0013 tests (T10):** service-worker snapshot test; `X-Data-Class: C3/C4` sanity check.
+- **HG-4 / ADR-0014 tests (T10):** deterministic-tamper; cross-device-replay; positive round-trip.
+- **HG-5 / ADR-0011 amendment tests (T10/T14):** round-trip EXIF/IPTC/XMP strip; defensive byte-grep.
+- **HG-6 / Amendment B tests (T13):** direct-bypass; indirection-success; atomicity; coverage-via-`pg_proc` on `reprisal_log_read_audited`.
+- **HG-7 tests (T13):** single-rep status-flip denied; 4-eyes status-flip succeeds; self-approve denied; retention-only hard-delete.
+- **HG-8 / ADR-0012 amendment tests (T17):** overwrite-creates-new-version; delete-denied-under-retention; lifecycle-hard-delete; weekly drift check.
+
+**Re-stated handoff to test-writer.** The test-writer's deliverable is the failing-test suite landed BEFORE any implementer touches T07, T08, T10, T11, T12, T13, T14, T16, T17, T18, or T19 code. The amendment pass #3 invariants are the latest layer; they sit on top of the pass #1 and pass #2 obligations rather than replacing them. The test-writer reads this file (final state), the threat-model file (final state including the second pass), the privacy-review file (final state), and the observability files (latest state, subject to the amendment-pass #3 prioritization note); the union of test obligations is the deliverable.
+
+**No new cross-border transfers introduced.** **No new PI subprocessors introduced.** **No locked decisions re-opened.** ADR-0010's "Sentry is the only non-Supabase PI-adjacent subprocessor" posture preserved. ADR-0001's hosting tradeoff defensibility preserved (E2EE + B3 narrow + ADR-0015 retention coherence + crypto-shred via ADR-0012 amendment).
