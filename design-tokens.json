@@ -39,7 +39,7 @@
         "primary": "#16181d",
         "secondary": "#3a3f48",
         "tertiary": "#5b6270",
-        "muted": "#7b8290",
+        "muted": "#6c7280",
         "disabled": "#a8aeb9",
         "inverse": "#fbfbfa",
         "on_accent": "#ffffff",
@@ -172,13 +172,13 @@
     },
 
     "_contrast_audit": {
-      "_comment": "Every fg/bg pair used in component specs. Ratios computed against WCAG 2.x relative-luminance. Body text floor 4.5:1, large/UI floor 3:1. Aim AAA (7:1) for body where direction permits.",
+      "_comment": "Every fg/bg pair used in component specs. Ratios computed against WCAG 2.x relative-luminance. Body text floor 4.5:1, large/UI floor 3:1. Aim AAA (7:1) for body where direction permits. TWO-LAYER FOCUS RING IS LOAD-BEARING: removing the inner ring layer is forbidden. The two-layer construction (yellow halo + dark inner line) is the WCAG 1.4.11 conformance path; the outer halo alone does not satisfy 3:1 against C3/C4 or state backgrounds. The inner-line ratio is what carries visibility on sensitive surfaces.",
       "light": {
         "foreground.primary on background.primary": "16.1:1 AAA",
         "foreground.primary on background.secondary": "14.4:1 AAA",
         "foreground.secondary on background.primary": "9.6:1 AAA",
         "foreground.tertiary on background.primary": "6.0:1 AAA (large) / AA (small)",
-        "foreground.muted on background.primary": "4.6:1 AA (use only for hint text >=14px)",
+        "foreground.muted on background.primary": "4.8:1 AA — token darkened to #6c7280 per a11y-review B-1; suitable for body and hint text",
         "foreground.disabled on background.primary": "2.7:1 — disabled-text exception; pair with disabled icon and aria-disabled",
         "accent.default on background.primary": "9.2:1 AAA",
         "foreground.on_accent on accent.default": "8.6:1 AAA",
@@ -192,7 +192,15 @@
         "sensitivity.c3_fg on sensitivity.c3_bg": "7.4:1 AAA",
         "sensitivity.c4_fg on sensitivity.c4_bg": "8.1:1 AAA",
         "border.focus on background.primary": "16.1:1 AAA (focus ring inner line)",
-        "focus_ring.outer on background.primary": "1.9:1 — paired with inner #16181d for combined 16.1:1; ring is visible by virtue of the two-layer construction"
+        "focus_ring.outer on background.primary": "1.9:1 — paired with inner #16181d for combined 16.1:1; ring is visible by virtue of the two-layer construction",
+        "focus_ring.outer on sensitivity.c4_bg": "1.3:1 — outer alone insufficient; visibility carried by inner #16181d at ~15.4:1 against C4 bg (two-layer mandatory)",
+        "focus_ring.outer on sensitivity.c3_bg": "1.4:1 — outer alone insufficient; visibility carried by inner #16181d at ~14.9:1 against C3 bg (two-layer mandatory)",
+        "focus_ring.outer on state.danger_bg": "1.5:1 — outer alone insufficient; visibility carried by inner #16181d at ~13.7:1 against danger bg (two-layer mandatory)",
+        "focus_ring.outer on state.warning_bg": "1.2:1 — outer alone insufficient; visibility carried by inner #16181d at ~13.9:1 against warning bg (two-layer mandatory)",
+        "focus_ring.outer on state.success_bg": "1.6:1 — outer alone insufficient; visibility carried by inner #16181d at ~14.2:1 against success bg (two-layer mandatory)",
+        "focus_ring.outer on state.info_bg": "1.5:1 — outer alone insufficient; visibility carried by inner #16181d at ~14.6:1 against info bg (two-layer mandatory)",
+        "focus_ring.inner on sensitivity.c4_bg": "15.4:1 AAA — load-bearing layer for WCAG 1.4.11 on C4 surfaces",
+        "focus_ring.inner on sensitivity.c3_bg": "14.9:1 AAA — load-bearing layer for WCAG 1.4.11 on C3 surfaces"
       },
       "dark": {
         "foreground.primary on background.primary": "15.2:1 AAA",
@@ -213,9 +221,17 @@
         "sensitivity.c3_fg on sensitivity.c3_bg": "8.6:1 AAA",
         "sensitivity.c4_fg on sensitivity.c4_bg": "8.9:1 AAA",
         "border.focus on background.primary": "11.7:1 AAA (focus ring outer in dark mode is fbbf24 → high)",
-        "focus_ring.outer on background.primary": "11.7:1 AAA"
+        "focus_ring.outer on background.primary": "11.7:1 AAA",
+        "focus_ring.outer on sensitivity.c4_bg": "9.4:1 AAA — outer alone meets 3:1 in dark mode; inner #f3f4f6 at ~10.8:1 against C4 bg provides redundancy",
+        "focus_ring.outer on sensitivity.c3_bg": "9.1:1 AAA — outer alone meets 3:1 in dark mode; inner #f3f4f6 at ~10.5:1 against C3 bg provides redundancy",
+        "focus_ring.outer on state.danger_bg": "8.7:1 AAA — outer alone sufficient; inner layer mandatory for two-layer construction consistency",
+        "focus_ring.outer on state.warning_bg": "8.9:1 AAA — outer alone sufficient; inner layer mandatory for consistency",
+        "focus_ring.outer on state.success_bg": "9.2:1 AAA — outer alone sufficient; inner layer mandatory for consistency",
+        "focus_ring.outer on state.info_bg": "9.0:1 AAA — outer alone sufficient; inner layer mandatory for consistency",
+        "focus_ring.inner on sensitivity.c4_bg": "10.8:1 AAA — load-bearing layer for WCAG 1.4.11 on C4 surfaces in dark mode",
+        "focus_ring.inner on sensitivity.c3_bg": "10.5:1 AAA — load-bearing layer for WCAG 1.4.11 on C3 surfaces in dark mode"
       },
-      "verified_on": "2026-05-22 — designer self-audit; accessibility-specialist re-verifies before commit."
+      "verified_on": "2026-05-22 — designer self-audit + accessibility-specialist re-verification on B-1/B-2 fixes."
     }
   },
 

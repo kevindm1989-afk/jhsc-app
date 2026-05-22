@@ -499,11 +499,11 @@
       "export.minutes": "Exported finalized minutes to employer co-chair",
       "export.recommendation": "Exported a recommendation to employer co-chair",
       "export.integrity_fail": "Export integrity check failed and was cancelled",
-      "identity_keypair.created": "Set up identity keys",
+      "identity_keypair.created": "Created the keys this device uses to sign in",
       "identity_privkey.recovery_blob.written": "Stored recovery key blob",
       "identity_privkey.recovery_blob.restored": "Restored identity keys from recovery",
       "committee_data_key.wrapped_for_member": "Granted a member access to the committee key",
-      "committee_data_key.unwrap": "Opened the committee key for this session",
+      "committee_data_key.unwrap": "Unlocked the committee's shared data for this session",
       "committee_data_key.rotation.started": "Started a committee key rotation",
       "committee_data_key.rotation.completed": "Completed a committee key rotation",
       "committee_data_key.member_revoked": "Revoked a member's access",
@@ -511,7 +511,7 @@
       "retention.pass": "Ran a retention pass",
       "rate_limit": "Rate-limited request",
       "client.identity_selftest_fail": "Identity-key self-test failed on a device",
-      "client.cache_policy_violation": "A client cache policy was violated and the response was dropped",
+      "client.cache_policy_violation": "Blocked a stale response from being shown — possible tampering",
       "queue.integrity_fail": "An offline-queued entry failed verification and was rejected"
     }
   },
