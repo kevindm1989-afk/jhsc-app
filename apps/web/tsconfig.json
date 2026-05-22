@@ -29,6 +29,14 @@
 
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "vitest.config.ts", "vite.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "vitest.config.ts",
+    "vite.config.ts",
+    ".svelte-kit/ambient.d.ts",
+    ".svelte-kit/non-ambient.d.ts",
+    ".svelte-kit/types/**/$types.d.ts"
+  ],
   "exclude": ["node_modules", ".svelte-kit/output", "build", "dist", "test/**/*.ts"]
 }

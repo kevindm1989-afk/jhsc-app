@@ -1,19 +1,50 @@
 /**
  * Client-side hooks.
  *
- * Sentry client init is intentionally NOT wired here at scaffold time —
- * the Sentry SDK is added by T02 implementer. When wired, it MUST:
- *   - Use the bundled npm `@sentry/sveltekit` import (NEVER the CDN per
- *     JHSC-APP-PLAN.md §7).
- *   - Install the `beforeSend` / `beforeBreadcrumb` hooks from
- *     `$lib/observability/sentry-scrub`.
- *   - NEVER call `Sentry.setUser` on the browser (ADR-0010).
+ * Sentry SDK is initialised here per ADR-0010 (Sentry SaaS EU + strict
+ * SDK-layer scrubbing) and its amendment (no tracing in Phase 0; release
+ * + environment + scrubber wired so the SaaS round-trip is verifiable).
  *
- * This file currently only sets up a minimal error handler that routes to
- * the structured logger so failures are visible during development.
+ * Hard rules enforced in this file:
+ *   - Bundled `@sentry/sveltekit` import only — never the CDN
+ *     (JHSC-APP-PLAN.md §7 / ADR-0010 amendment).
+ *   - `beforeSend` / `beforeBreadcrumb` come from
+ *     `$lib/observability/sentry-scrub` (the canonical scrubber; tested
+ *     under T02 / sentry-scrub.test.ts).
+ *   - No `Sentry.setUser({ id: rawUserId })` — only the scrub module's
+ *     pseudonym hash ever flows; the browser does not call setUser.
+ *   - `tracesSampleRate: 0` per ADR-0010 amendment F-H (Phase-0 deferral).
+ *   - If `PUBLIC_SENTRY_DSN` is undefined (local dev without DSN),
+ *     Sentry.init is NOT called — the structured logger remains the
+ *     emission surface and Sentry self-test failing is the expected dev
+ *     state.
  */
+import * as Sentry from '@sentry/sveltekit';
 import type { HandleClientError } from '@sveltejs/kit';
+import { PUBLIC_SENTRY_DSN } from '$env/static/public';
+import { beforeSend, beforeBreadcrumb } from '$lib/observability/sentry-scrub';
 import { log } from '$lib/log';
+
+const RELEASE = (import.meta.env.VITE_RELEASE_SHA as string | undefined) ?? 'unknown';
+const ENVIRONMENT = (import.meta.env.MODE as string | undefined) ?? 'development';
+
+if (PUBLIC_SENTRY_DSN) {
+  Sentry.init({
+    dsn: PUBLIC_SENTRY_DSN,
+    release: RELEASE,
+    environment: ENVIRONMENT,
+    // ADR-0010 amendment F-H: no distributed tracing in Phase 0.
+    tracesSampleRate: 0,
+    // ADR-0010: SDK-layer PI scrubbing. The scrub module is the canonical
+    // contract — these hooks are thin adapters whose signatures match
+    // Sentry's runtime types.
+    beforeSend: (event) => beforeSend(event as Parameters<typeof beforeSend>[0]) as typeof event,
+    beforeBreadcrumb: (breadcrumb) =>
+      beforeBreadcrumb(breadcrumb as Parameters<typeof beforeBreadcrumb>[0]) as typeof breadcrumb,
+    // No default integrations that would re-add tracing or session replay.
+    defaultIntegrations: false
+  });
+}
 
 export const handleError: HandleClientError = ({ error, event }) => {
   const error_class =
@@ -25,6 +56,9 @@ export const handleError: HandleClientError = ({ error, event }) => {
     error_class,
     route: event.route.id ?? '/'
   });
+  if (PUBLIC_SENTRY_DSN) {
+    Sentry.captureException(error);
+  }
   return {
     message: 'CLIENT_ERROR',
     code: 'CLIENT_ERROR'
