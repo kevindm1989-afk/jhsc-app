@@ -199,8 +199,8 @@ Postgres).
 | Auth | **Supabase Auth with passkeys (WebAuthn) only**; TOTP enrollment fallback removed once a passkey is set. No SMS, no password fallback. | Phishing-resistant by design. |
 | E2EE | **libsodium-wrappers** (sealed boxes for committee-encrypted records; secret boxes for member identity field); per-user identity keys; per-committee data key wrapped to each member's identity key. Server (Supabase) sees **ciphertext only** for C3/C4 data. | Mature, audited, WASM-friendly. |
 | Object storage | **Supabase Storage** with **client-side encryption** of every blob before upload | Provider sees ciphertext only — same posture as the DB. |
-| **Hosting** | **Self-hosted Supabase on a Canadian-incorporated VPS** (OVHcloud Canada, Vexxhost, or equivalent). **Supabase Cloud (ca-central) is the documented fallback** if self-host ops cost exceeds the team's capacity at v1 — acceptable only because E2EE means Supabase sees ciphertext for sensitive content. ADR captures the choice and the tradeoff. | Strongest jurisdiction posture; Supabase is open-source so self-hosting is supported. |
-| Error tracking | **Self-hosted GlitchTip** (same Canadian VPS) | No third-party PI processor. |
+| **Hosting** | **Supabase Cloud, `ca-central-1` (Canadian) region.** Tradeoff explicitly accepted: Supabase Inc. is US-incorporated and the underlying AWS region is also US-incorporated, so US legal process (CLOUD Act) can in principle reach the platform. This is acceptable **only because** the E2EE design in §5.3 means Supabase sees ciphertext for all C3/C4 data — what could be compelled is mostly unreadable without keys held client-side. ADR captures the tradeoff. | Lowest ops burden; managed Postgres + Auth + Storage + RLS in one stack; Canadian data residency; E2EE neutralizes the bulk of the US-process risk. |
+| Error tracking | **Sentry SaaS on EU/CA-eligible plan with strict PI scrubbing at the SDK layer** (or self-hosted GlitchTip if EU/CA residency unavailable on plan tier). Architect picks in ADR. | No PI leaves the app via error tracking; provider sees scrubbed payloads only. |
 | CI | GitHub Actions running `scripts/verify.sh` (already in pack) | Token audit, lint, types, semgrep, gitleaks. |
 | Feature flags | **Flag table in Postgres (with RLS)** — no third-party flag SaaS | No PI processor; simple is fine at this scale. |
 | i18n | **Locale catalog from day 1, `en-CA` only at launch** | Pack lesson: retrofitting i18n is expensive. French added later via localization-specialist. |
@@ -432,7 +432,7 @@ In addition to every gate already in `.context/constraints.md`:
 | # | Decision | Locked value |
 |---|---|---|
 | 1 | Workplace context | 50+ workers, single site → JHSC + at least one worker certified member (OHSA s.9(12)); **single-tenant build**. |
-| 2 | Hosting | **Self-hosted Supabase on a Canadian-incorporated VPS** (OVHcloud Canada / Vexxhost / equivalent). Supabase Cloud (ca-central) is the documented fallback; only viable because E2EE means the provider sees ciphertext for sensitive content. Architect produces the ADR comparing the two with ops-cost numbers. |
+| 2 | Hosting | **Supabase Cloud, `ca-central-1` region.** Tradeoff (Supabase Inc. + AWS are US-incorporated → CLOUD-Act reachable) is explicitly accepted. The E2EE design in §5.3 is the load-bearing mitigation: the provider holds ciphertext for all sensitive worker-side content. Architect captures the tradeoff and the mitigations in the ADR. |
 | 3 | Concern intake surface | **Committee-members-only.** No public-facing submission endpoint. Reps record concerns raised by workers. |
 | 4 | Name protection on concerns | **E2EE under the committee key; visible to all committee members.** No per-rep key partitioning. |
 | 5 | Duress / plausible-deniability mode | **Punt to v2.** Recorded in plan §14. v1 mitigation: visible audit log and post-coercion notification to other reps. |
