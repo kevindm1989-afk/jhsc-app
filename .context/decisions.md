@@ -172,7 +172,7 @@ The retention pass continues to emit exactly one `retention.deleted` summary row
 ## Follow-ups (T16 acceptance amended — see Task-list amendments at end)
 
 - [ ] **T16 acceptance amended** — per-event-type retention; `retention_class` column; schedule table; underlying-record-ceiling rule; `retention.deleted` jsonb shape per privacy-review §3.4 / §3.5.
-- [ ] **HG-14 — user ratification** of the per-event schedule before T16 ships. The schedule table is the authoritative artifact; the user reviews the values in this ADR as the proposed final state and ratifies or proposes per-row changes.
+- [x] **HG-14 — user ratification RATIFIED 2026-05-22 (orchestrator-recorded)** of the per-event schedule as-proposed. The user accepted the privacy-reviewer's per-event-type table verbatim (90d for auth events; 24mo for committee_data_key.unwrap / alert.fired; 7y for rotation/revocation/exports/retention.deleted; match-underlying-record for content events; underlying-record-ceiling rule with 30-day buffer). No per-row changes. T16 implementation is unblocked from HG-14 (other gates apply).
 - [ ] **observability-setup next pass:** corrects `observability/README.md` §1 reasoning text (cross-cutting observation #4) and replaces `observability/audit-log.md` §3 single-filter spec with a pointer to the schedule table.
 - [ ] **Test-writer (test obligations 7–11 from privacy-review §7):** per-event retention schedule honored; audit-row-cannot-outlive-target rule; `retention.deleted` summary row retention at 7y; schedule-table-vs-enum drift CI assertion; `retention.deleted` per-event-type counts in the summary row's jsonb.
 
