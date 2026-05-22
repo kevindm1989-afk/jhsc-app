@@ -82,7 +82,7 @@ const requestIdHandle: Handle = async ({ event, resolve }) => {
 };
 
 export const handle: Handle = SENTRY_DSN
-  ? sequence(Sentry.sentryHandle(), requestIdHandle)
+  ? sequence(Sentry.sentryHandle({ injectFetchProxyScript: false }), requestIdHandle)
   : requestIdHandle;
 
 export const handleError: HandleServerError = ({ error, event }) => {
