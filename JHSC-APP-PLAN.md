@@ -1,6 +1,6 @@
 # Worker-Side JHSC App — Project Plan
 
-> **Status:** Draft Phase-1 plan. Awaiting human-gate approval before any code is written.
+> **Status:** Phase-1 plan with all blocking decisions locked. Ready to invoke the **architect** agent for ADRs and task list.
 > **Branch:** `claude/jhsc-app-plan-nUriS`
 > **Authoring framework:** the Agent OS pack in this repo (PIPEDA/Ontario baseline).
 > **Not legal advice.** Before launch, a privacy lawyer and a labour-law lawyer must review.
@@ -45,10 +45,12 @@ A person can hold more than one role; the app stores roles as a set, not a tier.
 Each task below is a feature area. The architect breaks them into ordered tasks
 in Phase 1.
 
-1. **Member concern intake** — workers (not just JHSC members) submit
-   safety concerns to the *worker side* of the committee. Submission is
-   **anonymous by default**, with an optional name+contact for follow-up.
-   Encrypted to the committee's public key on the device before upload.
+1. **Member concern intake (committee-members-only entry point)** — a
+   worker rep records a concern raised by a worker. There is no public
+   submission surface; only committee members log into the app. The
+   rep can mark the source as anonymous, or record the worker's name —
+   in which case the name is **E2EE under the committee key** and visible
+   to all committee members for follow-up.
 2. **Hazard register** — concerns are triaged into a register with status,
    severity, location, control measures, owner-on-the-worker-side, and dates.
 3. **Monthly workplace inspections** (s.9(26)) — checklist-based, offline-
@@ -174,28 +176,34 @@ test-writer can convert to failing tests before the implementer touches code.
 - **Offline-capable** for inspections (the shop floor often has no signal).
 - **No native iOS/Android app in v1** — store presence reveals who
   installed it (T10) and adds a third-party (Apple/Google) PI processor.
-- **Single tenant per JHSC committee** logically, multi-tenant
-  physically; tenant boundary enforced at the row level and at the key
-  level (different committees encrypt to different committee keys).
+- **Single-tenant** — one JHSC committee, one workplace (50+ workers,
+  single site). Multi-tenant code paths are intentionally **not** built
+  in v1; if a second committee adopts later, that's a v2 project, not
+  a config flag. Keeps the v1 attack surface minimal.
+- **Personal-device-only** posture. Onboarding actively discourages
+  installing on employer devices; an in-app advisory shows on first
+  launch. No installation enforcement (we can't reliably detect MDM
+  from a PWA), but the docs and UX nudge hard.
 
-### 5.2 Tech stack (proposed; architect can revise)
+### 5.2 Tech stack (locked-in by user decisions; architect ratifies in ADR)
 Aligns with `.context/preferences.md` (TypeScript, simple-over-clever,
-SQLite-or-Postgres).
+Postgres).
 
 | Layer | Choice | Why |
 |---|---|---|
 | Language | **TypeScript** | Preference file. |
-| Framework | **SvelteKit** (or Next.js 15 App Router) | SvelteKit ships less JS, simpler mental model, strong PWA story. Final pick is an ADR. |
-| API | Co-located server routes; **tRPC** for type safety | Single codebase, no extra service to harden. |
-| DB | **Postgres** (managed, CA region) | Multi-user, audit log volume, concurrent committee members. |
-| ORM | **Drizzle** | Minimal, SQL-readable migrations the migration-handler can verify. |
-| Auth | **Lucia** (or `better-auth`) with **passkeys-first** (WebAuthn) | Phishing-resistant. No SMS. |
-| E2EE | **libsodium-wrappers** (sealed boxes for concern intake; secret boxes for stored sensitive fields); per-user identity keys; per-committee data key wrapped to each member's identity key | Mature, audited, WASM-friendly. |
-| Object storage | **Backblaze B2** in CA (or AWS S3 ca-central-1) with **client-side encryption** of every blob | Provider sees ciphertext only. |
-| Hosting | **Hetzner CA** (Falkenstein has no CA region — pick a Canadian-incorporated provider) or **AWS ca-central-1**. **Note:** AWS is US-incorporated and therefore CLOUD-Act-reachable; the ADR must document this tradeoff and lean toward a Canadian-incorporated provider where the SLA fits. | Canadian-region requirement (constraints.md). |
-| Error tracking | **Self-hosted GlitchTip** (CA region) | No third-party PI processor. |
+| Framework | **SvelteKit** (or Next.js 15 App Router) — architect picks in ADR | SvelteKit ships less JS, simpler mental model, strong PWA story. |
+| API | Co-located server routes + Supabase Edge Functions where useful | Single codebase, no extra service to harden. |
+| DB | **Supabase Postgres** with **Row-Level Security on every table** | Multi-user, audit log volume, concurrent committee members. RLS is mandatory, not optional. |
+| ORM | **Drizzle** (for schema + migrations) | SQL-readable migrations the migration-handler can verify. RLS policies authored in SQL and version-controlled. |
+| Auth | **Supabase Auth with passkeys (WebAuthn) only**; TOTP enrollment fallback removed once a passkey is set. No SMS, no password fallback. | Phishing-resistant by design. |
+| E2EE | **libsodium-wrappers** (sealed boxes for committee-encrypted records; secret boxes for member identity field); per-user identity keys; per-committee data key wrapped to each member's identity key. Server (Supabase) sees **ciphertext only** for C3/C4 data. | Mature, audited, WASM-friendly. |
+| Object storage | **Supabase Storage** with **client-side encryption** of every blob before upload | Provider sees ciphertext only — same posture as the DB. |
+| **Hosting** | **Self-hosted Supabase on a Canadian-incorporated VPS** (OVHcloud Canada, Vexxhost, or equivalent). **Supabase Cloud (ca-central) is the documented fallback** if self-host ops cost exceeds the team's capacity at v1 — acceptable only because E2EE means Supabase sees ciphertext for sensitive content. ADR captures the choice and the tradeoff. | Strongest jurisdiction posture; Supabase is open-source so self-hosting is supported. |
+| Error tracking | **Self-hosted GlitchTip** (same Canadian VPS) | No third-party PI processor. |
 | CI | GitHub Actions running `scripts/verify.sh` (already in pack) | Token audit, lint, types, semgrep, gitleaks. |
-| Feature flags | **Flag table in Postgres** (no third-party flag SaaS) | Same reason — no PI processor; simple is fine at this scale. |
+| Feature flags | **Flag table in Postgres (with RLS)** — no third-party flag SaaS | No PI processor; simple is fine at this scale. |
+| i18n | **Locale catalog from day 1, `en-CA` only at launch** | Pack lesson: retrofitting i18n is expensive. French added later via localization-specialist. |
 
 ### 5.3 Key cryptography model (this is load-bearing — threat-modeler verifies)
 - **Each user** has an identity keypair generated **client-side** at first
@@ -417,36 +425,36 @@ In addition to every gate already in `.context/constraints.md`:
 
 ---
 
-## 13. Decisions needed from you before Phase 1 starts
+## 13. Decisions locked (and the ones still open)
 
-These are blocking. The architect will refuse to start until they're answered.
+### Locked — Phase 1 can start
 
-1. **Workplace context.** How many workers in the workplace? Is the
-   workforce unionized? Single site or multi-site? (Drives JHSC vs H&S
-   Representative path, certified-member requirement, and multi-committee
-   tenancy.)
-2. **Hosting provider preference / budget tolerance.** Strict Canadian-
-   incorporated provider (Hetzner Canada-Central-via-partner, OVH Canada,
-   bare-metal Canadian VPS), or AWS ca-central-1 with the documented
-   CLOUD-Act tradeoff?
-3. **Personal-device-only stance.** Are workers willing to install on
-   personal phones, or do we need to support a "web-only, no install"
-   mode for those who only have an employer-issued device? (Affects
-   onboarding copy and the offline-inspection feature.)
-4. **Anonymity ceiling.** Do you want the strongest model — even worker
-   co-chair cannot link a concern to the submitter unless the submitter
-   explicitly reveals — or a slightly weaker model where the worker
-   co-chair can break the link in defined circumstances? (Trade-off:
-   stronger model = harder follow-up; weaker = small reprisal risk if
-   co-chair is ever compromised.)
-5. **Plausible deniability / duress mode.** In scope for v1, or punt to a
-   later version and document in `KNOWN-GAPS.md`? (Recommendation: punt.)
-6. **Pen-test budget and timing.** Required before production; need a
-   rough budget to identify a firm.
-7. **Legal review.** Do you have a privacy lawyer and a labour-law
-   lawyer lined up? They're a hard human gate before launch.
-8. **French.** Any French-speaking worker on the committee at launch? If
-   yes, `fr-CA` is in v1 and the localization-specialist joins Phase 1.
+| # | Decision | Locked value |
+|---|---|---|
+| 1 | Workplace context | 50+ workers, single site → JHSC + at least one worker certified member (OHSA s.9(12)); **single-tenant build**. |
+| 2 | Hosting | **Self-hosted Supabase on a Canadian-incorporated VPS** (OVHcloud Canada / Vexxhost / equivalent). Supabase Cloud (ca-central) is the documented fallback; only viable because E2EE means the provider sees ciphertext for sensitive content. Architect produces the ADR comparing the two with ops-cost numbers. |
+| 3 | Concern intake surface | **Committee-members-only.** No public-facing submission endpoint. Reps record concerns raised by workers. |
+| 4 | Name protection on concerns | **E2EE under the committee key; visible to all committee members.** No per-rep key partitioning. |
+| 5 | Duress / plausible-deniability mode | **Punt to v2.** Recorded in plan §14. v1 mitigation: visible audit log and post-coercion notification to other reps. |
+| 6 | Device stance | **Personal-device-only.** Onboarding actively discourages employer-issued devices; no MDM detection enforcement (PWA can't reliably do it), but UX nudges hard. |
+| 7 | French (fr-CA) at launch | **English-only at launch**, i18n catalog scaffolded from day 1 so French is later a translation task, not a refactor. |
+| 8 | Auth | **Supabase Auth with passkeys (WebAuthn) only.** TOTP for first-device enrollment; removed once a passkey is set. No SMS, no password fallback. |
+| 9 | Encryption model | **libsodium**, per-user identity keys, per-committee data key wrapped to each member. Server stores ciphertext for C3/C4 data. |
+
+### Still open — must be answered before launch, NOT before Phase 1
+
+| # | Open item | Owner | Gate |
+|---|---|---|---|
+| A | Pen-test scope, firm, and budget | You | Before production deploy. |
+| B | Privacy lawyer (PIPEDA/Ontario) lined up to review the privacy policy and the privacy-reviewer's posture | You | Before production deploy. |
+| C | Labour lawyer (OHSA s.50, labour-relations privilege) lined up to review the worker-side-only posture and the export model | You | Before production deploy. |
+| D | Retention schedule final approval (§8) | You + committee | Before production deploy. |
+| E | Privacy policy + accessibility statement + complaints contact published | tech-writer drafts → you + lawyer approve | Before production deploy. |
+| F | Backup/restore drill executed once end-to-end per `playbooks/backup-restore.md` | deployer + you | Before production deploy. |
+
+None of these block Phase 1. They block Phase 3 (Ship). They are listed
+here so the architect plans the work into the task list rather than us
+discovering them at launch week.
 
 ---
 
