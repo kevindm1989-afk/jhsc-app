@@ -1,0 +1,464 @@
+{
+  "_meta": {
+    "locale": "fr-CA",
+    "name": "Français (Canada)",
+    "direction": "ltr",
+    "version": "0.0.0",
+    "status": "stub — not for production. Per ADR-0009: scaffolded from day 1; populated by localization-specialist before any French-speaking committee member uses the app. OHSA / s.50 / s.43 / s.51 wording is reviewed by a labour lawyer before fr-CA ships (plan §10).",
+    "generated_by": "designer agent, 2026-05-22",
+    "_review_needed_when_localized": [
+      "concern.named.advisory",
+      "reprisal.passphrase.helper",
+      "reprisal.empty.body",
+      "onboarding.device.body",
+      "onboarding.hosting.body",
+      "onboarding.passkey.explainer",
+      "onboarding.recovery.body",
+      "panic.body",
+      "export.recipient.label",
+      "export.concern_flag.body",
+      "audit.action.*"
+    ]
+  },
+
+  "common": {
+    "app_name": "",
+    "actions": {
+      "cancel": "",
+      "continue": "",
+      "back": "",
+      "close": "",
+      "done": "",
+      "save": "",
+      "edit": "",
+      "delete": "",
+      "retry": "",
+      "next": "",
+      "previous": "",
+      "confirm": "",
+      "submit": "",
+      "open": "",
+      "remove": "",
+      "copy": "",
+      "print": "",
+      "more": "",
+      "expand": "",
+      "collapse": "",
+      "skip_to_content": ""
+    },
+    "labels": {
+      "required": "",
+      "optional": "",
+      "loading": "",
+      "error": "",
+      "success": "",
+      "warning": "",
+      "info": ""
+    },
+    "errors": {
+      "generic": "",
+      "network": "",
+      "permission": "",
+      "session_expired": "",
+      "rate_limit": "",
+      "crypto": "",
+      "integrity_fail": ""
+    }
+  },
+
+  "nav": {
+    "inspections": "",
+    "concerns": "",
+    "reprisal": "",
+    "minutes": "",
+    "recommendations": "",
+    "work_refusal": "",
+    "s51": "",
+    "library": "",
+    "training": "",
+    "audit": "",
+    "sensitive_feed": "",
+    "settings": "",
+    "more": ""
+  },
+
+  "onboarding": {
+    "device": {
+      "heading": "",
+      "body": "",
+      "fingerprint_label": "",
+      "continue": "",
+      "stop": "",
+      "stop_confirm_heading": "",
+      "stop_confirm_body": ""
+    },
+    "hosting": {
+      "heading": "",
+      "body": "",
+      "privacy_policy_link": "",
+      "continue": ""
+    },
+    "browser": {
+      "unsupported_heading": "",
+      "unsupported_body": ""
+    },
+    "passkey": {
+      "heading": "",
+      "explainer": "",
+      "start": "",
+      "waiting": "",
+      "failed_heading": "",
+      "failed_body": "",
+      "done": "",
+      "continue": ""
+    },
+    "recovery": {
+      "heading": "",
+      "body": "",
+      "print": "",
+      "copy": "",
+      "copy_warning": "",
+      "verify": {
+        "heading": "",
+        "helper": "",
+        "submit": "",
+        "wrong_heading": "",
+        "wrong_body": "",
+        "exhausted_heading": "",
+        "exhausted_body": ""
+      }
+    },
+    "done": {
+      "heading": "",
+      "summary_passkey": "",
+      "summary_recovery": "",
+      "summary_browser": "",
+      "summary_device": "",
+      "continue": ""
+    }
+  },
+
+  "print": {
+    "recovery": {
+      "title": "",
+      "date_label": "",
+      "passphrase_label": "",
+      "salt_label": "",
+      "warning": "",
+      "footer_url_label": "",
+      "footer_build_label": ""
+    }
+  },
+
+  "concern": {
+    "page": { "title": "", "list_heading": "", "log_button": "" },
+    "intake": {
+      "heading": "",
+      "subheading": "",
+      "field": {
+        "hazard_class": "",
+        "severity": "",
+        "location": "",
+        "title": "",
+        "body": "",
+        "source_toggle": "",
+        "source_name": ""
+      },
+      "anon": {
+        "on_label": "",
+        "off_label": "",
+        "helper_on": "",
+        "helper_off": ""
+      },
+      "named": { "advisory_heading": "", "advisory_body": "" },
+      "actions": { "save": "", "saving": "", "cancel": "" },
+      "validation": {
+        "title_required": "",
+        "body_required": "",
+        "hazard_required": "",
+        "severity_required": "",
+        "location_required": ""
+      }
+    },
+    "saved": {
+      "heading": "",
+      "summary_anon": "",
+      "summary_named": "",
+      "next": "",
+      "return": ""
+    },
+    "empty": { "heading": "", "body": "", "cta": "" },
+    "list": {
+      "row_anon_label": "",
+      "row_named_label": "",
+      "filter_status": "",
+      "filter_severity": "",
+      "filter_hazard": ""
+    }
+  },
+
+  "reprisal": {
+    "page": { "title": "", "list_heading": "" },
+    "empty": { "heading": "", "body": "", "cta": "" },
+    "row": { "c4_badge": "", "locked_preview": "" },
+    "create": {
+      "heading": "",
+      "subheading": "",
+      "field": { "title": "", "body": "", "passphrase": "", "passphrase_confirm": "" },
+      "passphrase": { "helper": "" },
+      "actions": { "save": "", "saving": "" }
+    },
+    "passphrase": {
+      "heading": "",
+      "label": "",
+      "helper": "",
+      "open": "",
+      "wrong_heading": "",
+      "wrong_body": "",
+      "exhausted_heading": "",
+      "exhausted_body": ""
+    },
+    "read": {
+      "actor_label": "",
+      "created_label": "",
+      "status_label": "",
+      "hash_label": "",
+      "recent_reads_heading": "",
+      "your_read_announce": ""
+    },
+    "fourEyes": {
+      "heading": "",
+      "body": "",
+      "propose_button": "",
+      "proposed_pending_label": "",
+      "proposed_expires_label": "",
+      "expired_label": "",
+      "approve_button": "",
+      "approved_announce": "",
+      "self_approve_denied_heading": "",
+      "self_approve_denied_body": ""
+    }
+  },
+
+  "sensitiveFeed": {
+    "page": { "title": "", "subtitle": "" },
+    "empty": { "heading": "", "body": "" },
+    "row": {
+      "read_action": "",
+      "export_action": "",
+      "update_action": "",
+      "timestamp_relative": "",
+      "timestamp_absolute": ""
+    },
+    "muted": { "banner": "", "toggle_label": "" },
+    "error": { "load_failed": "" }
+  },
+
+  "export": {
+    "button": { "label": "", "aria_label": "" },
+    "reauth": {
+      "heading": "",
+      "body": "",
+      "button_label": "",
+      "attempts_left": "",
+      "failed_heading": "",
+      "failed_body": "",
+      "lockout_heading": "",
+      "lockout_body": ""
+    },
+    "fields": { "heading": "", "subheading": "", "group_label": "" },
+    "recipient": { "label": "" },
+    "concern_flag": {
+      "heading": "",
+      "body": "",
+      "concern_row": "",
+      "confirm_checkbox": ""
+    },
+    "confirm": { "button_label": "", "disabled_hint": "" },
+    "confirming": { "label": "" },
+    "rendering": { "label": "", "page_progress": "" },
+    "exported": {
+      "heading": "",
+      "filename_label": "",
+      "audit_label": "",
+      "notified_label": "",
+      "close": ""
+    },
+    "empty": { "heading": "", "body": "" },
+    "error": { "integrity_heading": "", "integrity_body": "" }
+  },
+
+  "photo": {
+    "capture": { "button": "", "advisory_inline": "" },
+    "preview": { "heading": "", "gps_advisory": "", "attach": "", "retake": "" },
+    "location": { "label": "", "select_label": "", "placeholder": "" },
+    "thumbnail": { "alt_with_location": "", "alt_unspecified": "" },
+    "status": {
+      "attached": "",
+      "queued": "",
+      "upload_failed": "",
+      "integrity_failed_heading": "",
+      "integrity_failed_body": ""
+    }
+  },
+
+  "offline": {
+    "banner": { "heading": "", "queued_count": "", "retry": "" },
+    "syncing": { "heading": "" },
+    "synced": { "heading": "", "pill": "" },
+    "partial": { "heading": "", "body": "", "view_link": "" }
+  },
+
+  "lock": {
+    "heading": "",
+    "body": "",
+    "button_unlock": "",
+    "button_signout": "",
+    "now_button": "",
+    "auto_lock_after": ""
+  },
+
+  "panic": {
+    "trigger_button": "",
+    "heading": "",
+    "body": "",
+    "phrase_label": "",
+    "phrase_placeholder": "",
+    "confirm_button": "",
+    "wiping_heading": "",
+    "complete_heading": "",
+    "complete_body": ""
+  },
+
+  "session": {
+    "page": { "title": "", "subtitle": "" },
+    "row": {
+      "device_label": "",
+      "last_seen_label": "",
+      "current_label": "",
+      "revoke_button": "",
+      "revoking_label": "",
+      "revoked_label": ""
+    },
+    "revoke_all": {
+      "button": "",
+      "confirm_heading": "",
+      "confirm_body": "",
+      "confirm_button": ""
+    },
+    "current_revoke": { "confirm_heading": "", "confirm_body": "" }
+  },
+
+  "audit": {
+    "page": { "title": "", "subtitle": "" },
+    "filter": {
+      "action_label": "",
+      "actor_label": "",
+      "time_range_label": "",
+      "all": ""
+    },
+    "column": { "timestamp": "", "actor": "", "action": "", "target": "", "hash": "" },
+    "expanded": {
+      "full_hash_label": "",
+      "target_id_label": "",
+      "derived_from_concerns_label": "",
+      "field_set_hash_label": ""
+    },
+    "integrity": {
+      "ok_heading": "",
+      "ok_body": "",
+      "failed_heading": "",
+      "failed_body": "",
+      "never_heading": "",
+      "never_body": ""
+    },
+    "action": {
+      "concern.create": "",
+      "concern.update": "",
+      "source.reveal": "",
+      "reprisal.create": "",
+      "reprisal.update": "",
+      "reprisal.read": "",
+      "reprisal.delete.propose": "",
+      "reprisal.delete.approve": "",
+      "sensitive.read": "",
+      "sensitive.access_attempt": "",
+      "export.minutes": "",
+      "export.recommendation": "",
+      "export.integrity_fail": "",
+      "identity_keypair.created": "",
+      "identity_privkey.recovery_blob.written": "",
+      "identity_privkey.recovery_blob.restored": "",
+      "committee_data_key.wrapped_for_member": "",
+      "committee_data_key.unwrap": "",
+      "committee_data_key.rotation.started": "",
+      "committee_data_key.rotation.completed": "",
+      "committee_data_key.member_revoked": "",
+      "session.revoke": "",
+      "retention.pass": "",
+      "rate_limit": "",
+      "client.identity_selftest_fail": "",
+      "client.cache_policy_violation": "",
+      "queue.integrity_fail": ""
+    }
+  },
+
+  "inspection": {
+    "page": { "title": "", "new_button": "" },
+    "empty": { "heading": "", "body": "", "cta": "" },
+    "form": {
+      "heading": "",
+      "checklist_heading": "",
+      "notes_label": "",
+      "photos_heading": "",
+      "save": "",
+      "saving": "",
+      "save_draft": ""
+    }
+  },
+
+  "form": {
+    "common": { "required_indicator_sr": "" }
+  },
+
+  "a11y": {
+    "skip_to_content": "",
+    "menu_open": "",
+    "menu_close": "",
+    "modal_close": "",
+    "modal_announce_open": "",
+    "loading_announce": "",
+    "loading_complete": "",
+    "toast_announce": "",
+    "feed_new_item": "",
+
+    "export": {
+      "reauth": { "success": "" },
+      "concern_flag": { "detected": "" },
+      "complete": "",
+      "post_export_notification": ""
+    },
+    "reprisal": {
+      "read": { "logged": "" },
+      "fourEyes": { "proposed": "" }
+    },
+    "passphrase": { "wrong": "" },
+    "concern": {
+      "anonymous_on": "",
+      "anonymous_off": "",
+      "advisory_named": ""
+    },
+    "offline": { "banner": "", "online_again": "", "synced": "" },
+    "lock": { "engaged": "", "released": "" },
+    "panic": { "complete": "", "in_progress": "" },
+    "session": { "revoked": "", "all_revoked": "" },
+    "audit": { "integrity_fail": "", "integrity_ok": "" },
+    "photo": { "captured": "", "attached": "", "integrity_fail": "" },
+    "sensitive_feed": { "new_event": "", "muted": "" }
+  },
+
+  "library": {
+    "page": { "title": "", "subtitle": "" },
+    "empty": { "heading": "", "body": "" }
+  }
+}

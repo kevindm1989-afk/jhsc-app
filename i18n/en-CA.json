@@ -1,0 +1,625 @@
+{
+  "_meta": {
+    "locale": "en-CA",
+    "name": "English (Canada)",
+    "direction": "ltr",
+    "version": "0.1.0",
+    "generated_by": "designer agent, 2026-05-22",
+    "review_note": "All strings reviewed by tech-writer and labour lawyer before any production launch (plan §13 item E). OHSA / s.50 / s.43 / s.51 wording in particular.",
+    "placeholders": "Variables use {name} syntax; integers/dates locale-format at render time.",
+    "_review_needed_when_localized": [
+      "concern.named.advisory",
+      "reprisal.passphrase.helper",
+      "reprisal.empty.body",
+      "onboarding.device.body",
+      "onboarding.hosting.body",
+      "onboarding.passkey.explainer",
+      "onboarding.recovery.body",
+      "panic.body",
+      "export.recipient.label",
+      "export.concern_flag.body",
+      "audit.action.*"
+    ]
+  },
+
+  "common": {
+    "app_name": "JHSC App",
+    "actions": {
+      "cancel": "Cancel",
+      "continue": "Continue",
+      "back": "Back",
+      "close": "Close",
+      "done": "Done",
+      "save": "Save",
+      "edit": "Edit",
+      "delete": "Delete",
+      "retry": "Retry",
+      "next": "Next",
+      "previous": "Previous",
+      "confirm": "Confirm",
+      "submit": "Submit",
+      "open": "Open",
+      "remove": "Remove",
+      "copy": "Copy",
+      "print": "Print",
+      "more": "More",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "skip_to_content": "Skip to main content"
+    },
+    "labels": {
+      "required": "required",
+      "optional": "optional",
+      "loading": "Loading",
+      "error": "Error",
+      "success": "Success",
+      "warning": "Warning",
+      "info": "Information"
+    },
+    "errors": {
+      "generic": "Something went wrong. Try again, or contact your worker co-chair if the problem continues.",
+      "network": "Cannot reach the server. Check your connection and try again.",
+      "permission": "You don't have permission to do this. If you think you should, contact your worker co-chair.",
+      "session_expired": "Your session has ended. Sign in again to continue.",
+      "rate_limit": "You've done this too many times. Try again in {minutes} minutes.",
+      "crypto": "Could not decrypt the data on this device. Try locking and signing in again. If this keeps happening, your device may have been tampered with — contact your worker co-chair.",
+      "integrity_fail": "The data on this device could not be verified. This entry may have been tampered with and was not saved. Please re-enter it."
+    }
+  },
+
+  "nav": {
+    "inspections": "Inspections",
+    "concerns": "Concerns",
+    "reprisal": "Reprisal log",
+    "minutes": "Minutes",
+    "recommendations": "Recommendations",
+    "work_refusal": "Work refusal (s.43)",
+    "s51": "Critical injury (s.51)",
+    "library": "Document library",
+    "training": "Training records",
+    "audit": "Audit log",
+    "sensitive_feed": "Recent sensitive activity",
+    "settings": "Settings",
+    "more": "More"
+  },
+
+  "onboarding": {
+    "device": {
+      "heading": "Use a personal device only",
+      "body": "If you are reading this on a phone or laptop your employer owns, pays for, or manages, your employer may be able to read what you do here. Stop. Install on a personal phone or laptop and start again.",
+      "fingerprint_label": "This device",
+      "continue": "This is a personal device — continue",
+      "stop": "Stop — I'll switch to a personal device",
+      "stop_confirm_heading": "OK to close",
+      "stop_confirm_body": "You can come back any time on a personal device."
+    },
+    "hosting": {
+      "heading": "Where your data lives",
+      "body": "Your committee's data is stored on Supabase, a company based in the US that runs the servers in Canada (ca-central-1). Two things to know: (1) the worker-side content — concerns, reprisal entries, minutes drafts — is encrypted on your device before it leaves, so Supabase only ever sees scrambled bytes. (2) US legal process could in principle reach the company, but what they would get back is the same scrambled bytes.",
+      "privacy_policy_link": "Read the full privacy policy",
+      "continue": "Got it"
+    },
+    "browser": {
+      "unsupported_heading": "This browser is too old",
+      "unsupported_body": "The JHSC App needs a recent version of Chrome, Edge, Firefox, or Safari to set up passkeys safely. Update your browser or use a different one on this device and try again."
+    },
+    "passkey": {
+      "heading": "Set up your passkey",
+      "explainer": "A passkey is a way to sign in without a password. It lives on this device and uses your fingerprint, face, or device PIN to confirm it's you. There is no password to leak or guess.",
+      "start": "Set up passkey now",
+      "waiting": "Waiting for your device…",
+      "failed_heading": "Couldn't set up the passkey",
+      "failed_body": "Try again. If your device doesn't support passkeys, use a different personal device.",
+      "done": "Passkey set on this device",
+      "continue": "Next: print your recovery sheet"
+    },
+    "recovery": {
+      "heading": "Your recovery sheet",
+      "body": "If you lose this device AND your passkey, the only way back into your account is the recovery passphrase below. There is no admin who can reset it. Print this sheet and store it somewhere safe — not at work.",
+      "print": "Print recovery sheet",
+      "copy": "Copy to clipboard",
+      "copy_warning": "Copying is not a substitute for printing. The clipboard is not secure.",
+      "verify": {
+        "heading": "Type the passphrase back to confirm",
+        "helper": "Type the words exactly as printed, separated by spaces.",
+        "submit": "Confirm",
+        "wrong_heading": "That didn't match",
+        "wrong_body": "Check the printed sheet and try again. {attempts_left} attempts left.",
+        "exhausted_heading": "Three wrong attempts",
+        "exhausted_body": "We'll show the passphrase again so you can re-verify."
+      }
+    },
+    "done": {
+      "heading": "You're set up",
+      "summary_passkey": "Passkey set on this device",
+      "summary_recovery": "Recovery sheet printed and verified",
+      "summary_browser": "Browser supported",
+      "summary_device": "Marked as personal device",
+      "continue": "Open the app"
+    }
+  },
+
+  "print": {
+    "recovery": {
+      "title": "JHSC App — Recovery sheet for {display_name}",
+      "date_label": "Printed on",
+      "passphrase_label": "Recovery passphrase",
+      "salt_label": "Salt",
+      "warning": "If anyone has this sheet, they can recover your account on a new device. Treat it like a key. Do not store it at work.",
+      "footer_url_label": "App",
+      "footer_build_label": "Build"
+    }
+  },
+
+  "concern": {
+    "page": {
+      "title": "Concerns",
+      "list_heading": "Concerns register",
+      "log_button": "Log a concern"
+    },
+    "intake": {
+      "heading": "Log a concern",
+      "subheading": "Recorded by you on behalf of a worker. Anonymous by default.",
+      "field": {
+        "hazard_class": "Hazard class",
+        "severity": "Severity",
+        "location": "Location",
+        "title": "Title",
+        "body": "Describe the concern",
+        "source_toggle": "Keep source anonymous",
+        "source_name": "Source — worker's name"
+      },
+      "anon": {
+        "on_label": "Anonymous source",
+        "off_label": "Named source",
+        "helper_on": "The original worker's name is not stored. Only what you type in the body is.",
+        "helper_off": "You are about to record a worker's name."
+      },
+      "named": {
+        "advisory_heading": "About to save a worker's name",
+        "advisory_body": "The source name will be encrypted under the committee key. Every active committee member can see it. You cannot un-name it once you save."
+      },
+      "actions": {
+        "save": "Save concern",
+        "saving": "Encrypting and saving…",
+        "cancel": "Cancel"
+      },
+      "validation": {
+        "title_required": "Add a short title.",
+        "body_required": "Describe what happened.",
+        "hazard_required": "Pick a hazard class.",
+        "severity_required": "Pick a severity.",
+        "location_required": "Pick a location."
+      }
+    },
+    "saved": {
+      "heading": "Concern logged",
+      "summary_anon": "Saved as anonymous source.",
+      "summary_named": "Saved with a named source. Visible to all active committee members.",
+      "next": "Log another",
+      "return": "Back to register"
+    },
+    "empty": {
+      "heading": "No concerns logged yet",
+      "body": "When a worker raises something, log it here. The intake form encrypts the body on this device before saving.",
+      "cta": "Log a concern"
+    },
+    "list": {
+      "row_anon_label": "Anonymous source",
+      "row_named_label": "Named source — tap to reveal name",
+      "filter_status": "Status",
+      "filter_severity": "Severity",
+      "filter_hazard": "Hazard class"
+    }
+  },
+
+  "reprisal": {
+    "page": {
+      "title": "Reprisal log",
+      "list_heading": "Reprisal entries"
+    },
+    "empty": {
+      "heading": "No reprisal entries logged",
+      "body": "A reprisal entry records suspected retaliation against a worker for raising a health-and-safety concern. OHSA s.50 protects workers from this. Entries are the highest sensitivity tier in this app.",
+      "cta": "Log a reprisal entry"
+    },
+    "row": {
+      "c4_badge": "C4 — passphrase to view",
+      "locked_preview": "Locked — tap to view"
+    },
+    "create": {
+      "heading": "Log a reprisal entry",
+      "subheading": "Highest sensitivity. Your name will be recorded as the author. The body is encrypted on this device.",
+      "field": {
+        "title": "Title",
+        "body": "What happened",
+        "passphrase": "Set a passphrase for this entry",
+        "passphrase_confirm": "Re-enter the passphrase"
+      },
+      "passphrase": {
+        "helper": "This passphrase is a friction layer to view the entry later. The actual encryption uses your passkey-derived keys."
+      },
+      "actions": {
+        "save": "Save reprisal entry",
+        "saving": "Encrypting and saving…"
+      }
+    },
+    "passphrase": {
+      "heading": "Enter the passphrase for this entry",
+      "label": "Passphrase",
+      "helper": "This is a friction layer. The entry is also protected by your passkey-derived keys.",
+      "open": "Open",
+      "wrong_heading": "Passphrase incorrect",
+      "wrong_body": "{attempts_left} attempts remaining.",
+      "exhausted_heading": "Three wrong attempts",
+      "exhausted_body": "This attempt has been logged. Wait before trying again."
+    },
+    "read": {
+      "actor_label": "Author",
+      "created_label": "Created",
+      "status_label": "Status",
+      "hash_label": "Audit hash",
+      "recent_reads_heading": "Recent reads of this entry",
+      "your_read_announce": "Your read of this reprisal entry was logged at {timestamp} and other members will be notified."
+    },
+    "fourEyes": {
+      "heading": "This change needs a second committee member's approval",
+      "body": "Status changes on reprisal entries require two active committee members. Propose the change; another member will see it in their sensitive-activity feed and approve.",
+      "propose_button": "Propose change",
+      "proposed_pending_label": "Pending second approval",
+      "proposed_expires_label": "Proposal expires {when}",
+      "expired_label": "Proposal expired",
+      "approve_button": "Approve change",
+      "approved_announce": "Change approved by {approver} — {action}",
+      "self_approve_denied_heading": "You can't approve your own proposal",
+      "self_approve_denied_body": "Another active member must approve. This is by design."
+    }
+  },
+
+  "sensitiveFeed": {
+    "page": {
+      "title": "Recent sensitive activity",
+      "subtitle": "Reads of reprisal entries, exports to the employer co-chair, and other sensitive events from across the committee."
+    },
+    "empty": {
+      "heading": "No recent sensitive activity",
+      "body": "When another member reads a reprisal entry or exports anything to the employer co-chair, you will see it here."
+    },
+    "row": {
+      "read_action": "{actor} read {target_type} entry {target_id}",
+      "export_action": "{actor} exported {target_type} to the employer co-chair",
+      "update_action": "{actor} updated {target_type} entry {target_id}",
+      "timestamp_relative": "{relative}",
+      "timestamp_absolute": "{absolute}"
+    },
+    "muted": {
+      "banner": "Notification pop-ups paused. The feed still updates. Audit logging is unaffected.",
+      "toggle_label": "Pause notifications"
+    },
+    "error": {
+      "load_failed": "Unable to load recent activity. Retry."
+    }
+  },
+
+  "export": {
+    "button": {
+      "label": "Export to employer co-chair",
+      "aria_label": "Export {target_type} to the employer co-chair"
+    },
+    "reauth": {
+      "heading": "Confirm with your passkey to continue",
+      "body": "Exports leave the worker side. Your current session is not enough — you need to confirm with your passkey now.",
+      "button_label": "Use passkey",
+      "attempts_left": "{attempts_left} attempts remaining before lockout.",
+      "failed_heading": "Passkey not confirmed",
+      "failed_body": "Try again, or cancel and start over.",
+      "lockout_heading": "Too many failed attempts",
+      "lockout_body": "Wait {minutes} minutes before trying again."
+    },
+    "fields": {
+      "heading": "These fields will leave the worker side",
+      "subheading": "This is the entire allowlist. Anything not listed here is not included.",
+      "group_label": "{document_type}"
+    },
+    "recipient": {
+      "label": "Recipient: Employer co-chair (manual delivery — you will send the file yourself)."
+    },
+    "concern_flag": {
+      "heading": "This export includes items derived from worker concerns",
+      "body": "Some items being exported came from worker concerns logged on the worker side. Review the originating concerns below before confirming.",
+      "concern_row": "Concern {concern_id} — {hazard_class}",
+      "confirm_checkbox": "I have reviewed the concern-derived items."
+    },
+    "confirm": {
+      "button_label": "Confirm — export now",
+      "disabled_hint": "Tick the confirmation box above to enable."
+    },
+    "confirming": {
+      "label": "Preparing PDF…"
+    },
+    "rendering": {
+      "label": "Rendering…",
+      "page_progress": "Page {current} of {total}"
+    },
+    "exported": {
+      "heading": "Export ready",
+      "filename_label": "Filename",
+      "audit_label": "Audit row",
+      "notified_label": "Other members will be notified within 60 seconds.",
+      "close": "Done"
+    },
+    "empty": {
+      "heading": "Nothing to export yet",
+      "body": "There are no finalized items to export. Finalize the document first."
+    },
+    "error": {
+      "integrity_heading": "Export integrity check failed",
+      "integrity_body": "The list of fields about to be exported does not match the renderer. The export was cancelled and an audit row was written. Try again — if this keeps happening, contact the worker co-chair."
+    }
+  },
+
+  "photo": {
+    "capture": {
+      "button": "Add photo",
+      "advisory_inline": "GPS removed automatically. Enter location as text or pick from the list."
+    },
+    "preview": {
+      "heading": "Review before attaching",
+      "gps_advisory": "All location and metadata has been removed from this photo. The location below — if you enter it — is what will be saved.",
+      "attach": "Attach this photo",
+      "retake": "Retake"
+    },
+    "location": {
+      "label": "Location (optional, free text)",
+      "select_label": "Or pick from the location list",
+      "placeholder": "e.g. South dock, line 3, near the hydraulic press"
+    },
+    "thumbnail": {
+      "alt_with_location": "Inspection photo at {location}",
+      "alt_unspecified": "Inspection photo, no location text"
+    },
+    "status": {
+      "attached": "Attached",
+      "queued": "Queued — will sync when online",
+      "upload_failed": "Upload failed — will retry on next sync",
+      "integrity_failed_heading": "Could not verify this photo",
+      "integrity_failed_body": "This entry could not be verified and was not saved. A malicious extension may have modified the queue. Please re-take and re-enter."
+    }
+  },
+
+  "offline": {
+    "banner": {
+      "heading": "Offline — entries are being queued",
+      "queued_count": "{count} queued",
+      "retry": "Retry sync"
+    },
+    "syncing": {
+      "heading": "Syncing… {current} of {total}"
+    },
+    "synced": {
+      "heading": "All queued entries synced.",
+      "pill": "Synced {relative}"
+    },
+    "partial": {
+      "heading": "{succeeded} synced, {failed} failed verification",
+      "body": "These entries could not be verified and were not saved. Open the list to re-enter them.",
+      "view_link": "View failed entries"
+    }
+  },
+
+  "lock": {
+    "heading": "Locked — confirm it's you to continue",
+    "body": "Your committee data is protected and was cleared from memory.",
+    "button_unlock": "Use passkey",
+    "button_signout": "Sign out instead",
+    "now_button": "Lock now",
+    "auto_lock_after": "Auto-lock after {minutes} minutes of inactivity"
+  },
+
+  "panic": {
+    "trigger_button": "Wipe this device's data",
+    "heading": "Wipe this device's data",
+    "body": "This will remove from this device: the encrypted local store, your current session, and cached settings. It does NOT remove data from the server — other devices and the committee still have their access. You cannot undo this on this device.",
+    "phrase_label": "Type WIPE to confirm",
+    "phrase_placeholder": "WIPE",
+    "confirm_button": "Wipe this device's data",
+    "wiping_heading": "Wiping…",
+    "complete_heading": "Local data wiped",
+    "complete_body": "Sign in again to continue, or close this tab to leave the app."
+  },
+
+  "session": {
+    "page": {
+      "title": "Sessions on this account",
+      "subtitle": "Other devices where you are signed in. Revoke any that you don't recognize."
+    },
+    "row": {
+      "device_label": "Device",
+      "last_seen_label": "Last seen",
+      "current_label": "This device",
+      "revoke_button": "Revoke",
+      "revoking_label": "Revoking…",
+      "revoked_label": "Revoked {when}"
+    },
+    "revoke_all": {
+      "button": "Revoke all other sessions",
+      "confirm_heading": "Revoke all other sessions",
+      "confirm_body": "All sessions other than this device will be signed out. This is immediate.",
+      "confirm_button": "Revoke all others"
+    },
+    "current_revoke": {
+      "confirm_heading": "Revoke this device's session",
+      "confirm_body": "You will be signed out of this device. You can sign back in with your passkey."
+    }
+  },
+
+  "audit": {
+    "page": {
+      "title": "Audit log",
+      "subtitle": "Every action on the worker side. Hash-chained and tamper-evident."
+    },
+    "filter": {
+      "action_label": "Action",
+      "actor_label": "Actor",
+      "time_range_label": "Time range",
+      "all": "All"
+    },
+    "column": {
+      "timestamp": "Time",
+      "actor": "Actor",
+      "action": "Action",
+      "target": "Target",
+      "hash": "Prev hash"
+    },
+    "expanded": {
+      "full_hash_label": "Full hash",
+      "target_id_label": "Target ID",
+      "derived_from_concerns_label": "Derived from concerns",
+      "field_set_hash_label": "Field-set hash"
+    },
+    "integrity": {
+      "ok_heading": "Integrity check OK",
+      "ok_body": "Last checked {when}.",
+      "failed_heading": "Integrity check failed",
+      "failed_body": "The audit log appears to have been tampered with. Contact the worker co-chair immediately.",
+      "never_heading": "Integrity check not yet run",
+      "never_body": "The first daily integrity check will run shortly."
+    },
+    "action": {
+      "concern.create": "Logged a concern",
+      "concern.update": "Updated a concern",
+      "source.reveal": "Revealed a source name",
+      "reprisal.create": "Logged a reprisal entry",
+      "reprisal.update": "Updated a reprisal entry",
+      "reprisal.read": "Read a reprisal entry",
+      "reprisal.delete.propose": "Proposed deletion of a reprisal entry",
+      "reprisal.delete.approve": "Approved deletion of a reprisal entry",
+      "sensitive.read": "Read a sensitive entry",
+      "sensitive.access_attempt": "Attempted to view a sensitive entry",
+      "export.minutes": "Exported finalized minutes to employer co-chair",
+      "export.recommendation": "Exported a recommendation to employer co-chair",
+      "export.integrity_fail": "Export integrity check failed and was cancelled",
+      "identity_keypair.created": "Set up identity keys",
+      "identity_privkey.recovery_blob.written": "Stored recovery key blob",
+      "identity_privkey.recovery_blob.restored": "Restored identity keys from recovery",
+      "committee_data_key.wrapped_for_member": "Granted a member access to the committee key",
+      "committee_data_key.unwrap": "Opened the committee key for this session",
+      "committee_data_key.rotation.started": "Started a committee key rotation",
+      "committee_data_key.rotation.completed": "Completed a committee key rotation",
+      "committee_data_key.member_revoked": "Revoked a member's access",
+      "session.revoke": "Revoked a session",
+      "retention.pass": "Ran a retention pass",
+      "rate_limit": "Rate-limited request",
+      "client.identity_selftest_fail": "Identity-key self-test failed on a device",
+      "client.cache_policy_violation": "A client cache policy was violated and the response was dropped",
+      "queue.integrity_fail": "An offline-queued entry failed verification and was rejected"
+    }
+  },
+
+  "inspection": {
+    "page": {
+      "title": "Inspections",
+      "new_button": "New inspection"
+    },
+    "empty": {
+      "heading": "No inspections yet",
+      "body": "Monthly workplace inspections are an OHSA s.9(26) duty. Start a new one when you walk the floor.",
+      "cta": "Start an inspection"
+    },
+    "form": {
+      "heading": "New inspection",
+      "checklist_heading": "Checklist",
+      "notes_label": "Notes",
+      "photos_heading": "Photos",
+      "save": "Save inspection",
+      "saving": "Encrypting and saving…",
+      "save_draft": "Save as draft"
+    }
+  },
+
+  "form": {
+    "common": {
+      "required_indicator_sr": "required"
+    }
+  },
+
+  "a11y": {
+    "skip_to_content": "Skip to main content",
+    "menu_open": "Open menu",
+    "menu_close": "Close menu",
+    "modal_close": "Close dialog",
+    "modal_announce_open": "Dialog opened: {title}",
+    "loading_announce": "{action_label} in progress",
+    "loading_complete": "{action_label} complete",
+    "toast_announce": "{severity}: {body}",
+    "feed_new_item": "New activity: {description}",
+
+    "export": {
+      "reauth": {
+        "success": "Passkey confirmed. Reviewing export fields."
+      },
+      "concern_flag": {
+        "detected": "This export includes items derived from worker concerns. Review carefully."
+      },
+      "complete": "Export ready. PDF is downloaded. Audit row {audit_id} recorded.",
+      "post_export_notification": "Other committee members are being notified of this export."
+    },
+    "reprisal": {
+      "read": {
+        "logged": "Your read of this reprisal entry was logged at {timestamp} and other members will be notified."
+      },
+      "fourEyes": {
+        "proposed": "Change proposed. Awaiting approval from another committee member."
+      }
+    },
+    "passphrase": {
+      "wrong": "Passphrase incorrect. {attempts_left} attempts remaining."
+    },
+    "concern": {
+      "anonymous_on": "Anonymous source, on. Press to switch off and record a name.",
+      "anonymous_off": "Named source, on. Press to switch back to anonymous.",
+      "advisory_named": "About to save a worker's name. The name will be encrypted but every active committee member can see it."
+    },
+    "offline": {
+      "banner": "You are offline. {count} entries queued.",
+      "online_again": "Back online. Starting to sync.",
+      "synced": "All queued entries synced."
+    },
+    "lock": {
+      "engaged": "Application locked. Sign in again to continue.",
+      "released": "Unlocked."
+    },
+    "panic": {
+      "complete": "Local data wiped from this device.",
+      "in_progress": "Wiping local data."
+    },
+    "session": {
+      "revoked": "Session on {device} revoked.",
+      "all_revoked": "All other sessions revoked."
+    },
+    "audit": {
+      "integrity_fail": "Audit log integrity check failed. Contact the worker co-chair.",
+      "integrity_ok": "Audit log integrity check passed."
+    },
+    "photo": {
+      "captured": "Photo captured. Review and add a location if you want one.",
+      "attached": "Photo attached.",
+      "integrity_fail": "A photo could not be verified and was rejected. Please re-take it."
+    },
+    "sensitive_feed": {
+      "new_event": "New sensitive activity: {description}",
+      "muted": "Sensitive-activity pop-ups paused. The feed still updates."
+    }
+  },
+
+  "library": {
+    "page": {
+      "title": "Document library",
+      "subtitle": "Quick reference: OHSA, regulations, committee terms of reference."
+    },
+    "empty": {
+      "heading": "No documents yet",
+      "body": "Reference documents will appear here once they are published."
+    }
+  }
+}

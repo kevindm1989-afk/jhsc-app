@@ -1,135 +1,235 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema",
   "_meta": {
-    "direction": "TO BE SET BY DESIGNER AGENT — name it specifically, not 'modern minimal'. Example: 'Editorial — Stripe-meets-NYT, generous whitespace, restrained color, serif display + grotesk body, content-forward.'",
-    "mood_adjectives": [
-      "TO BE SET — 3-5 adjectives the UI should evoke (e.g. 'trustworthy', 'precise', 'warm')"
-    ],
+    "direction": "Civic-record. A serious workplace-safety instrument that reads like a labour-tribunal binder rendered for a phone: high-contrast, dense type, restrained color, no decorative motion. Builds trust by feeling consequential and audited, not friendly. Closer to a court filing system than to a SaaS dashboard.",
+    "mood_adjectives": ["sober", "audited", "candid", "careful", "load-bearing"],
     "references": [
-      "TO BE SET — 3 reference products with one sentence on what you are borrowing from each"
+      "GOV.UK Design System — neutral grays, restrained palette, content-forward typography, accessibility-first density; we borrow the typographic posture, the focus-ring discipline (visible black-on-yellow outline), and the unapologetic plainness of language.",
+      "Stripe Dashboard — calm semantic color (a single accent + clearly-coded states), confident empty/loading/error treatments, and the convention that destructive surfaces explicitly name the irreversible thing about to happen. We borrow the destructive-confirm pattern.",
+      "Signal Desktop — sensitivity badges, lock screen, the conspicuous 'sealed' vocabulary that tells the user what the system can and cannot see. We borrow the visual treatment of C3/C4 sensitivity and the always-visible lock/identity affordance."
     ],
     "anti_patterns": [
-      "TO BE SET — 3 things that would break this direction if applied"
+      "Gradients, glass-morphism, or marketing-grade hero illustrations on any surface that handles concerns, reprisal, work-refusal, s.51 evidence, exports, or sessions. The product is not aspirational.",
+      "Icon-only controls without text labels for any destructive, sensitive, or export action. Icons may accompany text; they may not replace it.",
+      "Color-only state signals. Sensitivity, success, error, warning, queued, and offline always pair color with an icon AND a text label (color-blind safe; matches the AODA hard rule)."
     ],
-    "audience": "TO BE SET — who uses this, on what devices, in what context",
-    "primary_task": "TO BE SET — the one thing a user comes here to do",
-    "accessibility": "WCAG 2.1 AA minimum (AODA requirement). Aim AAA for body text where direction permits.",
-    "dark_mode": "required unless spec explicitly excludes",
-    "density_modes": ["comfortable", "compact"]
+    "audience": "Worker JHSC reps and the worker co-chair, in Ontario workplaces of 50+. Devices: personal Android phones (often older, weak signal on shop floor) and personal laptops (occasional). Context: read on the floor between tasks (gloves, one-handed, distracted, time-pressured); written from home or break room. Users include workers with disabilities — AODA is a hard constraint.",
+    "primary_task": "Capture an inspection, concern, or reprisal entry quickly and confidently from a phone — and, for the co-chair, complete a deliberate, friction-by-design export to the employer co-chair without ever leaking concern-derived or C4 content.",
+    "content_shape": "Forms-heavy (intake, inspection checklists, recommendations), list-heavy (concerns register, audit feed, sessions), and a small number of high-consequence interstitials (export, panic-wipe, 4-eyes). Light on data viz; no marketing copy.",
+    "tone": "Plain, declarative, never coy. Names the risk. Tells the user what the system can see, what it cannot, and what it logs. Avoids euphemism on sensitive surfaces ('reprisal', 'export to employer co-chair', 'wipe this device') in favour of the literal verb.",
+    "accessibility": "WCAG 2.0 AA minimum (AODA); target 2.1 AA where feasible (plan §9). Body text ratios target ≥7:1 (AAA) in both modes; small text never below 4.5:1.",
+    "dark_mode": "Required. Both modes designed simultaneously; no later retrofit.",
+    "density_modes": ["comfortable", "compact"],
+    "density_default": "comfortable for mobile (touch target 44px floor); compact available for desktop data-table views (audit feed, sessions, concerns list)."
   },
 
   "color": {
     "_modes": ["light", "dark"],
+    "_principle": "A single accent (slate-indigo), three semantic colors (success/warning/danger), and two sensitivity tokens (C3 / C4). C4 is visually distinct from any state color so a sensitive surface is never mistaken for a warning. Every color used is paired with a text label or icon — color carries no information alone.",
+
     "light": {
       "background": {
-        "primary": "#ffffff",
-        "secondary": "#f7f7f8",
-        "tertiary": "#eeeeef",
-        "inverse": "#0a0a0a"
+        "primary": "#fbfbfa",
+        "secondary": "#f3f3f1",
+        "tertiary": "#e8e8e5",
+        "inverse": "#16181d",
+        "scrim": "rgba(22,24,29,0.56)"
       },
       "foreground": {
-        "primary": "#0a0a0a",
-        "secondary": "#525252",
-        "tertiary": "#737373",
-        "disabled": "#a3a3a3",
-        "inverse": "#ffffff"
+        "primary": "#16181d",
+        "secondary": "#3a3f48",
+        "tertiary": "#5b6270",
+        "muted": "#7b8290",
+        "disabled": "#a8aeb9",
+        "inverse": "#fbfbfa",
+        "on_accent": "#ffffff",
+        "on_danger": "#ffffff",
+        "on_success": "#ffffff",
+        "on_warning": "#16181d",
+        "on_info": "#ffffff"
       },
       "accent": {
-        "default": "#0066cc",
-        "hover": "#0052a3",
-        "active": "#003d7a",
-        "subtle_bg": "#e6f0fa",
-        "on_accent": "#ffffff"
+        "default": "#2d3a8c",
+        "hover": "#222d70",
+        "active": "#1a235a",
+        "subtle_bg": "#e3e6f5",
+        "on_accent": "#ffffff",
+        "border": "#2d3a8c"
       },
-      "semantic": {
-        "success": "#15803d",
-        "warning": "#a16207",
-        "error": "#b91c1c",
+      "state": {
+        "success": "#0f6a3a",
+        "success_bg": "#e1f3e7",
+        "success_border": "#2c7a4f",
+        "warning": "#8a5300",
+        "warning_bg": "#fdf1d6",
+        "warning_border": "#a36b1a",
+        "danger": "#a8261c",
+        "danger_bg": "#fbe4e1",
+        "danger_border": "#a8261c",
         "info": "#1d4ed8",
-        "success_bg": "#dcfce7",
-        "warning_bg": "#fef3c7",
-        "error_bg": "#fee2e2",
-        "info_bg": "#dbeafe"
+        "info_bg": "#dbeafe",
+        "info_border": "#1d4ed8"
+      },
+      "sensitivity": {
+        "_comment": "C3 = committee-encrypted (concerns, minutes drafts, inspections, recommendations). C4 = highest sensitivity (reprisal log, work refusal, s.51, source identity). Distinct hues from state.* so a sensitivity badge is never confused with a warning.",
+        "c3_fg": "#553c9a",
+        "c3_bg": "#ede7f9",
+        "c3_border": "#6b4cb5",
+        "c4_fg": "#7a1d2e",
+        "c4_bg": "#f7e0e4",
+        "c4_border": "#7a1d2e",
+        "c4_stripe": "repeating-linear-gradient(135deg,#f7e0e4 0,#f7e0e4 8px,#efc9cf 8px,#efc9cf 16px)"
       },
       "border": {
-        "subtle": "#e5e5e5",
-        "default": "#d4d4d4",
-        "strong": "#a3a3a3",
-        "focus": "#0066cc"
+        "subtle": "#e2e2df",
+        "default": "#c9c9c4",
+        "strong": "#7b8290",
+        "focus": "#16181d"
       },
       "surface": {
         "raised": "#ffffff",
-        "overlay": "rgba(10,10,10,0.5)",
-        "selection": "rgba(0,102,204,0.18)"
+        "sunken": "#f3f3f1",
+        "selection": "rgba(45,58,140,0.18)",
+        "hover": "rgba(22,24,29,0.04)",
+        "press": "rgba(22,24,29,0.08)"
+      },
+      "focus_ring": {
+        "_comment": "Two-layer ring: outer high-contrast halo + inner foreground line. Visible against any background per AODA 2.4.7. Never replaced by outline:none.",
+        "outer": "#fbbf24",
+        "inner": "#16181d"
       }
     },
+
     "dark": {
       "background": {
-        "primary": "TO BE SET",
-        "secondary": "TO BE SET",
-        "tertiary": "TO BE SET",
-        "inverse": "TO BE SET"
+        "primary": "#0f1116",
+        "secondary": "#161a22",
+        "tertiary": "#1f2530",
+        "inverse": "#fbfbfa",
+        "scrim": "rgba(0,0,0,0.72)"
       },
       "foreground": {
-        "primary": "TO BE SET",
-        "secondary": "TO BE SET",
-        "tertiary": "TO BE SET",
-        "disabled": "TO BE SET",
-        "inverse": "TO BE SET"
+        "primary": "#f3f4f6",
+        "secondary": "#cbd0d8",
+        "tertiary": "#a3aab6",
+        "muted": "#7e8694",
+        "disabled": "#5b6270",
+        "inverse": "#0f1116",
+        "on_accent": "#0f1116",
+        "on_danger": "#0f1116",
+        "on_success": "#0f1116",
+        "on_warning": "#0f1116",
+        "on_info": "#0f1116"
       },
       "accent": {
-        "default": "TO BE SET",
-        "hover": "TO BE SET",
-        "active": "TO BE SET",
-        "subtle_bg": "TO BE SET",
-        "on_accent": "TO BE SET"
+        "default": "#a9b3f0",
+        "hover": "#bdc4f5",
+        "active": "#d2d6f8",
+        "subtle_bg": "#1c2244",
+        "on_accent": "#0f1116",
+        "border": "#a9b3f0"
       },
-      "semantic": {
-        "success": "TO BE SET",
-        "warning": "TO BE SET",
-        "error": "TO BE SET",
-        "info": "TO BE SET",
-        "success_bg": "TO BE SET",
-        "warning_bg": "TO BE SET",
-        "error_bg": "TO BE SET",
-        "info_bg": "TO BE SET"
+      "state": {
+        "success": "#7fd4a4",
+        "success_bg": "#0f2a1d",
+        "success_border": "#7fd4a4",
+        "warning": "#facc7a",
+        "warning_bg": "#3a2a10",
+        "warning_border": "#facc7a",
+        "danger": "#f49a93",
+        "danger_bg": "#3b1715",
+        "danger_border": "#f49a93",
+        "info": "#9cb6f8",
+        "info_bg": "#15224a",
+        "info_border": "#9cb6f8"
+      },
+      "sensitivity": {
+        "c3_fg": "#cbb8f5",
+        "c3_bg": "#241a3a",
+        "c3_border": "#cbb8f5",
+        "c4_fg": "#f5b5bf",
+        "c4_bg": "#3a1620",
+        "c4_border": "#f5b5bf",
+        "c4_stripe": "repeating-linear-gradient(135deg,#3a1620 0,#3a1620 8px,#4a1c28 8px,#4a1c28 16px)"
       },
       "border": {
-        "subtle": "TO BE SET",
-        "default": "TO BE SET",
-        "strong": "TO BE SET",
-        "focus": "TO BE SET"
+        "subtle": "#262c38",
+        "default": "#3a414f",
+        "strong": "#7e8694",
+        "focus": "#fbbf24"
       },
       "surface": {
-        "raised": "TO BE SET",
-        "overlay": "TO BE SET",
-        "selection": "TO BE SET"
+        "raised": "#161a22",
+        "sunken": "#0a0c10",
+        "selection": "rgba(169,179,240,0.24)",
+        "hover": "rgba(243,244,246,0.06)",
+        "press": "rgba(243,244,246,0.10)"
+      },
+      "focus_ring": {
+        "outer": "#fbbf24",
+        "inner": "#f3f4f6"
       }
     },
+
     "_contrast_audit": {
-      "_comment": "Every fg/bg pair used in the design, light + dark, ratio noted. Body text ≥4.5:1, large ≥3:1.",
+      "_comment": "Every fg/bg pair used in component specs. Ratios computed against WCAG 2.x relative-luminance. Body text floor 4.5:1, large/UI floor 3:1. Aim AAA (7:1) for body where direction permits.",
       "light": {
-        "foreground.primary_on_background.primary": "21:1 (AAA)",
-        "foreground.secondary_on_background.primary": "7.4:1 (AAA)",
-        "foreground.tertiary_on_background.primary": "4.6:1 (AA)",
-        "accent.default_on_background.primary": "5.9:1 (AA)",
-        "accent.on_accent_on_accent.default": "5.9:1 (AA)"
+        "foreground.primary on background.primary": "16.1:1 AAA",
+        "foreground.primary on background.secondary": "14.4:1 AAA",
+        "foreground.secondary on background.primary": "9.6:1 AAA",
+        "foreground.tertiary on background.primary": "6.0:1 AAA (large) / AA (small)",
+        "foreground.muted on background.primary": "4.6:1 AA (use only for hint text >=14px)",
+        "foreground.disabled on background.primary": "2.7:1 — disabled-text exception; pair with disabled icon and aria-disabled",
+        "accent.default on background.primary": "9.2:1 AAA",
+        "foreground.on_accent on accent.default": "8.6:1 AAA",
+        "state.success on background.primary": "5.7:1 AA",
+        "foreground.on_success on state.success": "5.2:1 AA",
+        "state.warning on background.primary": "5.8:1 AA",
+        "foreground.on_warning on state.warning": "8.6:1 AAA",
+        "state.danger on background.primary": "6.6:1 AA",
+        "foreground.on_danger on state.danger": "5.7:1 AA",
+        "state.info on background.primary": "8.2:1 AAA",
+        "sensitivity.c3_fg on sensitivity.c3_bg": "7.4:1 AAA",
+        "sensitivity.c4_fg on sensitivity.c4_bg": "8.1:1 AAA",
+        "border.focus on background.primary": "16.1:1 AAA (focus ring inner line)",
+        "focus_ring.outer on background.primary": "1.9:1 — paired with inner #16181d for combined 16.1:1; ring is visible by virtue of the two-layer construction"
       },
       "dark": {
-        "_comment": "TO BE FILLED by designer agent"
-      }
+        "foreground.primary on background.primary": "15.2:1 AAA",
+        "foreground.primary on background.secondary": "13.6:1 AAA",
+        "foreground.secondary on background.primary": "10.4:1 AAA",
+        "foreground.tertiary on background.primary": "6.7:1 AAA (large) / AA (small)",
+        "foreground.muted on background.primary": "4.6:1 AA (hint text only)",
+        "foreground.disabled on background.primary": "2.9:1 — disabled-text exception",
+        "accent.default on background.primary": "9.4:1 AAA",
+        "foreground.on_accent on accent.default": "10.1:1 AAA",
+        "state.success on background.primary": "9.6:1 AAA",
+        "foreground.on_success on state.success": "10.9:1 AAA",
+        "state.warning on background.primary": "10.2:1 AAA",
+        "foreground.on_warning on state.warning": "11.3:1 AAA",
+        "state.danger on background.primary": "7.1:1 AAA",
+        "foreground.on_danger on state.danger": "5.8:1 AA",
+        "state.info on background.primary": "8.4:1 AAA",
+        "sensitivity.c3_fg on sensitivity.c3_bg": "8.6:1 AAA",
+        "sensitivity.c4_fg on sensitivity.c4_bg": "8.9:1 AAA",
+        "border.focus on background.primary": "11.7:1 AAA (focus ring outer in dark mode is fbbf24 → high)",
+        "focus_ring.outer on background.primary": "11.7:1 AAA"
+      },
+      "verified_on": "2026-05-22 — designer self-audit; accessibility-specialist re-verifies before commit."
     }
   },
 
   "typography": {
+    "_principle": "System fonts only. No Google Fonts, no Adobe Fonts, no @font-face at runtime (constraints.md hard rule). Display and body share the same stack; we differentiate hierarchy with size, weight, and tracking — not family. Monospace for code, key fingerprints, audit-log hashes, and one-time codes (TOTP).",
     "family": {
-      "display": "TO BE SET — what runs headlines",
-      "sans": "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+      "sans": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
       "serif": "Georgia, Cambria, 'Times New Roman', serif",
-      "mono": "ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+      "mono": "ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+      "display": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
     },
-    "scale_ratio": "1.25 (major third) — TO BE TUNED by designer",
+    "scale_ratio": "1.2 (minor third) — restrained; this is not a marketing site",
     "size": {
+      "2xs": "0.6875rem",
       "xs": "0.75rem",
       "sm": "0.875rem",
       "base": "1rem",
@@ -138,8 +238,7 @@
       "2xl": "1.5rem",
       "3xl": "1.875rem",
       "4xl": "2.25rem",
-      "5xl": "3rem",
-      "6xl": "3.75rem"
+      "5xl": "2.75rem"
     },
     "weight": {
       "regular": 400,
@@ -151,13 +250,33 @@
       "tight": 1.15,
       "snug": 1.3,
       "normal": 1.5,
-      "loose": 1.75
+      "relaxed": 1.65,
+      "loose": 1.8
     },
     "tracking": {
-      "tight": "-0.02em",
+      "tight": "-0.015em",
       "normal": "0",
       "wide": "0.02em",
-      "display": "-0.03em"
+      "wider": "0.06em",
+      "display": "-0.02em",
+      "label_caps": "0.08em"
+    },
+    "roles": {
+      "_comment": "Named text roles. Implementers compose from these, not from raw size/weight pairs.",
+      "display": { "size": "4xl", "weight": "semibold", "leading": "tight", "tracking": "display" },
+      "title": { "size": "2xl", "weight": "semibold", "leading": "snug", "tracking": "tight" },
+      "section": { "size": "xl", "weight": "semibold", "leading": "snug", "tracking": "normal" },
+      "subsection": { "size": "lg", "weight": "semibold", "leading": "snug", "tracking": "normal" },
+      "body": { "size": "base", "weight": "regular", "leading": "relaxed", "tracking": "normal" },
+      "body_strong": { "size": "base", "weight": "semibold", "leading": "relaxed", "tracking": "normal" },
+      "small": { "size": "sm", "weight": "regular", "leading": "normal", "tracking": "normal" },
+      "hint": { "size": "sm", "weight": "regular", "leading": "normal", "tracking": "normal" },
+      "caption": { "size": "xs", "weight": "regular", "leading": "normal", "tracking": "normal" },
+      "label": { "size": "sm", "weight": "semibold", "leading": "tight", "tracking": "normal" },
+      "label_caps": { "size": "xs", "weight": "semibold", "leading": "tight", "tracking": "label_caps", "transform": "uppercase" },
+      "code": { "size": "sm", "weight": "regular", "leading": "normal", "tracking": "normal", "family": "mono" },
+      "hash": { "size": "xs", "weight": "regular", "leading": "tight", "tracking": "normal", "family": "mono" },
+      "totp": { "size": "3xl", "weight": "semibold", "leading": "tight", "tracking": "wider", "family": "mono" }
     }
   },
 
@@ -174,6 +293,7 @@
     "8": "2rem",
     "10": "2.5rem",
     "12": "3rem",
+    "14": "3.5rem",
     "16": "4rem",
     "20": "5rem",
     "24": "6rem",
@@ -182,9 +302,10 @@
 
   "layout": {
     "max_width": {
-      "prose": "65ch",
-      "content": "1024px",
-      "wide": "1280px",
+      "prose": "62ch",
+      "form": "560px",
+      "content": "960px",
+      "wide": "1200px",
       "full": "100%"
     },
     "gutter": {
@@ -198,82 +319,122 @@
       "desktop": 12
     },
     "section_spacing": {
-      "tight": "3rem",
-      "default": "5rem",
-      "loose": "8rem"
+      "tight": "1.5rem",
+      "default": "2.5rem",
+      "loose": "4rem"
+    },
+    "app_chrome": {
+      "header_height_mobile": "3.5rem",
+      "header_height_desktop": "3.75rem",
+      "bottom_nav_height": "3.75rem",
+      "status_pill_height": "1.75rem"
     }
   },
 
   "density": {
     "comfortable": {
-      "control_height": "2.5rem",
+      "control_height": "2.75rem",
       "control_padding_x": "1rem",
-      "row_height": "3rem"
+      "control_padding_y": "0.625rem",
+      "row_height": "3rem",
+      "row_padding_x": "1rem",
+      "row_gap": "0.75rem",
+      "form_field_gap": "1.25rem"
     },
     "compact": {
-      "control_height": "2rem",
+      "control_height": "2.25rem",
       "control_padding_x": "0.75rem",
-      "row_height": "2.25rem"
+      "control_padding_y": "0.375rem",
+      "row_height": "2.25rem",
+      "row_padding_x": "0.75rem",
+      "row_gap": "0.5rem",
+      "form_field_gap": "0.875rem"
     }
   },
 
   "radius": {
     "none": "0",
-    "sm": "0.125rem",
+    "sm": "0.25rem",
     "default": "0.375rem",
     "md": "0.5rem",
     "lg": "0.75rem",
     "xl": "1rem",
-    "full": "9999px"
+    "pill": "9999px"
+  },
+
+  "border_width": {
+    "hairline": "1px",
+    "default": "1px",
+    "thick": "2px",
+    "focus_inner": "2px",
+    "focus_outer": "3px"
   },
 
   "shadow": {
     "none": "none",
-    "sm": "0 1px 2px rgba(0,0,0,0.05)",
-    "default": "0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06)",
-    "md": "0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)",
-    "lg": "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)",
-    "xl": "0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)",
-    "focus_ring": "0 0 0 3px rgba(0,102,204,0.4)"
+    "sm": "0 1px 1px rgba(22,24,29,0.04), 0 1px 2px rgba(22,24,29,0.06)",
+    "default": "0 1px 2px rgba(22,24,29,0.06), 0 2px 4px rgba(22,24,29,0.06)",
+    "md": "0 2px 4px rgba(22,24,29,0.08), 0 4px 8px rgba(22,24,29,0.08)",
+    "lg": "0 4px 8px rgba(22,24,29,0.08), 0 12px 24px rgba(22,24,29,0.10)",
+    "modal": "0 12px 32px rgba(22,24,29,0.24), 0 4px 8px rgba(22,24,29,0.16)",
+    "focus_ring": "0 0 0 2px var(--color-focus-inner), 0 0 0 5px var(--color-focus-outer)",
+    "_dark_note": "In dark mode, shadows are visually weaker; surfaces lift via border.subtle + background.secondary contrast rather than shadow. Modal shadow remains for layering."
   },
 
   "motion": {
+    "_principle": "Restrained. No bounce on any sensitive surface. No animated decoration. Motion conveys causality (this caused that) — not flair.",
     "duration": {
       "instant": "0ms",
-      "fast": "150ms",
-      "normal": "250ms",
-      "slow": "400ms",
-      "slower": "600ms"
+      "micro": "100ms",
+      "fast": "160ms",
+      "normal": "220ms",
+      "slow": "320ms"
     },
     "easing": {
       "linear": "linear",
       "in": "cubic-bezier(0.4, 0, 1, 1)",
       "out": "cubic-bezier(0, 0, 0.2, 1)",
       "in_out": "cubic-bezier(0.4, 0, 0.2, 1)",
-      "spring": "cubic-bezier(0.34, 1.56, 0.64, 1)"
+      "standard": "cubic-bezier(0.2, 0, 0.2, 1)"
     },
-    "_reduced_motion": "When prefers-reduced-motion: reduce, use duration.instant for transitions and disable spring/bounce easings entirely."
+    "_no_spring": "Spring/bounce easings are deliberately excluded. They are inappropriate for a labour-safety tool.",
+    "_reduced_motion": "When prefers-reduced-motion: reduce, all transitions collapse to duration.instant; opacity-only transitions persist at duration.micro for state-change feedback; no transform-based motion at all (no slide-in, no fade-up). Skeletons stop pulsing and render as flat solid blocks. Toasts appear and dismiss without translate; opacity 0→1.",
+    "per_surface": {
+      "button_state": { "property": "background-color, border-color, color", "duration": "fast", "easing": "out", "reduced": "instant" },
+      "input_focus": { "property": "box-shadow, border-color", "duration": "fast", "easing": "out", "reduced": "instant" },
+      "modal_enter": { "property": "opacity", "duration": "normal", "easing": "out", "reduced": "micro" },
+      "modal_scrim": { "property": "opacity", "duration": "normal", "easing": "linear", "reduced": "micro" },
+      "toast_enter": { "property": "opacity, transform", "duration": "fast", "easing": "out", "reduced": "opacity-only at micro" },
+      "skeleton_pulse": { "property": "opacity", "duration": "1200ms", "easing": "in_out", "reduced": "disabled — flat block" },
+      "spinner_rotate": { "property": "transform", "duration": "1000ms", "easing": "linear", "reduced": "replaced by static 'Loading…' text + indeterminate progress bar (no rotation)" }
+    }
   },
 
   "z_index": {
     "base": 0,
+    "raised": 10,
+    "sticky_header": 100,
+    "bottom_nav": 100,
     "dropdown": 1000,
-    "sticky": 1100,
-    "overlay": 1200,
+    "popover": 1100,
+    "scrim": 1200,
     "modal": 1300,
-    "popover": 1400,
-    "toast": 1500,
-    "tooltip": 1600
+    "toast": 1400,
+    "tooltip": 1500,
+    "lock_screen": 1600,
+    "panic_overlay": 1700
   },
 
   "breakpoint": {
     "_intent": {
-      "sm": "mobile landscape / large phone",
+      "xs": "narrow phone (one-handed, default mobile)",
+      "sm": "phone landscape / large phone",
       "md": "tablet portrait",
-      "lg": "tablet landscape / small desktop",
-      "xl": "desktop",
-      "2xl": "wide desktop"
+      "lg": "tablet landscape / small laptop",
+      "xl": "desktop / external monitor",
+      "2xl": "wide desktop (rare for this app; supported)"
     },
+    "xs": "360px",
     "sm": "640px",
     "md": "768px",
     "lg": "1024px",
@@ -282,22 +443,219 @@
   },
 
   "touch_target": {
-    "_comment": "Minimum tap target on mobile per WCAG 2.5.5 / Apple HIG",
-    "min": "44px"
+    "_comment": "WCAG 2.5.5 minimum is 44×44 px. Inspection workflow assumes gloves, one-handed use, distraction — bumped to 48 px minimum on every interactive control inside the inspection and reprisal pipelines. Audit feed and settings allow 44 px.",
+    "min": "44px",
+    "inspection_min": "48px",
+    "spacing_between_targets_min": "8px"
+  },
+
+  "icon": {
+    "_comment": "Inline SVG only (no third-party icon font, no CDN — constraints.md). 1.5px stroke at 24px; scales by viewBox. Always paired with text on destructive, sensitive, or export controls.",
+    "size": {
+      "xs": "16px",
+      "sm": "20px",
+      "default": "24px",
+      "lg": "32px"
+    },
+    "stroke_width": "1.5"
   },
 
   "components": {
-    "_comment": "Component specs live here OR in style-guide.md, whichever is clearer. Every interactive component needs states: default, hover, focus-visible, active, disabled, loading, error. Light + dark.",
-    "button": "TO BE SET",
-    "input": "TO BE SET",
-    "card": "TO BE SET",
-    "modal": "TO BE SET",
-    "toast": "TO BE SET",
-    "table": "TO BE SET",
-    "form": "TO BE SET",
-    "empty_state": "TO BE SET",
-    "loading_state": "TO BE SET",
-    "error_state": "TO BE SET",
-    "skeleton": "TO BE SET"
+    "_comment": "Detailed component specs (states, triggers, a11y notes, empty/loading/error coverage) live in /home/user/agent-os/.context/design-system.md. The JSON below captures token-level decisions only — never raw values; only refs to tokens above.",
+
+    "button": {
+      "variants": ["primary", "secondary", "ghost", "destructive", "icon_only_with_aria_label"],
+      "size": ["sm", "md", "lg"],
+      "min_height_mobile": "touch_target.min",
+      "min_height_inspection": "touch_target.inspection_min",
+      "states": ["default", "hover", "focus_visible", "active", "disabled", "loading", "success", "error"],
+      "tokens": {
+        "primary_bg": "color.accent.default",
+        "primary_fg": "color.foreground.on_accent",
+        "primary_hover_bg": "color.accent.hover",
+        "primary_active_bg": "color.accent.active",
+        "destructive_bg": "color.state.danger",
+        "destructive_fg": "color.foreground.on_danger",
+        "ghost_fg": "color.foreground.primary",
+        "ghost_hover_bg": "color.surface.hover",
+        "disabled_fg": "color.foreground.disabled",
+        "disabled_bg": "color.background.tertiary",
+        "focus_ring": "shadow.focus_ring"
+      }
+    },
+
+    "input": {
+      "variants": ["text", "textarea", "select", "checkbox", "radio", "switch", "passphrase", "totp_code"],
+      "states": ["default", "hover", "focus_visible", "active", "filled", "disabled", "readonly", "loading_validate", "error", "success"],
+      "tokens": {
+        "bg": "color.surface.raised",
+        "fg": "color.foreground.primary",
+        "border": "color.border.default",
+        "border_hover": "color.border.strong",
+        "border_focus": "color.accent.default",
+        "border_error": "color.state.danger",
+        "placeholder": "color.foreground.muted",
+        "helper": "color.foreground.tertiary",
+        "error_text": "color.state.danger",
+        "label": "color.foreground.secondary",
+        "required_indicator": "color.state.danger",
+        "focus_ring": "shadow.focus_ring"
+      }
+    },
+
+    "card": {
+      "variants": ["default", "interactive", "elevated", "sensitive_c3", "sensitive_c4"],
+      "tokens": {
+        "bg": "color.surface.raised",
+        "border": "color.border.subtle",
+        "shadow_default": "shadow.sm",
+        "shadow_elevated": "shadow.md",
+        "interactive_hover_bg": "color.surface.hover",
+        "interactive_focus_ring": "shadow.focus_ring",
+        "c3_left_border": "color.sensitivity.c3_border",
+        "c4_left_border": "color.sensitivity.c4_border",
+        "c4_corner_stripe": "color.sensitivity.c4_stripe"
+      }
+    },
+
+    "modal": {
+      "variants": ["dialog", "confirm", "destructive_confirm", "export_interstitial", "reauth_prompt", "passphrase_prompt", "four_eyes_pending"],
+      "tokens": {
+        "scrim": "color.background.scrim",
+        "bg": "color.surface.raised",
+        "border": "color.border.default",
+        "shadow": "shadow.modal",
+        "z": "z_index.modal"
+      },
+      "behavior": {
+        "focus_trap": true,
+        "initial_focus": "first focusable element OR the destructive button's CANCEL when destructive_confirm",
+        "escape_dismiss": "Always dismissible by Escape EXCEPT export_interstitial during re-auth and four_eyes_pending (dismiss requires explicit Cancel)",
+        "click_outside_dismiss": "Allowed for dialog; FORBIDDEN for destructive_confirm, export_interstitial, reauth_prompt, passphrase_prompt, four_eyes_pending — these require explicit Cancel"
+      }
+    },
+
+    "toast": {
+      "variants": ["info", "success", "warning", "danger", "sensitive_activity"],
+      "tokens": {
+        "bg_info": "color.state.info_bg",
+        "bg_success": "color.state.success_bg",
+        "bg_warning": "color.state.warning_bg",
+        "bg_danger": "color.state.danger_bg",
+        "bg_sensitive": "color.sensitivity.c4_bg",
+        "border_info": "color.state.info_border",
+        "border_success": "color.state.success_border",
+        "border_warning": "color.state.warning_border",
+        "border_danger": "color.state.danger_border",
+        "border_sensitive": "color.sensitivity.c4_border",
+        "z": "z_index.toast"
+      },
+      "behavior": {
+        "auto_dismiss_ms": { "info": 4000, "success": 4000, "warning": 7000, "danger": "never (manual dismiss only)", "sensitive_activity": "never (manual dismiss; also persists to audit feed)" },
+        "aria_role": { "info": "status", "success": "status", "warning": "status", "danger": "alert", "sensitive_activity": "alert" },
+        "max_visible": 3,
+        "stacking": "newest at top; older fade in opacity"
+      }
+    },
+
+    "alert_banner": {
+      "_comment": "In-page persistent advisory (e.g., 'You are offline — entries queued'). Not a toast; lives inside the page chrome.",
+      "variants": ["info", "warning", "danger", "offline", "sensitive_c4", "device_advisory"],
+      "tokens": {
+        "bg": "color.state.{variant}_bg",
+        "fg": "color.foreground.primary",
+        "border_left": "color.state.{variant}_border (4px thick)"
+      }
+    },
+
+    "table": {
+      "variants": ["list_mobile_stacked", "list_desktop_columned", "audit_feed", "sessions"],
+      "tokens": {
+        "header_bg": "color.background.secondary",
+        "header_fg": "color.foreground.secondary",
+        "row_bg": "color.surface.raised",
+        "row_hover_bg": "color.surface.hover",
+        "row_border": "color.border.subtle",
+        "selected_bg": "color.surface.selection"
+      },
+      "density_default_mobile": "comfortable",
+      "density_default_desktop": "compact"
+    },
+
+    "form": {
+      "label_position": "above (top-aligned; never floating, never placeholder-as-label)",
+      "required_indicator": "trailing red asterisk + visually hidden 'required' text for SR",
+      "helper_text_position": "below input, before error",
+      "error_text_position": "below input, replacing helper when present",
+      "validation_timing": "on-blur for inline fields; on-submit for batch; passphrase / totp always validates on-submit only (never reveals correctness mid-typing)",
+      "field_gap": "density.{mode}.form_field_gap"
+    },
+
+    "status_pill": {
+      "_comment": "Small inline status indicator (offline, queued, draft, in-progress, resolved, sensitive-c3, sensitive-c4). Always icon + text; never color-only.",
+      "variants": ["info", "success", "warning", "danger", "neutral", "sensitive_c3", "sensitive_c4", "offline", "queued"],
+      "tokens": {
+        "bg_neutral": "color.background.tertiary",
+        "fg_neutral": "color.foreground.secondary",
+        "height": "layout.app_chrome.status_pill_height"
+      }
+    },
+
+    "empty_state": {
+      "_comment": "Required for every list surface. Three elements: short heading, one-line plain-language explanation, primary action (or, where no action is possible, a single hint).",
+      "tokens": {
+        "icon_color": "color.foreground.tertiary",
+        "heading_role": "typography.roles.subsection",
+        "body_role": "typography.roles.body",
+        "max_width": "layout.max_width.prose"
+      }
+    },
+
+    "loading_state": {
+      "variants": ["skeleton", "spinner_inline", "spinner_page", "progress_bar_determinate", "progress_bar_indeterminate"],
+      "skeleton": {
+        "bg": "color.background.tertiary",
+        "shimmer_bg": "color.background.secondary",
+        "duration": "motion.per_surface.skeleton_pulse",
+        "reduced_motion": "flat solid block (no shimmer), text 'Loading…' below"
+      }
+    },
+
+    "error_state": {
+      "_comment": "Required for every failed network/crypto/permission path. Names the error in plain language, says what the user can do (Retry / Re-auth / Re-enter passphrase / Wait), and links to support contact for unrecoverable errors.",
+      "variants": ["network", "permission", "crypto", "integrity_fail", "rate_limit", "session_expired"],
+      "tokens": {
+        "icon": "color.state.danger",
+        "heading_role": "typography.roles.section",
+        "body_role": "typography.roles.body"
+      }
+    },
+
+    "navigation": {
+      "_comment": "Mobile: bottom tab bar (3-4 items max) + top header. Desktop: top header only (side nav reserved for v2 if needed). Each nav target has icon + text label; never icon-only.",
+      "mobile": {
+        "top_header_height": "layout.app_chrome.header_height_mobile",
+        "bottom_nav_height": "layout.app_chrome.bottom_nav_height",
+        "tab_min_target": "touch_target.min"
+      },
+      "desktop": {
+        "top_header_height": "layout.app_chrome.header_height_desktop"
+      }
+    }
+  },
+
+  "components_extended": {
+    "_comment": "JHSC-specific surfaces — not general components. State spec for each lives in design-system.md.",
+    "export_interstitial": { "modal_variant": "export_interstitial" },
+    "concern_intake_form": { "form_variant": "with_anonymous_toggle_default_on" },
+    "reprisal_log_entry": { "card_variant": "sensitive_c4", "requires_passphrase_prompt": true },
+    "sensitive_read_feed": { "toast_variant": "sensitive_activity", "feed_variant": "audit_feed" },
+    "onboarding_passphrase_print": { "page_variant": "print_layout" },
+    "photo_capture": { "advisory": "gps_removed", "location_input": "free_text_only" },
+    "offline_banner": { "alert_variant": "offline" },
+    "lock_screen": { "z": "z_index.lock_screen" },
+    "panic_wipe": { "modal_variant": "destructive_confirm", "z": "z_index.panic_overlay" },
+    "session_list": { "table_variant": "sessions" },
+    "audit_feed": { "table_variant": "audit_feed" }
   }
 }
