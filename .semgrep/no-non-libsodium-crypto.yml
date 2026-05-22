@@ -1,0 +1,33 @@
+# Semgrep rule — no non-libsodium crypto imports outside src/lib/crypto/.
+#
+# Source obligation: threat-model §8 T07, ADR-0003 Invariant 4.
+# Tests: apps/web/test/T02/ci-gates.test.ts.
+#
+# libsodium is the only cryptographic primitive library in this project.
+# Forbidden alternatives: crypto-js, node-forge, tweetnacl (without going
+# through libsodium-wrappers), and direct `crypto.subtle.*` calls outside
+# src/lib/crypto/.
+
+rules:
+  - id: no-non-libsodium-crypto
+    message: >-
+      Crypto primitive imported from outside libsodium-wrappers and
+      outside src/lib/crypto/. ADR-0003 Invariant 4 pins libsodium as the
+      only crypto library; the wrapper at src/lib/crypto/sodium.ts is the
+      only legitimate entry point.
+    severity: ERROR
+    languages: [typescript, javascript]
+    paths:
+      exclude:
+        - 'apps/web/src/lib/crypto/**'
+        - '**/*.test.ts'
+        - 'apps/web/test/**'
+        - 'observability/**'
+    patterns:
+      - pattern-either:
+          - pattern: import 'crypto-js'
+          - pattern: import 'node-forge'
+          - pattern: import 'crypto-js/...'
+          - pattern: import 'node-forge/...'
+          - pattern: crypto.subtle.$F(...)
+          - pattern: window.crypto.subtle.$F(...)

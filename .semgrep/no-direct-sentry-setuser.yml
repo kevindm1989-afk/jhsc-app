@@ -1,0 +1,24 @@
+# Semgrep rule — no Sentry.setUser on the browser path.
+#
+# Source obligation: ADR-0010 + observability/logging.md §7 rule 3.
+# Tests: apps/web/test/T02/ci-gates.test.ts.
+#
+# Sentry.setUser ties events to user identifiers. ADR-0010 forbids this on
+# the browser path; the server may set user.id to a pseudonym only.
+
+rules:
+  - id: no-direct-sentry-setuser
+    message: >-
+      Sentry.setUser is forbidden on the browser path (ADR-0010). Server
+      may set user.id to a pseudonym ONLY. The pseudonym is computed
+      server-side from HMAC_PSEUDONYM_KEY; the browser does not hold the
+      key.
+    severity: ERROR
+    languages: [typescript, javascript]
+    paths:
+      exclude:
+        - 'apps/web/test/**'
+        - '**/*.test.ts'
+        - 'observability/**'
+        - '.context/**'
+    pattern: Sentry.setUser(...)

@@ -1,0 +1,36 @@
+# Semgrep rule — no PI in log attributes.
+#
+# Source obligation: observability/logging.md §7 rule 1.
+# Tests: apps/web/test/T02/ci-gates.test.ts (rule-file existence + content).
+#
+# Bans literal-key passes of any PI denylist field into log.*() calls.
+# Detects:
+#   log.info({  ..., attributes: { display_name: ..., email: ..., phone: ..., body: ..., password: ..., token: ... } })
+
+rules:
+  - id: no-pi-in-log-attrs
+    message: >-
+      PI field name ($KEY) passed to log.*(). Logger drops these silently
+      at emit, but the call site MUST not assume the value flows through.
+      See observability/logging.md §2 (forbidden fields).
+    severity: ERROR
+    languages: [typescript, javascript]
+    paths:
+      exclude:
+        - 'apps/web/src/lib/log/**'
+        - 'supabase/functions/_shared/log.ts'
+        - 'apps/web/test/**'
+        - '**/*.test.ts'
+        - 'observability/**'
+        - '.context/**'
+    patterns:
+      - pattern-either:
+          - pattern: log.info({ ..., attributes: { ..., display_name: ..., ... } })
+          - pattern: log.info({ ..., attributes: { ..., email: ..., ... } })
+          - pattern: log.info({ ..., attributes: { ..., phone: ..., ... } })
+          - pattern: log.info({ ..., attributes: { ..., body: ..., ... } })
+          - pattern: log.info({ ..., attributes: { ..., password: ..., ... } })
+          - pattern: log.info({ ..., attributes: { ..., token: ..., ... } })
+          - pattern: log.warn({ ..., attributes: { ..., display_name: ..., ... } })
+          - pattern: log.error({ ..., attributes: { ..., email: ..., ... } })
+          - pattern: log.error({ ..., attributes: { ..., body: ..., ... } })

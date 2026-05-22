@@ -1,0 +1,13 @@
+node_modules/
+.svelte-kit/
+build/
+dist/
+coverage/
+package.json
+pnpm-lock.yaml
+
+# Test files are read-only per the scaffolder hard rule. Format drift is
+# tolerated until the implementer of each task lands the corresponding
+# feature code; the test-writer wrote tests in their preferred shape.
+test/
+

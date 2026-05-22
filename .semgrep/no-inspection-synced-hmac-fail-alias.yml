@@ -1,0 +1,32 @@
+# Semgrep rule — forbid the alias `inspection.synced.hmac_fail`.
+#
+# Source obligation: ADR-0010 Amendment F-B.
+# Tests: apps/web/test/T02/ci-gates.test.ts.
+#
+# `queue.integrity_fail` is the canonical event name. `inspection.synced.hmac_fail`
+# is the threat-model alias — kept readable in the three documented sources
+# (.context/decisions.md, observability/audit-log.md, .context/threat-model.md)
+# but forbidden everywhere else.
+
+rules:
+  - id: no-inspection-synced-hmac-fail-alias
+    message: >-
+      `inspection.synced.hmac_fail` is a documented alias for
+      `queue.integrity_fail`. Use the canonical name in code. See ADR-0010
+      Amendment F-B in .context/decisions.md, observability/audit-log.md
+      §6 finding #2.
+    severity: ERROR
+    languages: [typescript, javascript, generic]
+    paths:
+      include:
+        - 'apps/web/**'
+        - 'supabase/**'
+      exclude:
+        - '**/*.test.ts'
+        - 'apps/web/test/**'
+        - 'supabase/functions/_shared/test/**'
+        # The three documented files that may carry the alias text:
+        - '.context/decisions.md'
+        - 'observability/audit-log.md'
+        - '.context/threat-model.md'
+    pattern-regex: 'inspection\.synced\.hmac_fail'

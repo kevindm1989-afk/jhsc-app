@@ -1,0 +1,38 @@
+# Semgrep rule — no `console.log(req)` in Edge Functions.
+#
+# Source obligation: observability/logging.md §4 rule 1 / §7 rule 2.
+# Tests: apps/web/test/T02/ci-gates.test.ts.
+#
+# Edge Functions are the highest-risk logging surface. A careless
+# `console.log(req)` or `console.log(req.body)` leaks payload shape and
+# provenance into Supabase function logs even when no plaintext.
+#
+# Scoped explicitly to supabase/functions/ — the rest of the project uses
+# the shared structured logger.
+
+rules:
+  - id: no-console-log-req
+    message: >-
+      console.* on req / req.body / payload in an Edge Function leaks
+      request shape into platform logs. Use the shared structured logger
+      from supabase/functions/_shared/log.ts instead.
+      See observability/logging.md §4 rule 1.
+    severity: ERROR
+    languages: [typescript, javascript]
+    paths:
+      include:
+        - 'supabase/functions/**'
+      exclude:
+        - 'supabase/functions/_shared/log.ts'
+        - 'supabase/functions/_shared/test/**'
+    patterns:
+      - pattern-either:
+          - pattern: console.log($REQ)
+          - pattern: console.log($REQ.body)
+          - pattern: console.log($REQ.body, ...)
+          - pattern: console.info($REQ.body)
+          - pattern: console.warn($REQ.body)
+          - pattern: console.error($REQ.body)
+          - pattern: console.log(payload)
+          - pattern: console.log(body)
+          - pattern: console.log(req_body)

@@ -1,0 +1,71 @@
+# Supabase project configuration.
+#
+# Region: ca-central-1 (Canadian) per ADR-0001 + JHSC-APP-PLAN.md §3.3.
+# This file pins the project_id for the local stack; the production
+# region is configured in the Supabase dashboard (cannot be set from
+# config.toml) and verified by scripts/check-supabase-region.sh.
+
+project_id = "jhsc-app"
+
+# Region note (informational; the live region is verified at runtime by
+# the test harness in apps/web/test/_helpers/supabase-test.ts per
+# ADR-0001).
+# region = "ca-central-1"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+port = 54329
+pool_mode = "transaction"
+default_pool_size = 20
+max_client_conn = 100
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+jwt_expiry = 900
+enable_signup = false
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+enable_confirmations = true
+
+# WebAuthn / passkeys configured by Supabase platform; not all settings
+# are exposed via config.toml at this revision.
+
+[edge_runtime]
+enabled = true
+inspector_port = 8083
+policy = "oneshot"
+
+[analytics]
+enabled = false

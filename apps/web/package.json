@@ -1,0 +1,42 @@
+{
+  "name": "@jhsc/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker-side JHSC app — SvelteKit web application.",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p ./tsconfig.json",
+    "lint": "eslint .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "9.16.0",
+    "@sveltejs/adapter-static": "3.0.6",
+    "@sveltejs/kit": "2.8.1",
+    "@sveltejs/vite-plugin-svelte": "4.0.0",
+    "@testing-library/svelte": "5.2.4",
+    "@types/node": "22.10.1",
+    "@typescript-eslint/eslint-plugin": "8.18.0",
+    "@typescript-eslint/parser": "8.18.0",
+    "eslint": "9.16.0",
+    "eslint-plugin-svelte": "2.46.1",
+    "svelte-eslint-parser": "0.43.0",
+    "globals": "15.13.0",
+    "jsdom": "25.0.1",
+    "prettier": "3.4.2",
+    "prettier-plugin-svelte": "3.3.2",
+    "svelte": "5.2.10",
+    "svelte-check": "4.1.0",
+    "typescript": "5.7.2",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
+  },
+  "dependencies": {
+    "libsodium-wrappers": "0.7.15"
+  }
+}

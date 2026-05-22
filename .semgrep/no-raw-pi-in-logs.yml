@@ -1,0 +1,27 @@
+# Semgrep rule — no raw PI in any logger call.
+#
+# Source obligation: observability/logging.md §2 forbidden fields.
+# Catches console.log of named-PI variables/properties.
+
+rules:
+  - id: no-raw-pi-in-logs
+    message: >-
+      Raw PI passed to a logger. Use the structured logger with allowlisted
+      attribute keys; pseudonymize identifiers server-side first.
+      See observability/logging.md §2.
+    severity: ERROR
+    languages: [typescript, javascript]
+    paths:
+      exclude:
+        - '**/*.test.ts'
+        - 'apps/web/test/**'
+        - 'observability/**'
+        - 'apps/web/src/lib/log/**'
+    patterns:
+      - pattern-either:
+          - pattern: console.log($X.display_name)
+          - pattern: console.log($X.email)
+          - pattern: console.log($X.phone)
+          - pattern: console.log($X.body)
+          - pattern: console.error($X.email)
+          - pattern: console.warn($X.phone)

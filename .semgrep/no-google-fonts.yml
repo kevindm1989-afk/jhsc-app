@@ -1,0 +1,20 @@
+# Semgrep rule — no Google Fonts (system font stack only).
+#
+# Source obligation: JHSC-APP-PLAN.md §7, .context/constraints.md.
+# The bundle-grep gate (scripts/verify-no-third-party-js.sh) catches the
+# built artifact; this rule catches the source.
+
+rules:
+  - id: no-google-fonts
+    message: >-
+      Google Fonts URL detected. The app uses the system-font stack only
+      (no third-party JS / fonts at runtime). Remove the reference.
+    severity: ERROR
+    languages: [generic]
+    paths:
+      include:
+        - 'apps/web/**'
+      exclude:
+        - '**/*.test.ts'
+        - 'apps/web/test/**'
+    pattern-regex: 'fonts\.(googleapis|gstatic)\.com'

@@ -1,0 +1,27 @@
+# Semgrep rule — log.debug() outside dev/test.
+#
+# Source obligation: observability/logging.md §1 / §7 rule 4.
+# Tests: apps/web/test/T02/ci-gates.test.ts.
+#
+# DEBUG is build-time excluded in production via the logger module. This
+# rule catches `log.debug(` references in production code paths to prevent
+# noisy emissions before the build-time exclusion kicks in. The logger
+# module itself + tests are exempt.
+
+rules:
+  - id: no-debug-in-prod
+    message: >-
+      log.debug() should be removed from production-bound modules.
+      DEBUG is excluded from prod bundles, but the call site is removed
+      from the codebase to keep production-bound modules free of
+      developer-only state. See observability/logging.md §1.
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - 'apps/web/src/**'
+      exclude:
+        - 'apps/web/src/lib/log/**'
+        - '**/*.test.ts'
+        - '**/*.dev.ts'
+    pattern: log.debug(...)

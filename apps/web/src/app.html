@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en-CA" %sveltekit.theme%>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="no-referrer" />
+    <!--
+      System-font stack only. No Google Fonts, no Adobe Fonts, no CDN.
+      Per JHSC-APP-PLAN.md §7 "No third-party JS at runtime" and the
+      bundle-grep gate in scripts/verify-no-third-party-js.sh.
+    -->
+    <style>
+      :root {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Helvetica Neue',
+          Arial, 'Liberation Sans', sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
+      }
+      body {
+        margin: 0;
+        background: #fbfbfa;
+        color: #16181d;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0c0e12;
+          color: #f4f5f7;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
+      }
+    </style>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

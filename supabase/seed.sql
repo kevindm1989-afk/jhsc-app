@@ -1,0 +1,15 @@
+-- Test-environment seed.
+--
+-- Loaded by `supabase db reset` after migrations. Adds enough synthetic
+-- rows for the Vitest integration + pgTAP harness to run without having
+-- to invent state. NO real PI; the fixtures match
+-- apps/web/test/_helpers/fixtures.ts.
+--
+-- Migration-handler / implementer note: this seed depends on the
+-- canonical migration (00000000000000_init.sql) plus per-task migrations
+-- the architect orders in the task list. At scaffold time the migration
+-- is intentionally minimal; the seed is therefore minimal.
+
+-- Synthetic users — wired by the implementer of T05 / T06 once the
+-- committee_membership table is migrated.
+-- INSERT INTO committee_membership (user_id, role, active) VALUES ...;

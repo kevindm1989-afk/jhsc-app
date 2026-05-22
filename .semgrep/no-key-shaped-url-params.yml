@@ -1,0 +1,25 @@
+# Semgrep rule — no key-shaped URL query parameter names.
+#
+# Source obligation: threat-model §8 T07 Invariant 5 strengthened.
+# Tests: apps/web/test/T02/ci-gates.test.ts.
+#
+# A URL query parameter named `key`, `secret`, `passphrase`, `priv`, or
+# `nonce` is a footgun: even with HTTPS, query strings end up in proxy
+# logs, browser history, and Sentry breadcrumb URLs (until the scrubber
+# strips them). Catch the pattern at code review.
+
+rules:
+  - id: no-key-shaped-url-params
+    message: >-
+      URL query parameter name looks like a credential or crypto material
+      (key|secret|passphrase|priv|nonce). Put the value in the request
+      body over HTTPS or in an HMAC-signed header instead. See
+      threat-model §6 Invariant 5 strengthened.
+    severity: ERROR
+    languages: [typescript, javascript]
+    paths:
+      exclude:
+        - '**/*.test.ts'
+        - 'apps/web/test/**'
+        - 'observability/**'
+    pattern-regex: '[?&](key|secret|passphrase|priv|nonce)='
