@@ -115,11 +115,16 @@ describe('T05 / F-37 / T7 — passkey RP-ID origin binding', () => {
 // ----------------------------------------------------------------------------
 
 describe('T05 / F-38 — TOTP bootstrap', () => {
-  it('T05 / F-38 — TOTP is consumed atomically; reuse returns 410 Gone', async () => {
+  it('T05 / F-38 — TOTP is consumed atomically; reuse returns 401 (per threat-model §8 T05 canonical contract)', async () => {
+    // Reconciled with F-43 (line 83-89): same wire scenario (post-enrolment
+    // TOTP login attempt) must return one status. Threat-model §8 T05 line 828
+    // is verbatim "subsequent TOTP login attempt returns 401" — F-43 wins.
+    // F-38's "single-use" is enforced by the atomic delete + consumed-log,
+    // observable via this 401 return + the audit row.
     const invite = await supa.coChairIssueInvite({ user_id: SYNTHETIC_USER_A });
     await enrollFirstDevice(auth, { totp_code: invite.totp_code, user_id: SYNTHETIC_USER_A });
     const reuse = await auth.attemptTotpLogin(SYNTHETIC_USER_A, invite.totp_code);
-    expect(reuse.status).toBe(410);
+    expect(reuse.status).toBe(401);
   });
 
   it('T05 / F-38 — TOTP expires after 15 minutes', async () => {
