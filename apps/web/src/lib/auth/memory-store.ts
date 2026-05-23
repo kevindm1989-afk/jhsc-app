@@ -186,9 +186,20 @@ export class MemoryAuthStore implements AuthStore {
     if (row.locked_at !== null) return { ok: false, status: 429, reason: 'locked' };
     if (opts.now >= row.expires_at) return { ok: false, status: 410, reason: 'expired' };
     if (row.totp_code !== opts.totp_code) {
-      // Caller (auth-core) does the wrong-attempt counting; this
-      // path is only reached on a code mismatch on the enrollment ceremony,
-      // which should not happen if the caller is doing its job.
+      // F-38 parity with SQL `enroll_first_passkey` (migrations/
+      // 00000000000001_auth.sql lines ~400-405): the store itself
+      // increments wrong_attempts and sets locked_at on the 5th wrong
+      // code so the enrollment ceremony shares the same lockout semantic
+      // as `attemptTotpLogin`. The lockout policy lives at the AuthStore
+      // layer; callers do NOT (and MUST NOT) re-count here, or production
+      // would lock at 2.5x the SQL threshold. The 5th wrong attempt
+      // returns 401 (wrong_code) while recording the lock; the 6th
+      // attempt then hits the `locked_at !== null` early branch above
+      // and returns 429, matching the `attemptTotpLogin` lockout flow.
+      row.wrong_attempts += 1;
+      if (row.wrong_attempts >= 5 && row.locked_at === null) {
+        row.locked_at = opts.now;
+      }
       return { ok: false, status: 401, reason: 'wrong_code' };
     }
 

@@ -87,6 +87,22 @@ const _hasKeyEnv =
   typeof process.env[_keyEnvJoinedName] === 'string' &&
   (process.env[_keyEnvJoinedName] as string).length > 0;
 
+/**
+ * TOCTOU gate (second-opinion reviewer C2): inbound requests must NOT
+ * pass through while the boot smoke test is still in flight. Between
+ * server start and the async fetch-server-SHA returning, the `_drained`
+ * flag is still `false` even though parity may be about to fail, so
+ * fire-and-forget would let the first few requests authenticate against
+ * a parity-mismatched setup, produce pseudonyms that don't join with the
+ * DB, then the smoke test resolves false and the server drains.
+ *
+ * Trade-off: cold-start requests wait for the smoke test to resolve
+ * (≤500ms in practice, one Postgres round-trip). Subsequent requests
+ * pass through instantly because the Promise is already resolved. On
+ * rejection, every request gets a 503 via the drained-state branch.
+ */
+let _bootSmokeTestPromise: Promise<void> | null = null;
+
 if (_hasKeyEnv) {
   // Synchronous gate: synthesize a fetch fn that reads from the staging-
   // shim env var. The boot smoke test logs ERROR on failure and never
@@ -94,7 +110,7 @@ if (_hasKeyEnv) {
   const stagingShimSha =
     typeof process !== 'undefined' ? process.env.KEY_PARITY_SERVER_SHA_HEX : undefined;
 
-  runBootSmokeTest(async () => {
+  _bootSmokeTestPromise = runBootSmokeTest(async () => {
     if (typeof stagingShimSha !== 'string' || stagingShimSha.length === 0) {
       throw new KeyParityError(
         'no server SHA available for key-parity smoke test; ' +
@@ -102,14 +118,19 @@ if (_hasKeyEnv) {
       );
     }
     return stagingShimSha;
-  }).catch((err) => {
-    _drained = true;
-    _drainedReason = err instanceof Error ? err.constructor.name : 'KeyParityFailure';
-    // Note: the ERROR line is already emitted inside runBootSmokeTest
-    // / verifyKeyParity. We do NOT re-emit the message here (it may
-    // include diagnostic strings that we want only on the single
-    // canonical line).
-  });
+  }).then(
+    () => {
+      // Success — no flag set; subsequent requests serve normally.
+    },
+    (err: unknown) => {
+      _drained = true;
+      _drainedReason = err instanceof Error ? err.constructor.name : 'KeyParityFailure';
+      // Note: the ERROR line is already emitted inside runBootSmokeTest
+      // / verifyKeyParity. We do NOT re-emit the message here (it may
+      // include diagnostic strings that we want only on the single
+      // canonical line).
+    }
+  );
 }
 
 const UUID_V4_HEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -134,6 +155,16 @@ const requestIdHandle: Handle = async ({ event, resolve }) => {
   const incoming = event.request.headers.get('x-request-id');
   const request_id = incoming && UUID_V4_HEX.test(incoming) ? incoming : generateRequestId();
   event.locals.request_id = request_id;
+
+  // TOCTOU gate (C2 fix): if the boot smoke test is still in flight,
+  // hold this request until it resolves. Cold-start incurs a small
+  // latency cost (≤500ms, one Postgres round-trip); subsequent
+  // requests pass through instantly because the Promise is already
+  // resolved. On rejection, `_drained` is set and the short-circuit
+  // below returns 503.
+  if (_bootSmokeTestPromise) {
+    await _bootSmokeTestPromise;
+  }
 
   // Drained-state short-circuit (amendment pass #4 §B1): if the boot
   // smoke test failed, every request returns 503 with a generic body.

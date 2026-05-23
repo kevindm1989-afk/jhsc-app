@@ -46,7 +46,6 @@ import { rateLimitStore, ATTEMPT_LIMIT } from './rate-limit';
 import { checkBrowserBaseline } from './browser-baseline';
 
 const SESSION_TTL_MS = 15 * 60_000; // ADR-0002: 15 minutes
-const REVOCATION_PROPAGATION_MS = 5_000; // F-39: ≤5s propagation
 
 /**
  * Production RP-ID. Tests assert that origins outside this eTLD+1 are
@@ -561,4 +560,4 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
   };
 }
 
-export { SESSION_TTL_MS, REVOCATION_PROPAGATION_MS, RP_ID };
+export { SESSION_TTL_MS, RP_ID };

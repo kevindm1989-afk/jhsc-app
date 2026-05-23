@@ -152,6 +152,37 @@ describe('T05 / F-38 — TOTP bootstrap', () => {
     });
     expect(correctButLocked.status).toBe(429);
   });
+
+  it('T05 / F-38 — 5 wrong enroll attempts in 15 min lock the bootstrap; 6th enroll attempt returns 429', async () => {
+    // Contract-pin (per second-opinion-reviewer C1): the SQL
+    // `enroll_first_passkey` function increments wrong_attempts and
+    // locks the bootstrap at 5 wrong codes during the enrollment
+    // ceremony. The TS in-memory store MUST mirror that semantic so
+    // production and test paths share the same lockout policy. Modeled
+    // on the `attemptTotpLogin` lockout test above but exercising
+    // `enrollFirstDevice` with wrong codes instead.
+    const invite = await supa.coChairIssueInvite({ user_id: SYNTHETIC_USER_A });
+    for (let i = 0; i < 5; i++) {
+      const r = await enrollFirstDevice(auth, {
+        totp_code: '000000',
+        user_id: SYNTHETIC_USER_A,
+      });
+      expect(r.status).toBe(401);
+    }
+    // 6th enroll attempt — bootstrap is now locked; wire is 429.
+    const sixth = await enrollFirstDevice(auth, {
+      totp_code: '000000',
+      user_id: SYNTHETIC_USER_A,
+    });
+    expect(sixth.status).toBe(429);
+    // The invite is locked even with the CORRECT code now (contract
+    // parity with the `attemptTotpLogin` lockout flow).
+    const correctButLocked = await enrollFirstDevice(auth, {
+      totp_code: invite.totp_code,
+      user_id: SYNTHETIC_USER_A,
+    });
+    expect(correctButLocked.status).toBe(429);
+  });
 });
 
 // ----------------------------------------------------------------------------
