@@ -229,3 +229,68 @@ After architect amendments land:
 - **migration-handler** updates the migration per Findings 2, 5, 6.
 - **test-writer** adds test obligations.
 - **privacy-reviewer** re-runs on the resulting diff before T05 merges.
+
+---
+
+## Re-review after architect amendment #4 (2026-05-23)
+
+**Re-review scope.** Combined respin diff `ceb4992..31955f0` on `claude/jhsc-app-plan-nUriS`. Files re-read: `supabase/migrations/00000000000001_auth.sql` (all 583 lines), `apps/web/src/lib/auth/server/key-parity.ts` (new), `apps/web/src/hooks.server.ts`, `apps/web/src/lib/auth/memory-store.ts:1-120`, `apps/web/src/lib/auth/auth-core.ts` (comment + emission sites), `scripts/verify-no-third-party-js.sh`, `.context/decisions.md` ADR-0016 + ADR-0002 Amendment G + amendment-pass-#4 summary.
+
+### What changed since prior review
+
+1. **ADR-0016 (NEW, top of `decisions.md` lines 28-175)** — operational-table retention schedule + HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC standard. HG-15 bundles user ratification.
+2. **ADR-0002 Amendment G (lines 2618-2762)** — folds the four T05 auth-side-table decisions into the auth ADR. G.1 documents `auth_totp_consumed_log`; G.2 drops `auth_totp_bootstraps.totp_code`; G.3 reconciles `public.users` field set with the migration; G.4 ratifies HMAC-keyed pseudonyms + `subject_pseudonym` rename; G.5 ratifies per-attempt canonical wording for `auth.passkey.assert`; G.6 + G.7 fold-in `retention_class` + `request_id` at T05.
+3. **PI inventory amendments (`decisions.md:3251-3261+`)** — `users.{active,role,totp_destroyed_at}` rows added; `auth_totp_consumed_log.*` rows added; `auth_totp_bootstraps.totp_code` row removed; T06/T07-deferred `users` fields explicitly marked.
+4. **Migration** — pseudonym derivation at lines 400, 413, 439, 484, 571 all use `hmac(X::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256')`. `auth_totp_bootstraps.totp_code` removed; `UNIQUE (user_id)` only. `auth_totp_consumed_log` created with `(user_id, totp_code_hash bytea, consumed_at)`. GUC presence check fails the migration if unset. `audit_log.retention_class` + `audit_emit(p_request_id uuid, …)` + `retention_class_for(event_type)` all present. `alert.fired` uses `subject_pseudonym` in meta; outer `actor_pseudonym = 'sys-alert-dispatcher'`.
+5. **New file `apps/web/src/lib/auth/server/key-parity.ts`** — boot-time TS↔Postgres SHA-of-key parity check. Caches SHA only; constant-time verify; never logs key/SHA. Server-only via `lib/auth/server/` convention + `typeof window` guard.
+6. **`apps/web/src/hooks.server.ts`** — gated boot smoke test; on failure `_drained = true` and every request returns 503 with generic body. Drained reason in logs only.
+7. **`scripts/verify-no-third-party-js.sh:69`** — added `HMAC_PSEUDONYM_KEY` to bundle-leak denylist.
+8. **`memory-store.ts:23,49-99`** — pseudonym + TOTP-code-hash both use HMAC-SHA-256 keyed by per-store `randomBytes(32)`. Algorithm parity with prod; key independence by design.
+
+### Per-Q verdict (re-issue)
+
+- **Q1 (`auth_totp_consumed_log`):** APPROVED-WITH-CHANGES → **APPROVED.** Documentation: ADR-0016 row + ADR-0002 Amendment G.1 + PI inventory rows for `user_id`, `totp_code_hash`, `consumed_at` all present. Principles 4.2 + 4.5 defensibility holds. HMAC implementation at `00000000000001_auth.sql:413`. Retention 24h documented; enforcer is T16 (see new Finding R3).
+
+- **Q2 (`auth.passkey.assert` structured-log-only):** APPROVED-WITH-CHANGES → **APPROVED.** Per-attempt canonical wording ratified in Amendment G.5. Code cites at lines 14-17, 188-189, 253-254, 485-487. `actor_pseudonym` omission on server INFO emissions remains a T05-prod-deployment obligation (carry forward).
+
+- **Q3 (General PI handling):** APPROVED-WITH-CHANGES → **APPROVED.** B3 (Finding 5): `public.users` is `{id, active, role, totp_destroyed_at, created_at, updated_at}` exactly. PI inventory matches. B4 (Finding 6): `auth_totp_bootstraps` has `secret_hash bytea` only; no plaintext column. `UNIQUE (user_id)` only. Comparison rewritten. PIPEDA Principle 4.4 + 4.7 satisfied.
+
+- **Q4 (Browser-baseline gate):** **APPROVED.** Unchanged.
+
+- **Q5 (Test harness):** APPROVED-WITH-CHANGES → **APPROVED-WITH-ADVISORY.** Algorithm parity achieved (HMAC-SHA-256 both sides); key independence is acceptable under Principle 4.7 — the security property is "not recoverable to underlying id without the key," not "bit-identical output across processes." Finding 8 (consent surface bypass) still applies to T06.
+
+### New findings from the respin (R1–R7)
+
+**Finding R1 (ADVISORY — gate hygiene):** `scripts/verify-no-third-party-js.sh:36-44` falls back to `SRC_DIR` scan when `BUILD_DIR` is absent; three comment-only occurrences of `HMAC_PSEUDONYM_KEY` in source files would false-positive. CI runs `pnpm build` first so production CI is unaffected; local dev / future CI paths without build could erroneously block. Fix: exclude comment lines from source-fallback scan or downgrade source-fallback to warn. Non-blocking.
+
+**Finding R2 (ADVISORY — drift check):** `00000000000001_auth.sql:117-150` `retention_class_for()` is a hand-typed mirror of ADR-0015/ADR-0016. Currently aligned (22 rows match), but no test asserts the mirror. Future ADR amendment that adds an event_type without updating the function silently falls through to `'24mo'`. Test-writer carries forward a drift-check test enumerating event_type values across (a) `audit_log_retention_schedule` table and (b) `retention_class_for()` output, asserting equality.
+
+**Finding R3 (ADVISORY but operational gate — Principle 4.5 enforcer):** ADR-0016 documents 24h retention for `auth_totp_consumed_log` but T05 ships no sweep job; T16 owns it. Between T05 ship and T16 ship, no automated deletion. Acceptable on a low-volume single-tenant v0 but PIPEDA 4.5 is only satisfied by an enforced retention. **T16 is a hard prerequisite for the first production deploy where real PI lands.** Not a blocker on T05 merge; is a blocker on T05-bearing production deploy.
+
+**Finding R4 (ADVISORY — defense-in-depth):** Boot smoke test runs only when `_isProduction === true` (`hooks.server.ts:82-88`). In a misconfigured staging where `MODE=production` isn't set but real PI flows (e.g., preview deploy pointed at real Supabase), the parity check is skipped. Fix: either tighten the gate (any presence of `HMAC_PSEUDONYM_KEY` env var triggers the check regardless of MODE — defense in depth) OR document explicitly that `MODE=production` is a deploy-time requirement. Architect-level decision; deploy-runbook item.
+
+**Finding R5 (CONFIRMED — `subject_pseudonym` rename OK):** Outer `actor_pseudonym: 'sys-alert-dispatcher'`; `meta.subject_pseudonym: actorKey` (HMAC-SHA-256 of user_id). No raw user_id, no email, no IP. Second `subject_pseudonym` use at line 367 also keyed-HMAC. No regression. Closed.
+
+**Finding R6 (CONFIRMED — `audit_emit(p_request_id uuid)` safe):** request_id from `crypto.randomUUID()` (no user input) or strict UUIDv4-regex-validated incoming header. Propagated as X-Request-ID response header. `event.locals.request_id` typed. No cookie / local-storage / PI-tagged log alongside. Closed.
+
+**Finding R7 (CONFIRMED — `auth_totp_consumed_log.totp_code_hash` shape):** `bytea NOT NULL`, full 32 bytes, no truncation. Cleaner than text-hex; entropy preserved for byte-equality. Closed.
+
+### Overall T05 verdict
+
+**APPROVED-WITH-ADVISORIES.** All four prior blocking findings (1, 2, 5, 6) closed. Four new advisories (R1–R4) non-blocking. **R3 is a hard prerequisite for first production deploy** (T16 retention sweep must land before real PI flows). R4 is a deploy-runbook item.
+
+Human-gate posture:
+- **HG-15 (NEW)** — user ratification of (a) ADR-0016's operational-table retention schedule and (b) the HMAC-SHA-256 + GUC posture. Bundled per Amendment G. Architect recommendation to user: APPROVE both as proposed. Until HG-15 lands, T05 is merge-eligible but T16 / production deploy is gated.
+- No new cross-border-transfer gate. No new third-party processor.
+
+### Handoff
+
+Next agent: **orchestrator / user (HG-15)**.
+
+Carry-forwards:
+- **T16:** 24h sweep for `auth_totp_consumed_log` (R3); per-event-type retention-schedule drift assertion (R2).
+- **Test-writer:** Amendment G testable assertions §1–9 at `decisions.md:2715-2727`; retention-class-mirror drift check (R2).
+- **Implementer / migration-handler:** CI gate refinement for source-fallback false-positives (R1, optional); boot-smoke-test activation rule tightening (R4, optional deploy-runbook item).
+- **Unchanged carry-forward:** `auth.passkey.assert` server INFO `actor_pseudonym` inclusion is a T05-prod-deployment obligation (prior Finding 4).
+
+T05 cleared on its own merits for merge. Production deploy gates on T16 landing + HG-15 ratification.
