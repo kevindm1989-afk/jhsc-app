@@ -827,6 +827,124 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope (T12.1):** mirror T11.1's resolution pattern for the recommendation surface.
 **Blocker for:** production deploy.
 
+## T16 — Retention sweep
+
+> Library-only T16 (ADR-0002 Amendment H) closes library halves of G-T05-6 + G-T05-7. The 10 G-T16-1..10 entries below were minted in threat-model.md §3.9 and are reproduced here for one-stop T16.1 planning. Six additional entries (G-T16-PRIV-1..3, G-T16-RECONCILE-CEILING, G-T16-SO-1, G-T16-SO-2) come from the T16 reviewer pass.
+
+### G-T16-1 — SQL advisory lock (F-59 production half)
+**Source:** threat-model.md §3.9 F-59; ADR-0017 §6 step 1.
+**Finding:** library lease (5-min in-memory checkpoint) is the cooperative-caller defense. Hostile-concurrent-caller defense requires `pg_try_advisory_xact_lock(hashtext('retention_sweep'))` at the top of the T16.1 SQL function.
+**Resolution scope (T16.1):** wrap `runRetentionPass` invocation inside a Postgres transaction that holds the advisory lock for the full pass duration.
+**Blocker for:** production deploy.
+
+### G-T16-2 — Statement timeout + lock_timeout (F-60 production half)
+**Source:** threat-model.md §3.9 F-60.
+**Finding:** library row-cap (20000 default) bounds the per-pass volume. Production needs `SET LOCAL statement_timeout='60s'` + `lock_timeout='5s'` on the SQL function to prevent high-churn-table starvation.
+**Resolution scope (T16.1):** SQL function preamble.
+**Blocker for:** production deploy.
+
+### G-T16-3 — pg_cron schedule 03:30 ET
+**Source:** threat-model.md §3.9 F-60 mitigation note; ADR-0017 §6 step 1.
+**Finding:** library is invoke-driven; production needs a daily cron.
+**Resolution scope (T16.1):** `cron.schedule('retention-sweep', '30 3 * * *', $$SELECT retention_sweep_runner()$$)`. ET-anchored.
+**Blocker for:** production deploy.
+
+### G-T16-4 — Cross-mirror drift assertion (TS const ↔ SQL function ↔ SQL table)
+**Source:** G-T05-6 (now closed library half) + threat-model.md §3.9 F-55.
+**Finding:** library closes drift between `RETENTION_SCHEDULE` const and `RetentionEventType` enum. T16.1 introduces a `retention_class_for(text)` SQL function + `audit_log_retention_schedule` SQL table; all three must mirror exactly. CI asserts triple equality.
+**Resolution scope (T16.1):** pgTAP test enumerates event_types from (a) TS const exported, (b) SQL function output, (c) SQL table rows; asserts set-equality.
+**Blocker for:** T16.1 PR submission.
+
+### G-T16-5 — A-RETENTION-001 alert wiring (observability-setup)
+**Source:** threat-model.md §3.9 F-57 + RA-2 reconciliation.
+**Finding:** F-57 over-delete alarm is library-side `alarm_fired: true` in the result. Production needs the alert sink: A-RETENTION-001 fires when `alarm_fired === true` OR when `would_delete_total > expected_p99_for_event_class`.
+**Resolution scope (T16.1 → observability pass):** define A-RETENTION-001 with runbook; route to on-call.
+**Blocker for:** RA-1 compensating-control monitoring posture.
+
+### G-T16-6 — HG-15 re-ratification at T16.1
+**Source:** ADR-0017 §sibling task spec.
+**Finding:** T16.1 introduces two new physical tables (`retention_sweep_runs`, `audit_log_retention_schedule`). HG-15 re-fires for §PI inventory amendments + ADR-0016 schedule rows.
+**Resolution scope (T16.1):** prepare HG-15 packet; user ratifies before SQL migration lands.
+**Blocker for:** T16.1 PR submission.
+
+### G-T16-7 — §PI inventory amendments at T16.1
+**Source:** ADR-0017 §sibling task spec.
+**Finding:** the two new physical tables need §PI inventory rows. Neither holds PI (counts + hashes + UUIDs); inventory still must record them.
+**Resolution scope (T16.1):** add 2 rows to §PI inventory in `decisions.md`; privacy-reviewer re-runs with the diff.
+**Blocker for:** T16.1 PR submission.
+
+### G-T16-8 — T18 integrity-job reconciliation join
+**Source:** threat-model.md §3.9 F-69 + RA-2 trigger #3.
+**Finding:** library writes `retention_sweep_runs.per_event_counts` mirroring `retention.deleted.meta.deleted_per_table.audit_log_per_event_type`. T18's integrity job must reconcile live-chain row counts against this anchor across the latest pg_dump.
+**Resolution scope (T18):** integrity-job join over (audit_log, retention_sweep_runs, pg_dump snapshot); diverge ⇒ A-INTEGRITY-002.
+**Blocker for:** RA-2 trigger #3 monitoring posture.
+
+### G-T16-9 — `xact_start()` shim swap-in
+**Source:** threat-model.md §3.9 F-66; G-T08-14 / G-T13-9 mirror.
+**Finding:** library returns `Date.now()` + monotonic floor for `transaction_ts_ms`. T16.1's SQL function uses `xact_start()`.
+**Resolution scope (T16.1):** SQL function uses `xact_start()`; library shim is replaced by the real transaction timestamp.
+**Blocker for:** none. Hygiene.
+
+### G-T16-10 — SECURITY DEFINER signatures + REVOKE posture
+**Source:** threat-model.md §3.9 F-64.
+**Finding:** library structurally forbids caller-supplied WHERE. SQL function must mirror: 3-arg signature exactly, no string-fragment parameter, SECURITY DEFINER owned by `migration_role`, `GRANT EXECUTE` only to `retention_service_role` (non-login), REVOKE from `authenticated` / `anon` / `service_role`.
+**Resolution scope (T16.1):** SQL migration in `00000000000007_retention.sql`.
+**Blocker for:** T16.1 PR submission (T11/T12 F-1 pattern recurrence prevention).
+
+### G-T16-PRIV-1 — actor_pseudonym must not duplicate into meta jsonb (BLOCKING-IN-T16.1)
+**Source:** privacy-review-t16.md Q3 ADVISORY.
+**Finding:** `MemoryRetentionStore.emitRetentionDeletedAndRegisterRun` inlines pseudonym into `meta.actor_pseudonym` (memory-retention-store.ts:272) — acceptable for in-memory testing but `SupabaseRetentionStore` MUST put `actor_pseudonym` only in the top-level `audit_log` column. G-T11-14 / T13 hygiene lineage.
+**Resolution scope (T16.1):** `SupabaseRetentionStore` writes `actor_pseudonym` to the column directly; meta jsonb carries only counts + status + schedule_hash + run_id.
+**Blocker for:** PIPEDA 4.7 audit-shape clarity at T16.1 PR.
+
+### G-T16-PRIV-3 — Operator-side structured Error logging (BLOCKING-IN-T16.1)
+**Source:** privacy-review-t16.md Q4 ADVISORY.
+**Finding:** `runRetentionPass` swallows thrown Errors completely (retention-core.ts:252, :313). Correct for client-facing payloads (constraints.md:111 — no PI in error messages returned to clients) but degrades operator observability for diagnosing the underlying failure.
+**Resolution scope (T16.1):** route swallowed Error to server-side structured-log sink with PI scrubbing; PIPEDA Principle 4.10 (Challenging Compliance).
+**Blocker for:** operator debugging of T16.1 production failures.
+
+### G-T16-RECONCILE-CEILING — Per-event attribution of ceiling-driven deletes
+**Source:** T16 security review Finding 2; threat-model.md §3.9 F-69.
+**Finding:** library ceiling-rule deletes are aggregated under a synthetic `__ceiling__` key (retention-core.ts:232) then stripped before emission (lines 266-270). Emitted `per_event_counts` does NOT include ceiling-driven deletes. F-69 reconciliation under-attributes by the ceiling-delete count in any pass that triggers the ceiling rule.
+**Resolution scope (T16.1):** `SupabaseRetentionStore.deleteForUnderlyingRecordCeiling` returns a per-event-type breakdown via SQL join on `audit_log.event_type`; `runRetentionPass` substitutes this into `auditLogPerEventType` instead of the `__ceiling__` aggregate.
+**Blocker for:** RA-2 trigger #3 reconciliation correctness at T16.1.
+
+### G-T16-SO-1 — Snapshot completeness invariant
+**Source:** T16 second-opinion review CF-1.
+**Finding:** `MemoryRetentionStore.snapshot()` captures `auditRows` + `operational` only — NOT `deletedRecords` or `sweepRuns`. Safe today by construction (production methods only mutate audit/operational arrays; the only `sweepRuns.push` is inside the same method that throws BEFORE the push) but a future edit reordering `emitRetentionDeletedAndRegisterRun` could silently break rollback.
+**Resolution scope (T16.1 OR next library pass):** either (a) widen Snapshot to capture every mutable field on the store, OR (b) add a snapshot-completeness invariant test that asserts byte-identical store state after rollback.
+**Blocker for:** none. Future-proofing.
+
+### G-T16-SO-2 — Alarm scope is per-event-type only by construction
+**Source:** T16 second-opinion review CF-3 + CF-4.
+**Finding:** F-57 alarm check at retention-core.ts:171-176 iterates `perEventCounts[et]` only — does NOT check `perTableCounts[t]` or `ceilingCount`. An over-broad schedule change reducing `auth_totp_consumed_log` from 24h to 1h silently sweeps 10x more rows with no alarm. Additionally, default threshold 20 is fine for low-volume audit categories but `session.revoked` (90-day fixed_days) on any modest-DAU deployment routinely has >20 daily candidates → alarm fires every pass → operational chore OR `confirmOverDeleteThreshold: true` hardcoded → F-57 neutralized.
+**Resolution scope (T16.1 Edge Function):** either (a) widen alarm to include `perTableCounts` + `ceilingCount`, OR (b) accept `Partial<Record<RetentionEventType, number>>` threshold map for per-event tuning. Architect decision when wiring T16.1.
+**Blocker for:** F-57 effectiveness in production.
+
+### G-T16-PRIV-2 — Document `meta.run_id` redundancy in ADR-0017 §7
+**Source:** privacy-review-t16.md Q3 ADVISORY.
+**Finding:** summary `meta.run_id` and `retention_sweep_runs.run_id` are intentionally redundant (lets a forensic reader pair the audit row with the run row without a join). ADR should record this intent so future readers don't try to normalize.
+**Resolution scope (next ADR pass):** one-line addition to ADR-0017 §7.
+**Blocker for:** none. Documentation.
+
+### G-T16-PRIV-5 — HMAC pseudonym shape cross-mirror
+**Source:** privacy-review-t16.md Cross-cutting C.
+**Finding:** library `systemActorPseudonym()` returns 32-char hex from HMAC-SHA-256 (memory-retention-store.ts:151-153). T16.1's `SupabaseRetentionStore` MUST share the AuthStore's HMAC key (ADR-0016 §Decision 1) so pseudonym values are cross-correlatable across audit-log readers.
+**Resolution scope (T16.1):** `SupabaseRetentionStore` reads the production HMAC key via the shared GUC `app.hmac_pseudonym_key` per ADR-0016.
+**Blocker for:** forensic-reveal correlation at T16.1.
+
+### G-T16-PRIV-6 — Privacy-reviewer revisits Q9 (no caller WHERE) at T16.1 SQL signature
+**Source:** privacy-review-t16.md Q9.
+**Finding:** library structurally prevents caller-supplied WHERE. SQL function MUST hold the same property — privacy-reviewer audits the function signature in T16.1.
+**Resolution scope (T16.1 review pass):** privacy-reviewer asserts SQL function arity + parameter types; no string-fragment parameter.
+**Blocker for:** T16.1 PR approval.
+
+### G-T16-PRIV-7 — T18 integrity-job join structural-fields-only
+**Source:** privacy-review-t16.md Cross-cutting findings.
+**Finding:** when T18 integrity-job lands (G-T16-8), the live-chain ↔ `retention_sweep_runs.per_event_counts` reconciliation join MUST read only structural fields (run_id, ms-epoch, per-event counts) — never surface any pseudonym across the integrity-job output.
+**Resolution scope (T18 design):** integrity-job query projects only the structural fields; pseudonyms remain in audit_log.
+**Blocker for:** T18 privacy review approval.
+
 ---
 
 ## How to use this file
@@ -839,5 +957,6 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 - When working on T13.1 / production wire-up: search for `G-T13-*` and resolve them in a single pass.
 - When working on T14.1 / production wire-up: search for `G-T14-*` and resolve them in a single pass.
 - When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.
+- When working on T16.1 / production wire-up: search for `G-T16-*` and resolve them in a single pass.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.
