@@ -1,10 +1,19 @@
 -- T05 — Authentication: passkeys (WebAuthn) + TOTP bootstrap + sessions.
 --
 -- Source obligations:
---   - .context/decisions.md ADR-0002 — passkeys-only, TOTP enrollment.
+--   - .context/decisions.md ADR-0002 (+ Amendment G, amendment pass #4) —
+--     passkeys-only, TOTP enrollment, HMAC-keyed pseudonyms, plaintext
+--     `totp_code` dropped, retention_class + request_id fold-ins,
+--     alert.fired meta rename.
+--   - .context/decisions.md ADR-0016 — operational-table retention schedule
+--     + HMAC pseudonymization standard (HG-15).
 --   - .context/decisions.md ADR-0001 — Canadian region pin (orthogonal).
+--   - .context/decisions.md ADR-0015 — per-event-type audit-log retention
+--     (authoritative source for the retention_class lookup below).
 --   - .context/threat-model.md §3.1 F-37..F-43.
 --   - observability/audit-log.md §1 "Auth + session (T05)".
+--   - observability/audit-log.md §2 row schema (extended in T05 with
+--     `retention_class` + `request_id`).
 --   - observability/alerts.md §1 A-AUTH-001, A-AUTH-002.
 --
 -- Hard rules followed:
@@ -13,10 +22,16 @@
 --   - Audit emission via a SECURITY DEFINER `audit_emit` function (architect
 --     pattern; the chain hash is computed by the function — callers cannot
 --     forge a hash).
+--   - All pseudonym derivations use HMAC-SHA-256 keyed by the GUC
+--     `app.hmac_pseudonym_key` (ADR-0016 §Decision 1, B1).
 --   - TOTP bootstrap row is DELETED in the same transaction as the first
 --     passkey enrollment (F-43); a separate `auth_totp_consumed_log` table
---     records the consumed-code so reuse attempts can still be detected as
---     410 Gone (F-38) without bringing the row back.
+--     records the HMAC of the consumed-code so reuse attempts can still be
+--     detected as 410 Gone (F-38) without bringing the row back.
+--   - The `auth_totp_bootstraps.secret_hash` column is the HMAC of the
+--     6-digit code, computed by the issuer (co-chair Edge Function in
+--     production; test harness in dev). The raw code never persists in
+--     this table (B4).
 --   - Session jti revocation is server-side (F-39); a revoked session_id
 --     cannot reauthenticate even if the JWT is held client-side.
 --
@@ -28,6 +43,27 @@
 --     migration creates a STUB `audit_log` table here so the auth emission
 --     paths have somewhere to write. The T18 migration will ALTER it to add
 --     hash-chain columns + the strict CHECK constraint.
+
+-- ============================================================================
+-- HMAC pseudonymization key
+-- ============================================================================
+-- The HMAC key for pseudonym derivation lives in a Postgres GUC. Set at deploy
+-- time via:
+--   ALTER DATABASE postgres SET app.hmac_pseudonym_key = '<base64-32-bytes>';
+-- The application tier reads HMAC_PSEUDONYM_KEY env var; the values MUST
+-- match. A boot smoke test compares SHA-of-key on both sides.
+--
+-- For local dev / test, set a deterministic placeholder via:
+--   ALTER DATABASE postgres SET app.hmac_pseudonym_key = 'dev-only-not-secret-32-bytes-aaaa';
+--
+-- ADR-0002 Amendment G + ADR-0016 + B1 (architect amendment #4) ratify this.
+-- ============================================================================
+DO $$
+BEGIN
+  IF current_setting('app.hmac_pseudonym_key', true) IS NULL OR current_setting('app.hmac_pseudonym_key', true) = '' THEN
+    RAISE EXCEPTION 'app.hmac_pseudonym_key GUC not set. Set via ALTER DATABASE ... SET app.hmac_pseudonym_key = ''<key>''; before running this migration.';
+  END IF;
+END $$;
 
 -- ===========================================================================
 -- AUDIT-LOG STUB (full schema lands in T18 migration)
@@ -42,6 +78,10 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
   target_class    text NOT NULL CHECK (target_class IN ('C0','C1','C2','C3','C4')),
   severity        text NOT NULL DEFAULT 'info'
                   CHECK (severity IN ('info','notice','warn','alert')),
+  -- retention_class is written by audit_emit from a static event_type lookup
+  -- per ADR-0015's authoritative schedule. T16's retention sweep keys off
+  -- this column. Per ADR-0002 Amendment G.6 / privacy-review-t05 §8 #2.
+  retention_class text NOT NULL,
   request_id      uuid,
   rotation_id     uuid,
   meta            jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -56,12 +96,61 @@ CREATE INDEX IF NOT EXISTS audit_log_event_type_ts_idx
 ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
 
 -- SELECT: active members only. is_active_member() lands with T07/T08;
--- until then we deny by default.
+-- until then we deny by default. T13 replaces this policy with the
+-- Amendment D projection-view SELECT path (ADR-0002 Amendment G.8).
 CREATE POLICY audit_log_select_deny_default ON public.audit_log
   FOR SELECT TO authenticated
   USING (false);
 
 REVOKE INSERT, UPDATE, DELETE ON public.audit_log FROM authenticated, anon;
+
+-- ===========================================================================
+-- retention_class_for — static event_type → retention_class lookup
+-- ===========================================================================
+--
+-- Authoritative source: ADR-0015 §"The schedule" + ADR-0016 §"operational-
+-- table retention schedule". This function is a small mirror so audit_emit
+-- can stamp retention_class at write time. If a value here disagrees with
+-- ADR-0015, ADR-0015 wins — surface and amend this function, do NOT amend
+-- the ADR.
+
+CREATE OR REPLACE FUNCTION public.retention_class_for(p_event_type text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT CASE p_event_type
+    WHEN 'auth.passkey.enrolled'                          THEN '90d'
+    WHEN 'auth.passkey.revoked'                           THEN '90d'
+    WHEN 'session.revoked'                                THEN '90d'
+    WHEN 'committee_data_key.unwrap'                      THEN '24mo'
+    WHEN 'committee_data_key.rotation.started'            THEN '7y'
+    WHEN 'committee_data_key.rotation.completed'          THEN '7y'
+    WHEN 'committee_data_key.member_revoked'              THEN '7y'
+    WHEN 'committee.key_rotated'                          THEN '7y'
+    WHEN 'identity_keypair.created'                       THEN '7y'
+    WHEN 'identity_privkey.recovery_blob.written'         THEN 'membership+24mo'
+    WHEN 'identity_privkey.recovery_blob.restored'        THEN 'membership+24mo'
+    WHEN 'identity_privkey.recovery_blob.viewed'          THEN 'membership+24mo'
+    WHEN 'committee_data_key.wrapped_for_member'          THEN '7y_from_rotation'
+    WHEN 'export.generated'                               THEN '7y'
+    WHEN 'export.contained_concern_derived_items'         THEN '7y'
+    WHEN 'retention.deleted'                              THEN '7y'
+    WHEN 'member.added'                                   THEN 'membership+7y'
+    WHEN 'member.removed'                                 THEN 'membership+7y'
+    WHEN 'alert.fired'                                    THEN '24mo'
+    WHEN 'client.cache_policy_violation'                  THEN '90d'
+    WHEN 'client.identity_selftest_fail'                  THEN '90d'
+    ELSE '24mo'   -- safe ceiling fallback; concrete-target rows are
+                  -- re-stamped to 'match_underlying' by the caller if a
+                  -- target_id was supplied (handled in audit_emit).
+  END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.retention_class_for(text) FROM public;
+GRANT EXECUTE ON FUNCTION public.retention_class_for(text) TO supabase_auth_admin;
 
 -- ===========================================================================
 -- audit_emit — SECURITY DEFINER emission path
@@ -70,30 +159,49 @@ REVOKE INSERT, UPDATE, DELETE ON public.audit_log FROM authenticated, anon;
 -- The hash-chain is filled in by T18's migration. Until then, callers go
 -- through this function so we have a single emission path that the
 -- semgrep rule + audit-log CI gate can match on.
+--
+-- Signature changes vs original (amendment pass #4):
+--   - p_request_id uuid added (ADR-0002 Amendment G.7 / cross-cutting #4).
+--     Callers pre-T18 may pass NULL; T18 starts threading it through.
+--   - retention_class is written from retention_class_for(event_type)
+--     (ADR-0002 Amendment G.6 / cross-cutting #2). When a target_id is
+--     supplied and the static lookup falls through to the default, the
+--     class is rewritten to 'match_underlying' so the T16 sweep follows
+--     the target row's retention.
 
 CREATE OR REPLACE FUNCTION public.audit_emit(
   p_event_type      text,
   p_actor_pseudonym varchar(16),
   p_target_class    text,
   p_severity        text,
-  p_target_id       uuid DEFAULT NULL,
-  p_rotation_id     uuid DEFAULT NULL,
-  p_meta            jsonb DEFAULT '{}'::jsonb
+  p_request_id      uuid    DEFAULT NULL,
+  p_target_id       uuid    DEFAULT NULL,
+  p_rotation_id     uuid    DEFAULT NULL,
+  p_meta            jsonb   DEFAULT '{}'::jsonb
 ) RETURNS bigint
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_id bigint;
+  v_id              bigint;
+  v_retention_class text;
 BEGIN
+  v_retention_class := public.retention_class_for(p_event_type);
+  -- If the static lookup fell back to the safe ceiling AND the caller
+  -- supplied a target_id, prefer 'match_underlying' so T16 follows the
+  -- target row's retention (ADR-0015 §"underlying-record-ceiling rule").
+  IF v_retention_class = '24mo' AND p_target_id IS NOT NULL THEN
+    v_retention_class := 'match_underlying';
+  END IF;
+
   INSERT INTO public.audit_log (
     event_type, actor_pseudonym, target_class, severity,
-    target_id, rotation_id, meta
+    request_id, target_id, rotation_id, retention_class, meta
   )
   VALUES (
     p_event_type, p_actor_pseudonym, p_target_class, p_severity,
-    p_target_id, p_rotation_id, p_meta
+    p_request_id, p_target_id, p_rotation_id, v_retention_class, p_meta
   )
   RETURNING id INTO v_id;
   RETURN v_id;
@@ -101,8 +209,11 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION public.audit_emit(
-  text, varchar, text, text, uuid, uuid, jsonb
+  text, varchar, text, text, uuid, uuid, uuid, jsonb
 ) FROM public;
+GRANT EXECUTE ON FUNCTION public.audit_emit(
+  text, varchar, text, text, uuid, uuid, uuid, jsonb
+) TO supabase_auth_admin;
 
 -- ===========================================================================
 -- USERS profile side-table
@@ -131,17 +242,17 @@ CREATE POLICY users_select_self ON public.users
 CREATE TABLE IF NOT EXISTS public.auth_totp_bootstraps (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id         uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  -- The secret is HMAC-derived in production; for the test harness this
-  -- column holds the literal short code. Production callers MUST hash
-  -- before storing.
+  -- HMAC-SHA-256 of the 6-digit code; computed by the issuer (co-chair Edge
+  -- Function in production; test harness in dev). The raw code never
+  -- persists in this table (B4 / ADR-0002 Amendment G.2).
   secret_hash     bytea NOT NULL,
-  totp_code       text NOT NULL,                    -- short-lived code; for the harness only
   issued_at       timestamptz NOT NULL DEFAULT now(),
   expires_at      timestamptz NOT NULL,             -- issued_at + 15 min
   consumed_at     timestamptz,
   wrong_attempts  integer NOT NULL DEFAULT 0,
   locked_at       timestamptz,
-  UNIQUE (user_id, totp_code)
+  -- One outstanding bootstrap per user (B4: UNIQUE was (user_id, totp_code)).
+  UNIQUE (user_id)
 );
 
 CREATE INDEX IF NOT EXISTS auth_totp_bootstraps_user_id_idx
@@ -160,13 +271,15 @@ REVOKE SELECT, INSERT, UPDATE, DELETE ON public.auth_totp_bootstraps
 --
 -- Per F-43 the bootstrap row is DELETED on consume. To still answer
 -- "is this code one we already accepted?" (F-38 single-use) we record a
--- minimal audit-shaped row here. Retained 24h (T16 will own the
--- retention rule).
+-- minimal audit-shaped row here. Retained 24h per ADR-0016 operational-
+-- table schedule (T16 owns the sweep).
 
 CREATE TABLE IF NOT EXISTS public.auth_totp_consumed_log (
   id              bigserial PRIMARY KEY,
   user_id         uuid NOT NULL,
-  totp_code_hash  bytea NOT NULL,                   -- HMAC of the consumed code
+  -- HMAC-SHA-256(code, app.hmac_pseudonym_key) — full 32 bytes for
+  -- byte-equality reuse detection (no truncation). Per B1 / ADR-0016.
+  totp_code_hash  bytea NOT NULL,
   consumed_at     timestamptz NOT NULL DEFAULT now()
 );
 
@@ -281,7 +394,10 @@ BEGIN
     RAISE EXCEPTION 'TOTP_BOOTSTRAP_EXPIRED' USING ERRCODE = 'P0001';
   END IF;
 
-  IF v_bootstrap.totp_code <> p_totp_code THEN
+  -- B4: compare HMAC(submitted-code) to the stored secret_hash. Raw code
+  -- is never persisted; this is the only point where p_totp_code is
+  -- handled in the same transaction frame as the stored hash.
+  IF v_bootstrap.secret_hash <> hmac(p_totp_code::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256') THEN
     UPDATE public.auth_totp_bootstraps
        SET wrong_attempts = wrong_attempts + 1,
            locked_at = CASE WHEN wrong_attempts + 1 >= 5 THEN now() ELSE locked_at END
@@ -291,8 +407,10 @@ BEGIN
 
   -- Atomically: insert consumed-log row, delete bootstrap, set
   -- users.totp_destroyed_at, save credential, emit audit row.
+  -- B1: HMAC, not bare SHA. Full 32-byte HMAC stored for byte-equality
+  -- reuse detection.
   INSERT INTO public.auth_totp_consumed_log (user_id, totp_code_hash)
-    VALUES (p_user_id, digest(p_totp_code, 'sha256'));
+    VALUES (p_user_id, hmac(p_totp_code::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'));
 
   DELETE FROM public.auth_totp_bootstraps WHERE id = v_bootstrap.id;
 
@@ -308,13 +426,17 @@ BEGIN
     p_credential_id, p_user_id, p_public_key, p_aaguid, p_transports, p_rp_id, p_device_label
   );
 
+  -- B1: cred_id pseudonym is keyed HMAC, truncated to 16 hex chars per
+  -- observability/audit-log.md §2 style. request_id threaded as NULL
+  -- here pre-T18; the auth layer wires it in once threaded.
   PERFORM public.audit_emit(
     p_event_type      => 'auth.passkey.enrolled',
     p_actor_pseudonym => p_actor_pseudonym,
     p_target_class    => 'C1',
     p_severity        => 'info',
+    p_request_id      => NULL,
     p_meta            => jsonb_build_object(
-      'cred_id_pseudonym', encode(digest(p_credential_id, 'sha256'), 'hex')
+      'cred_id_pseudonym', LEFT(encode(hmac(p_credential_id::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16)
     )
   );
 
@@ -325,6 +447,9 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.enroll_first_passkey(
   uuid, text, text, bytea, uuid, text[], text, text, varchar
 ) FROM public;
+GRANT EXECUTE ON FUNCTION public.enroll_first_passkey(
+  uuid, text, text, bytea, uuid, text[], text, text, varchar
+) TO supabase_auth_admin;
 
 -- ===========================================================================
 -- revoke_session — F-39 with audit row in same txn
@@ -347,14 +472,16 @@ BEGIN
      AND revoked_at IS NULL;
 
   IF FOUND THEN
+    -- B1: session_id pseudonym is keyed HMAC, truncated to 16 hex chars.
     PERFORM public.audit_emit(
       p_event_type      => 'session.revoked',
       p_actor_pseudonym => p_actor_pseudonym,
       p_target_id       => p_session_id,
       p_target_class    => 'C1',
       p_severity        => 'info',
+      p_request_id      => NULL,
       p_meta            => jsonb_build_object(
-        'session_id_pseudonym', encode(digest(p_session_id::text, 'sha256'), 'hex'),
+        'session_id_pseudonym', LEFT(encode(hmac(p_session_id::text::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16),
         'revoked_by_actor_pseudonym', p_actor_pseudonym,
         'reason', p_reason
       )
@@ -365,6 +492,8 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.revoke_session(uuid, uuid, varchar, text)
   FROM public;
+GRANT EXECUTE ON FUNCTION public.revoke_session(uuid, uuid, varchar, text)
+  TO supabase_auth_admin;
 
 -- ===========================================================================
 -- revoke_all_sessions — F-39
@@ -393,6 +522,7 @@ BEGIN
     p_actor_pseudonym => p_actor_pseudonym,
     p_target_class    => 'C1',
     p_severity        => 'info',
+    p_request_id      => NULL,
     p_meta            => jsonb_build_object(
       'revoked_by_actor_pseudonym', p_actor_pseudonym,
       'reason', p_reason,
@@ -406,6 +536,8 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.revoke_all_sessions(uuid, varchar, text)
   FROM public;
+GRANT EXECUTE ON FUNCTION public.revoke_all_sessions(uuid, varchar, text)
+  TO supabase_auth_admin;
 
 -- ===========================================================================
 -- revoke_passkey
@@ -428,13 +560,15 @@ BEGIN
    RETURNING user_id INTO v_user_id;
 
   IF FOUND THEN
+    -- B1: cred_id pseudonym is keyed HMAC, truncated to 16 hex chars.
     PERFORM public.audit_emit(
       p_event_type      => 'auth.passkey.revoked',
       p_actor_pseudonym => p_actor_pseudonym,
       p_target_class    => 'C1',
       p_severity        => 'info',
+      p_request_id      => NULL,
       p_meta            => jsonb_build_object(
-        'cred_id_pseudonym',         encode(digest(p_credential_id, 'sha256'), 'hex'),
+        'cred_id_pseudonym',          LEFT(encode(hmac(p_credential_id::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16),
         'revoked_by_actor_pseudonym', p_revoker_pseudonym
       )
     );
@@ -444,3 +578,5 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.revoke_passkey(text, varchar, varchar)
   FROM public;
+GRANT EXECUTE ON FUNCTION public.revoke_passkey(text, varchar, varchar)
+  TO supabase_auth_admin;

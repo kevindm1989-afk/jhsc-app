@@ -1,0 +1,13 @@
+rules:
+  - id: no-bare-sha256-in-migrations
+    message: |
+      Use hmac(X, current_setting('app.hmac_pseudonym_key'), 'sha256') for
+      pseudonym derivation in migrations. Bare digest(X, 'sha256') is not a
+      pseudonym — it is brute-forceable for low-entropy inputs and breaks the
+      audit-log §2 same-key correlation property.
+    languages: [generic]
+    paths:
+      include:
+        - "supabase/migrations/**.sql"
+    pattern: digest($X, 'sha256')
+    severity: ERROR
