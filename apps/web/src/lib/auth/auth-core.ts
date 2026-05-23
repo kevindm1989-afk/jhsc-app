@@ -12,7 +12,13 @@
  *   - audit-log.md §1 — `auth.passkey.enrolled`, `auth.passkey.revoked`,
  *     `session.revoked` shapes.
  *   - ADR-0003 Amendment A extension — `auth.passkey.assert` is
- *     structured-log-only (no audit_log row).
+ *     structured-log-only (no audit_log row). Amendment G.5 / amendment
+ *     pass #4 confirms **per-attempt** as canonical wording: both success
+ *     and failure paths emit a single structured-log INFO line.
+ *   - ADR-0016 / amendment pass #4 — pseudonyms derive from HMAC-SHA-256
+ *     keyed by `app.hmac_pseudonym_key` (SQL) / `HMAC_PSEUDONYM_KEY`
+ *     env var (TS); the boot smoke test in `./server/key-parity.ts`
+ *     refuses to start on mismatch.
  *
  * Hard rules from the prompt:
  *   - No raw PI in log lines (uses `$lib/log` which scrubs).
@@ -20,6 +26,9 @@
  *   - Audit rows are emitted through `store.emitAudit()` (architect's
  *     SECURITY DEFINER pattern; the in-memory store simulates the
  *     server-side INSERT path).
+ *   - All failure-mode differentiation for unauthenticated clients
+ *     collapses to 401 (security-reviewer A4 / amendment pass #4); the
+ *     differential reason lands in the audit-log `meta` only.
  */
 
 import { log } from '../log';
@@ -121,10 +130,20 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
   // -----------------------------------------------------------------
 
   async function recordFailureForBurst(actorKey: string): Promise<void> {
+    // `recordAuthFailureForBurst` returns true ONLY on the false→true
+    // transition (per security-reviewer A6 / amendment pass #4). Burst-
+    // active flag is held in the rate-limit store and cleared when the
+    // bucket drops below threshold, so a fresh crossing fires fresh.
     const tripped = rateLimitStore.recordAuthFailureForBurst(actorKey, now());
     if (tripped) {
       // Per A-AUTH-001 the alert goes through the audit-log path
       // (`alert.fired` enum value). No external alerting service.
+      //
+      // `meta.subject_pseudonym` (NOT `actor_pseudonym`) per Amendment
+      // G.4 / cross-cutting #5: the outer row's `actor_pseudonym` is the
+      // dispatcher (`sys-alert-dispatcher`); the embedded one is the
+      // subject of the burst. Different semantics, different names —
+      // avoids a column-shape collision in any downstream projection.
       await store.emitAudit({
         event_type: 'alert.fired',
         actor_pseudonym: 'sys-alert-dispatcher',
@@ -135,7 +154,7 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
           severity: 'P2',
           routing: 'inc-responder',
           burst_window_minutes: 5,
-          actor_pseudonym: actorKey
+          subject_pseudonym: actorKey
         }
       });
       if (deps.onBurstAlert) await deps.onBurstAlert(actorKey);
@@ -163,7 +182,10 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     // sliding window honest.
     const attempts = rateLimitStore.recordWebAuthnAttempt(actorKey, tNow);
 
-    // Per F-40: emit log line at INFO — no PI.
+    // Per ADR-0003 Amendment A (per-attempt canonical wording, ratified
+    // by amendment pass #4 G.5): emit a structured-log INFO line on
+    // every attempt (success + failure), NOT an audit_log row. The line
+    // carries `auth.method` + `auth.result` only; no PI.
     log.info({
       event: 'auth.passkey.assert',
       outcome: 'fail',
@@ -225,6 +247,9 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     const tNow = now();
     const actorKey = store.pseudonymOf(user_id);
 
+    // Per ADR-0003 Amendment A (per-attempt canonical wording, ratified
+    // by amendment pass #4 G.5): emit a structured-log INFO line on
+    // every attempt, NOT an audit_log row.
     log.info({
       event: 'auth.passkey.assert',
       outcome: 'fail',
@@ -236,52 +261,65 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
 
     const bootstrap = await store.getTotpBootstrap(user_id);
 
-    // No active bootstrap. Per F-38 a reuse of a consumed code returns
-    // 410 Gone; per F-43 a TOTP login attempt against a fully-enrolled
-    // user returns 401. We branch on the user's `totp_destroyed_at`
-    // timestamp to satisfy both:
-    //   - totp_destroyed_at IS NULL (pre-enrollment): reuse of
-    //     consumed code → 410 (F-38); else 401.
-    //   - totp_destroyed_at IS NOT NULL (post-enrollment): 401 always
-    //     (F-43 — TOTP is no longer a valid auth mechanism for this
-    //     account; do not signal "consumed" status differentially).
+    // Enumeration-prevention contract (security-reviewer A4 / amendment
+    // pass #4): every unauthenticated failure mode for TOTP collapses to
+    // the canonical 401 with `AUTH_FAIL_BODY` — no 410, no 429, no
+    // axis-discoverable status differential. The 429 status remains
+    // reserved for rate-limit (independent of user state); rate-limit
+    // is enforced by the WebAuthn surface and by the bootstrap lockout
+    // (which is observed as 401 from the client and as `reason=locked`
+    // in the audit-log meta).
+    //
+    // Differential reason for forensic / audit-log meta:
+    //   * !bootstrap                              → reason='no_bootstrap'
+    //   * bootstrap.locked_at !== null            → reason='locked'
+    //   * tNow >= bootstrap.expires_at            → reason='expired'
+    //   * wrong code                              → reason='wrong_code'
+    //   * code matches a consumed-log row         → reason='consumed'
+    //   * correct code (no session — TOTP is not a login by itself)
+    //                                             → reason='not_a_login'
+    // None of these leaks beyond the audit row; the wire is uniform 401.
+    let auditReason: string;
+
     if (!bootstrap) {
-      const user = await store.getUser(user_id);
-      if (user?.totp_destroyed_at == null) {
-        // Pre-enrollment: distinguish reuse-of-consumed-code (410)
-        // from no-bootstrap (401).
-        const wasConsumed = await store.wasTotpCodeConsumed(user_id, totp_code);
-        if (wasConsumed) {
-          return makeFailureResponse(410, AUTH_410_BODY);
-        }
-      }
+      // No active bootstrap. Distinguishing "reuse-of-consumed-code"
+      // from "no-bootstrap" remains in the audit meta only.
+      const wasConsumed = await store.wasTotpCodeConsumed(user_id, totp_code);
+      auditReason = wasConsumed ? 'consumed' : 'no_bootstrap';
       await recordFailureForBurst(actorKey);
+      await emitTotpAttemptAudit(user_id, actorKey, auditReason);
       return makeFailureResponse(401);
     }
 
-    // Locked?
+    // Locked? (Differential reason → audit meta only; wire is 401.)
     if (bootstrap.locked_at !== null) {
-      return makeFailureResponse(429, AUTH_429_BODY);
+      auditReason = 'locked';
+      await emitTotpAttemptAudit(user_id, actorKey, auditReason);
+      return makeFailureResponse(401);
     }
 
-    // Expired?
+    // Expired? (Differential reason → audit meta only; wire is 401.)
     if (tNow >= bootstrap.expires_at) {
-      return makeFailureResponse(410, AUTH_410_BODY);
+      auditReason = 'expired';
+      await emitTotpAttemptAudit(user_id, actorKey, auditReason);
+      return makeFailureResponse(401);
     }
 
     // Wrong code → increment counter. Per F-38: 5 wrongs in 15 min lock
-    // the invite; the SIXTH attempt is the first 429. So the 5th wrong
-    // still returns 401, then we set locked_at as a post-condition so
-    // the next call sees the locked state above.
+    // the invite; the SIXTH attempt sees the bootstrap as locked. The
+    // wire stays 401 throughout; the locked-vs-wrong axis surfaces only
+    // in the audit meta.
     if (!constantTimeEqual(totp_code, bootstrap.totp_code)) {
       const updated = await store.recordTotpWrong(user_id);
       const wrongs = updated?.wrong_attempts ?? bootstrap.wrong_attempts + 1;
       await recordFailureForBurst(actorKey);
       if (wrongs >= 5) {
-        // Lock AFTER returning the 401 for this 5th wrong — the next
-        // (6th) attempt hits the locked branch above.
+        // Lock AFTER recording the wrong — next call hits the locked
+        // branch above and audits as `reason=locked`.
         await store.lockTotpBootstrap(user_id);
       }
+      auditReason = 'wrong_code';
+      await emitTotpAttemptAudit(user_id, actorKey, auditReason);
       return makeFailureResponse(401);
     }
 
@@ -291,7 +329,33 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     // reuse vector; the correct-code path is consumed by
     // `enrollFirstDevice`. Returning 401 here is intentional: a TOTP
     // by itself is not a login.
+    auditReason = 'not_a_login';
+    await emitTotpAttemptAudit(user_id, actorKey, auditReason);
     return makeFailureResponse(401);
+  }
+
+  /**
+   * Emit a `auth.totp.attempt` audit row carrying the differential
+   * reason. Wire-side response is always 401 (collapsed per A4); this
+   * row is the only place the differential lives.
+   *
+   * Source: security-reviewer A4 / amendment pass #4.
+   */
+  async function emitTotpAttemptAudit(
+    user_id: string,
+    actorPseudonym: string,
+    reason: string
+  ): Promise<void> {
+    await store.emitAudit({
+      event_type: 'auth.totp.attempt',
+      actor_pseudonym: actorPseudonym,
+      target_class: 'C1',
+      severity: 'info',
+      meta: {
+        subject_pseudonym: store.pseudonymOf(user_id),
+        reason
+      }
+    });
   }
 
   // -----------------------------------------------------------------

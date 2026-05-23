@@ -32,6 +32,16 @@ class BucketStore {
   private totp = new Map<string, BucketRow>();
   /** Per-actor failure burst tracker; fed to the alert dispatcher. */
   private failureBurst = new Map<string, number[]>();
+  /**
+   * Per-actor "burst is currently active" flag. Used to deduplicate the
+   * A-AUTH-001 emission so the alert.fired row is emitted exactly once on
+   * the false→true threshold crossing, and re-emits only after the bucket
+   * drops back below threshold and rises through it again.
+   *
+   * Source: security-reviewer A6 / decisions.md amendment-pass-#4
+   * "burst-alert duplicates emission" — emit once per threshold crossing.
+   */
+  private burstActive = new Set<string>();
 
   private prune(row: BucketRow, now: number, windowMs: number): void {
     row.attempts = row.attempts.filter((t) => now - t < windowMs);
@@ -79,8 +89,13 @@ class BucketStore {
 
   /**
    * Track an authentication failure for the A-AUTH-001 burst alert.
-   * Returns true when this failure crosses the 10-in-5-min threshold for
-   * the first time in the rolling window.
+   * Returns true ONLY on the false→true transition (first failure that
+   * crosses the 10-in-5-min threshold within the rolling window). While
+   * the burst is active subsequent failures return false. When the window
+   * drains below threshold the active flag is cleared so the next crossing
+   * fires a fresh alert.
+   *
+   * Source: security-reviewer A6 — emit once per threshold crossing.
    */
   recordAuthFailureForBurst(key: string, now: number): boolean {
     let arr = this.failureBurst.get(key);
@@ -92,13 +107,39 @@ class BucketStore {
     const cutoff = now - FAILURE_BURST_WINDOW_MS;
     while (arr.length > 0 && (arr[0] ?? Infinity) < cutoff) arr.shift();
     arr.push(now);
-    return arr.length >= FAILURE_BURST_THRESHOLD;
+    const overThreshold = arr.length >= FAILURE_BURST_THRESHOLD;
+    if (!overThreshold) {
+      // Bucket drained below threshold — clear the active flag so the next
+      // crossing fires.
+      if (this.burstActive.has(key)) this.burstActive.delete(key);
+      return false;
+    }
+    // Over threshold. Fire only on the false→true transition.
+    if (this.burstActive.has(key)) return false;
+    this.burstActive.add(key);
+    return true;
+  }
+
+  /** Test/inspection: is the burst-active flag set for this actor? */
+  isBurstActive(key: string): boolean {
+    return this.burstActive.has(key);
+  }
+
+  /** Mark burst-active for this actor. */
+  markBurstActive(key: string): void {
+    this.burstActive.add(key);
+  }
+
+  /** Clear burst-active for this actor; next crossing will fire again. */
+  clearBurstActive(key: string): void {
+    this.burstActive.delete(key);
   }
 
   reset(): void {
     this.webauthn.clear();
     this.totp.clear();
     this.failureBurst.clear();
+    this.burstActive.clear();
   }
 }
 

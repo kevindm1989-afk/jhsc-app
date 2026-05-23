@@ -47,6 +47,16 @@ export interface AuditEmission {
   severity: 'info' | 'notice' | 'warn' | 'alert';
   meta: Record<string, unknown>;
   rotation_id?: string;
+  /**
+   * Request-id correlation handle. Mirrors the SQL `audit_emit(...,
+   * p_request_id uuid)` parameter added in Amendment G.7 / cross-cutting
+   * #4. Pre-T18 callers may pass `null` (cheaper than rewriting every
+   * caller during T18). Server hot-path callers SHOULD thread the
+   * `event.locals.request_id` value from `hooks.server.ts`.
+   *
+   * Source: decisions.md amendment-pass-#4 ADR-0002 Amendment G.7.
+   */
+  request_id?: string | null;
 }
 
 export interface AuthStore {

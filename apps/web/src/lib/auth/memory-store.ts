@@ -9,11 +9,18 @@
  * "Transactions" are simulated by performing all writes inside a single
  * function body; no concurrent mutators in tests.
  *
- * The pseudonymisation HMAC uses a per-store random key so that pseudonyms
- * are stable within a test but never leak across tests.
+ * Pseudonymisation algorithm: **HMAC-SHA-256** (per ADR-0016 / amendment
+ * pass #4 §B1). The same key (`this.hmacKey`) drives `pseudonymOf(uid)`
+ * AND the `consumedTotpCodes` lookup hash. In production the key is the
+ * `HMAC_PSEUDONYM_KEY` env var (server-only) whose SHA-256 must equal the
+ * SHA-256 of the Postgres GUC `app.hmac_pseudonym_key` — see
+ * `apps/web/src/lib/auth/server/key-parity.ts` for the boot smoke test.
+ *
+ * The test-harness uses a per-store random key so pseudonyms are stable
+ * within a single test but never leak across tests.
  */
 
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { AuthStore, AuditEmission, TotpBootstrap, UserRow } from './store';
 import type { AuthSession, PasskeyCredential } from './types';
 
@@ -28,6 +35,14 @@ interface AuditRow {
   target_class: string;
   severity: string;
   rotation_id: string | null;
+  /**
+   * Request-id correlation handle. Mirrors the SQL `audit_log.request_id`
+   * column + `audit_emit(..., p_request_id uuid)` parameter added in
+   * Amendment G.7 / cross-cutting #4. Pre-T18 callers may pass null;
+   * the T05 in-memory store defaults to a fresh UUID when no caller-
+   * provided request_id is supplied.
+   */
+  request_id: string | null;
   meta: Record<string, unknown>;
 }
 
@@ -39,12 +54,19 @@ export class MemoryAuthStore implements AuthStore {
    * `auth_totp_bootstraps` row is DELETED on consume (per F-43 atomic
    * destroy + the T05 test "TOTP row deleted in the SAME transaction").
    * To distinguish "reuse of an already-consumed code" (410 Gone, per
-   * F-38) from "no bootstrap exists" (401), we keep a small hashed
-   * record of the consumed code. Storing only the code itself is
-   * acceptable here: the code is short-lived, single-use, has no PI
-   * content, and is destroyed when retention cleans the row at 24h.
+   * F-38) from "no bootstrap exists" (401), we record only the
+   * **HMAC-SHA-256 of the code** (keyed by `this.hmacKey`), mirroring
+   * the SQL `auth_totp_consumed_log.totp_code_hash` column shape per
+   * ADR-0002 Amendment G.4 + ADR-0016 §Decision 3. Storing the raw
+   * code would be (a) over-collection (PIPEDA 4.4) and (b) a backup-
+   * recoverable plaintext that the 6-digit code-space (~10^6) makes
+   * rainbow-friendly without a key. The 24h ADR-0016 retention sweep
+   * (T16) cleans rows by `consumed_at`.
    */
-  private consumedTotpCodes = new Map<string, Array<{ code: string; consumed_at: number }>>();
+  private consumedTotpCodes = new Map<
+    string,
+    Array<{ code_hmac: Buffer; consumed_at: number }>
+  >();
   private credentials = new Map<string, PasskeyCredential>();
   private sessions = new Map<string, AuthSession>();
   private auditRows: AuditRow[] = [];
@@ -61,11 +83,22 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   // -----------------------------------------------------------------
-  // Pseudonym — HMAC-BLAKE2b-256 in production; HMAC-SHA-256 here is
-  // adequate for the test harness (the key never leaves the process).
+  // Pseudonym — HMAC-SHA-256 keyed by `this.hmacKey` per ADR-0016
+  // §Decision 1 (canonical algorithm; same algorithm on SQL + TS +
+  // Sentry surfaces so pseudonyms join across layers). The test-harness
+  // key never leaves the process.
   // -----------------------------------------------------------------
   pseudonymOf(uid: string): string {
     return createHmac('sha256', this.hmacKey).update(uid).digest('hex').slice(0, 16);
+  }
+
+  /**
+   * HMAC of a TOTP code, used to populate the consumed-log lookup. Same
+   * key as `pseudonymOf` (`this.hmacKey`) per ADR-0016 §Decision 3 TS-
+   * side parity contract.
+   */
+  private hmacOfCode(code: string): Buffer {
+    return createHmac('sha256', this.hmacKey).update(code).digest();
   }
 
   // -----------------------------------------------------------------
@@ -123,7 +156,9 @@ export class MemoryAuthStore implements AuthStore {
   async wasTotpCodeConsumed(user_id: string, code: string): Promise<boolean> {
     const consumed = this.consumedTotpCodes.get(user_id);
     if (!consumed) return false;
-    return consumed.some((c) => c.code === code);
+    const target = this.hmacOfCode(code);
+    // timingSafeEqual requires equal lengths; HMAC-SHA-256 always 32 bytes.
+    return consumed.some((c) => c.code_hmac.length === target.length && c.code_hmac.equals(target));
   }
 
   async recordTotpWrong(user_id: string): Promise<TotpBootstrap | null> {
@@ -173,7 +208,10 @@ export class MemoryAuthStore implements AuthStore {
       consumed = [];
       this.consumedTotpCodes.set(opts.user_id, consumed);
     }
-    consumed.push({ code: row.totp_code, consumed_at: opts.now });
+    // Store only the HMAC of the code per ADR-0016 §Decision 3 / Amendment
+    // G.4. The raw code never lands in this map — same posture as the SQL
+    // `auth_totp_consumed_log.totp_code_hash bytea` column.
+    consumed.push({ code_hmac: this.hmacOfCode(row.totp_code), consumed_at: opts.now });
     this.bootstraps.delete(opts.user_id);
 
     const user = await this.ensureUser(opts.user_id);
@@ -276,6 +314,13 @@ export class MemoryAuthStore implements AuthStore {
   // -----------------------------------------------------------------
   async emitAudit(event: AuditEmission): Promise<void> {
     this.auditSeq += 1;
+    // Mirror the SQL `audit_emit(..., p_request_id uuid)` parameter
+    // (Amendment G.7 / cross-cutting #4). If the caller did not supply a
+    // request_id we generate one here so every audit row carries a
+    // correlation handle. `null` is reserved for cases where the caller
+    // explicitly disclaims correlation (e.g. system-internal sweeps).
+    const request_id =
+      event.request_id === undefined ? randomUUID() : event.request_id;
     this.auditRows.push({
       id: this.auditSeq,
       ts: new Date(this.nowProvider()).toISOString(),
@@ -285,6 +330,7 @@ export class MemoryAuthStore implements AuthStore {
       target_class: event.target_class,
       severity: event.severity,
       rotation_id: event.rotation_id ?? null,
+      request_id,
       meta: event.meta
     });
   }
