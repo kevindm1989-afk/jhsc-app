@@ -683,6 +683,136 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope (next i18n pass):** add `export.toast.notification_deferred: "Other committee members will be notified when the network reconnects."` under the `toast.warning` block.
 **Blocker for:** none of the test obligations. UX polish.
 
+---
+
+### T11/T12 reviewer-pass additions (privacy G-T11-NEW-1..21 + second-opinion CF-1..9, deduplicated)
+
+### G-T11-12 — Recipient identity narrowing (BLOCKING-IN-T11.1) **[privacy P-1 + SO CF-1]**
+**Source:** privacy-review-t11-t12.md Q4 BLOCKING #1; second-opinion CF-1.
+**Finding:** `recipient_role: 'employer_co_chair'` is a label, not an identity. PIPEDA 4.5 (Limiting Disclosure) + 4.9 (Individual Access) require the audit row to answer "to whom" with sufficient precision to support a §4.9 access request. The current shape only narrows to a role class.
+**Resolution scope (T11.1):** add `recipient_user_pseudonym: string` (HMAC of recipient user id, shared key with `actor_pseudonym`) to `ExportAuditEmission.meta`; `SupabaseExportStore` resolves recipient identity from the active export-recipient binding; multi-employer-co-chair edge needs architect decision before SQL ships.
+**Blocker for:** T11.1 PR submission.
+
+### G-T11-13 — `hazard_class` hardcoded `'physical'` in re-consent interstitial copy (BLOCKING-IN-T11.1) **[privacy P-2]**
+**Source:** privacy-review-t11-t12.md Q2 BLOCKING-IN-T11.1.
+**Finding:** `ExportInterstitial.svelte` renders the re-consent body with `hazard_class` hardcoded to `'physical'` instead of deriving from the concern's actual hazard class. PIPEDA Principle 4.6 (Accuracy) is violated for chemical/biological/ergonomic/psychosocial concerns — the worker sees an inaccurate re-consent surface.
+**Resolution scope (T11.1):** pass the per-concern hazard_class through `prepareExport` result → interstitial prop; render one bullet per distinct hazard class in the concern-derived set.
+**Blocker for:** T11.1 PR submission (highest-priority advisory per RA-1 margin).
+
+### G-T11-14 — Duplicate pseudonym in audit-row meta (BLOCKING-IN-T11.1 hygiene) **[privacy P-3 + SO CF-2]**
+**Source:** privacy-review-t11-t12.md Q4; second-opinion CF-2.
+**Finding:** `approver_pseudonym` and `actor_pseudonym` appear both at the top level of `ExportAuditEmission` AND inside `meta`. PIPEDA 4.7 (Safeguards) requires audit shape to be unambiguous; the duplicate invites a "which field is authoritative?" forensic question.
+**Resolution scope (T11.1):** keep top-level only; drop from `meta`. Update the F-24 audit-shape test to assert single-location.
+**Blocker for:** none. Hygiene before SQL projection-view ships.
+
+### G-T11-15 — SQL transaction atomicity for second-class audit row (BLOCKING-IN-T11.1) **[privacy P-4 + SO CF-3]**
+**Source:** privacy-review-t11-t12.md Q5; second-opinion CF-3.
+**Finding:** the library emits `export.generated` then `export.delivered` as two emit calls. The `MemoryExportStore` records them in array order, but the F-24 invariant (audit-before-Blob) is only proven for the primary `export.generated` row. The second `export.delivered` row's ordering is not atomically bound to the first under a partial-failure scenario.
+**Resolution scope (T11.1):** wrap both inserts in a single SQL transaction inside the `export_record_with_audit()` SECURITY DEFINER function; primary row precedes secondary inside the same transaction; both succeed or neither does.
+**Blocker for:** T11.1 SQL migration PR.
+
+### G-T11-16 — PDF byte-grep regression test for `/Info` dictionary absence (BLOCKING-IN-T11.1) **[privacy P-5]**
+**Source:** privacy-review-t11-t12.md Q6 ADVISORY upgraded.
+**Finding:** the hand-rolled emitter omits the `/Info` dictionary by construction (no `Author`/`Producer`/`Creator` strings) — that is the load-bearing privacy property keeping co-chair identity out of the PDF. Today's tests verify rendered text contents; no test asserts the absence of those literal strings at the byte level.
+**Resolution scope (T11.1):** add `assert(!pdfBytes.includes(textEncoder.encode('/Author')))` style byte-grep assertions for `/Author`, `/Producer`, `/Creator`, `/CreationDate`, `/ModDate`, `/Info` against every PDF the renderer emits.
+**Blocker for:** any PDF-library swap (G-T11-3) — the new lib MUST also pass these assertions.
+
+### G-T11-17 — HG-10 trigger — recipient-identification copy review **[privacy P-6]**
+**Source:** privacy-review-t11-t12.md HG-10 fires (G-T11-NEW-1).
+**Finding:** the interstitial says "to the employer co-chair" generically. PIPEDA 4.3.4 ("to whom") requires the worker to see the recipient's identity at consent time. After G-T11-12 lands the data, the copy MUST surface the recipient's display name + role.
+**Resolution scope (T11.1, gated on labour-lawyer + privacy-lawyer HG-10 sign-off):** revise interstitial copy to render `${recipient.display_name} (${recipient.role_label})`.
+**Blocker for:** T11.1 UI ship.
+
+### G-T11-18 — HG-10 trigger — four-bullet consent parity copy **[privacy P-7]**
+**Source:** privacy-review-t11-t12.md Q2 + Q7 ADVISORY (G-T11-NEW-4 + NEW-16).
+**Finding:** T13's intake form ships PIPEDA 4.3.4's four-bullet structure (what, why, to-whom, how-long). The export interstitial's re-consent body must match that pattern for §4.3 parity — currently it is prose, not bullets.
+**Resolution scope (T11.1, HG-10 gated):** restructure interstitial body into four bullets mirroring T13's intake copy.
+**Blocker for:** T11.1 UI ship.
+
+### G-T11-19 — HG-10 trigger — `concernDerivedAnnotatedFields` subtext **[privacy P-8]**
+**Source:** privacy-review-t11-t12.md Cross-cutting B ADVISORY.
+**Finding:** RA-1 #3 (visible concern-derived flag) is satisfied today by listing the concern IDs the export inherits from. PIPEDA 4.3.4 informedness is stronger if the per-concern annotated-field set is visible (e.g., "this export carries your concern's narrative + photo metadata + hazard class").
+**Resolution scope (T11.1, HG-10 gated):** render `concernDerivedAnnotatedFields(kind)` as a sub-bullet under each concern-id chip.
+**Blocker for:** none. Informedness uplift.
+
+### G-T11-20 — HG-10 trigger — `notification_deferred` error string copy **[privacy P-9]**
+**Source:** privacy-review-t11-t12.md Q3 ADVISORY.
+**Finding:** when post-export fan-out fails (RA-1 #4), the user sees a warning toast keyed `export.notification_deferred`. The fr-CA copy + i18n key catalog entry both need labour-lawyer review.
+**Resolution scope (T11.1, HG-10 gated):** sign-off copy in en-CA + fr-CA before T11.1 ships.
+**Blocker for:** localization-specialist handoff.
+
+### G-T11-21 — `__debug*` interface-split (mirrors G-T13-15 / G-T14-17) **[privacy P-10 + SO CF-4]**
+**Source:** privacy-review-t11-t12.md hygiene; second-opinion CF-4.
+**Finding:** the `ExportCapableClient` interface (export/index.ts:85) merges production methods with test-only hooks (`__getActorUserId` / `__getExportStore` / `__getReauthAssertion`). Same shape as G-T13-15 / G-T14-17 — production code paths can read the `__` hooks at runtime.
+**Resolution scope (T11.1):** split into `ExportClient` (production) + `TestExportClient extends ExportClient` (test-only); production callers narrow to `ExportClient`; harness widens to `TestExportClient`.
+**Blocker for:** none. Hygiene mirror.
+
+### G-T11-22 — `'audit_failed'` missing from `ExportRejection.reason` union **[privacy P-11 + SO CF-5]**
+**Source:** privacy-review-t11-t12.md Q5 ADVISORY; second-opinion CF-5.
+**Finding:** F-24 says "no Blob if audit row failed to land", but the `ExportRejection.reason` discriminated union does not include `'audit_failed'`. When the SupabaseExportStore audit insert fails, the rejection currently falls through to a generic reason.
+**Resolution scope (T11.1):** add `'audit_failed'` to the `ExportRejection.reason` union; F-24 test asserts that exact reason on simulated audit-insert failure.
+**Blocker for:** F-24 production proof.
+
+### G-T11-23 — Hash determinism pin for `computeAllowlistHash` **[privacy P-12]**
+**Source:** privacy-review-t11-t12.md Q1 ADVISORY.
+**Finding:** `computeAllowlistHash` is deterministic under Node's `crypto.subtle` + the current iteration order of `Object.freeze([] as const)`. A future TS upgrade or constants reordering could silently change the hash → SQL projection-view binding breaks.
+**Resolution scope (T11.1):** add a pinned-value test (e.g., `expect(computeAllowlistHash(EXPORT_ALLOWLIST_MINUTES)).toBe('<frozen hex>')`); regenerate the pinned value only when the allowlist intentionally changes.
+**Blocker for:** none. Drift detector.
+
+### G-T11-24 — ESLint rule for the F-19 spread ban (verification) **[privacy P-13]**
+**Source:** privacy-review-t11-t12.md Q1 ADVISORY; pairs with G-T11-9.
+**Finding:** G-T11-9 already records that the ESLint `no-restricted-syntax` rule is unwired; privacy review confirms verification needed at T11.1 — must prove the rule actually rejects a synthetic spread in CI.
+**Resolution scope (T11.1):** add a `__lint_negative__.ts.disabled` file + CI step that runs `eslint` against it and asserts non-zero exit.
+**Blocker for:** none. Verification of G-T11-9.
+
+### G-T11-25 — RA-1 trigger #5 monitoring alert (`A-EXPORT-002`) **[privacy P-14]**
+**Source:** privacy-review-t11-t12.md Q3 ADVISORY.
+**Finding:** RA-1 re-open trigger #5 fires on "loss of post-export notification surface". Today the library has the surface; production needs an alert when the fanout success-rate drops or latency p95 > 60s.
+**Resolution scope (T11.1):** define `A-EXPORT-002` (notification-fanout health) with runbook in observability-setup pass; threshold defined alongside the SLO.
+**Blocker for:** RA-1 compensating-control monitoring posture.
+
+### G-T11-26 — Fan-out latency contractually bounded **[privacy P-15]**
+**Source:** privacy-review-t11-t12.md Q3 ADVISORY.
+**Finding:** the 60s budget mentioned in G-T11-6 is asserted in MemoryExportStore tests but is not contractually surfaced in the `ExportStore.sendPostExportNotification` return type.
+**Resolution scope (T11.1):** add `latency_ms: number` to the notification-fanout result; integration test asserts `< 60_000` against the live stack.
+**Blocker for:** SLO definition.
+
+### G-T11-27 — `mode` prop type tightening on `ExportInterstitial.svelte` **[privacy P-16]**
+**Source:** privacy-review-t11-t12.md Q7 ADVISORY.
+**Finding:** `mode` is typed as `string`; should be the discriminated union `'re-auth-required' | 'exporting' | 'exported' | 'failed'` matching the state machine.
+**Resolution scope (T11.1 UI):** tighten the prop type; accessibility-specialist handoff already covers ARIA states for each.
+**Blocker for:** none. Type hygiene.
+
+### G-T11-28 — AODA spec scope routed to accessibility-specialist **[privacy P-17]**
+**Source:** privacy-review-t11-t12.md Q7; pairs with G-T11-10.
+**Finding:** privacy review explicitly routed AODA-spec scope on the interstitial to accessibility-specialist; not in privacy's scope.
+**Resolution scope (T11.1 UI):** accessibility-specialist review of `ExportInterstitial.svelte` + `ExportInterstitialModal.svelte` once the modal-wrapper exists.
+**Blocker for:** T11.1 UI ship gate.
+
+### G-T11-29 — Second-opinion: `URL.createObjectURL` swallow-catch hides Blob failure **[SO CF-6]**
+**Source:** second-opinion review CF-6.
+**Finding:** `exportOne` in index.ts catches Blob-URL errors silently. In production, if the browser blocks Blob URL creation (CSP `blob:` not in `default-src`), the user sees a successful return but no download. The audit row commits, leaving an inexplicable audit entry with no PDF.
+**Resolution scope (T11.1):** keep the swallow only when `process.env.NODE_ENV === 'test'`; in production, surface a `'blob_url_creation_failed'` rejection (also add to the `ExportRejection.reason` union per G-T11-22).
+**Blocker for:** production deploy.
+
+### G-T11-30 — Second-opinion: rate-limit not exercised in library tests **[SO CF-7]**
+**Source:** second-opinion review CF-7.
+**Finding:** F-28 (rate-limit) is documented in decisions.md but the library has no rate-limit surface — it lives in the Edge Function. The library test suite cannot exercise it.
+**Resolution scope (T11.1):** SQL function `export_record_with_audit()` consults a `export_rate_buckets` table (token bucket: 5 exports per 5 minutes per actor); integration test simulates burst.
+**Blocker for:** T11.1 production ship.
+
+### G-T11-31 — Second-opinion: `concernDerivedFieldsForKind` test surface coverage **[SO CF-8]**
+**Source:** second-opinion review CF-8.
+**Finding:** `concernDerivedFieldsForKind('minutes.final')` and `('recommendation')` return canonical lists; only the union is exercised. Per-kind narrowing assertions absent.
+**Resolution scope (T11.1):** add per-kind assertions; lock the canonical list against drift.
+**Blocker for:** none. Drift detector.
+
+### G-T11-32 — Second-opinion: F-25 inventory test fragility against route additions **[SO CF-9]**
+**Source:** second-opinion review CF-9; pairs with G-T11-4.
+**Finding:** F-25 asserts "no route declares application/pdf"; the assertion iterates the inventory. When unrelated routes get added that declare `application/octet-stream` or similar, future reviewers may relax the check.
+**Resolution scope (T11.1):** tighten F-25 to an explicit allowlist of non-PDF content types per route entry.
+**Blocker for:** none. Drift guard.
+
 ## T12 — Recommendations + 21-day timer
 
 ### G-T12-1 — 21-day timer SQL + Edge Function
