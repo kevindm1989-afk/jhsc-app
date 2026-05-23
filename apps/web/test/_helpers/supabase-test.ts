@@ -113,6 +113,16 @@ import {
   type PostShipment
 } from '../../src/lib/inspections/queue';
 import { flushCacheViolationsForTest } from './sw-test-harness';
+// T11/T12 — export pipeline library. Per ADR-0002 Amendment H the
+// MemoryExportStore is the test-only persistence; SupabaseExportStore
+// lands in T11.1/T12.1 (G-T11-* / G-T12-* in `.context/known-gaps.md`).
+import {
+  MemoryExportStore,
+  type ExportStore,
+  type MinutesFinalRow,
+  type RecommendationRow,
+  type ReauthAssertion
+} from '../../src/lib/export';
 __setTestOverrideUseBlake2bFallback(() => true);
 
 /**
@@ -575,6 +585,56 @@ function makeAdminQuery(
       return { rows };
     }
 
+    // SELECT count(*)::int AS n FROM audit_log WHERE event_type = '<event>' AND meta->>'alert_id' = '<x>'
+    // (T11/T12 F-28 — A-EXPORT-002 rate-limit alert count.)
+    {
+      const m = norm.match(
+        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'([^']+)'\s+AND\s+meta->>'alert_id'\s*=\s*'([^']+)'$/i
+      );
+      if (m) {
+        const event = m[1]!;
+        const alert_id = m[2]!;
+        const fromAuth = store
+          .__debugAuditRows()
+          .filter(
+            (r) =>
+              r.event_type === event &&
+              (r.meta as { alert_id?: string }).alert_id === alert_id
+          ).length;
+        const fromKey = keyStore
+          ? keyStore
+              .__debugAuditRows()
+              .filter(
+                (r) =>
+                  r.event_type === event &&
+                  (r.meta as { alert_id?: string }).alert_id === alert_id
+              ).length
+          : 0;
+        return { rows: [{ n: fromAuth + fromKey }] };
+      }
+    }
+
+    // SELECT count(*)::int AS n FROM audit_log WHERE event_type = 'export.contained_concern_derived_items' AND meta->>'export_audit_id' = $1
+    // (T11/T12 RA-1 #3.)
+    {
+      const m = norm.match(
+        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'([^']+)'\s+AND\s+meta->>'([^']+)'\s*=\s*\$1$/i
+      );
+      if (m) {
+        const event = m[1]!;
+        const metaKey = m[2]!;
+        const targetVal = String((params ?? [])[0]);
+        const fromAuth = store
+          .__debugAuditRows()
+          .filter(
+            (r) =>
+              r.event_type === event &&
+              String((r.meta as Record<string, unknown>)[metaKey] ?? '') === targetVal
+          ).length;
+        return { rows: [{ n: fromAuth }] };
+      }
+    }
+
     // SELECT count(*)::int AS n FROM audit_log WHERE event_type = '<event>'
     // (generic count handler — used by T05 auth.passkey.assert AND T10
     // inspection.synced.hmac_fail forbidden-alias absence assertions.)
@@ -675,6 +735,24 @@ class TestSupabaseImpl implements TestSupabase {
    * `c4_read_service` per HG-6).
    */
   private c4ReadServiceAuditInsertBlocked = false;
+  /**
+   * T11/T12 — export pipeline store. Shares the AuthStore's HMAC key so
+   * pseudonyms join across surfaces (ADR-0016 §Decision 1) and bridges
+   * its audit rows into the AuthStore so the generic `audit_log`
+   * adminQuery handlers find them.
+   */
+  private exportStoreInst!: MemoryExportStore;
+  /**
+   * Per-co-chair fresh re-auth assertion (RA-1 single-signer). Set when
+   * `enrollUser({ role: 'worker_co_chair' })` lands; cleared when the
+   * caller invokes `attemptExportWithoutReauth(...)` to simulate the
+   * stale-session attempt.
+   */
+  private exportReauthAssertions = new Map<string, ReauthAssertion>();
+  /** T11/T12 — minutes finalised by `finalizeMinutes(...)`. */
+  private minutesIdSeq = 0;
+  /** T11/T12 — recommendations finalised by `finalizeRecommendation(...)`. */
+  private recommendationIdSeq = 0;
   /**
    * Cleartext committee data key the concern-core library encrypts with.
    * Set in `ensureCommitteeDataKey()` the first time a T08 client surface
@@ -791,6 +869,33 @@ class TestSupabaseImpl implements TestSupabase {
       () => Date.now(),
       this.store.__debugHmacKey()
     );
+    // T11/T12 — export pipeline store. Audit emissions bridge through
+    // the AuthStore so the harness's generic `audit_log` adminQuery
+    // handlers (which read from AuthStore + KeyStore) find the rows.
+    this.exportStoreInst = new MemoryExportStore(
+      () => Date.now(),
+      this.store.__debugHmacKey(),
+      {
+        emitAudit: async (e) => {
+          await this.store.emitAudit(e);
+        }
+      }
+    );
+    // F-28 — the export store also emits the `alert.fired` row on the
+    // rate-limit threshold crossing. The export-core calls
+    // `__bridgeEmitAlertFired(alert_id)` on the store (when present); we
+    // satisfy that contract by attaching the bridge here.
+    (this.exportStoreInst as unknown as {
+      __bridgeEmitAlertFired: (alert_id: string) => Promise<void>;
+    }).__bridgeEmitAlertFired = async (alert_id: string) => {
+      await this.store.emitAudit({
+        event_type: 'alert.fired',
+        actor_pseudonym: 'sys-alert',
+        target_class: 'C1',
+        severity: 'alert',
+        meta: { alert_id }
+      });
+    };
     // HG-6 atomicity — wrap `recordReprisalEvent` so the test's
     // `__test_revoke_audit_insert_for_role('c4_read_service')` shim
     // can force an INSERT failure on the audit row. With strict ordering
@@ -1012,6 +1117,20 @@ class TestSupabaseImpl implements TestSupabase {
     } else {
       this.workRefusalStoreInst.__setActiveMember(uid, false);
       this.s51EvidenceStoreInst.__setActiveMember(uid, false);
+    }
+    // T11/T12 / F-22 — worker_co_chair gates the export RLS surface.
+    // Active worker_co_chair gets the role bit + a fresh re-auth
+    // assertion (RA-1 single-signer: the test assumes the WebAuthn
+    // ceremony just succeeded at enrollment time).
+    if (isActive && role === 'worker_co_chair') {
+      this.exportStoreInst.__setCoChair(uid, true);
+      this.exportReauthAssertions.set(uid, {
+        ceremony_id: `ceremony-${uid}-${Date.now()}`,
+        actor_user_id: uid,
+        issued_at_ms: Date.now()
+      });
+    } else {
+      this.exportStoreInst.__setCoChair(uid, false);
     }
     const identity = {
       public_key: enroll.public_key,
@@ -1758,7 +1877,23 @@ class TestSupabaseImpl implements TestSupabase {
 
       fetchSensitiveActivityFeed: async () => {
         const items = await self.reprisalStoreInst.listReprisalFeed();
-        return { items };
+        // RA-1 control #4 — `export.*` rows also flow into the
+        // sensitive-activity feed within 60s of an export. The export
+        // store's audit rows include `target_id` so workers can see
+        // "what was exported" without seeing the contents.
+        const exportRows = self.exportStoreInst
+          .__debugAuditRows()
+          .filter((r) => r.event_type.startsWith('export.'))
+          .map((r) => ({
+            id: r.id,
+            event_type: r.event_type,
+            ts_bucketed_to_hour: r.ts,
+            target_id: r.target_id,
+            target_class: 'C3' as const,
+            prev_hash: '',
+            hash: ''
+          }));
+        return { items: [...items, ...exportRows] };
       },
 
       fetchMyActivity: async (opts: { event_type_prefix: string }) => {
@@ -1950,6 +2085,95 @@ class TestSupabaseImpl implements TestSupabase {
           throw new Error('__testDecryptS51Photo: not found');
         }
         return r.photo_plaintext;
+      },
+
+      // =================================================================
+      // T11 — finalized minutes + export hooks
+      // =================================================================
+
+      /**
+       * Finalize a minutes row. RLS gate (F-22): the user MUST be a
+       * worker_co_chair; non-co-chair attempts throw. The harness writes
+       * the row into the MemoryExportStore so the export library finds it.
+       */
+      finalizeMinutes: async (opts: {
+        agenda_items?: readonly string[];
+        decisions?: readonly string[];
+        recommendations_summary?: string;
+        attendees_present?: readonly string[];
+        next_meeting_at?: number | null;
+        co_chair_signature_block?: string;
+        derived_from_concerns?: readonly string[];
+      }): Promise<string> => {
+        if (!(await self.exportStoreInst.isCoChair(userId))) {
+          throw new Error('finalizeMinutes: not a worker_co_chair');
+        }
+        self.minutesIdSeq += 1;
+        const id = `minutes-${self.minutesIdSeq}`;
+        const row: MinutesFinalRow = {
+          id,
+          finalized_at: Date.now(),
+          agenda_items: opts.agenda_items ?? [],
+          decisions: opts.decisions ?? [],
+          recommendations_summary: opts.recommendations_summary ?? '',
+          attendees_present: opts.attendees_present ?? [],
+          next_meeting_at: opts.next_meeting_at ?? null,
+          co_chair_signature_block: opts.co_chair_signature_block ?? '',
+          derived_from_concerns: opts.derived_from_concerns ?? []
+        };
+        self.exportStoreInst.__putMinutesFinalRow(row);
+        return id;
+      },
+
+      /**
+       * F-22 — fetch a finalized minutes row by id. Non-co-chair gets
+       * 403; missing row gets 404. The body never contains ciphertext
+       * (this is a contract-level mirror; T11.1 wires the SQL view).
+       */
+      fetchFinalizedMinutes: async (
+        minutes_id: string
+      ): Promise<{ status: number; body?: unknown }> => {
+        const r = await self.exportStoreInst.fetchMinutesFinalRow(userId, minutes_id);
+        if (r.ok === false) {
+          return { status: r.status, body: { error: r.status === 403 ? 'forbidden' : 'not_found' } };
+        }
+        return { status: 200, body: r.row };
+      },
+
+      /**
+       * RA-1 / F-29 — attempt an export without a fresh re-auth assertion.
+       * The export library returns `requires_reauth` when no assertion is
+       * attached; the harness simulates that by routing through the
+       * library with `null` assertion.
+       */
+      attemptExportWithoutReauth: async (
+        minutes_id: string
+      ): Promise<{ status: string; reason?: string }> => {
+        const { proceedExport } = await import('../../src/lib/export');
+        const r = await proceedExport(
+          { store: self.exportStoreInst, now: () => Date.now() },
+          {
+            kind: 'minutes.final',
+            target_id: minutes_id,
+            actor_user_id: userId,
+            recipient_role: 'employer_co_chair'
+          },
+          null
+        );
+        return { status: r.status, ...('reason' in r ? { reason: r.reason } : {}) };
+      },
+
+      // ----- Hooks consumed by exportMinutes / exportRecommendation -----
+      __getActorUserId: (): string => userId,
+      __getExportStore: (): ExportStore => self.exportStoreInst,
+      __getReauthAssertion: (): ReauthAssertion | null => {
+        // Returns the freshest assertion minted at enrollment. The export
+        // store's verifyReauthAssertion ensures the assertion is fresh
+        // (≤5min) — in tests, the clock is frozen at enrollment time, so
+        // the assertion is always within window. Tests advancing 60s for
+        // the post-export feed assertion stay well inside the 5-min budget.
+        const a = self.exportReauthAssertions.get(userId) ?? null;
+        return a;
       }
     };
   }
@@ -2489,11 +2713,17 @@ class TestSupabaseImpl implements TestSupabase {
     return [];
   }
 
+  /**
+   * Per-event onWrite callbacks installed by the test via `onWrite(...)`.
+   * Fires AFTER the row commits — used by T11/T12 F-24 ordering tests.
+   */
+  private auditSpyOnWrite = new Map<string, Array<() => void>>();
   spyAuditWrites(): {
     calls: Array<{ event_type: string; meta: Record<string, unknown>; ts: number }>;
     dom_render_ts: number | null;
     last_written_ts_for: (event_type: string) => number | null;
     last_meta: (event_type: string) => Record<string, unknown> | null;
+    onWrite: (event_type: string, cb: () => void) => void;
   } {
     this.auditSpyEnabled = true;
     this.auditSpyEntries = [];
@@ -2548,6 +2778,44 @@ class TestSupabaseImpl implements TestSupabase {
           if (this.auditSpyEnabled) {
             this.auditSpyEntries.push({ event_type: e.event_type, meta: e.meta, ts });
           }
+        };
+      }
+    }
+    // T11/T12 — patch the export store's recordExportEvent so F-24
+    // ordering tests can read the audit ts AND fire onWrite callbacks
+    // BEFORE the Blob URL is created.
+    {
+      const es = this.exportStoreInst as unknown as {
+        recordExportEvent: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+          approver_pseudonym: string;
+        }) => Promise<{ audit_id: string }>;
+        __originalRecordExportEvent?: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+          approver_pseudonym: string;
+        }) => Promise<{ audit_id: string }>;
+      };
+      if (!es.__originalRecordExportEvent) {
+        es.__originalRecordExportEvent = es.recordExportEvent.bind(this.exportStoreInst);
+        es.recordExportEvent = async (e) => {
+          const ts = Date.now();
+          const r = await es.__originalRecordExportEvent!(e);
+          if (this.auditSpyEnabled) {
+            this.auditSpyEntries.push({ event_type: e.event_type, meta: e.meta, ts });
+          }
+          // F-24 — fire onWrite callbacks AFTER row committed, BEFORE
+          // the caller (proceedExport) proceeds to render bytes. The
+          // callbacks are sync; their side-effects land in the test's
+          // events array before the next `await` boundary.
+          const cbs = this.auditSpyOnWrite.get(e.event_type);
+          if (cbs) for (const cb of cbs) cb();
+          return r;
         };
       }
     }
@@ -2607,6 +2875,14 @@ class TestSupabaseImpl implements TestSupabase {
           .reverse()
           .find((e) => e.event_type === event_type);
         return found?.meta ?? null;
+      },
+      onWrite(event_type: string, cb: () => void): void {
+        let arr = self.auditSpyOnWrite.get(event_type);
+        if (!arr) {
+          arr = [];
+          self.auditSpyOnWrite.set(event_type, arr);
+        }
+        arr.push(cb);
       }
     };
   }
@@ -2624,9 +2900,18 @@ class TestSupabaseImpl implements TestSupabase {
     if (event === 'identity_privkey.recovery_blob.viewed') {
       __setShowAgainAuditOverrideForTest(async () => ({ ok: false }));
     }
+    // T11/T12 F-24 — when the test forces a 500 on an `export.*` event,
+    // toggle the export store's per-event audit-fail flag so its
+    // recordExportEvent throws BEFORE the wrapper sees the row.
+    if (event === 'export.generated' || event === 'export.contained_concern_derived_items' || event === 'export.integrity_fail') {
+      this.exportStoreInst.__setAuditFailForEvent(event, true);
+    }
   }
   __forceNotificationEndpoint500(): void {
-    /* not exercised by T07 */
+    // RA-1 #4 — flip the export store's notification-failure flag. The
+    // export still completes (audit row is the gate); the result carries
+    // `warning_toast_key: 'export.notification_deferred'`.
+    this.exportStoreInst.__setNotificationForcedFail(true);
   }
   async __emitAuditRowForTest(event: string, meta: Record<string, unknown>): Promise<unknown> {
     await this.store.emitAudit({
@@ -2755,6 +3040,25 @@ class TestSupabaseImpl implements TestSupabase {
     // Reset module-level test observers so the next test starts clean.
     __setShowAgainAuditObserverForTest(null);
     __setShowAgainAuditOverrideForTest(null);
+    // T11/T12 — clear the renderer-allowlist override so a test that
+    // monkey-patched it does not leak into the next test.
+    try {
+      const { __setRendererAllowlistOverrideForTest } = await import(
+        '../../src/lib/export/export-core'
+      );
+      __setRendererAllowlistOverrideForTest(null);
+    } catch {
+      /* defensive — the module may not have loaded in T05/T07-only tests. */
+    }
+    // T11/T12 — reset the export store's per-test toggles + rate-limit
+    // bucket so the next createTestSupabase() starts clean. We do this
+    // even though each test gets a fresh harness; defensive in case the
+    // sub-test pattern shares an instance via a module-level handle.
+    try {
+      this.exportStoreInst.__reset();
+    } catch {
+      /* harness may have already torn down */
+    }
     // Clear any vi mocks installed by tests.
     vi.clearAllMocks();
   }

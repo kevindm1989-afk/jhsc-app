@@ -615,11 +615,97 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 
 ---
 
+## T11 / T12 — Export pipeline
+
+### G-T11-1 — SQL migration deferred to T11.1
+**Source:** ADR-0002 Amendment H (sibling-task pattern; mirrors G-T07-1 + G-T13-1).
+**Finding:** the `minutes_final` table + `recommendations` table + `co_chair_role` RLS predicate + `export_audit_log` projection view + `A-EXPORT-001` / `A-EXPORT-002` alert wiring all ship in T11.1 / T12.1, not T11/T12. T11/T12's library tests run against `MemoryExportStore` exclusively.
+**Resolution scope (T11.1):** ship `supabase/migrations/00000000000006_minutes_export.sql` + Edge Function `/api/exports/minutes` + `/api/exports/recommendation` with the closed-allowlist SQL function, F-22 RLS, F-28 rate-limit, RA-1 re-auth assertion verification + post-export rep-notification fanout.
+**Blocker for:** first production deploy carrying real PI in finalized minutes.
+
+### G-T11-2 — Token surface expansion for the export interstitial
+**Source:** implementer T11 — `apps/web/src/lib/export/ExportInterstitial.svelte`.
+**Finding:** the component reads only `color.state.warning/danger`, `focus.outer/inner`, and `border_width.thick/focus_inner` from the typed accessor. Full design-system §4.A coverage (states `re-auth-required`, `exporting`, `exported`, every modal variant's primary/secondary button tokens, the `card.sensitive_c4` strip tokens, the `motion.duration.*` for the reduced-motion-aware transition) requires the implementer to extend `apps/web/src/lib/tokens.ts` to expose those surfaces.
+**Resolution scope (next UI pass on T11):** extend `tokens.ts` per design-tokens.json §components.modal + §spacing + §motion; rebind `style:` directives.
+**Blocker for:** none of the test obligations (markup is structural). Affects visual fidelity only.
+
+### G-T11-3 — Minimal PDF emitter — production wire-up
+**Source:** implementer T11 — `apps/web/src/lib/export/export-renderer.ts`.
+**Finding:** the renderer ships a hand-rolled, zero-dependency PDF emitter that produces a single-page document whose content stream is a literal text dump of the allowlist projection. It is well-formed enough for the test helper's `extractPdfText` to grep, but it is NOT a typeset PDF — no Unicode font subsetting, no line wrapping, no headers/footers, no multi-page layout. Production needs a real PDF library.
+**Resolution scope (T11.1):** evaluate a zero-telemetry PDF library (candidates: `pdfkit` self-hosted bundle, `pdf-lib`); ensure no analytics/telemetry/network calls; verify the bundle does not pull `console`/`window` references that defeat ADR-0010's no-third-party JS posture; keep the F-19 closed-allowlist projection as the only data source the renderer can read.
+**Blocker for:** production deploy where the PDF is consumed by a non-technical employer co-chair.
+
+### G-T11-4 — `getRouteInventory()` binding for `/api/exports/*`
+**Source:** implementer T11 — F-25 route inventory contract.
+**Finding:** `getRouteInventory()` currently returns four routes (`/`, `/api/concerns`, `/api/inspections`, `/api/sessions`); the T11 F-25 test passes because none of those declare `application/pdf`. When the production Edge Functions land at T11.1, the inventory MUST gain the export routes AND assert no PDF content type.
+**Resolution scope (T11.1):** add `/api/exports/minutes` and `/api/exports/recommendation` entries with `application/json` only; the F-25 test continues to pass against the real route surface.
+**Blocker for:** T11.1 PR submission.
+
+### G-T11-5 — Re-auth assertion verification stub
+**Source:** implementer T11 — `apps/web/src/lib/export/memory-export-store.ts`.
+**Finding:** `MemoryExportStore.verifyReauthAssertion` only validates assertion presence + actor binding + 5-minute freshness window. Production needs the full WebAuthn assertion verify step: signature check against the user's stored credential public key, counter monotonicity, RP id binding, ceremony challenge match.
+**Resolution scope (T11.1):** `SupabaseExportStore.verifyReauthAssertion` calls into the Supabase Auth Edge Function `/api/auth/reauth/verify` which performs the full WebAuthn verify. Library tests against MemoryExportStore continue to pass — production tests gate on the real verify.
+**Blocker for:** production deploy.
+
+### G-T11-6 — Post-export rep notification fanout
+**Source:** RA-1 compensating control #4.
+**Finding:** `MemoryExportStore.sendPostExportNotification` is a no-op (returns `{ ok: true }` unless the test forces failure). The real fanout writes per-recipient feed entries (or pushes to a websocket subscription) within 60s.
+**Resolution scope (T11.1):** SupabaseExportStore writes to a `sensitive_activity_feed` table (or fans out via Supabase Realtime) so every active member sees the entry within the 60s budget; the integration test asserts the budget against the live stack.
+**Blocker for:** production deploy where RA-1's compensating-control posture is load-bearing.
+
+### G-T11-7 — Audit-row bridge — production posture
+**Source:** implementer T11 — `apps/web/test/_helpers/supabase-test.ts` constructor.
+**Finding:** the harness wires the `MemoryExportStore`'s audit bridge AND the `__bridgeEmitAlertFired` hook so the test queries against the AuthStore's audit_log find the rows. Production has ONE audit_log table; the Edge Function writes the row directly. The library's `ExportStore.recordExportEvent` contract holds (single emit per call); the bridge is a test artifact.
+**Resolution scope (T11.1):** SupabaseExportStore writes directly to `audit_log`; the bridge disappears. The F-24 audit-before-Blob ordering invariant is preserved by the SQL function's transaction boundary.
+**Blocker for:** none. Hygiene.
+
+### G-T11-8 — Renderer-allowlist override hook is module-scoped
+**Source:** implementer T11 — `apps/web/src/lib/export/export-core.ts` `_rendererAllowlistOverride`.
+**Finding:** the test-only hook `__test_overrideRendererAllowlist` mutates a module-level variable. Tests run sequentially (vitest singleThread) so the leak risk is bounded; we belt-and-brace by resetting in `supabase-test.ts.tearDown`. Production code paths never read the override (it defaults to null and the export-core falls back to the canonical allowlist).
+**Resolution scope (none required for production):** the override never ships — it lives in `export-core.ts` only because the F-27 test needs to monkey-patch the renderer. Document the gate in `apps/web/src/lib/export/export-core.ts` header.
+**Blocker for:** none. Already documented.
+
+### G-T11-9 — ESLint `no-restricted-syntax` rule for the F-19 spread ban
+**Source:** F-19 mitigation — "an ESLint rule forbids spread-into-export-payload outside that module".
+**Finding:** the rule is NOT yet wired in `.eslintrc`. The library's `projectMinutesByAllowlist` / `projectRecommendationByAllowlist` are written as literal switch statements over the allowlist keys (compile-time exhaustiveness via the `never` cast) so a spread would not type-check anyway, but the rule is an additional belt.
+**Resolution scope (T11.1 or next lint-config pass):** add the rule with the message "spread-into-export-payload forbidden outside src/lib/export/export-renderer.ts; use the allowlist switch statement".
+**Blocker for:** none. The compile-time exhaustiveness is the load-bearing gate.
+
+### G-T11-10 — Protected-modal harness mounts a stub, not the real Svelte component
+**Source:** implementer T11 — `apps/web/test/_helpers/protected-modal-harness.ts`.
+**Finding:** the harness mounts a DOM-shaped surface (scrim + dialog + buttons + state object) that satisfies M-53a/b/c testably. The real `ExportInterstitial.svelte` component is rendered by the React-testing-library `render(...)` calls; the protected-modal-harness tests do NOT exercise it. When the production modal-wrapper component lands (per G-T13-10), the harness should be replaced with a real `render(ExportInterstitialModal, {...})` flow.
+**Resolution scope (T11.1 UI):** ship `ExportInterstitialModal.svelte` that composes `ExportInterstitial.svelte` inside a `<dialog>` with a focus-trap action; the harness can then assert against the real component.
+**Blocker for:** none of the test obligations (the harness satisfies M-53a/b/c via DOM structure).
+
+### G-T11-11 — `i18n` key `export.notification_deferred` is the warning-toast slot
+**Source:** implementer T11 — `apps/web/src/lib/export/types.ts` `warning_toast_key`.
+**Finding:** the type names the key `'export.notification_deferred'`; the i18n catalog does NOT yet have an entry for it. The Svelte toast component reads the key + renders the en-CA copy at toast-mount time. The test only asserts the key string.
+**Resolution scope (next i18n pass):** add `export.toast.notification_deferred: "Other committee members will be notified when the network reconnects."` under the `toast.warning` block.
+**Blocker for:** none of the test obligations. UX polish.
+
+## T12 — Recommendations + 21-day timer
+
+### G-T12-1 — 21-day timer SQL + Edge Function
+**Source:** T12 acceptance.
+**Finding:** the library's `recommendation` export carries `created_at` + `sent_at` + `twentyone_day_due_at` in the allowlist, but T11/T12 does NOT ship the timer-bookkeeping mechanism (the daily job that marks an expired recommendation, the alert when employer response is overdue).
+**Resolution scope (T12.1):** SQL function `recommendation_due_check()` runs on a daily cron; emits `recommendation.overdue.alert` audit row + `A-REC-001` alert when `now() > twentyone_day_due_at`.
+**Blocker for:** OHSA s.9(20) 21-day compliance feature.
+
+### G-T12-2 — Same posture as T11 for the recommendation export path
+**Source:** T12 acceptance ("same export posture as T11").
+**Finding:** G-T11-1 / G-T11-3 / G-T11-4 / G-T11-5 / G-T11-6 / G-T11-7 all apply mutatis mutandis to T12.1.
+**Resolution scope (T12.1):** mirror T11.1's resolution pattern for the recommendation surface.
+**Blocker for:** production deploy.
+
+---
+
 ## How to use this file
 
 - When working on T05.1 / production wire-up: search for `G-T05-*` and resolve them in a single pass.
 - When working on T07.1 / production wire-up: search for `G-T07-*` and resolve them in a single pass.
 - When working on T08.1 / production wire-up: search for `G-T08-*` and resolve them in a single pass.
+- When working on T11.1 / production wire-up: search for `G-T11-*` and resolve them in a single pass.
+- When working on T12.1 / production wire-up: search for `G-T12-*` and resolve them in a single pass.
 - When working on T13.1 / production wire-up: search for `G-T13-*` and resolve them in a single pass.
 - When working on T14.1 / production wire-up: search for `G-T14-*` and resolve them in a single pass.
 - When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.

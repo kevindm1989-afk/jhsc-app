@@ -30,6 +30,13 @@ interface RawTokens {
       focus_ring?: { outer?: string; inner?: string };
     };
   };
+  border_width?: {
+    hairline?: string;
+    default?: string;
+    thick?: string;
+    focus_inner?: string;
+    focus_outer?: string;
+  };
 }
 
 /**
@@ -56,6 +63,13 @@ export const tokens = {
   focus: {
     outer: raw.color?.light?.focus_ring?.outer ?? '',
     inner: raw.color?.light?.focus_ring?.inner ?? ''
+  },
+  border_width: {
+    hairline: raw.border_width?.hairline ?? '',
+    default: raw.border_width?.default ?? '',
+    thick: raw.border_width?.thick ?? '',
+    focus_inner: raw.border_width?.focus_inner ?? '',
+    focus_outer: raw.border_width?.focus_outer ?? ''
   }
 } as const;
 
