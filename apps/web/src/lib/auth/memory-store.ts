@@ -354,4 +354,15 @@ export class MemoryAuthStore implements AuthStore {
   __debugBootstraps(): readonly TotpBootstrap[] {
     return [...this.bootstraps.values()];
   }
+
+  /**
+   * Test-only — expose the HMAC key so the T07 MemoryKeyStore can be
+   * constructed with the same key, keeping pseudonyms equal across the
+   * two stores. ADR-0016 §Decision 1 ("same key, same algorithm, same
+   * surface") — in production both surfaces read the same env-var /
+   * Postgres GUC. The test harness keeps them in lockstep here.
+   */
+  __debugHmacKey(): Buffer {
+    return this.hmacKey;
+  }
 }

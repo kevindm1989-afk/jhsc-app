@@ -92,9 +92,7 @@ export type RotateCommitteeKeyResult =
   | { status: 409; rotation_id?: string }
   | { status: 'aborted'; reason: string };
 
-export type IdentitySelfTestResult =
-  | { ok: true }
-  | { ok: false; next_action: 'recovery_flow' };
+export type IdentitySelfTestResult = { ok: true } | { ok: false; next_action: 'recovery_flow' };
 
 export interface ShowRecoveryAgainResult {
   /** ok=true → the caller may render the passphrase. */

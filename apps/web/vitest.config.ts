@@ -67,7 +67,7 @@ export default defineConfig({
       shuffle: false,
       concurrent: false
     },
-    setupFiles: [],
+    setupFiles: ['./test/setup.ts'],
     pool: 'threads',
     poolOptions: {
       threads: {

@@ -119,6 +119,11 @@
       "print": "Print recovery sheet",
       "copy": "Copy to clipboard",
       "copy_warning": "Copying is not a substitute for printing. The clipboard is not secure.",
+      "show_again": {
+        "label": "Press and hold to show the passphrase again",
+        "helper": "Anyone who can see this screen can read the passphrase. Hold the button down for a moment to reveal it; release to hide. You can do this three times per enrollment — after that, restart enrollment to see it again.",
+        "helper_capped": "You've used all three reveals in this enrollment. To see the passphrase again, restart enrollment from the start of the recovery step."
+      },
       "verify": {
         "heading": "Type the passphrase back to confirm",
         "helper": "Type the words exactly as printed, separated by spaces.",

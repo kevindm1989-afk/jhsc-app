@@ -118,6 +118,11 @@
       "print": "",
       "copy": "",
       "copy_warning": "",
+      "show_again": {
+        "label": "",
+        "helper": "",
+        "helper_capped": ""
+      },
       "verify": {
         "heading": "",
         "helper": "",

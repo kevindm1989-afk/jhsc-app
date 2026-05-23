@@ -108,6 +108,6 @@ if grep -rq "audit_emit\s*(" "$REPO_ROOT/apps/web/src" "$REPO_ROOT/supabase" 2>/
 fi
 
 # (3) + (4) — DEFERRED until T18 migration lands.
-echo "check-audit-enum-coverage: ${#EXPECTED_ENUM[@]} enum value(s) documented; call-site coverage clean."
+echo "check-audit-enum-coverage: OK — ${#EXPECTED_ENUM[@]} enum value(s) documented; call-site coverage complete."
 echo "check-audit-enum-coverage: DB-side CHECK + ADR-0015 schedule drift checks are DEFERRED until T18 migration; see ADR-0003 Amendment A."
 exit 0

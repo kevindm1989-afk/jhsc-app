@@ -50,11 +50,11 @@ export interface GeneratedPassphrase {
  * 160 bits, comfortably above the F-08 >=128 bit floor.
  */
 export async function generateRecoveryPassphrase(
-  entropyBytes: number = DEFAULT_ENTROPY_BYTES,
+  entropyBytes: number = DEFAULT_ENTROPY_BYTES
 ): Promise<GeneratedPassphrase> {
   if (entropyBytes < 16) {
     throw new Error(
-      `recovery passphrase entropy must be >= 16 bytes (128 bits); got ${entropyBytes}`,
+      `recovery passphrase entropy must be >= 16 bytes (128 bits); got ${entropyBytes}`
     );
   }
   await ready;
@@ -63,7 +63,7 @@ export async function generateRecoveryPassphrase(
   const grouped = groupWithHyphens(encoded, GROUP_SIZE);
   return {
     passphrase: grouped,
-    entropy_bits: entropyBytes * 8,
+    entropy_bits: entropyBytes * 8
   };
 }
 
