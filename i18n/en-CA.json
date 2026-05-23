@@ -244,8 +244,18 @@
       "passphrase": {
         "helper": "This passphrase is a friction layer to view the entry later. The actual encryption uses your passkey-derived keys."
       },
+      "consent": {
+        "heading": "Before you log a reprisal",
+        "lead": "A reprisal entry is the most sensitive record this app holds. Here is exactly what happens when you submit it.",
+        "bullet_encrypted": "What is sealed and only readable by the committee: the entry body, any names, dates, witnesses, and any details you write or attach. These are locked to the committee key and never readable by the employer, the hosting provider, or anyone outside the committee.",
+        "bullet_visible": "What other active committee members will see in the recent-activity feed: that a reprisal entry exists, when it was created (to the nearest hour), and the reprisal entry's ID. They will NOT see who created it. Forensic review can identify the author only after a two-member committee approval, the same way reprisal entries are deleted.",
+        "bullet_why": "Why other members see the entry exists: to deter anyone — including a co-opted committee member — from quietly logging or reading reprisal entries on someone else's behalf. The committee acts as a check on itself.",
+        "bullet_not_visible": "What other members will NOT see: your name, your pseudonym, the content of the entry, or any worker named in the entry.",
+        "ohsa_reminder": "OHSA s.50 reminder: reprisal against you for using this app is itself an OHSA offence. The committee can pursue a s.50 complaint to the Ontario Labour Relations Board.",
+        "checkbox_label": "I understand what other committee members will see, and I want to submit this entry."
+      },
       "actions": {
-        "save": "Save reprisal entry",
+        "save": "Save entry",
         "saving": "Encrypting and saving…"
       }
     },

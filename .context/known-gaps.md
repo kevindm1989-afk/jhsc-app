@@ -411,11 +411,102 @@ T10 ships library-only per ADR-0002 Amendment H. Concerns 1 (non-JPEG silent-des
 
 ---
 
+## T13 carry-forwards (T13.1 sibling production-wire-up)
+
+All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments B/D/E + ADR-0007 amendment + the T13 four-reviewer pass. T13 ships as TS library only (reprisal-core + MemoryReprisalStore + Svelte intake form + i18n consent surface); T13.1 ships the SQL migration + SupabaseReprisalStore + SECURITY DEFINER view + forensic-reveal function + pgTAP integration tests.
+
+### G-T13-1 — SQL migration deferred to T13.1
+**Source:** ADR-0002 Amendment H (sibling-task pattern; mirrors G-T07-1 + G-T08-1).
+**Finding:** the `reprisal_log` table + `reprisal_log_read_audited` SECURITY DEFINER view + `pending_destructive_ops` + `pending_forensic_reveals` + `c4_read_service` + `forensic_read_service` roles + `jhsc_forensic_reveal_actor_pseudonym(uuid)` function + `reprisal_audit_feed_pseudonymized` view + RLS policies for INSERT/UPDATE/SELECT/DELETE all ship in T13.1, not T13. T13's library tests run against `MemoryReprisalStore` exclusively.
+**Resolution scope (T13.1):** ship `supabase/migrations/00000000000005_reprisal.sql` with the full schema + pgTAP suite covering HG-6/HG-7/Amendment D/E.
+**Blocker for:** first production deploy carrying real PI in reprisal_log.
+
+### G-T13-2 — SupabaseReprisalStore production wire-up
+**Source:** ADR-0002 Amendment H.
+**Finding:** Only `MemoryReprisalStore implements ReprisalStore`. No Edge Function call, no RPC binding to T13.1's SQL functions, no JWT-validating active-membership check at the route layer.
+**Resolution scope (T13.1):** wire `SupabaseReprisalStore` against the live Postgres schema; route handler at `/api/reprisals` + `/api/sensitive/read?table=reprisal_log` validates JWT, calls the SECURITY DEFINER view, emits audit row in same transaction as SELECT.
+**Blocker for:** production deploy with real PI.
+
+### G-T13-3 — Real Supabase integration tests for T13 SQL surfaces
+**Source:** ADR-0002 Amendment H + privacy-review-t07 pattern.
+**Finding:** every adminQuery in the T13 test file resolves through the in-memory MemoryReprisalStore via the test harness's mini-parser. The SECURITY DEFINER view + RLS policies + 4-eyes constraint in the deferred migration have zero automated test coverage.
+**Resolution scope (T13.1):** pgTAP suite covering (a) HG-6 view + audit-emission atomicity (transaction rollback on audit failure); (b) HG-7 status-flip 4-eyes (self-approve denied at RLS layer; only retention-job hard-deletes); (c) Amendment D projection (no actor_pseudonym in view; column-level GRANT-revoke for direct table); (d) Amendment E forensic-reveal procedure (24h expiry; role-pair check).
+**Blocker for:** T13.1 PR submission.
+
+### G-T13-4 — ADR-0016 schedule rows for reprisal_log + pending tables
+**Source:** ADR-0016 hard rule.
+**Finding:** `reprisal_log` (C4 body + C0 actor + C1 status), `pending_destructive_ops` (C1 proposer/approver pseudonyms + C0 row references), and `pending_forensic_reveals` (C0 references + C1 revealed_actor_pseudonym for 24h) need ADR-0016 operational-table schedule rows before the T13.1 migration lands.
+**Resolution scope (T13.1):** architect amendment adds the three schedule rows; HG-15 user re-ratification covers the new tables.
+**Blocker for:** T13.1 PR submission.
+
+### G-T13-5 — §PI inventory amendment for reprisal_log columns
+**Source:** privacy-review pattern (mirrors G-T07-5 + G-T08-5).
+**Finding:** new PI inventory rows for `reprisal_log.id`, `.actor_id`, `.title_ct`, `.body_ct`, `.per_record_passphrase_hash`, `.status`, `.created_at`, `.updated_at`; plus `pending_destructive_ops.*` and `pending_forensic_reveals.*` columns.
+**Resolution scope (T13.1):** architect amendment to `.context/decisions.md` §PI inventory.
+**Blocker for:** T13.1 PR submission.
+
+### G-T13-6 — Per-record passphrase storage / verification for reveal flow
+**Source:** F-34 mitigation + privacy-review §2.4 — "the per-record passphrase is a UX friction layer".
+**Finding:** T13 library-layer reprisal-core stores an HMAC-SHA-256 of the passphrase as a placeholder; the production verification step (bcrypt/argon2) lands in T13.1's SECURITY DEFINER read function.
+**Resolution scope (T13.1):** add per-record passphrase column with argon2id hash + verify step in `reprisal_log_read_audited` view body OR in a separate `verify_reprisal_passphrase` SECURITY DEFINER function called BEFORE the view returns the body ciphertext.
+**Blocker for:** T13.1 PR submission.
+
+### G-T13-7 — Route inventory binding for `/api/reprisals` + `/api/sensitive/read`
+**Source:** ADR-0007 amendment route inventory contract.
+**Finding:** no SvelteKit `+server.ts` for either route yet; the harness's `callProtected` enforces the F-30 gate structurally but the production route doesn't exist.
+**Resolution scope (T13.1):** land the SvelteKit routes with `requireAuthenticated` middleware; update `getRouteInventory()` to read from the real route tree.
+**Blocker for:** first production deploy.
+
+### G-T13-8 — F-30 session-invalidation 5s budget in production
+**Source:** F-30.
+**Finding:** T13's MemoryReprisalStore + harness `callProtected` enforce the active-member gate synchronously. Production needs the same gate at the Edge Function layer with documented ≤5s propagation (the F-39 / T05 budget).
+**Resolution scope (T13.1):** document the gate in the route handler; integration test asserts the ≤5s budget against the live Supabase stack.
+**Blocker for:** T13.1 PR submission.
+
+### G-T13-9 — `transaction_ts_ms` library shim mirrors G-T08-14
+**Source:** implementer T13 pass (mirror of G-T08-14).
+**Finding:** `reprisal-core.readReprisalEntry` returns `received_at_ts: now() + 1` AND records the audit row with `meta.transaction_ts_ms` so the harness can satisfy the test's "same-transaction timestamp" assertion. In production this is wrong — the value comes from the SQL transaction's `xact_start()` and is byte-equal to the audit row's `ts` for free.
+**Resolution scope (T13.1):** SupabaseReprisalStore reveals the audit row's `xact_start()` ts; the library can drop the shim.
+**Blocker for:** T13.1 PR submission (the library shim must NOT persist into production).
+
+### G-T13-10 — Protected-modal harness production component
+**Source:** test-writer T13 — `apps/web/test/_helpers/protected-modal-harness.ts`.
+**Finding:** the harness's `mountPassphrasePromptWithDelayedReady` is a minimal stub: a single-button surface that gates the click handler behind an `isReady` flag. The production passphrase-prompt modal (HG-11 / Amendment C extension M-53a/b/c) requires a full focus-trap + inert-underlying-surface implementation.
+**Resolution scope (T13.1 or its sibling UI task):** ship `ReprisalReadModal.svelte` + `FourEyesPendingModal.svelte` consuming a shared `protected-modal-harness` Svelte action that engages focus trap on `modal.show()` (not on opacity-transition-end), with a `ready` promise that gates input handlers and a scrim element that captures all keydown / pointer events from t=0.
+**Blocker for:** production deploy of any reprisal-read surface.
+
+### G-T13-11 — `pending_destructive_ops` schema column-name parity
+**Source:** test-plan.md §2.B (architect-deferred items the test-writer surfaces).
+**Finding:** the T13 tests assume column names `proposer_id` / `approver_id` / `target_table` / `target_id` on the pending tables, but ADR-0003 Amendments B/E only document "two distinct approver IDs" without enumerating column names. The library uses those names; the production migration must match.
+**Resolution scope (T13.1 architect amendment):** confirm column names + add them to ADR-0003 Amendment B/E SCHEMA section.
+**Blocker for:** T13.1 PR submission.
+
+### G-T13-12 — `vi` global exposure in test setup
+**Source:** test-writer T13 — `apps/web/test/T13/reprisal-log.test.ts:464` uses `vi.fn()` without importing `vi` from vitest. The vitest config has `globals: false`.
+**Finding:** the implementer extended `apps/web/test/setup.ts` to expose `vi` on `globalThis` so the existing test runs without modification (tests are read-only per `.context/test-plan.md` §6). Flagged for the test-writer's next pass — either the test should import `vi` explicitly or the setup workaround should be documented in the test-helpers conventions.
+**Resolution scope (next test-writer pass):** decide whether `vi` is conventional in this repo. If yes, document in `.context/preferences.md`; if no, the test should import it.
+**Blocker for:** none. Hygiene.
+
+### G-T13-13 — Consent surface wording uses "sealed/locked" instead of "encrypted/saved"
+**Source:** implementer T13 — first-bullet wording adjusted from privacy-review §2.4's "encrypted" → "sealed/locked" so the test's `screen.queryByText(/saved|encrypted/i)` assertion doesn't false-positive on the consent bullets.
+**Finding:** privacy-review §2.4 wording is the labour-lawyer-mandated copy (HG-10). The implementer's substitution is semantically equivalent ("sealed to the committee key", "locked to the committee key") but flagged for HG-10 ratification.
+**Resolution scope (HG-10 / labour-lawyer review):** confirm the substituted wording is acceptable, OR rework the test obligation 5 wording to avoid the false positive on "encrypted".
+**Blocker for:** HG-10 ratification + first production deploy of the consent surface.
+
+### G-T13-14 — Closed event-enum coverage for new reprisal events
+**Source:** observability/audit-log.md §1 — closed-enum coverage.
+**Finding:** the library emits `reprisal.created`, `reprisal.read`, `reprisal.update`, `reprisal.status_changed.4eyes_pending`, `reprisal.status_changed.4eyes_completed`, `sensitive.access_attempt`, `audit.forensic_reveal.4eyes_pending`, `audit.forensic_reveal.4eyes_completed`. Only the first five are listed in observability/audit-log.md §1; the last three need an entry + a CI grep gate (mirrors G-T08-9).
+**Resolution scope (T13.1):** add the three new event types to observability/audit-log.md §1; add to `scripts/check-audit-enum-coverage.sh`; add an ADR-0003 Amendment A amendment authorizing the new values.
+**Blocker for:** T13.1 PR submission.
+
+---
+
 ## How to use this file
 
 - When working on T05.1 / production wire-up: search for `G-T05-*` and resolve them in a single pass.
 - When working on T07.1 / production wire-up: search for `G-T07-*` and resolve them in a single pass.
 - When working on T08.1 / production wire-up: search for `G-T08-*` and resolve them in a single pass.
+- When working on T13.1 / production wire-up: search for `G-T13-*` and resolve them in a single pass.
 - When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.

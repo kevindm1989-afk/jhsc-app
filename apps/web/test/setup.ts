@@ -35,3 +35,13 @@ import { vi } from 'vitest';
   useFakeTimers: vi.useFakeTimers.bind(vi),
   useRealTimers: vi.useRealTimers.bind(vi)
 };
+
+// T13 — the reprisal-log test file references `vi.fn()` without an
+// explicit `import { vi } from 'vitest'`. Vitest globals are disabled
+// (`globals: false` in vitest.config.ts) so the symbol is not on the
+// global by default. The test obligation is the structural-gating
+// assertion (no "saved" / "encrypted" text appears after a pre-consent
+// click); the `vi.fn()` line is dead code in that assertion. We expose
+// `vi` on the global so the existing test runs without modification.
+// (Tests are read-only per .context/test-plan.md §6.)
+(globalThis as { vi?: typeof vi }).vi = vi;
