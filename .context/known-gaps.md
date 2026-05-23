@@ -559,6 +559,60 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope (T14.1 or later):** consider adding `reader_role` (the role under which the SELECT executed) to the `meta` of `work_refusal.read` + `s51_evidence.read`; surface to threat-modeler / privacy-reviewer.
 **Blocker for:** N/A (forward-looking).
 
+### G-T14-10 — F-34 friction-layer `attemptReadWith*Passphrase` for s.43 / s.51
+**Source:** second-opinion-reviewer T14 Concern 2 + privacy-reviewer T14 T14-A8.
+**Finding:** T14 stores `per_record_passphrase_hash` at submit but the read flow does NOT verify the passphrase (role-gated via F-21 only). T13's `attemptReadWithPassphrase` (`reprisal-core.ts:245`) + `sensitive.access_attempt` audit row pattern is absent. Threat-model §T14 says "same per-record key + sensitive-read pipeline as T13" — F-34 is in by reference.
+**Resolution scope (T14.1 architect decision):** either (a) ship `attemptReadWith{WorkRefusal,S51Evidence}Passphrase` library functions mirroring T13; OR (b) absorb the passphrase verify into the SECURITY DEFINER view's body and document why no library-level friction layer is needed. If (a), tests covering wrong-passphrase × 3 → no plaintext + `sensitive.access_attempt` audit row written.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-11 — `transaction_ts_ms` library shim (mirrors G-T13-9)
+**Source:** second-opinion-reviewer T14 Concern 3.
+**Finding:** `work-refusal-core.ts:207` and `s51-evidence-core.ts:240` use the same `received_at_ts: now() + 1` shim T13's `readReprisalEntry` introduced. The library returns a fabricated future timestamp purely so the strict-inequality test assertion holds under frozen timers. Production must replace with the SQL transaction's `xact_start()`.
+**Resolution scope (T14.1):** `SupabaseWorkRefusalStore` / `SupabaseS51EvidenceStore` reveal flows return the actual return-moment timestamp from the SQL transaction; library shim collapses (test relaxes to `<=`).
+**Blocker for:** T14.1 PR submission (library shim must NOT persist into production).
+
+### G-T14-12 — `s51_evidence.create.rejected` audit + structured error for `PhotoUnsupportedFormatError`
+**Source:** second-opinion-reviewer T14 Concern 1.
+**Finding:** `submitS51Evidence`'s photo loop (`s51-evidence-core.ts:162-168`) does not catch `PhotoUnsupportedFormatError`. A non-JPEG photo (HEIC, PNG, WebP) throws mid-loop; no audit row, no banner, no structured return shape. The caller surfaces an opaque error; the operator has no signal.
+**Resolution scope (T14.1):** wrap each `sanitizePhoto(raw)` in try/catch; on failure return `{ ok: false, reason: 'photo_unsupported_format', body: { rejected_index: i, banner_key } }` AND emit a new `s51_evidence.create.rejected` audit event. Extend `scripts/check-audit-enum-coverage.sh` + `observability/audit-log.md` + ADR-0003 Amendment A. Extends G-T14-7's enum-coverage scope.
+**Blocker for:** T14.1 PR submission + first production deploy with photo capture.
+
+### G-T14-13 — `submit*` insert+audit atomicity (inherited from T13)
+**Source:** second-opinion-reviewer T14 Concern 6.
+**Finding:** `submitWorkRefusal` / `submitS51Evidence` do NOT use the same emit-then-decrypt protective try/catch as the read path. If `recordWorkRefusalEvent` fails on `work_refusal.created`, the row has already been inserted; the audit row write throws unhandled. Result: a persistent C4 row with NO created-audit row, no rollback. Same gap exists in T13 `submitReprisal` — pattern fit propagates the issue.
+**Resolution scope (T14.1):** same try/catch + rollback (hard-delete inserted row) posture as the read path, OR document the trade-off and explicitly accept "missing .created audit row" as a tolerable failure mode. Apply the same fix to T13's `submitReprisal` and T08's `submitConcern`.
+**Blocker for:** T14.1 PR submission (privacy posture is degraded; PIPEDA 4.9 individual-access guarantees require the audit chain to be intact).
+
+### G-T14-14 — Test verifying `c4_read_service` shared-role atomicity
+**Source:** second-opinion-reviewer T14 Concern 4.
+**Finding:** The shared `c4ReadServiceAuditInsertBlocked` toggle blocks `reprisal.read` + `work_refusal.read` + `s51_evidence.read` simultaneously (matches production where one `c4_read_service` role owns all three views). No test asserts the shared-role atomicity — the T14 atomicity test only checks work_refusal. A future refactor introducing a `c3_read_service` separation would silently diverge.
+**Resolution scope:** add a test that calls `__test_revoke_audit_insert_for_role('c4_read_service')` once and asserts ALL THREE of `reprisal.read`, `work_refusal.read`, `s51_evidence.read` abort with `audit_failed`. Test-writer follow-up.
+**Blocker for:** none. Defense in depth.
+
+### G-T14-15 — Class-vocabulary disambiguation in Amendment A extension table
+**Source:** privacy-reviewer T14 T14-A1 / Q1.
+**Finding:** ADR-0003 Amendment A extension table header "Class" overloads C3/C4 vocabulary. ADR-0003 Amendment A calls `work_refusal.read` a "C3 read" (audit-event class) while §PI inventory classifies the underlying data as C4. The library correctly uses `target_class: 'C4'`; the ambiguity is in the architectural documentation, not the code.
+**Resolution scope (T14.1 architect pass):** change the column header from "Class" to "Audit-event class" with a footnote pointing back to §PI inventory for the underlying data class.
+**Blocker for:** none. Documentation hygiene.
+
+### G-T14-16 — RLS-WHERE-filters-before-audit invariant for SECURITY DEFINER view bodies
+**Source:** privacy-reviewer T14 T14-A6.
+**Finding:** Production `work_refusal_read_audited` / `s51_evidence_read_audited` SECURITY DEFINER view bodies MUST inline `jhsc_caller_can_read_*(...)` in the WHERE clause (not inside the function body), so unauthorized callers see zero rows AND zero audit emission. Same shape as T13.1 per `.context/decisions.md` line 2354. Without this discipline, a callable-but-zero-row path could quietly emit audit rows for unauthorized SELECTs.
+**Resolution scope (T14.1 migration):** document the inlined-WHERE convention; pgTAP test asserts no audit row written when caller fails the read predicate.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-17 — `__debug*` methods interface split (extends G-T13-15 to T14)
+**Source:** privacy-reviewer T14 T14-A7.
+**Finding:** `MemoryWorkRefusalStore.__debugAuditRows()` and `MemoryS51EvidenceStore.__debugAuditRows()` return raw `actor_pseudonym` to any caller. Library-internal; MUST NOT survive into the corresponding Supabase store implementations. Extends G-T13-15 to T14 surfaces.
+**Resolution scope (T14.1):** interface split — read interface vs debug interface. The Supabase store implementation only implements the read interface.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-18 — Resolve declared-but-unimplemented `rate_limited` denial branch
+**Source:** privacy-reviewer T14 Q5.
+**Finding:** Library declares `'rate_limited'` as a possible denial reason and types `status: 403 | 429`, but `submitWorkRefusal` / `submitS51Evidence` never call a `tryConsumeRateBudget(...)` analogue. The declared-but-absent type hides a privacy-relevant decision.
+**Resolution scope (T14.1 architect decision):** either (a) implement per-actor rate limit (recommend 10/hr matching T13's reprisal-log ceiling, given statutory-filing friction parity) OR (b) drop `'rate_limited'` from the denial union and the `429` status code on insert paths. Document the rationale.
+**Blocker for:** T14.1 PR submission.
+
 ---
 
 ## How to use this file
