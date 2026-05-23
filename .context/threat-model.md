@@ -679,6 +679,209 @@ The retention job is run by a service role; audit log spec says writes via Edge 
 - **Residual:** Low if every retention pass emits a structured summary row.
 - **Testable mitigation (T16 + T18):** *"Each retention-job run writes exactly one `retention.pass` audit-log row with `{deleted_count_per_table, run_ts, job_id, prev_pass_hash}`. Test: trigger a pass; assert a single summary row appears; assert it hash-chains to the prior pass row."*
 
+### 3.9 §3.6 Retention sweep (T16 library + T16.1 SQL — naming honours ADR-0017 §10 brief; numbered §3.9 because §3.6–§3.8 are taken in this file's existing structure)
+
+Source: ADR-0017 (T16 retention sweep library + MemoryRetentionStore), 2026-05-23. Closes the F-51/F-52 surfaces with concrete library-level test obligations and adds five new surfaces specific to the sweep mechanism (lease, row-cap, schedule-hash, TestStore split, no-PII-in-errors).
+
+**Scope split:** F-55..F-69 below are scored as a family. Library-scope assertions land in T16 (CI tests against `MemoryRetentionStore`). SQL-scope assertions land in T16.1 (pgTAP, `SupabaseRetentionStore`, pg_cron, Edge Function trigger). Each row tags `[T16]` or `[T16.1 deferred]` for the test-writer.
+
+#### Trust boundaries this introduces
+
+- **B6 — Retention service-role boundary (added here; activates at T16.1; library shape preserved in T16).** A non-login `retention_service_role` in T16.1 holds `GRANT EXECUTE` on the `SECURITY DEFINER` sweep functions and is the only role authorised to issue cross-table DELETEs aligned to the schedule. It has NO `GRANT` on base tables — the only attack surface is the function set, and the function bodies hard-code the schedule lookup. The library half (T16) mirrors this at the type level: `RetentionStore` forbids caller-supplied WHERE; the predicate is constructed from the schedule discriminator only. Treat B6 as "type-level in T16, role-level in T16.1." Reference: ADR-0017 §1, §4, §6; sibling task spec items #1, #3, #9.
+- **Diagram note (consolidated diagram, §1 of this file).** B6 sits inside the Supabase-cloud box, adjacent to "Postgres + RLS-as-authz" and "Edge Functions". Edge: `pg_cron` (T16.1) -> SECURITY DEFINER functions (owner `migration_role`, GRANT EXECUTE to `retention_service_role`) -> per-event-type and per-table DELETEs bounded by `RETENTION_SCHEDULE` / `OPERATIONAL_TABLE_SCHEDULE`. The audit-log `retention.deleted` summary row is the LAST write in the transaction (F-24 variant; see F-58). When the diagram is next refreshed, add a B6 box labelled "Retention service-role (non-login, SECURITY DEFINER bounded by closed schedule)" with arrows: pg_cron -> sweep fn -> DELETEs (per-event-type, per-table) -> retention.deleted (LAST) -> `retention_sweep_runs` checkpoint.
+
+#### Data flows (T16 library shape; T16.1 SQL shape mirrors)
+
+```
+[Retention sweep pass — per ADR-0017 §6 algorithm]
+  Caller (CI test in T16; pg_cron / Edge Fn in T16.1)
+    -> runRetentionPass({store, config})
+       1. store.findOpenRun(lease_window_ms)            // lease acquire (B6 entry)
+          if existing -> return {status: 'lease_held'}  // F-59
+       2. store.recordSweepRun({run_id, started_at_ms, status: 'running'})
+       3. for each RetentionEventType in alphabetised order:    // F-55 closed-allowlist
+            cutoff = resolveCutoff(RETENTION_SCHEDULE[event_type], nowMs)
+            if event_type is 'retention.deleted': skip (F-62 carve-out)
+            if kind is 'match_underlying':
+              ask store.isTargetGoneFor(target_id, source_table)  // F-61 ceiling
+              gate on (linked_record_deleted_for >30d)
+            store.deleteForEventType(event_type, cutoff, batch_size)  // F-64 no WHERE
+            accumulate per_event_counts
+            check per_pass_row_cap                       // F-60 row-cap
+       4. for each table in OPERATIONAL_TABLE_SCHEDULE:
+            store.deleteForTable(table_name, predicate, batch_size)  // F-56 totp 24h
+            accumulate per_table_counts
+       5. if total > alarm_threshold (default 20):       // F-57 over-delete alarm
+            result.alarm_fired = true (T16.1 emits A-RETENTION-001)
+       6. summary = buildRetentionDeletedSummary({       // F-58 audit-WITH-side-effect
+            run_id, started_at_ms, ended_at_ms,
+            schedule_hash,                                // F-63 binds to schedule version
+            per_event_counts, per_table_counts,
+            prev_pass_hash, status })
+       7. store.emitRetentionDeleted(summary)           // LAST write in tx
+          if throws: ENTIRE TRANSACTION ROLLS BACK
+                     (no deletes, no summary; F-58 invariant)
+       8. store.closeSweepRun(run_id, {status, ended_at_ms, ...})  // F-68 RA-2 anchor
+  Errors throughout: {run_id, status, error_code} only  // F-66 no PII
+
+[Dry-run mode (CI test default per F-57)]
+  step 3/4 use countCandidates* instead of delete*;
+  summary is built but NOT emitted; result returns would-delete counts.
+```
+
+Classification per surface: `retention_sweep_runs` carries NO PI (counts + run metadata only; confirmed per ADR-0017 §8 of T16.1 deliverables). `retention.deleted` audit rows carry NO `target_id` (ADR-0015 carve-out) and store actor as the synthetic `retention_service` HMAC pseudonym. The sweep itself reads `audit_log.retention_class` (C1) and writes `audit_log` (C1); it never reads or writes C3/C4 plaintext. Residency: ca-central-1 (no new processor, no new cross-border flow — confirmed in ADR-0017 §Compliance check). Retention of the surfaces themselves: `retention_sweep_runs` = 7y (mirrors `retention.deleted`); `audit_log_retention_schedule` = permanent_schema_table.
+
+#### STRIDE scoring table — F-55 through F-69
+
+| F-### | Lineage (architect ask) | STRIDE | Asset / code path | Mitigation (testable assertion) | Residual | Test obligation | Scope |
+|---|---|---|---|---|---|---|---|
+| F-55 | F-R1 / F-19 | T (Tampering of code paths via mirror drift) + E (Elevation via missing schedule entry deleting more than intended) | `RetentionEventType` union vs `RETENTION_SCHEDULE` const; ADR-0017 §2, §3 | *"Library CI parses `RETENTION_SCHEDULE` + asserts every value in the closed `RetentionEventType` union has exactly one entry; every `RETENTION_SCHEDULE` key is in the union. Drift fails CI. Removing any entry fails CI. Adding a key not in the union fails CI."* | **Low** (with CI test); without the test this would be Medium-High because a missing entry would silently skip an event type in the sweep. | T16-DRIFT-1 (single test exercises three drift conditions). | T16 (library CI). Cross-mirror SQL drift deferred to T16.1 per ADR-0017 §H. |
+| F-56 | F-R2 / G-T05-7 | I (Information disclosure via stale TOTP-consumed rows) + T (Tampering — stale rows correlate with auth flow timing) | `auth_totp_consumed_log` table sweep at 24h; ADR-0017 §6 step 4 | *"Fixture seeds rows with `consumed_at` of -23h, -25h, -100h; library `runRetentionPass` deletes rows at -25h and -100h, preserves the -23h row. `OPERATIONAL_TABLE_SCHEDULE['auth_totp_consumed_log']` is `{kind: 'fixed_hours', hours: 24}`."* | **Low** | T16-SWEEP-OPS-1. SQL DELETE path deferred to T16.1 pgTAP. | T16 (library). T16.1 (SQL DELETE on the real table). |
+| F-57 | F-R3 / F-51 generalised | D (Denial of service of legitimate data via over-delete) + T (Tampering of the live store by a buggy filter) | F-51 was Medium with high blast radius; over-delete alarm + row-cap + dry-run-default in combination; ADR-0017 §6 step 6 | *"Fixture with 25 candidate rows + default `alarm_threshold = 20` triggers `result.alarm_fired = true`; the emitted summary row has `meta.severity = 'warn'` and `meta.alarm_fired = true`. Fixture with 19 candidates: `alarm_fired = false`. CI test default `config.dry_run = true`."* | **Low** — see F-57 math note below. | T16-ALARM-1, T16-DRY-RUN-1. A-RETENTION-001 alert wiring deferred to T16.1 + observability-setup. | T16 (flag); T16.1 (alert sink). |
+| F-58 | F-R4 / F-52 + F-24 inversion | R (Repudiation of deletion) + T (Tampering — summary row diverges from actual deletes) | F-24 generalises to "audit-WITH-side-effect"; ADR-0017 §Decision Option D + §6 step 7 + §6 step 9 | *"Force `emitRetentionDeleted` to throw mid-transaction; assert (a) zero rows deleted from any sweepable surface, (b) no `retention.deleted` row appears in `audit_log`, (c) the run row closes with `status='errored'`. Force a per-event-type delete to throw after the summary is built but before commit; assert same outcome. Run a clean pass; assert the `retention.deleted` row's `meta.deleted_per_table` and `meta.deleted_per_event_type` counts equal the live deltas exactly."* | **Low** — F-24 invariant is preserved as a single-transaction atomicity guarantee (audit-WITH-side-effect variant), NOT weakened. See F-58 invariant note below. | T16-ATOMIC-1, T16-ATOMIC-2, T16-SUMMARY-COUNTS-1. | T16 (library; `MemoryRetentionStore` mirrors the rollback). T16.1 (`SupabaseRetentionStore` wraps the whole pass in a single Postgres tx). |
+| F-59 | F-R5 (new surface) | T (Tampering — double-delete via race) + D (Denial of service — wasted lock contention) | pg_cron race + crash-mid-pass; ADR-0017 §Option C(a) + §6 step 1 | *"Seed `retention_sweep_runs` with a row `{status: 'running', started_at_ms: now - 60_000}` and lease_window_ms = 300_000; call `runRetentionPass`; assert returns `{status: 'lease_held', existing_run_id}` and no deletes occur and no `retention.deleted` row written. Repeat with `started_at_ms: now - 600_000` (older than lease window); assert the pass proceeds."* | **Low (library)** / **Medium until T16.1 adds `pg_advisory_xact_lock`** as defence-in-depth on top of the checkpoint row. The checkpoint row alone is correct under cooperative callers; a hostile concurrent caller could race the `findOpenRun -> recordSweepRun` window. T16.1 mitigation beyond library expressivity: wrap the lease acquire in `pg_try_advisory_xact_lock(hashtext('retention_sweep'))` so two simultaneous pg_cron firings serialise at the lock, not at the checkpoint row read. | T16-LEASE-1, T16-LEASE-2. T16.1-LEASE-LOCK-1 (advisory lock). | T16 (library checkpoint). T16.1 (advisory lock + SQL function `find_open_run`). |
+| F-60 | F-R6 (new surface) | D (Denial of service — long lock hold on high-churn table starves writers) + T (incorrect partial-state recovery) | New surface: high-churn table (`auth_sessions`) starvation; ADR-0017 §6 step 5 + §Risks | *"Fixture of 25000 expired rows + `config.max_total_rows_per_pass = 20000`; first pass deletes 20000 rows, summary `meta.status = 'capped'`, `retention_sweep_runs.status = 'capped'`. Second pass deletes 5000, `status = 'completed'`. Lock-hold-time bounded by (`per_event_batch_size` * `max_total_rows_per_pass`) / `per_event_batch_size` = at most 20 batches per surface. Statement timeout (T16.1) overrides default 30s to 60s."* | **Low (library)** / **Medium until T16.1 sets statement_timeout=60s** on the SECURITY DEFINER functions and pg_cron schedule is staggered to 03:30 ET (after the 03:00 ET pg_dump per ADR-0012). T16.1 mitigation beyond library expressivity: per-function `SET LOCAL statement_timeout = '60s'` AND `SET LOCAL lock_timeout = '5s'` so the sweep yields rather than blocks indefinitely. | T16-CAP-1 (cap + resume), T16-CAP-2 (status='capped' surfaced). T16.1-TIMEOUT-1 (statement/lock timeouts). | T16 (library cap + status). T16.1 (Postgres timeouts + pg_cron stagger). |
+| F-61 | F-R7 / ADR-0015 §3.5 | I (Information disclosure via audit rows outliving the linked record) + T (audit row references stale target_id) | Underlying-record-ceiling rule; ADR-0017 §8 | *"Fixture: a `concern.source_revealed` audit row whose linked `concerns` row was deleted 31 days ago IS swept. Same audit row at 29 days is NOT swept. The 30-day ceiling is exact (not >30 days inclusive of day 30); test boundary cases at 29.99d, 30.0d, 30.01d."* | **Low** | T16-CEILING-1 (30d boundary), T16-CEILING-2 (linked record still present -> not swept). | T16 (library; `MemoryRetentionStore.isTargetGoneFor`). T16.1 (SQL join across operational tables). |
+| F-62 | F-R8 / ADR-0015 carve-out | T (carve-out bypassed deletes the audit-trail-of-deletes itself) | `retention.deleted` carve-out: no `target_id`, 7y independent; ADR-0017 §3, §8 | *"Fixture: a `retention.deleted` row at 6y is preserved. A `retention.deleted` row at 7y+1d is swept. The underlying-record-ceiling rule does NOT apply (it has no `target_id`). The drift test asserts `RETENTION_SCHEDULE['retention.deleted'].kind === 'fixed_years'` and `years === 7` and `no_target_id === true`."* | **Low** | T16-CARVE-OUT-1, T16-CARVE-OUT-2. | T16 (library). |
+| F-63 | F-R9 / F-27 lineage | T (Tampering of schedule between pass and audit row — drift hidden) + R (Repudiation: "the schedule at the time said X") | `schedule_hash` binding mirrors F-27 (allowlist hash) from T11/T12; ADR-0017 §7 | *"Snapshot `meta.schedule_hash` for a baseline pass. Monkey-patch a single entry in `RETENTION_SCHEDULE` (via a freeze bypass for the test); run a second pass; assert the new `meta.schedule_hash` differs. Hash is `SHA-256(canonical-JSON(RETENTION_SCHEDULE concat OPERATIONAL_TABLE_SCHEDULE))` — canonical-JSON means sorted keys, no whitespace, deterministic number serialisation."* | **Low** | T16-SCHEDULE-HASH-1, T16-SCHEDULE-HASH-2 (canonical-JSON stability). | T16 (library). |
+| F-64 | F-R10 / F-19 lineage | E (Elevation of privilege — caller supplies a WHERE that deletes outside the schedule) | No caller-supplied WHERE; defense-in-depth; ADR-0017 §4 | *"TypeScript-level: attempting to call `store.deleteForEventType(event_type, cutoff_ms, max_rows)` with a fourth arg or an arbitrary SQL string fails type-check. The `RetentionStore` interface exposes ONLY `event_type`, `cutoff_ms`, `max_rows`. ESLint rule `no-spread-into-retention-schedule` flags `{...RETENTION_SCHEDULE, ...}` outside `schedule.ts`. CI test asserts the rule fires on a poisoned fixture."* | **Low** | T16-NO-WHERE-1 (type-level), T16-NO-SPREAD-1 (ESLint rule). T16.1-FN-SIGNATURE-1 (SQL function signatures hard-code the schedule lookup). | T16 (library type-level + ESLint). T16.1 (SQL function signatures). |
+| F-65 | F-R11 / G-T11-21 lineage | E (Elevation — production code reaches test-only fixtures) | TestStore interface split; ADR-0017 §4 | *"Type-level: `RetentionStore` does not have `__debugListRuns`, `__debugForceFail`, `__debugSetClock`, `__debugInsertFixture` (TypeScript `keyof` assertion in a `.test-d.ts` file or equivalent). `TestRetentionStore extends RetentionStore` and adds those four. Production callers receive `RetentionStore`. Attempting to cast `RetentionStore` to call `__debug*` fails type-check."* | **Low** | T16-TYPE-SPLIT-1. | T16 (library). |
+| F-66 | F-R12 / G-T08-14 + G-T13-9 lineage | T (Tampering — two writes share an ms timestamp and ordering is ambiguous in tests) | `transaction_ts_ms` shim; ADR-0017 §5 | *"`MemoryRetentionStore.nowMs()` returns strictly monotonically increasing values: two adjacent calls return `t` and `t+k` where `k >= 1`. Pseudo-test: call 1000x in a tight loop; assert strictly increasing. T16.1 `SupabaseRetentionStore.nowMs()` uses `xact_start()` for per-pass clock anchoring."* | **Low** | T16-NOW-MS-1. T16.1-XACT-START-1. | T16 (library). T16.1 (SQL function uses `xact_start()`). |
+| F-67 | F-R13 / constraints.md:110-111 lineage | I (Information disclosure via error path leak of row content or PI) | No PII in error paths; ADR-0017 §6 step 9 | *"Force every error path in `runRetentionPass`: (a) lease conflict, (b) `findOpenRun` throws, (c) `recordSweepRun` throws, (d) per-event-type delete throws, (e) per-table delete throws, (f) summary emit throws, (g) closeSweepRun throws. Capture every thrown Error and every result.error. Assert each carries ONLY `{run_id, status, error_code}` and does NOT contain (i) any UUID other than `run_id`, (ii) any email-shaped string, (iii) any HMAC-pseudonym-shaped string (32-char hex), (iv) any field name starting with `body_ct`/`source_name`/`notes_ct`/`title_ct`."* | **Low** | T16-NO-PII-ERRORS-1 (seven force-error paths). | T16 (library). |
+| F-68 | F-R14 / RA-1 control #5 anchor | I (Information disclosure — post-export notification surface loses its anchor if `export.generated` is shortened) | RA-1 control #5 preserved; ADR-0017 §6 (no shortening) + §Validation pass | *"Snapshot the resolved cutoff for `export.generated` events given a fixed `nowMs()`. Assert `cutoff_ms === nowMs() - 7 * 365.25 * 24 * 3600 * 1000` (exact, ±1ms). Monkey-patch `RETENTION_SCHEDULE['export.generated']` to `{kind: 'fixed_years', years: 1}` (via freeze bypass); assert (a) drift test (F-55) fires OR (b) F-63 schedule_hash diverges from the baseline; assert ADR-0017 §6 algorithm cannot shorten the schedule at runtime since the const is `Object.freeze`d."* | **Low** | T16-RA1-CONTROL-5-PRESERVED-1. | T16 (library). |
+| F-69 | F-R15 / RA-2 trigger #3 anchor | R (Repudiation — live-chain vs pg_dump divergence cannot be attributed to a sweep pass) | RA-2 trigger #3 reconciliation anchor; ADR-0017 §Option E + §10 F-R15 | *"Sweep deletes N rows across event types. Assert `retention_sweep_runs.per_event_counts` jsonb sums to N (sum of all values across all keys). Reconciliation: a row absent from `audit_log` whose hash chains to a known prior is attributable iff its event type and pre-deletion ms-epoch fall within `[retention_sweep_runs.started_at_ms, ended_at_ms]` AND the per_event_counts entry for that event type is non-zero. T18 inherits the join (additive; covered by carry-forward G-T16-RECONCILE)."* | **Low** | T16-RA2-RECONCILE-1 (sum check). T16.1-RA2-RECONCILE-2 (cross-table join in pgTAP). T18-RA2-RECONCILE-3 (integrity job join; carry-forward). | T16 (library row + sum). T16.1 (jsonb shape + SQL join). T18 (integrity job join; deferred). |
+
+#### F-57 math note (architect ask #1: drives F-51 Medium → Low?)
+
+F-51's original residual was "Medium — high blast radius" because the sole control was "Crypto-shred for E2EE'd records; deletion logged; alert on volume" with no quantification of the volume threshold or default posture. F-57 generalises F-51 to ALL retention-eligible tables (not only `reprisal_log`) and stacks three controls:
+
+1. **Dry-run as CI default.** Every CI run of the sweep is dry-run, so a regression that would mass-delete is caught BEFORE the live path executes. Likelihood of a bug reaching production with a delete-side-effect: high → low, because the implementer cannot land a green CI on a bug that would delete more than the fixture expects.
+2. **Per-pass row-cap (default 20000).** Even a runaway sweep cannot delete more than `max_total_rows_per_pass` per execution. The blast radius is capped: at one pass per day (T16.1 pg_cron schedule), the maximum unrecoverable loss is bounded per 24h. Impact of a successful exploit / bug: high → medium, because hot recovery from a single pass is feasible from the backup (ADR-0012's pg_dump, 35-day retention) — the backup carries the rows the sweep deleted.
+3. **Over-delete alarm at threshold 20 (configurable).** A pass whose deletes exceed 20 rows trips `alarm_fired = true`, emits the alarm via T16.1's A-RETENTION-001, and an operator reviews before the next pass at 03:30 ET. Operator latency: <24h in normal operation. Time-to-detect a runaway: ≤24h, often minutes once observability-setup wires the alert sink.
+
+**Combined likelihood:** Low. A bug must (a) escape the drift test (F-55), (b) escape the dry-run CI test (F-57), (c) escape the alarm review window, AND (d) operate within the row-cap. The compound probability is at the "low" end across realistic deployment.
+
+**Combined impact:** Medium. The row-cap bounds the per-pass blast radius to 20000 rows; the 35-day pg_dump window bounds recovery to the last 24h of writes-since-dump (acceptable per ADR-0015 §Risks "transient inconsistency is acceptable" posture). Not Low because a runaway hitting C4 audit metadata is still operationally painful; not High because the cap + backup combination is structural.
+
+**Residual: Low.** F-57 drives F-51 down from Medium to Low when (1)+(2)+(3) all hold AND the T16.1 alarm wiring lands. Until T16.1 lands, residual is "Low (CI) / Medium (production-untested)" — the test obligation (T16-ALARM-1, T16-DRY-RUN-1) plus the architect-mandated production prerequisite (T16.1 A-RETENTION-001) carry the assertion.
+
+#### F-58 invariant note (architect ask #2: F-24 inversion, not weakening)
+
+F-24 in this file (export pipeline) reads "audit-BEFORE-side-effect": the export audit row commits before the Blob URL is created and the file leaves the worker's browser. The inversion intuition is "if the audit fails, the side-effect is harmless because nothing was disclosed." For retention sweep, F-24 takes a structurally equivalent form with the ordering INVERTED in time but the invariant PRESERVED:
+
+- **The invariant (both F-24 and F-58):** *no side-effect commits without its audit row, and no audit row commits without its corresponding side-effect.*
+- **F-24 (export):** audit emitted first, side-effect (Blob URL) follows. Failure mode = audit emit fails → no Blob URL.
+- **F-58 (retention sweep):** side-effects (deletes) accumulate within an open transaction, summary row written LAST inside the same transaction. Failure mode = summary emit fails → ENTIRE transaction rolls back → no deletes commit AND no summary row. Per ADR-0017 §Option D: "the summary row is the LAST row written in the transaction (after the deletes) so its `meta.deleted_per_table` / `meta.deleted_per_event_type` counts are authoritative for what landed."
+
+The audit-WITH-side-effect form is **stronger** than audit-BEFORE-side-effect for this surface because the summary row's counts are authoritative — they cannot understate what landed (the deletes already executed within the same tx) and they cannot overstate (a failed summary emit takes the deletes down with it). For the export surface F-24's "audit-BEFORE" is the right pattern because the export side-effect (file leaves the browser) is irreversible once it occurs; for the sweep, the deletes are reversible only within the open transaction, so the summary-LAST pattern guarantees atomicity.
+
+**Verdict:** F-58 is a coherent F-24 variant, not a weakening. Test obligations T16-ATOMIC-1 (force summary throw → assert rollback) and T16-ATOMIC-2 (force mid-batch delete throw after summary built → assert rollback) pin the invariant directly. Per-batch savepoints are explicitly rejected (ADR-0017 §Option D) because they admit a partial-state failure mode that would weaken the invariant.
+
+#### F-59 / F-60 new-surface mitigations beyond library expressivity (architect ask #3)
+
+The library (T16) cannot express all the controls these surfaces need; T16.1 must add:
+
+**F-59 (lease / pg_cron race) — STRIDE: T (tampering of state via double-pass) + D (lock contention).**
+- T16 library covers: checkpoint-row-based lease via `findOpenRun`. Sufficient for cooperative single-caller in-process tests. Test: T16-LEASE-1, T16-LEASE-2.
+- T16.1 must add: `pg_try_advisory_xact_lock(hashtext('retention_sweep'))` inside the SECURITY DEFINER `runRetentionPass` wrapper function, BEFORE the checkpoint-row lookup. Two simultaneous pg_cron firings (e.g., a manual re-trigger overlapping the 03:30 ET scheduled run) serialise at the advisory lock. The library's `lease_held` return value continues to be the operator-visible signal. Test obligation T16.1-LEASE-LOCK-1: simulate concurrent invocations (two psql sessions, second invoked before first commits); assert second returns `lease_held` without attempting any DELETE.
+
+**F-60 (per-pass row-cap / starvation) — STRIDE: D (denial of service) + T (incorrect partial recovery).**
+- T16 library covers: `max_total_rows_per_pass` cap + `per_event_batch_size` and `per_table_batch_size` batching + `status='capped'` resume contract. Sufficient for deterministic batch boundaries in tests. Test: T16-CAP-1, T16-CAP-2.
+- T16.1 must add: (a) `SET LOCAL statement_timeout = '60s'` and `SET LOCAL lock_timeout = '5s'` on every SECURITY DEFINER sweep function so the pass yields under contention rather than blocking auth-flow writers; (b) pg_cron schedule explicitly set to 03:30 ET (after the 03:00 ET pg_dump per ADR-0012) so the sweep does not contend with the backup; (c) the per-function comment must record both timeouts and the schedule rationale. Test obligations T16.1-TIMEOUT-1 (assert `current_setting('statement_timeout')` inside the function body is 60s; assert `lock_timeout` is 5s) and T16.1-PG-CRON-SCHEDULE-1 (`SELECT schedule FROM cron.job WHERE jobname = 'retention_sweep'` returns the daily 03:30 ET expression).
+
+Both T16.1 additions are recorded in ADR-0017's sibling task spec items #5 and §Risks ("Lock-hold-time on `auth_sessions`"); this threat-model entry pins them as test obligations for the T16.1 pgTAP suite.
+
+#### Residual assessment (aggregate)
+
+All fifteen findings score Low at the library boundary (T16). Five carry a T16.1-deferred component that is required before the production wire-up clears: F-59 (advisory lock), F-60 (timeouts + cron stagger), F-64 (SQL function signature), F-66 (`xact_start()`), F-69 (pgTAP reconciliation). One — F-57 — is "Low (CI) / Medium (production-untested)" until A-RETENTION-001 is wired by observability-setup after T16.1. No finding is Critical or High at any horizon.
+
+Aggregate posture: **Low residual** for the retention-sweep family with the T16.1 deferred items tracked as carry-forwards. F-51 (the pre-existing entry) is **closed by F-57** when T16.1 ships; until then, F-51's residual remains "Medium — high blast radius" *only as the production claim*, downgraded to Low at the library boundary.
+
+#### Re-open triggers
+
+This section re-opens if any of the following:
+
+1. A new audit-log event type is added without all four mirrors (TS const, SQL function, SQL schedule table, RetentionEventType enum). The drift test (F-55) catches this in CI; if the test is disabled or the mirrors silently diverge, F-55 re-opens and the entire family is re-scored.
+2. The `retention.deleted` carve-out (F-62) is altered (e.g., a `target_id` is added). The 7y independent retention assumes no target — adding one re-opens F-61 and F-62 jointly.
+3. The hard-delete-uniformly semantics (ADR-0017 §Option A) is reversed to pseudonym-only redaction. F-58, F-61, F-62 re-score under a different invariant; the entire family requires re-pass.
+4. Pre-deletion user notification is added (HG-10 fires retroactively per a regulator request). New surface for notification race and consent-revocation; new findings F-### in §3.9 family.
+5. `retention_sweep_runs` is shortened below 7y or `audit_log_retention_schedule` is made non-permanent. F-68 / F-69 re-open (the reconciliation anchor and the export retention preservation depend on these).
+6. A second sweep mechanism is added (e.g., a per-request "right of erasure" path under PIPEDA Principle 4.5 ad-hoc deletion). New finding for "ad-hoc DELETE outside the schedule" — currently structurally forbidden by the closed allowlist; relaxing it re-opens F-64.
+7. `pg_advisory_xact_lock` is removed from T16.1 (e.g., for performance). F-59 re-scores to Medium; the architect must justify in an amendment.
+
+#### Carry-forwards (test-writer / implementer must observe)
+
+| ID | Description | Owner | Surface |
+|---|---|---|---|
+| G-T16-1 | T16.1 advisory lock on sweep wrapper function (F-59). | T16.1 implementer + pgTAP test-writer | SQL |
+| G-T16-2 | T16.1 statement/lock timeouts on SECURITY DEFINER sweep functions (F-60). | T16.1 implementer | SQL |
+| G-T16-3 | T16.1 pg_cron schedule at 03:30 ET (F-60). | T16.1 implementer | Infrastructure |
+| G-T16-4 | T16.1 cross-mirror drift test: TS const vs SQL function vs SQL schedule table (F-55 cross-mirror half). | T16.1 test-writer | pgTAP |
+| G-T16-5 | T16.1 A-RETENTION-001 alert wiring; observability-setup next pass (F-57). | observability-setup | Alert sink |
+| G-T16-6 | T16.1 HG-15 re-ratification for the two new physical tables (`retention_sweep_runs`, `audit_log_retention_schedule`). | user | Human gate |
+| G-T16-7 | T16.1 §PI inventory amendments (no PI in `retention_sweep_runs`; no PI in `audit_log_retention_schedule`). | privacy-reviewer | PI inventory |
+| G-T16-8 | T18 integrity job inherits reconciliation join `retention_sweep_runs.per_event_counts <-> audit_log` for F-69. | T18 implementer + test-writer | SQL |
+| G-T16-9 | T16.1 confirm `xact_start()` used as `nowMs()` in `SupabaseRetentionStore` (F-66). | T16.1 implementer | SQL |
+| G-T16-10 | T16.1 SECURITY DEFINER function signatures hard-code schedule lookup; no caller-supplied predicate path (F-64). | T16.1 implementer + security-reviewer | SQL |
+
+#### Architect ask #4 verdict — RA-1 control #5 and RA-2 trigger #3 NOT re-opened
+
+**RA-1 compensating control #5 (post-export notification surface).** The sweep cannot shorten `export.generated` retention because (a) `RETENTION_SCHEDULE['export.generated']` is `{kind: 'fixed_years', years: 7}` in the frozen const (ADR-0017 §3, verbatim ADR-0015 mirror); (b) F-63's `schedule_hash` binds the audit row to the exact schedule version that produced it — any runtime tampering shifts the hash and the integrity check (F-50 + F-69) attributes the divergence; (c) F-68's test obligation pins the resolved cutoff to exactly 7y. The post-export notification surface (`ExportStore.sendPostExportNotification`) is NOT a retention target — it is logic, not stored data — and the audit row it depends on retains for 7y. **Verdict: NOT re-opened.** Confirmed; F-68 is the standing assertion.
+
+**RA-2 trigger #3 (live-chain vs pg_dump divergence).** Pre-ADR-0017, an audit row absent from the live chain but present in pg_dump was treated as a tamper. Post-ADR-0017, the sweep is the legitimate DELETE path on `audit_log`; the structured `retention_sweep_runs.per_event_counts` jsonb anchors the attribution. RA-2 trigger #3 semantics are UNCHANGED — it still fires on **unattributed** divergence; attributed divergence (i.e., a row whose deletion timestamp and event type are accounted for in a sweep-pass row) is the new audited expected case. T18's integrity job inherits the join as G-T16-8. **Verdict: NOT re-opened.** Confirmed; F-69 is the standing assertion.
+
+**Architect's claim validated.** No BLOCK from threat-modeler on either surface.
+
+#### Architect ask #5 verdict — HG-10 NOT firing is defensible
+
+PIPEDA Principle 4.5 (Limiting Retention) requires that PI be retained only as long as necessary to fulfil the identified purposes; it does **not** mandate pre-deletion notice to the individual. PIPEDA Principle 4.9 (Individual Access) requires that on request, an individual be given access to their PI — but it operates on the existing record, not on a future-deletion-pending record. ADR-0017's underlying-record-ceiling rule guarantees that audit rows expire AFTER the underlying record they reference, so a user querying their data while their membership is active sees the complete record; deletion at the floor is structural and follows the retention promise the user agreed to at consent time (the privacy policy / `.context/constraints.md` posture).
+
+A pre-deletion notification surface would introduce: (a) a "deletion is pending; please confirm" interaction surface that ADR-0017 §Option F deliberately omits; (b) a new race between notification delivery, user response window, and the sweep's lease window; (c) a new attack surface for the employer adversary (A1) to subpoena a "pending deletion" snapshot. The threat-model concurs with ADR-0017 that v1 ships without pre-deletion notification and that HG-10 (if it existed for this purpose) does NOT fire.
+
+If a regulator surfaces a pre-deletion-notice requirement post-launch, the carry-forward path is an ADR amendment re-firing HG-10 explicitly with new findings under §3.9. **Verdict: HG-10 NOT firing is defensible.** No BLOCK from threat-modeler.
+
+#### Handoff to test-writer
+
+Each F-### below maps to exactly one test in `apps/web/test/T16/` (library scope) or `supabase/tests/T16_1/` (SQL scope, deferred). The test-writer's deliverable for T16 is the library-scope set; the T16.1 set lands when that sibling ships.
+
+| F-### | Test obligation | File suggestion | Scope |
+|---|---|---|---|
+| F-55 | Drift between `RETENTION_SCHEDULE` and `RetentionEventType` enum fails CI. Three sub-assertions: every enum value has exactly one schedule entry; every schedule key is in enum; removing/adding an entry asymmetrically fails CI. | `apps/web/test/T16/retention-schedule-drift.test.ts` | T16 (library) |
+| F-56 | `auth_totp_consumed_log` sweep at 24h; fixture at -23h/-25h/-100h; -25h and -100h deleted, -23h preserved. | `apps/web/test/T16/retention-sweep.test.ts` (totp section) | T16 (library) |
+| F-57 | Dry-run is CI default; alarm fires at default threshold = 20; `meta.alarm_fired = true` on summary row when triggered; `meta.severity = 'warn'` when alarm fires. | `apps/web/test/T16/retention-sweep.test.ts` (alarm section) | T16 (library); A-RETENTION-001 alert wiring DEFERRED to T16.1 + observability-setup. |
+| F-58 | Force `emitRetentionDeleted` to throw → no deletes commit, no summary row. Force mid-batch delete to throw → same outcome. Clean pass → summary counts equal live deltas. | `apps/web/test/T16/closed-allowlist-and-audit-before.test.ts` (atomicity section) | T16 (library); single-Postgres-tx assertion DEFERRED to T16.1 pgTAP. |
+| F-59 | Open run row within lease window → `runRetentionPass` returns `{status: 'lease_held'}` and performs no deletes. Open run row older than lease window → pass proceeds. | `apps/web/test/T16/retention-sweep.test.ts` (lease section) | T16 (library); `pg_try_advisory_xact_lock` DEFERRED to T16.1. |
+| F-60 | 25000 rows + cap 20000 → first pass deletes 20000 with `status='capped'`; second pass deletes 5000 with `status='completed'`. | `apps/web/test/T16/retention-sweep.test.ts` (cap section) | T16 (library); `statement_timeout`/`lock_timeout` DEFERRED to T16.1. |
+| F-61 | `concern.source_revealed` audit row + linked `concerns` deleted 31d ago → swept. Same row at 29d → not swept. | `apps/web/test/T16/retention-sweep.test.ts` (underlying-record-ceiling section) | T16 (library) |
+| F-62 | `retention.deleted` at 6y → preserved. `retention.deleted` at 7y+1d → swept. Underlying-record-ceiling does not apply. | `apps/web/test/T16/retention-sweep.test.ts` (carve-out section) | T16 (library) |
+| F-63 | Monkey-patch one schedule entry between passes; `meta.schedule_hash` differs across summaries; hash is `SHA-256(canonical-JSON(...))`. | `apps/web/test/T16/retention-schedule-drift.test.ts` (schedule_hash section) | T16 (library) |
+| F-64 | TypeScript-level: `RetentionStore` exposes only the three-arg `deleteForEventType`; ESLint rule `no-spread-into-retention-schedule` fires on `{...RETENTION_SCHEDULE}` outside `schedule.ts`. | `apps/web/test/T16/closed-allowlist-and-audit-before.test.ts` (type-level + ESLint section) | T16 (library); SQL function signature DEFERRED to T16.1. |
+| F-65 | Type-level: `RetentionStore` does NOT have `__debug*`; `TestRetentionStore extends RetentionStore` does. Cast attempt fails type-check. | `apps/web/test/T16/closed-allowlist-and-audit-before.test.ts` (type-split section) or a `.test-d.ts` file | T16 (library) |
+| F-66 | `MemoryRetentionStore.nowMs()` strictly monotonic across 1000 consecutive calls. | `apps/web/test/T16/retention-sweep.test.ts` (now-ms section) | T16 (library); `xact_start()` DEFERRED to T16.1. |
+| F-67 | Force every error path (seven sub-cases) in `runRetentionPass`; assert each carries only `{run_id, status, error_code}` and contains no UUID other than `run_id`, no email-shaped string, no pseudonym-shaped 32-hex string, no `*_ct` field name. | `apps/web/test/T16/retention-sweep.test.ts` (no-pii-errors section) | T16 (library) |
+| F-68 | Snapshot resolved cutoff for `export.generated`; assert equals `nowMs() - 7y` exactly. Object.freeze prevents runtime shortening; drift test (F-55) catches a static shortening. | `apps/web/test/T16/ra1-control-5-preserved.test.ts` | T16 (library) |
+| F-69 | Sweep deletes N rows; `retention_sweep_runs.per_event_counts` jsonb sums to N. Reconciliation join semantics defined as carry-forward G-T16-8. | `apps/web/test/T16/retention-sweep.test.ts` (reconciliation section) | T16 (library sum check); cross-table join DEFERRED to T16.1 pgTAP; T18 integrity job DEFERRED to T18 next pass. |
+
+##### Four cross-cutting properties the suite MUST establish
+
+(a) **No caller-supplied WHERE compiles.** Static (TypeScript) assertion lives in F-64; the test suite includes a `.test-d.ts` or expect-type assertion that `RetentionStore['deleteForEventType']` has arity 3 with parameter types `(event_type: RetentionEventType, cutoff_ms: number, max_rows: number)` and the return type does not allow any path through which a caller can inject a predicate. The ESLint rule `no-spread-into-retention-schedule` is exercised by a poisoned fixture file (in a CI-only directory) that is asserted to fail lint.
+
+(b) **Drift between `RETENTION_SCHEDULE` and `RetentionEventType` fails CI.** F-55's three sub-assertions plus a "scrub-and-restore" fixture that temporarily removes one entry from `RETENTION_SCHEDULE` (via mutation of a deep-cloned copy fed through a test-only injection point) and asserts the drift test fails. Adding a non-existent event type to a deep-cloned copy and asserting the drift test fails.
+
+(c) **`retention.deleted` is the LAST row in a sweep transaction.** F-58's two force-throw paths assert atomicity. Additionally: a transaction-order assertion using `MemoryRetentionStore.nowMs()` monotonic clock — the `retention.deleted` row's `meta.ended_at_ms` is strictly greater than every per-event-type and per-table delete's recorded `nowMs()` within the same pass. T16.1's pgTAP suite re-asserts the property at the SQL boundary using `xact_start()` ordering.
+
+(d) **Over-delete alarm fires on threshold.** F-57's fixture sets 25 candidates with default threshold 20; assert `result.alarm_fired === true` and the emitted summary row has `meta.alarm_fired === true` AND `meta.severity === 'warn'`. Boundary: 20 candidates does NOT fire (`alarm_fired === false`); 21 candidates fires. T16.1's wire-up of A-RETENTION-001 is verified by observability-setup's next pass (deferred).
+
+##### Handoff envelope
+
+- **To test-writer:** ADR-0017 §10 originally listed F-R1..F-R15; this §3.9 assigns final numbers F-55..F-69. ADR-0017 §10 is updated below the table to point at the F-### range. All fifteen tests are mandatory for T16's four-way reviewer pass clearance; five carry `[T16.1 deferred]` tags whose tests land later but whose acceptance criteria are recorded now.
+- **To security-reviewer:** at diff time on T16 PR, verify F-55 (drift CI), F-58 (atomicity), F-64 (no caller-supplied WHERE at type level + ESLint), F-65 (TestStore type split), F-67 (no PII in errors). At diff time on T16.1 PR (deferred), verify F-59 advisory lock, F-60 timeouts, F-64 SQL signature, F-66 `xact_start()`, F-68 RA-1 control #5, F-69 reconciliation jsonb shape.
+- **To privacy-reviewer:** PI inventory for `retention_sweep_runs` (no PI; counts + run metadata only) and `audit_log_retention_schedule` (no PI; schema artifact) lands in T16.1 per G-T16-7. ADR-0017 §Compliance check confirms PIPEDA Principle 4.5 + 4.9 alignment; HG-10 NOT firing is defensible (architect ask #5 verdict above). Cross-border transfers: NONE introduced by this surface (architect ask: confirmed; ADR-0017 §Compliance check `[x] Data residency — no new processor; no new cross-border flow`).
+- **To user (human-gate items):**
+  - **HG-15 (re-fires at T16.1 PR submission)** for the two new physical tables `retention_sweep_runs` and `audit_log_retention_schedule`. Recorded in ADR-0017 §Compliance check.
+  - **HG-10 explicitly NOT firing** in this pass (architect ask #5 verdict above; ADR-0017 §Option F).
+  - **No new HG fires in T16 itself.**
+
 ---
 
 ## 4. PI processing map (every field, where plaintext exists, where ciphertext exists, what crosses what boundary, retention)

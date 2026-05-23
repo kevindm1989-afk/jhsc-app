@@ -361,6 +361,37 @@ The test-writer turns each into a test obligation. Numbering continues from exis
 - **F-R14 (RA-1 control #5 preserved).** `export.generated` retention is 7y; the sweep MUST NOT shorten it. Test: snapshot the resolved cutoff for `export.generated`; assert it is exactly 7y back from `nowMs()`.
 - **F-R15 (RA-2 trigger #3 reconciliation anchor).** Every sweep pass writes a `retention_sweep_runs` row with `per_event_counts` jsonb; the test-writer's reconciliation test (T18 carry-forward) joins live `audit_log` absences to `retention_sweep_runs.per_event_counts` for attribution. Test: delete N rows via sweep; assert `retention_sweep_runs.per_event_counts` sums to N.
 
+### Threat-model F-### cross-reference (assigned 2026-05-23 by threat-modeler)
+
+The threat-modeler's next pass scored F-R1..F-R15 above as the retention-sweep family and assigned final F-### identifiers in `.context/threat-model.md` §3.9 "Retention sweep (T16)" (titled per the ADR-0017 brief as "§3.6 Retention sweep (T16)"; numbered §3.9 in the threat-model file because §3.6, §3.7, §3.8 are pre-occupied by inspection sync, backup encryption, and audit-log integrity respectively). Mapping placeholder → final:
+
+| ADR-0017 §10 placeholder | Final F-### in threat-model §3.9 | Lineage anchor | Library/SQL scope |
+|---|---|---|---|
+| F-R1 | F-55 | F-19 closed-allowlist | T16 library CI; T16.1 cross-mirror |
+| F-R2 | F-56 | F-38 / G-T05-7 | T16 library; T16.1 SQL DELETE |
+| F-R3 | F-57 | F-51 generalised | T16 library; T16.1 alert wire |
+| F-R4 | F-58 | F-52 + F-24 inversion | T16 library; T16.1 pgTAP single-tx |
+| F-R5 | F-59 | NEW SURFACE — pg_cron race | T16 checkpoint; T16.1 advisory lock |
+| F-R6 | F-60 | NEW SURFACE — starvation | T16 cap; T16.1 timeouts + cron stagger |
+| F-R7 | F-61 | ADR-0015 §3.5 | T16 library |
+| F-R8 | F-62 | ADR-0015 schedule carve-out | T16 library |
+| F-R9 | F-63 | F-27 allowlist hash | T16 library |
+| F-R10 | F-64 | F-19 lineage | T16 type-level + ESLint; T16.1 SQL signature |
+| F-R11 | F-65 | G-T11-21 / G-T13-15 / G-T14-17 | T16 library |
+| F-R12 | F-66 | G-T08-14 / G-T13-9 | T16 library; T16.1 xact_start() |
+| F-R13 | F-67 | constraints.md:110-111 | T16 library |
+| F-R14 | F-68 | RA-1 control #5 | T16 library |
+| F-R15 | F-69 | RA-2 trigger #3 | T16 library; T16.1 pgTAP; T18 join |
+
+Verdicts (threat-modeler):
+- **RA-1 control #5 NOT re-opened** — confirmed; F-68 is the standing assertion.
+- **RA-2 trigger #3 NOT re-opened** — semantics unchanged; F-69 + G-T16-8 (T18 join inheritance) anchor attribution.
+- **HG-10 NOT firing is defensible** — confirmed; no BLOCK from threat-modeler.
+- **F-51 drives Medium → Low at the library boundary** when dry-run + row-cap + alarm-threshold all hold; production-untested Medium remains until T16.1 wires A-RETENTION-001.
+- **F-58 is a coherent F-24 variant** (audit-WITH-side-effect), not a weakening of F-24.
+
+T16.1-deferred carry-forwards (G-T16-1 through G-T16-10) are listed in threat-model §3.9 "Carry-forwards" and gate T16.1 PR clearance.
+
 ## Sibling task spec — T16.1 scope
 
 T16.1 ships AFTER T16's four-way reviewer pass clears. T16.1 deliverables (no PR until HG-15 ratification arrives):
