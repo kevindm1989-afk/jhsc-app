@@ -501,12 +501,73 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments B/D/E + 
 
 ---
 
+## T14 carry-forwards (T14.1 sibling production-wire-up)
+
+All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extension / B / D extension + ADR-0011 amendment (HG-5) + the T14 four-reviewer pass. T14 ships as TS library only (work-refusal-core + MemoryWorkRefusalStore + s51-evidence-core + MemoryS51EvidenceStore); T14.1 ships the SQL migration + Supabase{WorkRefusal,S51Evidence}Store + SECURITY DEFINER views + pgTAP integration tests.
+
+### G-T14-1 — SQL migration deferred to T14.1
+**Source:** ADR-0002 Amendment H — Supabase store production-wire-up is a numbered sibling task.
+**Finding:** the `work_refusal` + `s51_evidence` tables + `work_refusal_read_audited` / `s51_evidence_read_audited` SECURITY DEFINER views (sharing the T13 `c4_read_service` role) + RLS policies (F-21: `is_certified_member()` INSERT/UPDATE; `is_certified_or_cochair()` SELECT via view) all ship in T14.1, not T14. T14's library tests run against `MemoryWorkRefusalStore` + `MemoryS51EvidenceStore` exclusively. The harness asserts the view-existence + GRANT-absence contract synthetically.
+**Resolution scope (T14.1):** ship `supabase/migrations/00000000000006_t14.sql` with the full schema + pgTAP suite covering F-21 + HG-6 mirror + Amendment D extension.
+**Blocker for:** first production deploy carrying real PI in work_refusal / s51_evidence.
+
+### G-T14-2 — Supabase{WorkRefusal,S51Evidence}Store production wire-up
+**Source:** ADR-0002 Amendment H.
+**Finding:** only `MemoryWorkRefusalStore implements WorkRefusalStore` and `MemoryS51EvidenceStore implements S51EvidenceStore`. No Edge Function call, no RPC binding to T14.1's SQL functions, no JWT-validating active-membership check at the route layer.
+**Resolution scope (T14.1):** wire `SupabaseWorkRefusalStore` + `SupabaseS51EvidenceStore` against the live Postgres schema; route handlers at `/api/work-refusal` + `/api/s51-evidence` + `/api/sensitive/read?table={work_refusal,s51_evidence}` validate JWT, call the SECURITY DEFINER view, emit audit row in same transaction as SELECT.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-3 — Real Supabase integration tests for T14 SQL surfaces
+**Source:** test-plan.md §3.C — pgTAP for SQL-level tests.
+**Finding:** every adminQuery in the T14 test file resolves through the in-memory `MemoryWorkRefusalStore` / `MemoryS51EvidenceStore` via the test harness's mini-parser. The SECURITY DEFINER views + RLS policies + GRANT enumeration in the deferred migration have zero automated test coverage.
+**Resolution scope (T14.1):** pgTAP suite covering (a) F-21 RLS (certified_member-only INSERT/UPDATE; co-chair read via view); (b) HG-6 mirror view + audit-emission atomicity (transaction rollback on audit failure); (c) GRANT enumeration assertion (zero direct SELECT GRANT on base tables); (d) Amendment D extension projection (work_refusal.* + s51_evidence.* rows in `reprisal_audit_feed_pseudonymized`).
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-4 — ADR-0016 schedule rows for work_refusal + s51_evidence tables
+**Source:** ADR-0016 operational-table schedule.
+**Finding:** `work_refusal` (C4 notes + C0 actor + C1 status) and `s51_evidence` (C4 notes + C4 photos + C0 actor + C1 status) need ADR-0016 operational-table schedule rows before the T14.1 migration lands. T14's PI inventory (decisions.md §PI inventory) already lists `work_refusal.notes_ct` and `s51_evidence.*_ct` under Active matter + 7y; the schedule table needs the matching entry.
+**Resolution scope (T14.1):** architect amendment adds the two schedule rows; HG-15 user re-ratification covers the new tables.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-5 — Per-record passphrase storage / verification for s.43 + s.51 reveal flow
+**Source:** mirror of G-T13-6.
+**Finding:** T14 library-layer work-refusal-core + s51-evidence-core store an HMAC-SHA-256 of the passphrase as a placeholder; the production verification step (bcrypt/argon2) lands in T14.1's SECURITY DEFINER read functions.
+**Resolution scope (T14.1):** add per-record passphrase column with argon2id hash + verify step in `work_refusal_read_audited` / `s51_evidence_read_audited` view bodies OR in separate `verify_*_passphrase` SECURITY DEFINER functions called BEFORE the views return the body ciphertext.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-6 — Route inventory binding for `/api/work-refusal` + `/api/s51-evidence`
+**Source:** ADR-0003 Invariant 5 strengthened (no key-shaped URL params) + ADR-0007 (no public-write routes).
+**Finding:** `getRouteInventory()` in the test harness does not yet enumerate T14 routes. The harness's anonymous-POST gate in `fetch()` already rejects `/api/work-refusal` and `/api/s51` paths (mirrors T13 posture), so the negative test for "no public-write route" passes structurally — but the route inventory itself omits the entries.
+**Resolution scope (T14.1):** land the SvelteKit routes with `requireAuthenticated` middleware; update `getRouteInventory()` to read from the real route tree; add an explicit T14 entry to the route-inventory test if a future obligation lands.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-7 — Closed event-enum coverage for new T14 events
+**Source:** observability/audit-log.md §1 — closed-enum coverage; §6 finding #3 already flags the gap.
+**Finding:** the library emits `work_refusal.created`, `work_refusal.read`, `work_refusal.update`, `s51_evidence.created`, `s51_evidence.read`, `s51_evidence.update`. None are listed in observability/audit-log.md §1 (the document references "the same pattern is replicated for work_refusal and s51_evidence in T14" but does not enumerate). `scripts/check-audit-enum-coverage.sh` needs the new values too.
+**Resolution scope (T14.1):** add the six new event types to observability/audit-log.md §1; add to `scripts/check-audit-enum-coverage.sh`; the ADR-0003 Amendment A extension already authorizes them (decisions.md line 546 + line 478 of the retention schedule).
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-8 — `notes_ct` column-name parity with PI inventory
+**Source:** threat-model §3.4 PI inventory.
+**Finding:** the threat-model PI inventory uses `work_refusal.notes_ct` and `s51_evidence.*_ct`. The T14 library types use `notes_ct` for the s.43 narrative and the s.51 narrative bodies — matching. The SQL migration in T14.1 MUST use the same column name (not `body_ct` as the reprisal_log table does); the harness adminQuery handler hardcodes `notes_ct` so a column-name divergence would silently break the test path.
+**Resolution scope (T14.1):** confirm `notes_ct` is the chosen column name in the migration; if changed, update the harness handler in lockstep.
+**Blocker for:** T14.1 PR submission.
+
+### G-T14-9 — F-21 SELECT-via-view audit semantics for co-chair
+**Source:** F-21 — co-chairs MUST be able to read s.43 + s.51 via the view; INSERT/UPDATE is denied.
+**Finding:** the harness routes co-chair reads through `MemoryWorkRefusalStore.__grantReadOnlyRole` / `MemoryS51EvidenceStore.__grantReadOnlyRole` which admit `canReadWorkRefusal` / `canReadS51Evidence`. The library does not record the role of the reader in the audit-row meta; the production SECURITY DEFINER view emits `read_via: 'security_definer_view'` (Amendment A extension) and the meta is sufficient for forensic-reveal. A future obligation may add `reader_role` to the audit-row meta for the co-chair vs certified_member case.
+**Resolution scope (T14.1 or later):** consider adding `reader_role` (the role under which the SELECT executed) to the `meta` of `work_refusal.read` + `s51_evidence.read`; surface to threat-modeler / privacy-reviewer.
+**Blocker for:** N/A (forward-looking).
+
+---
+
 ## How to use this file
 
 - When working on T05.1 / production wire-up: search for `G-T05-*` and resolve them in a single pass.
 - When working on T07.1 / production wire-up: search for `G-T07-*` and resolve them in a single pass.
 - When working on T08.1 / production wire-up: search for `G-T08-*` and resolve them in a single pass.
 - When working on T13.1 / production wire-up: search for `G-T13-*` and resolve them in a single pass.
+- When working on T14.1 / production wire-up: search for `G-T14-*` and resolve them in a single pass.
 - When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.

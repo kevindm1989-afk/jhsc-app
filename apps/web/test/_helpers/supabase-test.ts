@@ -74,6 +74,25 @@ import {
 // internal structure by design.
 import { decryptBodyViaCkPrivTestOnly as decryptBodyViaCkPrivCore } from '../../src/lib/reprisal/reprisal-core';
 import type { MemberRole } from '../../src/lib/reprisal';
+// T14 — work-refusal + s.51 evidence libraries. Library-only per ADR-0002
+// Amendment H; the SupabaseWorkRefusalStore / SupabaseS51EvidenceStore +
+// SQL migration land in T14.1 (G-T14-* in `.context/known-gaps.md`).
+import {
+  MemoryWorkRefusalStore,
+  readWorkRefusalEntry as readWorkRefusalEntryCore,
+  submitWorkRefusal as submitWorkRefusalCore
+} from '../../src/lib/work-refusal';
+import {
+  MemoryS51EvidenceStore,
+  readS51Evidence as readS51EvidenceCore,
+  submitS51Evidence as submitS51EvidenceCore
+} from '../../src/lib/s51-evidence';
+// Deep-import for the s.51 photo-decrypt test bypass — mirrors the
+// `decryptBodyViaCkPrivTestOnly` deep-import convention. NOT re-exported
+// from `$lib/s51-evidence`; only the harness reaches it via this internal
+// module path. Used by the HG-5 round-trip assertion that grep-checks the
+// decrypted photo bytes for EXIF/IPTC/XMP residue.
+import { decryptS51PhotoTestOnly as decryptS51PhotoCore } from '../../src/lib/s51-evidence/s51-evidence-core';
 import {
   __setShowAgainAuditObserverForTest,
   __setShowAgainAuditOverrideForTest
@@ -637,9 +656,23 @@ class TestSupabaseImpl implements TestSupabase {
    */
   private reprisalStoreInst: MemoryReprisalStore;
   /**
+   * T14 — work-refusal store. Same HMAC-key-sharing posture as
+   * reprisalStoreInst so pseudonyms join across surfaces.
+   */
+  private workRefusalStoreInst: MemoryWorkRefusalStore;
+  /**
+   * T14 — s.51 critical-injury evidence store.
+   */
+  private s51EvidenceStoreInst: MemoryS51EvidenceStore;
+  /**
    * T13 — flag tracking whether the harness has revoked the c4_read_service
    * role's INSERT-on-audit_log grant (HG-6 atomicity test). When `true`,
    * `recordReprisalEvent` rejects, forcing the read to abort.
+   *
+   * T14 — the same flag toggles `work_refusal.read` /
+   * `s51_evidence.read` audit-emit failure for the Amendment A
+   * extension atomicity test (the production view + role is the same
+   * `c4_read_service` per HG-6).
    */
   private c4ReadServiceAuditInsertBlocked = false;
   /**
@@ -747,6 +780,17 @@ class TestSupabaseImpl implements TestSupabase {
       () => Date.now(),
       this.store.__debugHmacKey()
     );
+    // T14 — work-refusal + s.51 evidence stores sharing the same HMAC
+    // key so pseudonyms join across the four surfaces (auth / concern /
+    // reprisal / work_refusal + s51_evidence). Per ADR-0016 §Decision 1.
+    this.workRefusalStoreInst = new MemoryWorkRefusalStore(
+      () => Date.now(),
+      this.store.__debugHmacKey()
+    );
+    this.s51EvidenceStoreInst = new MemoryS51EvidenceStore(
+      () => Date.now(),
+      this.store.__debugHmacKey()
+    );
     // HG-6 atomicity — wrap `recordReprisalEvent` so the test's
     // `__test_revoke_audit_insert_for_role('c4_read_service')` shim
     // can force an INSERT failure on the audit row. With strict ordering
@@ -776,6 +820,60 @@ class TestSupabaseImpl implements TestSupabase {
           throw new Error('audit_log_insert_revoked_for_c4_read_service');
         }
         await rs.__originalRecordReprisalEvent!(e);
+      };
+    }
+    // T14 — same atomicity shim for work_refusal.read + s51_evidence.read.
+    // The production C4 read role (c4_read_service) is shared with T13;
+    // the test toggles a single flag and asserts that ALL three C4 read
+    // paths abort when the audit-INSERT GRANT is revoked.
+    {
+      const wrs = this.workRefusalStoreInst as unknown as {
+        recordWorkRefusalEvent: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+        }) => Promise<void>;
+        __originalRecordWorkRefusalEvent?: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+        }) => Promise<void>;
+      };
+      wrs.__originalRecordWorkRefusalEvent = wrs.recordWorkRefusalEvent.bind(
+        this.workRefusalStoreInst
+      );
+      wrs.recordWorkRefusalEvent = async (e) => {
+        if (this.c4ReadServiceAuditInsertBlocked && e.event_type === 'work_refusal.read') {
+          throw new Error('audit_log_insert_revoked_for_c4_read_service');
+        }
+        await wrs.__originalRecordWorkRefusalEvent!(e);
+      };
+    }
+    {
+      const ses = this.s51EvidenceStoreInst as unknown as {
+        recordS51EvidenceEvent: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+        }) => Promise<void>;
+        __originalRecordS51EvidenceEvent?: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+        }) => Promise<void>;
+      };
+      ses.__originalRecordS51EvidenceEvent = ses.recordS51EvidenceEvent.bind(
+        this.s51EvidenceStoreInst
+      );
+      ses.recordS51EvidenceEvent = async (e) => {
+        if (this.c4ReadServiceAuditInsertBlocked && e.event_type === 's51_evidence.read') {
+          throw new Error('audit_log_insert_revoked_for_c4_read_service');
+        }
+        await ses.__originalRecordS51EvidenceEvent!(e);
       };
     }
     this.idb = {
@@ -898,6 +996,22 @@ class TestSupabaseImpl implements TestSupabase {
       (this.reprisalStoreInst as unknown as {
         __setActiveMember: (uid: string, active: boolean) => void;
       }).__setActiveMember(uid, false);
+    }
+    // T14 / F-21 — work_refusal + s51_evidence role grants. Active
+    // certified_member has both INSERT/UPDATE + SELECT-via-view;
+    // active co-chair has SELECT-via-view only (no direct INSERT);
+    // worker_member has neither.
+    if (isActive) {
+      if (role === 'certified_member') {
+        this.workRefusalStoreInst.__grantWriteRole(uid);
+        this.s51EvidenceStoreInst.__grantWriteRole(uid);
+      } else if (role === 'worker_co_chair' || role === 'employer_co_chair') {
+        this.workRefusalStoreInst.__grantReadOnlyRole(uid);
+        this.s51EvidenceStoreInst.__grantReadOnlyRole(uid);
+      }
+    } else {
+      this.workRefusalStoreInst.__setActiveMember(uid, false);
+      this.s51EvidenceStoreInst.__setActiveMember(uid, false);
     }
     const identity = {
       public_key: enroll.public_key,
@@ -1519,22 +1633,56 @@ class TestSupabaseImpl implements TestSupabase {
       // -----------------------------------------------------------------
 
       /**
-       * Raw SELECT on a "table" name. The harness routes the two paths the
-       * test exercises:
+       * Raw SELECT on a "table" name. The harness routes the paths the
+       * tests exercise:
        *   - `reprisal_log` → returns ZERO rows (no SELECT GRANT for
        *     authenticated/anon/service_role; per HG-6 only the view
        *     exposes the row).
-       *   - `reprisal_audit_feed_pseudonymized` → returns the closed-set
-       *     projection rows (Amendment D).
+       *   - `work_refusal` / `s51_evidence` → same posture per F-21 +
+       *     Amendment A extension (HG-6 mirror).
+       *   - `reprisal_audit_feed_pseudonymized` → returns the closed-
+       *     set projection rows (Amendment D) — extended in T14 to
+       *     cover work_refusal.* / s51_evidence.* write events via the
+       *     optional `where` filter.
        */
-      rawSelectFrom: async (table: string, _cols: string) => {
-        if (table === 'reprisal_log') {
+      rawSelectFrom: async (table: string, _cols: string, where?: string) => {
+        if (
+          table === 'reprisal_log' ||
+          table === 'work_refusal' ||
+          table === 's51_evidence'
+        ) {
+          // Direct SELECT denied per HG-6 / F-21 — no SELECT GRANT for
+          // authenticated/anon/service_role.
           return { rows: [] };
         }
         if (table === 'reprisal_audit_feed_pseudonymized') {
-          const items = await self.reprisalStoreInst.listReprisalFeed();
-          return {
-            rows: items.map((i) => ({
+          // Amendment D + Amendment D extension: the projection covers
+          // reprisal.* AND (per T14) work_refusal.* / s51_evidence.*
+          // write events. Tests may pass an `event_type LIKE 'prefix.%'`
+          // predicate; the harness applies it post-projection.
+          const reprisalItems = await self.reprisalStoreInst.listReprisalFeed();
+          const workRefusalItems = await self.workRefusalStoreInst.listWorkRefusalFeed();
+          const s51Items = await self.s51EvidenceStoreInst.listS51EvidenceFeed();
+          const all: Array<Record<string, unknown>> = [
+            ...reprisalItems.map((i) => ({
+              id: i.id,
+              event_type: i.event_type,
+              ts_bucketed_to_hour: new Date(i.ts_bucketed_to_hour).toISOString(),
+              target_id: i.target_id,
+              target_class: i.target_class,
+              prev_hash: i.prev_hash,
+              hash: i.hash
+            })),
+            ...workRefusalItems.map((i) => ({
+              id: i.id,
+              event_type: i.event_type,
+              ts_bucketed_to_hour: new Date(i.ts_bucketed_to_hour).toISOString(),
+              target_id: i.target_id,
+              target_class: i.target_class,
+              prev_hash: i.prev_hash,
+              hash: i.hash
+            })),
+            ...s51Items.map((i) => ({
               id: i.id,
               event_type: i.event_type,
               ts_bucketed_to_hour: new Date(i.ts_bucketed_to_hour).toISOString(),
@@ -1543,17 +1691,32 @@ class TestSupabaseImpl implements TestSupabase {
               prev_hash: i.prev_hash,
               hash: i.hash
             }))
-          };
+          ];
+          // Tolerate a minimal `event_type LIKE 'prefix.%'` predicate.
+          // The full SQL parser lives in T14.1; the test only uses
+          // `LIKE`-with-trailing-`%`.
+          if (where) {
+            const m = where
+              .replace(/\s+/g, ' ')
+              .trim()
+              .match(/^event_type\s+LIKE\s+'([^']+)%'$/i);
+            if (m) {
+              const prefix = m[1] ?? '';
+              return { rows: all.filter((r) => String(r.event_type).startsWith(prefix)) };
+            }
+          }
+          return { rows: all };
         }
         return { rows: [] };
       },
 
       /**
-       * Privacy-review §7 obligation 2 — the direct SELECT on
-       * `audit_log` for `actor_pseudonym` MUST return zero rows OR
-       * NULL/absent column on `reprisal.*` events. The harness mirrors
-       * the column-level GRANT-revoke path (rows present but
-       * actor_pseudonym column not visible — null).
+       * Privacy-review §7 obligation 2 / obligation 6 — the direct
+       * SELECT on `audit_log` for `actor_pseudonym` MUST return zero
+       * rows OR NULL/absent column on `reprisal.*` events (T13) and
+       * on `work_refusal.*` / `s51_evidence.*` events (T14 extension).
+       * The harness mirrors the column-level GRANT-revoke path (rows
+       * present but actor_pseudonym column not visible — null).
        */
       rawQuery: async (sql: string) => {
         const norm = sql.replace(/\s+/g, ' ').trim();
@@ -1565,6 +1728,28 @@ class TestSupabaseImpl implements TestSupabase {
           const rows = self.reprisalStoreInst
             .__debugAuditRows()
             .filter((r) => r.event_type.startsWith('reprisal.'))
+            .map(() => ({ actor_pseudonym: null }));
+          return { rows };
+        }
+        if (
+          /^SELECT\s+actor_pseudonym\s+FROM\s+audit_log\s+WHERE\s+event_type\s+LIKE\s+'work_refusal\.%'$/i.test(
+            norm
+          )
+        ) {
+          const rows = self.workRefusalStoreInst
+            .__debugAuditRows()
+            .filter((r) => r.event_type.startsWith('work_refusal.'))
+            .map(() => ({ actor_pseudonym: null }));
+          return { rows };
+        }
+        if (
+          /^SELECT\s+actor_pseudonym\s+FROM\s+audit_log\s+WHERE\s+event_type\s+LIKE\s+'s51_evidence\.%'$/i.test(
+            norm
+          )
+        ) {
+          const rows = self.s51EvidenceStoreInst
+            .__debugAuditRows()
+            .filter((r) => r.event_type.startsWith('s51_evidence.'))
             .map(() => ({ actor_pseudonym: null }));
           return { rows };
         }
@@ -1588,6 +1773,183 @@ class TestSupabaseImpl implements TestSupabase {
           opts
         );
         return { items: r.items };
+      },
+
+      // =================================================================
+      // T14 — work-refusal (s.43) client surface
+      // =================================================================
+
+      /**
+       * Submit a work-refusal entry. Routes through work-refusal-core +
+       * MemoryWorkRefusalStore. Returns the row id (string). On RLS
+       * denial, throws so the test fails loud on unexpected denials;
+       * the `attemptInsertWorkRefusalRaw` variant returns the
+       * structured shape for the F-21 test.
+       */
+      insertWorkRefusal: async (intake: {
+        title: string;
+        body: string;
+        passphrase: string;
+      }): Promise<string> => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await submitWorkRefusalCore(
+          {
+            store: self.workRefusalStoreInst,
+            committeeKeyBytes: dataKeyBytes,
+            now: () => Date.now()
+          },
+          { user_id: userId },
+          intake
+        );
+        if (r.ok === false) {
+          throw new Error(`insertWorkRefusal: ${r.reason}`);
+        }
+        return r.id;
+      },
+
+      /**
+       * F-21 — attempt insert and return the structured raw shape so
+       * the test can assert the `rls_denied` status when the actor is
+       * not a certified_member (or is inactive).
+       */
+      attemptInsertWorkRefusalRaw: async (intake: {
+        title: string;
+        body: string;
+        passphrase: string;
+      }) => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await submitWorkRefusalCore(
+          {
+            store: self.workRefusalStoreInst,
+            committeeKeyBytes: dataKeyBytes,
+            now: () => Date.now()
+          },
+          { user_id: userId },
+          intake
+        );
+        if (r.ok === true) return { status: 200, body: { id: r.id } };
+        if (r.reason === 'rls_denied') {
+          return { status: 'rls_denied' as const, body: r.body };
+        }
+        return { status: r.status, body: r.body };
+      },
+
+      /**
+       * HG-6 mirror (Amendment A extension) — read a work-refusal
+       * entry through the SECURITY DEFINER view. The audit row commits
+       * BEFORE plaintext returns (work-refusal-core enforces).
+       */
+      readWorkRefusalViaView: async (id: string) => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await readWorkRefusalEntryCore(
+          {
+            store: self.workRefusalStoreInst,
+            committeeKeyBytes: dataKeyBytes,
+            now: () => Date.now()
+          },
+          { user_id: userId },
+          id
+        );
+        if (r.ok === false) {
+          if (r.reason === 'audit_failed') {
+            throw new Error('work_refusal.read aborted: audit row write failed');
+          }
+          return { row: null, transaction_ts_ms: Date.now() };
+        }
+        return {
+          row: {
+            id,
+            notes_plaintext: r.notes_plaintext,
+            title_plaintext: r.title_plaintext
+          },
+          transaction_ts_ms: r.transaction_ts_ms
+        };
+      },
+
+      // =================================================================
+      // T14 — s.51 critical-injury evidence client surface
+      // =================================================================
+
+      /**
+       * Submit an s.51 evidence entry. Routes through s51-evidence-core
+       * + MemoryS51EvidenceStore. Photos (HG-5) are sanitized BEFORE
+       * encryption inside `submitS51Evidence`.
+       */
+      insertS51Evidence: async (intake: {
+        title: string;
+        body: string;
+        passphrase: string;
+        photos?: Uint8Array[];
+      }): Promise<string> => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await submitS51EvidenceCore(
+          {
+            store: self.s51EvidenceStoreInst,
+            committeeKeyBytes: dataKeyBytes,
+            now: () => Date.now()
+          },
+          { user_id: userId },
+          intake
+        );
+        if (r.ok === false) {
+          throw new Error(`insertS51Evidence: ${r.reason}`);
+        }
+        return r.id;
+      },
+
+      /**
+       * HG-6 mirror (Amendment A extension) — read an s.51 evidence
+       * entry through the SECURITY DEFINER view.
+       */
+      readS51EvidenceViaView: async (id: string) => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await readS51EvidenceCore(
+          {
+            store: self.s51EvidenceStoreInst,
+            committeeKeyBytes: dataKeyBytes,
+            now: () => Date.now()
+          },
+          { user_id: userId },
+          id
+        );
+        if (r.ok === false) {
+          if (r.reason === 'audit_failed') {
+            throw new Error('s51_evidence.read aborted: audit row write failed');
+          }
+          return { row: null, transaction_ts_ms: Date.now() };
+        }
+        return {
+          row: {
+            id,
+            notes_plaintext: r.notes_plaintext,
+            title_plaintext: r.title_plaintext
+          },
+          transaction_ts_ms: r.transaction_ts_ms
+        };
+      },
+
+      /**
+       * HG-5 round-trip — decrypt a stored s.51 evidence photo for the
+       * EXIF/IPTC/XMP byte-grep assertion. Test-only bypass; does NOT
+       * emit an audit row. Mirrors T13's `__testDecryptReprisalBody
+       * ViaCkPriv` pattern.
+       */
+      __testDecryptS51Photo: async (id: string, photo_index: number) => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await decryptS51PhotoCore(
+          {
+            store: self.s51EvidenceStoreInst,
+            committeeKeyBytes: dataKeyBytes,
+            now: () => Date.now()
+          },
+          { user_id: userId },
+          id,
+          photo_index
+        );
+        if (r === null) {
+          throw new Error('__testDecryptS51Photo: not found');
+        }
+        return r.photo_plaintext;
       }
     };
   }
@@ -1767,47 +2129,110 @@ class TestSupabaseImpl implements TestSupabase {
       return { rows: [] };
     }
 
-    // T13 — reprisal audit row probes
+    // T14 / Amendment A extension coverage — view existence enumeration.
+    if (
+      /^SELECT\s+table_name\s+FROM\s+information_schema\.views\s+WHERE\s+table_name\s+IN\s*\(\s*'work_refusal_read_audited'\s*,\s*'s51_evidence_read_audited'\s*\)$/i.test(
+        norm
+      )
+    ) {
+      // Per Amendment A extension: every T14 C3/C4 table has a paired
+      // `_read_audited` SECURITY DEFINER view. Library tests assert
+      // the contract; the real CREATE VIEW lands in T14.1 (G-T14-1).
+      return {
+        rows: [
+          { table_name: 'work_refusal_read_audited' },
+          { table_name: 's51_evidence_read_audited' }
+        ]
+      };
+    }
+
+    // T14 / Amendment A extension coverage — direct-table GRANT
+    // enumeration. Per HG-6 mirror: no SELECT GRANT on the base
+    // tables for authenticated/anon/service_role.
+    if (
+      /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+information_schema\.role_table_grants\s+WHERE\s+table_name\s+IN\s*\(\s*'work_refusal'\s*,\s*'s51_evidence'\s*\)\s+AND\s+grantee\s+IN\s*\(\s*'authenticated'\s*,\s*'anon'\s*,\s*'service_role'\s*\)\s+AND\s+privilege_type\s*=\s*'SELECT'$/i.test(
+        norm
+      )
+    ) {
+      return { rows: [{ n: 0 }] };
+    }
+
+    // T14 — C4 ciphertext-shape probe for the notes_ct column.
+    // The test asserts the column carries only opaque bytes (no
+    // plaintext canary substring).
+    if (
+      /^SELECT\s+notes_ct\s+FROM\s+work_refusal\s+WHERE\s+id\s*=\s*\$1$/i.test(norm)
+    ) {
+      const id = String((params ?? [])[0]);
+      const row = this.workRefusalStoreInst
+        .__debugWorkRefusalRows()
+        .find((r) => r.id === id);
+      return { rows: row ? [{ notes_ct: Buffer.from(row.notes_ct) }] : [] };
+    }
+    if (
+      /^SELECT\s+notes_ct\s+FROM\s+s51_evidence\s+WHERE\s+id\s*=\s*\$1$/i.test(norm)
+    ) {
+      const id = String((params ?? [])[0]);
+      const row = this.s51EvidenceStoreInst
+        .__debugS51EvidenceRows()
+        .find((r) => r.id === id);
+      return { rows: row ? [{ notes_ct: Buffer.from(row.notes_ct) }] : [] };
+    }
+
+    // T13 + T14 — C4 read-audit row probes.
+    //
+    // The event-type prefix set (reprisal | sensitive | audit |
+    // work_refusal | s51_evidence) covers:
+    //   - T13's reprisal.* / sensitive.access_attempt /
+    //     audit.forensic_reveal.* events
+    //   - T14's work_refusal.* / s51_evidence.* events (Amendment A
+    //     extension — same HG-6 read-audit posture)
+    //
+    // Each handler unions the three in-memory audit-row sources so
+    // the test's count/meta/ts queries find rows regardless of which
+    // C4 surface emitted them.
     {
-      // SELECT count(*)::int AS n FROM audit_log WHERE event_type = '<reprisal/sensitive/forensic>' [AND target_id = $1]
+      const c4AuditRows = () => [
+        ...this.reprisalStoreInst.__debugAuditRows(),
+        ...this.workRefusalStoreInst.__debugAuditRows(),
+        ...this.s51EvidenceStoreInst.__debugAuditRows()
+      ];
+      // SELECT count(*)::int AS n FROM audit_log WHERE event_type = '<event>' [AND target_id = $1]
       const countWithTargetMatch = norm.match(
-        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit)\.[a-z_.0-9]+)'\s+AND\s+target_id\s*=\s*\$1$/i
+        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit|work_refusal|s51_evidence)\.[a-z_.0-9]+)'\s+AND\s+target_id\s*=\s*\$1$/i
       );
       if (countWithTargetMatch) {
         const event = countWithTargetMatch[1]!;
         const tid = String((params ?? [])[0]);
-        const n = this.reprisalStoreInst
-          .__debugAuditRows()
-          .filter((r) => r.event_type === event && r.target_id === tid).length;
+        const n = c4AuditRows().filter(
+          (r) => r.event_type === event && r.target_id === tid
+        ).length;
         return { rows: [{ n }] };
       }
       const countOnlyMatch = norm.match(
-        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit)\.[a-z_.0-9]+)'$/i
+        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit|work_refusal|s51_evidence)\.[a-z_.0-9]+)'$/i
       );
       if (countOnlyMatch) {
         const event = countOnlyMatch[1]!;
-        const n = this.reprisalStoreInst
-          .__debugAuditRows()
-          .filter((r) => r.event_type === event).length;
+        const n = c4AuditRows().filter((r) => r.event_type === event).length;
         return { rows: [{ n }] };
       }
       // SELECT meta, ts FROM audit_log WHERE event_type = '<e>' AND target_id = $1
       const metaTsTargetMatch = norm.match(
-        /^SELECT\s+meta,\s*ts\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit)\.[a-z_.0-9]+)'\s+AND\s+target_id\s*=\s*\$1$/i
+        /^SELECT\s+meta,\s*ts\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit|work_refusal|s51_evidence)\.[a-z_.0-9]+)'\s+AND\s+target_id\s*=\s*\$1$/i
       );
       if (metaTsTargetMatch) {
         const event = metaTsTargetMatch[1]!;
         const tid = String((params ?? [])[0]);
-        const rows = this.reprisalStoreInst
-          .__debugAuditRows()
+        const rows = c4AuditRows()
           .filter((r) => r.event_type === event && r.target_id === tid)
           .map((r) => ({
             meta: r.meta,
             // Per HG-6 the SECURITY DEFINER view emits the audit row
-            // with `ts = transaction_ts_ms`. The library's
-            // `readReprisalEntry` records `transaction_ts_ms` in the
-            // meta. Mirror it back as the row's `ts` so the test's
-            // "same-transaction timestamp" comparison holds.
+            // with `ts = transaction_ts_ms`. The library records
+            // `transaction_ts_ms` in the meta. Mirror it back as the
+            // row's `ts` so the test's "same-transaction timestamp"
+            // comparison holds.
             ts: new Date(
               ((r.meta as { transaction_ts_ms?: number }).transaction_ts_ms ??
                 Date.parse(r.ts)) as number
@@ -1815,15 +2240,14 @@ class TestSupabaseImpl implements TestSupabase {
           }));
         return { rows };
       }
-      // SELECT meta FROM audit_log WHERE event_type = '<e>' AND target_id = $1 ORDER BY id DESC LIMIT 1
+      // SELECT meta FROM audit_log WHERE event_type = '<e>' AND target_id = $1 [ORDER BY id DESC LIMIT 1]
       const metaTargetMatch = norm.match(
-        /^SELECT\s+meta\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit)\.[a-z_.0-9]+)'\s+AND\s+target_id\s*=\s*\$1\s+ORDER\s+BY\s+id\s+DESC\s+LIMIT\s+1$/i
+        /^SELECT\s+meta\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'((?:reprisal|sensitive|audit|work_refusal|s51_evidence)\.[a-z_.0-9]+)'\s+AND\s+target_id\s*=\s*\$1(?:\s+ORDER\s+BY\s+id\s+DESC\s+LIMIT\s+1)?$/i
       );
       if (metaTargetMatch) {
         const event = metaTargetMatch[1]!;
         const tid = String((params ?? [])[0]);
-        const rows = this.reprisalStoreInst
-          .__debugAuditRows()
+        const rows = c4AuditRows()
           .filter((r) => r.event_type === event && r.target_id === tid)
           .sort((a, b) => b.id - a.id)
           .slice(0, 1)
