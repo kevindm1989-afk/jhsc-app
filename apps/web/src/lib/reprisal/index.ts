@@ -34,7 +34,6 @@ export {
   approveForensicReveal,
   approveStatusChange,
   attemptReadWithPassphrase,
-  decryptBodyViaCkPriv,
   fetchForensicReveal,
   fetchMyActivity,
   listReprisalFeed,

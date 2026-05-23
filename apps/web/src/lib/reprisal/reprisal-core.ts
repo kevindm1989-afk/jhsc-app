@@ -288,12 +288,19 @@ export async function attemptReadWithPassphrase(
  * WITHOUT the per-record passphrase. Used by the test to demonstrate
  * that the passphrase is UX only.
  *
- * Does NOT emit a `reprisal.read` audit row — this is the "bypass"
- * decrypt the test exercises; in production a server-side view would
- * still gate audited reads via HG-6, but the cryptographic property the
- * test asserts is library-shaped.
+ * SECURITY: this function does NOT emit a `reprisal.read` audit row.
+ * It is the "bypass" the F-34 test exercises to prove that the
+ * cryptographic gate is ck_priv, not the passphrase. The `__test_`
+ * prefix per project convention marks it as test-only — production
+ * reads MUST go through `readReprisalEntry` (which enforces HG-6
+ * audit-before-decrypt). NOT exported from `./index.ts`; only the
+ * harness in `test/_helpers/supabase-test.ts` imports it directly.
+ *
+ * If a future caller needs ck_priv-without-passphrase semantics in
+ * production, they MUST also emit a `reprisal.read` audit row first
+ * — and at that point they should call `readReprisalEntry` directly.
  */
-export async function decryptBodyViaCkPriv(
+export async function decryptBodyViaCkPrivTestOnly(
   core: ReprisalCoreOpts,
   _actor: { user_id: string },
   id: string

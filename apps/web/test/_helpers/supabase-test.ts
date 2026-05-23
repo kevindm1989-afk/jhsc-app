@@ -56,7 +56,6 @@ import {
   approveForensicReveal as approveForensicRevealCore,
   approveStatusChange as approveStatusChangeCore,
   attemptReadWithPassphrase as attemptReadWithPassphraseCore,
-  decryptBodyViaCkPriv as decryptBodyViaCkPrivCore,
   fetchForensicReveal as fetchForensicRevealCore,
   fetchMyActivity as fetchMyActivityCore,
   listReprisalFeed as listReprisalFeedCore,
@@ -67,6 +66,13 @@ import {
   submitReprisal as submitReprisalCore,
   updateReprisalText as updateReprisalTextCore
 } from '../../src/lib/reprisal';
+// Deep-import for the test-only bypass that does NOT emit a reprisal.read
+// audit row. Per security-review T13 F-1 fix: this function is explicitly
+// NOT re-exported from the public ./reprisal barrel so production callers
+// cannot reach it via `import { ... } from '$lib/reprisal'`. The harness
+// imports from the internal module path because tests are coupled to the
+// internal structure by design.
+import { decryptBodyViaCkPrivTestOnly as decryptBodyViaCkPrivCore } from '../../src/lib/reprisal/reprisal-core';
 import type { MemberRole } from '../../src/lib/reprisal';
 import {
   __setShowAgainAuditObserverForTest,
