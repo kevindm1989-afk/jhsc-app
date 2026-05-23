@@ -25,6 +25,555 @@ pointing to the new one. The history is the value.
 
 ---
 
+## ADR-0018 — T17 backup object-lock library + MemoryBackupStore
+
+**Status:** Accepted
+**Date:** 2026-05-23
+**Decider(s):** architect (T17 design pass on the carry-forward set RA-2 compensating control #4 + RA-2 trigger #3 + G-T16-8 + G-T16-PRIV-7 + G-T16-RECONCILE-CEILING and the ADR-0001 + ADR-0007 + ADR-0010 + ADR-0012-amendments + ADR-0015 + ADR-0016 + ADR-0017 + ADR-0002 Amendment H constraint set). **No new HG fires in this pass** — T17 ships library-only per Amendment H; **HG-15 fires on T17.1** when (a) the new physical `backup_manifests` table lands and (b) the new Supabase Storage bucket carrying the object-lock policy is provisioned. HG-9 / retention-schedule was RATIFIED 2026-05-22 for ADR-0015 / ADR-0012-amendment and does NOT re-fire in this pass. **HG-10 explicitly does NOT fire** — T17 ships zero user-facing copy.
+
+**Source:** ADR-0012 + amendments (35d rolling backups, 42d hard-delete, object-lock + versioning, crypto-shred-on-retention coherence — authoritative on backup posture), ADR-0007 (`committee_data_key` anchors at-rest encryption — authoritative on key material), ADR-0001 (Supabase `ca-central-1` pin — authoritative on residency; cross-border egress is a flagged decision per Hard Rule #4), ADR-0010 (Sentry is the only non-Supabase subprocessor — re-opening for KMS / external signer is itself a flagged human-gate decision), ADR-0015 (per-event audit-log retention; 7y longest content; transient inconsistency at restore is acceptable per §Risks), ADR-0016 (operational-table retention schedule + HMAC pseudonym standard), ADR-0017 (T16 retention sweep library; `retention_sweep_runs` + `audit_log_retention_schedule` are themselves backup-target tables; sweep MUST NOT acquire backup dependency), ADR-0002 Amendment H (sibling-task pattern; library-only T_n + production-wire-up T_n.1), ADR-0003 Amendment A (audit-log enum extension procedure — `backup.manifest_written` requires the same enum-extension dance as G-T08-9 / G-T13-14 / G-T14-7). RA-2 §3681-3751 verbatim (compensating control #4 — "the pg_dump backup is the secondary witness"; trigger #3 — "any divergence between the live chain and the most recent pg_dump backup for a row older than the dump"). Carry-forwards: G-T16-8 (T17 is the data source; T18 the consumer), G-T16-PRIV-7 (manifest schema MUST NOT surface pseudonyms across the integrity-job join), G-T16-RECONCILE-CEILING (per-event attribution survives into the backup snapshot; no aggregate `__ceiling__` keys on the wire). Pattern lineage: F-19 closed-allowlist (T11/T12 + T16), F-24 audit-before-side-effect (T11), SECURITY DEFINER + REVOKE (T05/T16 + G-T16-10), MemoryStore/SupabaseStore split + advisory lock (G-T16-1, Amendment H), TestStore interface split (G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1), `xact_start()` over `Date.now()` shim (G-T08-14 / G-T13-9 / G-T16-9), HMAC pseudonym shape (ADR-0016; G-T16-PRIV-5), hash-determinism pin (G-T11-23), structured-error-not-PII (G-T11-29 / G-T16-PRIV-3).
+
+## Context
+
+ADR-0012 + amendments ratify the backup posture (nightly pg_dump, 35d rolling, Object-Lock + versioning, 42d hard-delete, crypto-shred-on-retention coherent with 7y longest audit retention) but stop short of specifying the library mechanism that performs the dump, computes the manifest, talks to the object-lock bucket, and surfaces the head-pointer T18 needs for the RA-2 trigger #3 reconciliation join. T17 is that library. Per Amendment H, T17 ships library code + `MemoryBackupStore` only; T17.1 ships the `SupabaseBackupStore` + the SQL migration that creates `backup_manifests` (the per-pass manifest table) + the Supabase Storage bucket with object-lock policy + the pg_cron-scheduled wrapper + the ADR-0016 schedule rows for the new table + the §PI inventory amendments + HG-15 re-ratification + the cross-mirror drift test + the A-BACKUP-001 alert wiring + the restore runbook.
+
+This ADR ratifies the library contract the backup pass ships against and the open-question dispositions (a)–(g) the librarian briefing surfaced.
+
+**The load-bearing reason T17 exists at all:** RA-2 compensating control #4 — "the pg_dump backup is the secondary witness" — is the only v1 detection surface for the platform-admin chain-rewrite attack that the hash-only chain cannot detect by itself. T18 owns the diff job; T18 cannot ship without a data source that (i) snapshots `audit_log` deterministically, (ii) exposes a `latest_dump_ts` and a head-pointer (id, ts, hash) over a stable interface, (iii) is itself tamper-evident via object-lock. T17 is that data source. Any T17 design that weakens (i)–(iii) re-opens RA-2 by construction.
+
+The carry-forward set this ADR closes (library-side) and defers (T17.1-side):
+
+- **Closes in T17:** library-side modelling of object-lock as a `is_object_locked(object_ref) → boolean` predicate; manifest emission ordering (F-24 audit-before-side-effect inversion — manifest WRITTEN before upload completes; structured rollback contract on upload failure); head-pointer extraction surface for G-T16-8 / RA-2 follow-up; per-event attribution preservation (G-T16-RECONCILE-CEILING) by carrying `per_event_row_counts` on the manifest, never aggregated then stripped; closed-allowlist of backup-target tables (mirrors F-19); hash-determinism pin (G-T11-23) on the manifest sha256.
+- **Defers to T17.1:** Supabase Storage bucket provisioning with S3-compatible object-lock policy in `ca-central-1`; `SupabaseBackupStore` with `pg_try_advisory_xact_lock` (mirrors G-T16-1); the `backup_manifests` SQL table + migration; ADR-0016 schedule rows for the new table; §PI inventory amendments; pgTAP integration tests; cross-mirror drift test (TS `BACKUP_TABLES` const vs SQL grant footprint on `backup_writer_role`); A-BACKUP-001 alert wiring (storage-quota + missed-dump); restore runbook; HG-15 re-ratification at PR submission; `audit_log_event_type` enum extension for `backup.manifest_written` (ADR-0003 Amendment A extension lands in T17.1 alongside the audit-log.md §1 update and the `scripts/check-audit-enum-coverage.sh` update, mirroring G-T08-9 / G-T13-14 / G-T14-7).
+
+## Decision drivers
+
+- **PIPEDA Principle 4.7 (Safeguards) + ADR-0012 amendment HG-8:** backups encrypted at rest under `committee_data_key` (ADR-0007), object-lock protects against ransomware-style delete, 42d hard-delete bounds the at-rest window. The library is the structural enforcer for "manifest before upload; no silent upload-failure swallow; hard-delete is real."
+- **RA-2 compensating control #4:** "the pg_dump backup is the secondary witness." The library MUST produce dumps T18's reconciliation job can join against. Failure modes: a manifest with missing head-pointer; a manifest emitted AFTER upload (allowing the upload to silently fail with the manifest looking "successful"); a manifest whose hash drifts under a Node/TS upgrade (G-T11-23). Each of these would re-open RA-2 trigger #3 by removing the attribution anchor.
+- **RA-2 trigger #3:** "any divergence between the live chain and the most recent pg_dump backup for a row older than the dump" fires on FIRST occurrence regardless of cause. T17's manifest is the cite-able anchor — the manifest carries `latest_dump_ts` + `audit_log_head: {id, ts, hash}` so the divergence is well-defined: T18 compares `audit_log.hash` at the head-pointer's `id` against the live `audit_log.hash` for the same row. Without the head-pointer on the manifest, the divergence check has no stable anchor.
+- **G-T16-8:** T17 is data source; T18 is consumer. The integrity-job join over (audit_log, retention_sweep_runs, pg_dump snapshot manifest) is the v1 detection surface for RA-2. The manifest schema is the join surface; this ADR pins it.
+- **G-T16-PRIV-7:** the join MUST read only structural fields. The manifest deliberately omits pseudonyms; the head-pointer is `(id, ts, hash)` — no actor_pseudonym, no meta jsonb excerpts. Cross-reference to the T18 join is structural-only.
+- **G-T16-RECONCILE-CEILING:** the manifest carries `per_event_row_counts` (a per-event-type histogram). An aggregate "total rows" field loses the attribution surface F-69 / T18 depend on. The library MUST NOT aggregate-then-strip on the wire.
+- **ADR-0007 + key rotation:** backups encrypted with `committee_data_key`. A rotation during the 42d backup window leaves old-key backups in the bucket. The library does NOT perform key rotation; it records the encrypting `committee_data_key.kid` on the manifest so a restore can locate the matching key from the historical wrap. Re-encrypt-on-rotation is rejected (re-encrypting object-locked content breaks the immutability contract; correct posture is "preserve old-key backup until 42d hard-delete; key envelope is retained for that window").
+- **ADR-0015 §Risks ("transient inconsistency is acceptable"):** the T16 sweep does NOT wait for a backup. Conversely, T17 does NOT wait for a sweep. The two passes are independent; the only interaction is via the manifest (sweep deletes recorded in `retention_sweep_runs` snapshot at backup time; T18 reconciles). **T17 MUST NOT introduce a backup-completion dependency in the T16 sweep** — this ADR pins it (Decision §13).
+- **ADR-0001 cross-border egress invariant:** any backup destination not in `ca-central-1` is a flagged decision per `.context/constraints.md` Hard Rule #4. T17.1's bucket lives in `ca-central-1`; T17 the library is region-agnostic (the `BackupStore` interface accepts an opaque `object_ref` string), but the production wire-up MUST refuse to operate outside `ca-central-1`. Decision §10 below pins the library-side guard rail; T17.1 ratifies the bucket region.
+- **ADR-0010 single-subprocessor posture:** introducing a third-party KMS or signer would re-open ADR-0010. The library uses `committee_data_key` (ADR-0007) which is held inside the Supabase Postgres trust boundary — no new subprocessor introduced. Encryption-at-rest is server-side-encryption (SSE) under `committee_data_key`-wrapped DEK; the wrap is recorded on the manifest. No KMS dependency.
+- **Amendment H pattern:** the library ships against `MemoryBackupStore`; tests are fast, deterministic, and do not depend on a Supabase local stack. SQL invariants land in T17.1's pgTAP suite. Object-lock semantics are modelled by the library as a `is_object_locked(object_ref) → boolean` predicate the store satisfies; the production wire-up satisfies it by deferring to the S3-compatible bucket's policy response.
+
+## Options considered
+
+### Option A: pg_dump scope — full-schema (chosen) vs PI-bearing-tables-only
+
+RA-2 trigger #3 requires `audit_log` + `retention_sweep_runs` + `audit_log_retention_schedule` at minimum. The PI-bearing operational tables (`concerns`, `inspections`, `inspection_photos`, `minutes_final`, `recommendations`, `reprisal_log`, `work_refusal`, `s51_evidence`, `training_records`) carry 7y OHSA obligations and recovery requirements. A PI-bearing-only dump would (i) require a separate `audit_log` dump because audit-log integrity reconciliation MUST run independently of operational-table restore, and (ii) leave membership / committee-key / identity-key tables outside the backup surface, which would prevent a clean restore. **We choose full-schema dump** (every table the closed `BACKUP_TABLES` allowlist enumerates), encrypted as a single blob. The manifest carries per-table row counts so a restore can verify coverage. This is the simplest posture, mirrors ADR-0012's original intent ("pg_dump"), and avoids the partial-dump-correctness surface.
+
+### Option B: Encryption key — per-rotation envelope under `committee_data_key.kid` (chosen) vs per-backup random key vs per-day key
+
+Three options for the at-rest encryption key:
+
+- **(i) Per-rotation envelope:** the backup is encrypted with a freshly-generated DEK; the DEK is wrapped with the current `committee_data_key` (per ADR-0007); the manifest records `committee_data_key.kid` of the wrapping key. On rotation, old-key backups are decryptable for the 42d window because the historical wrap is preserved in `committee_key_wraps_history` (per the privacy review §4 carve-out lineage in ADR-0007 amendment pass). After 42d, the old-key backup is hard-deleted; if the historical wrap also ages out, crypto-shred is structural. **Chosen.**
+- **(ii) Per-backup random key written to ops-only vault.** Adds an out-of-band secret store (1Password equivalent for backup DEKs), which introduces operational fragility (key-loss = backup-loss) and a new trust surface that does not exist today. Rejected.
+- **(iii) Per-day key derived from `committee_data_key` via HKDF.** Tempting because it lets the manifest reference only a date, but couples backup decryption to in-app key derivation logic — a future HKDF salt change would silently break old-backup restorability without any audit-log trail. The manifest already carries a kid; a date is not a substitute for an authenticated reference. Rejected.
+
+Option (i) keeps backup encryption inside the ADR-0007 / ADR-0010 trust boundary (no new subprocessor; no new secret store; envelope crypto inside the same key hierarchy). Rotation-during-window interaction is documented as accepted (Decision §8): old-key backups remain decryptable for the 42d window; the rotation procedure does NOT re-encrypt old backups (re-encrypting object-locked content is impossible by contract, and would defeat object-lock).
+
+### Option C: Object-lock duration — 42 days, with explicit T17 delete at age-out (chosen) vs auto-release
+
+ADR-0012 amendment HG-8 ratifies 42d hard-delete. Two enforcement postures:
+
+- **(i) Auto-release at 42d** via the bucket's lifecycle policy (S3-compatible "Object Lock expires; lifecycle rule deletes"). Simpler, but couples deletion to a bucket-policy attribute that lives outside the audit trail. A misconfigured lifecycle rule (or a quiet provider change) leaves objects past 42d without firing any visible signal.
+- **(ii) Explicit T17 delete at age-out** — T17 lists manifests older than 42d and issues a delete that the bucket accepts iff the lock has expired. The delete emits an audit row (`backup.deleted` enum extension, T17.1) so the deletion is itself in the audit chain.
+
+**We choose both** — auto-release lifecycle for defense-in-depth + explicit T17-driven delete pass for the audit trail. Constraints.md "Deletion is real deletion" requires the latter; the former is the fallback if T17's delete pass is skipped. Decision §9 below pins it.
+
+### Option D: Restore drill cadence — monthly (chosen) vs weekly
+
+No prior ADR pins the cadence. Weekly is too aggressive for a 12-active-user committee with one engineer-of-record (`.context/constraints.md` lifecycle posture); monthly aligns with ADR-0012's recovery-testing intent. **We choose monthly** with the drill itself an explicit task in the operator runbook (T17.1 deliverable). A missed monthly drill fires A-BACKUP-002 (observability-setup next pass). Restore-into-prod is forbidden by runbook (Hard Rule #2 — restore-as-superuser bypasses RLS); default target is a staging project in the same `ca-central-1` region.
+
+### Option E: Backup-manifest schema — superset (chosen)
+
+The librarian briefing suggested: `timestamp, sha256, encrypted_key_id, retention_class, table_list, run_id, status`. We extend it with the RA-2 / G-T16-* anchors so T18 has everything it needs in one row: `audit_log_head: {id, ts, hash}` (the RA-2 follow-up requirement), `per_event_row_counts: {[event_type: string]: int}` (G-T16-RECONCILE-CEILING — per-event attribution preserved), `retention_sweep_runs_snapshot_ts_ms` (the ms-epoch the dump observed the sweep checkpoint at; T18 joins to the sweep-runs table at that ts), `schedule_hash` (mirrors ADR-0017 §7 — the ADR-0015 / ADR-0016 schedule version that produced the audit_log rows in the dump), and `node_runtime_pin: {node_version, openssl_version}` (G-T11-23 hash-determinism pin so a future toolchain swap is visible). Decision §7 below lists the full layout.
+
+### Option F: Library scope for "object-lock" — boolean predicate the store satisfies (chosen)
+
+Mirrors G-T16-1's pattern (MemoryRetentionStore models the SQL semantic; SupabaseRetentionStore satisfies the same interface against pg_try_advisory_xact_lock). The library treats object-lock as `BackupStore.isObjectLocked(object_ref): Promise<boolean>` + `BackupStore.putWithObjectLock(object_ref, blob, lock_until_ms): Promise<{committed: true} | {committed: false, reason: 'object_lock_policy_rejected' | ...}>`. The library never accepts a caller-supplied lock-policy parameter — the lock duration is derived from `BACKUP_OBJECT_LOCK_DAYS = 42` (Decision §9 below) — defense-in-depth against the "cooperative caller hands a 1-day lock" attack. The `MemoryBackupStore` models this by storing `(object_ref, blob, unlocked_at_ms)` triples in-memory and refusing deletes until `unlocked_at_ms ≤ nowMs()`.
+
+### Option G: Interaction with T16 sweep — independent passes (chosen)
+
+ADR-0015 §Risks (line 1028) reads: "Backup-restore window vs schedule rules: a restore from a 35-day-old backup brings back audit rows that the live schedule may have already aged out. The retention job's next pass cleans them up; transient inconsistency is acceptable." T17 honours this verbatim: the backup pass does NOT wait for a sweep; the sweep does NOT wait for a backup. The manifest captures a `retention_sweep_runs_snapshot_ts_ms` (when the dump observed the sweep table); T18's reconciliation join uses this to attribute live-chain deletions to a sweep pass that happened post-dump (legitimate divergence) vs unattributed divergence (RA-2 trigger #3 fires). **T17 MUST NOT introduce a backup-completion dependency in the T16 sweep** — this ADR pins it (Decision §13). The T16 implementer is forbidden from adding any such dependency in a future amendment without re-opening ADR-0017 + this ADR.
+
+### Option H: `backup.manifest_written` audit event — new enum extension, lands in T17.1 (chosen)
+
+Per the F-24 audit-before-side-effect lineage, every successful backup pass emits a `backup.manifest_written` audit row. This is a new audit_log enum value and requires the ADR-0003 Amendment A extension dance: (a) add the value to the closed `AuditEventType` enum in TS; (b) add the matching value to the SQL enum domain via migration; (c) add the value to `RETENTION_SCHEDULE` (decision below: `fixed_years` / 7y — mirrors `retention.deleted` because the audit row is the manifest's audit anchor); (d) add the corresponding `audit_log_retention_schedule` SQL row; (e) update `audit-log.md §1` enum table; (f) update `scripts/check-audit-enum-coverage.sh`. **T17 library reserves the enum string `'backup.manifest_written'` in a code constant and includes a placeholder schedule entry; T17.1 lands the SQL side + the doc updates + the coverage-script update.** This mirrors G-T08-9 / G-T13-14 / G-T14-7 (same enum-extension dance landed for those tasks).
+
+### Option I: In-flight rollback contract — explicit (chosen)
+
+A pass that writes the manifest BEFORE the upload completes can fail at upload time. Two postures:
+
+- **(i) Best-effort:** leave the manifest row; let the next pass overwrite. Silently fragile — RA-2 trigger #3 fires on a stale manifest pointing to a missing upload.
+- **(ii) Explicit rollback contract:** the library writes the manifest in `pending` status; on upload success it transitions to `committed`; on upload failure it transitions to `aborted_upload_failed` (or a sibling structured reason like `aborted_object_lock_policy_rejected`); the failed-manifest row is preserved (audit trail) but T18's reconciliation join filters `status='committed'`.
+
+**Chosen: (ii).** F-24 generalizes to "manifest-WRITTEN-before-upload, status-finalized-after." The MemoryBackupStore models the same state machine; the production `SupabaseBackupStore` wraps the manifest write + upload + status transition in a single SQL transaction (mirrors ADR-0017 §6 audit-WITH-side-effect). The library NEVER returns `{committed: true}` for an upload it did not actually receive a success ACK for (G-T11-29 lesson: stub side-effects do NOT silently succeed).
+
+### Option J: Schedule authority for backup retention — locked by ADR-0012 amendment; T17 library mirrors the constant only (chosen)
+
+ADR-0012 amendment is authoritative on the 42d backup-retention window. The library mirrors this as `BACKUP_OBJECT_LOCK_DAYS = 42` + `BACKUP_HARD_DELETE_DAYS = 42` constants exported from `apps/web/src/lib/backup/types.ts`. T17.1's cross-mirror drift test asserts `BACKUP_OBJECT_LOCK_DAYS === BACKUP_HARD_DELETE_DAYS === 42` and that the bucket's object-lock policy is configured to the same value. Changing the value requires an ADR-0012 amendment + this ADR's mirror update + the SQL bucket policy update — three mirrors, one CI drift check.
+
+## Decision
+
+**We choose Options A + B(i) + C(both) + D + E + F + G + H + I + J.**
+
+### 1. File-level structure (binding for T17 ship)
+
+Library lives under `apps/web/src/lib/backup/`:
+
+```
+apps/web/src/lib/backup/
+  types.ts                   — BackupTable union, BackupManifest shape, BACKUP_* constants
+  backup-tables.ts           — BACKUP_TABLES frozen closed-allowlist + drift-check helpers
+  backup-store.ts            — BackupStore (production) + TestBackupStore (test-only)
+  memory-backup-store.ts     — MemoryBackupStore implements TestBackupStore
+  backup-core.ts             — runBackupPass + head-pointer extraction + manifest emission
+  manifest.ts                — buildBackupManifest + sha256 (hex-determinism pin) + canonical JSON
+  index.ts                   — public surface re-exports (BackupStore, runBackupPass, BACKUP_TABLES)
+```
+
+No SQL ships in T17. No new physical tables ship in T17. No Supabase Storage bucket ship in T17. PR-review-time assertion mirrors Amendment H's §Testable assertions: `git diff --name-only main...T17-branch -- supabase/migrations/ supabase/seed.sql` returns empty AND `git diff --name-only main...T17-branch | grep -E '(storage|bucket)'` returns empty.
+
+### 2. Closed `BackupTable` enum (binding; mirrors the §PI inventory verbatim)
+
+The library defines a closed string-literal union `BackupTable` covering exactly the tables in the librarian briefing's "Tables T17 backs up" list. The union is exhaustive-switched in `backup-core.ts` with a `never` cast on the default branch (F-19 closed-allowlist pattern). ESLint rule `no-spread-into-backup-tables` (added by implementer; mirrors T11/T12 + T16 spread bans) forbids spread-into-`BACKUP_TABLES`.
+
+**Closed enum (verbatim, alphabetized for review stability):**
+
+```
+'audit_log'
+'audit_log_retention_schedule'      // ADR-0017 §1 — lands in T16.1, present in BACKUP_TABLES at T17 because T17.1 ships after T16.1
+'committee_data_keys'
+'committee_key_wraps'
+'committee_key_wraps_history'
+'concerns'
+'identity_keys'
+'inspection_photos'
+'inspections'
+'members'
+'minutes_final'
+'recommendations'
+'recovery_blob_resets'
+'recovery_blobs'
+'reprisal_log'
+'retention_sweep_runs'              // ADR-0017 §1 — RA-2 trigger #3 reconciliation anchor
+'s51_evidence'
+'training_records'                  // §PI inventory class verification deferred to T17.1 architect flag
+'work_refusal'
+```
+
+**Architect flag (open in T17.1 architect pass):** `training_records` PI class must be verified against §PI inventory in the same PR that lands `BACKUP_TABLES` in production. If §PI inventory records it as not-yet-cataloged, T17.1 fold-in pass adds the row.
+
+The enum is the closed allowlist for the backup pass. Any new table added to the system in a future task MUST add (a) a `BackupTable` entry, (b) the matching SQL grant on `backup_writer_role` (T17.1), (c) a row in the §PI inventory, and (d) — if the table is operational — a row in the ADR-0016 schedule. All four mirror; CI drift fails on any single-mirror update.
+
+### 3. `BACKUP_TABLES` frozen const + drift assertion (binding; closes the F-19 family library-side)
+
+`backup-tables.ts` exports:
+
+```
+export const BACKUP_TABLES = Object.freeze([
+  'audit_log',
+  'audit_log_retention_schedule',
+  'committee_data_keys',
+  'committee_key_wraps',
+  'committee_key_wraps_history',
+  'concerns',
+  'identity_keys',
+  'inspection_photos',
+  'inspections',
+  'members',
+  'minutes_final',
+  'recommendations',
+  'recovery_blob_resets',
+  'recovery_blobs',
+  'reprisal_log',
+  'retention_sweep_runs',
+  's51_evidence',
+  'training_records',
+  'work_refusal'
+] as const) satisfies readonly BackupTable[];
+```
+
+Drift assertion (CI test, lands in T17, file `apps/web/test/T17/backup-tables-drift.test.ts`):
+
+```
+test('BACKUP_TABLES is set-equal to BackupTable union')           // closes G-T05-6-pattern for backup mirror
+test('BACKUP_TABLES is Object.isFrozen')                          // F-19 spread-then-mutate defense
+test('every BACKUP_TABLES entry has a §PI inventory row')         // STRUCTURAL assertion — list pinned in test fixture, T17.1 ratifies via the actual §PI inventory
+test('no caller-supplied table name reaches a sweep predicate')   // F-19 defense-in-depth; type-level + runtime
+```
+
+T17.1 adds the cross-mirror SQL drift test (TS `BACKUP_TABLES` const vs SQL `backup_writer_role` GRANT footprint on the listed tables). The library-side CI test is the prerequisite for the SQL test.
+
+### 4. `BackupStore` interface vs `TestBackupStore` test-only extension
+
+Per the G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 pattern (TestStore split):
+
+- `BackupStore` — production interface. Closed-allowlist methods only. No caller-supplied object_ref, predicate, or table-name string. Methods:
+  - `nowMs(): number` — monotonic ms-epoch (F-66-pattern; library shim, production reads `xact_start()`).
+  - `extractHeadPointer(): Promise<{id: string, ts_ms: number, hash: string} | null>` — reads the highest `audit_log.id` and its `(ts, hash)` pair. The library never SQL-constructs this; the store implements it.
+  - `dumpClosedAllowlist(tables: ReadonlyArray<BackupTable>): Promise<{blob: Uint8Array, per_table_row_counts: Readonly<Record<BackupTable, number>>, per_event_row_counts: Readonly<Record<string, number>>, retention_sweep_runs_snapshot_ts_ms: number}>` — performs the pg_dump (or in-memory equivalent), returning the encrypted blob, per-table row counts, per-event-type row counts (G-T16-RECONCILE-CEILING — never aggregated to a `__ceiling__` key), and the ms-epoch the dump observed `retention_sweep_runs` at.
+  - `currentCommitteeDataKeyKid(): Promise<string>` — the kid of the wrapping key (ADR-0007).
+  - `putWithObjectLock(object_ref: string, blob: Uint8Array, lock_until_ms: number): Promise<{committed: true} | {committed: false, reason: 'object_lock_policy_rejected' | 'storage_quota_exceeded' | 'cross_region_destination_refused' | 'unknown_storage_error'}>` — uploads + applies the lock. Structured rejection (G-T11-29 lesson — never swallow upload failure). The `object_ref` MUST be derived by the library from `(BACKUP_OBJECT_REF_PREFIX, manifest.run_id, manifest.committed_at_ms)`; the store does NOT accept a caller-supplied path.
+  - `isObjectLocked(object_ref: string): Promise<boolean>` — predicate for the cooperative-caller defense (Decision §6 + §9).
+  - `listManifestsOlderThanMs(cutoff_ms: number): Promise<ReadonlyArray<{run_id: string, object_ref: string, committed_at_ms: number}>>` — for the explicit-delete-at-age-out pass.
+  - `deleteObjectIfUnlocked(object_ref: string): Promise<{deleted: true} | {deleted: false, reason: 'still_locked' | 'not_found' | 'unknown_storage_error'}>` — hard-delete (Decision §9).
+  - `writeManifestPending(manifest: BackupManifestPending): Promise<void>` — F-24 inversion (Decision §5 — manifest BEFORE upload).
+  - `transitionManifestStatus(run_id: string, to_status: 'committed' | 'aborted_upload_failed' | 'aborted_object_lock_policy_rejected' | 'aborted_unknown_storage_error', finalized_at_ms: number): Promise<void>` — explicit state machine (Decision §5).
+  - `emitBackupManifestWritten(audit_row: {ts_ms: number, target_id: null, actor_pseudonym: string, meta: Record<string, unknown>}): Promise<void>` — the `backup.manifest_written` audit emission (Decision §5; H above).
+  - `hasOpenBackupRunWithinWindow(now_ms: number, lease_window_ms: number): Promise<boolean>` — F-59-pattern (mirrors G-T16-1 lease).
+
+- `TestBackupStore extends BackupStore` — adds `__debugListManifests()`, `__debugForceUploadFailure(reason)`, `__debugSetClock(ms)`, `__debugInsertAuditRow(row)`, `__debugRegisterTablePopulation(table_name, row_count)`, `__debugForceObjectLockPolicyRejection(on)`, `__debugForceCrossRegionDestinationRefused(on)`. These hooks live ONLY on `TestBackupStore`; production code paths receive `BackupStore` and CANNOT reach the `__debug*` methods at type level. `SupabaseBackupStore` (T17.1) implements `BackupStore` only — narrowing it back to `TestBackupStore` is a type error.
+
+The interface forbids caller-supplied predicates, object_refs, lock-policy parameters, or table-name strings; the library hard-codes the closed-allowlist lookup (defense-in-depth per the librarian's threat-model delta).
+
+### 5. Sweep-pass algorithm (binding for T17 ship)
+
+```
+runBackupPass({store, config}) -> BackupPassResult
+```
+
+Algorithm:
+
+1. **Acquire lease.** Call `store.hasOpenBackupRunWithinWindow(nowMs, config.lease_window_ms)`. If true → return `{status: 'skipped', reason: 'pass_already_in_window'}`. (F-59-pattern; SQL half lands in T17.1 as `pg_try_advisory_xact_lock` per G-T16-1.)
+2. **Extract head pointer FIRST.** `head = await store.extractHeadPointer()`. This MUST happen BEFORE the dump so the head pointer corresponds to the chain state at the moment the dump begins. A head pointer captured after the dump would race the sweep + new inserts.
+3. **Resolve current key kid.** `kid = await store.currentCommitteeDataKeyKid()` — the wrapping key for the DEK (ADR-0007).
+4. **Dump the closed allowlist.** `{blob, per_table_row_counts, per_event_row_counts, retention_sweep_runs_snapshot_ts_ms} = await store.dumpClosedAllowlist(BACKUP_TABLES)`. The store hard-codes the table list from the passed array; no caller-supplied tables.
+5. **Compute manifest sha256.** `sha256 = hexSha256(blob)` — pinned hex determinism (G-T11-23; test pins the hex of a known fixture so a future Node/OpenSSL upgrade is visible). `node_runtime_pin` field on manifest carries `{node_version, openssl_version}` for traceability.
+6. **Build pending manifest** (Decision §7 layout) with `status: 'pending'`, `committed_at_ms: null`, `finalized_at_ms: null`, `audit_log_head: head`, `per_event_row_counts`, `per_table_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `committee_data_key_kid: kid`, `schedule_hash` (sourced from ADR-0017 §7 helper — the library imports `computeScheduleHash` from `apps/web/src/lib/retention/schedule.ts`), `node_runtime_pin`, `run_id` (UUIDv4 with G-T16-PRIV-3 PII-shape rejection — same rejection-sample logic as ADR-0017 §6 `generateRunId`), `sha256`, `bytes: blob.byteLength`, `retention_class: '42d'`, `lock_until_ms: nowMs + BACKUP_OBJECT_LOCK_DAYS * MS_PER_DAY`.
+7. **Write manifest in `pending` status FIRST (F-24 inversion).** `await store.writeManifestPending(manifest)`. The manifest is the audit anchor for the upload; if the upload silently failed without a pending row, the failure would be invisible. If THIS write fails: return `{status: 'errored', error_code: 'manifest_write_failed', run_id}` — no upload attempted.
+8. **Upload with object lock.** `result = await store.putWithObjectLock(object_ref, blob, manifest.lock_until_ms)` where `object_ref = backupObjectRefFor(manifest)`. On failure: `await store.transitionManifestStatus(run_id, 'aborted_' + result.reason, nowMs)` and return `{status: 'errored', error_code: 'backup_upload_failed', upload_reason: result.reason, run_id}`. The library NEVER returns `{status: 'completed'}` for an upload that did not receive a success ACK (G-T11-29 lesson).
+9. **Transition manifest to `committed`.** `await store.transitionManifestStatus(run_id, 'committed', nowMs)`. If this throws AFTER a successful upload: the manifest stays in `pending` and the next pass's reconciliation surfaces it. (T17.1's SQL wraps steps 7–9 in a single transaction; the library models the same atomicity by requiring the store to roll back the pending manifest on transition failure.)
+10. **Emit `backup.manifest_written` audit row.** Built with `event_type: 'backup.manifest_written'`, `actor_pseudonym: store.systemActorPseudonym()` (HMAC pseudonym for `'system:backup-pass'`; mirrors ADR-0017 §6 `systemActorPseudonym`), `target_id: null`, `meta: {run_id, sha256, bytes, retention_class, table_list, status: 'committed', committee_data_key_kid: kid, audit_log_head, per_event_row_counts, per_table_row_counts, retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin}`. The audit row is emitted AS THE LAST step of the pass (mirrors ADR-0017 §6 step 9). If THIS emit fails: the library returns `{status: 'errored', error_code: 'audit_emit_failed', run_id}` BUT the upload and the manifest remain — this is an accepted tradeoff (the manifest's `status='committed'` is itself the persistent record; the audit row is supplementary). The librarian-briefing G-T16-PRIV-3 lesson applies: error message carries no PII.
+11. **Hard-delete-at-age-out pass** (separate entry point: `runBackupRetentionPass({store, config})`). Lists manifests older than `BACKUP_HARD_DELETE_DAYS` (42d), calls `store.deleteObjectIfUnlocked(object_ref)` for each, transitions matching manifest to `status: 'hard_deleted'`. A delete that returns `{deleted: false, reason: 'still_locked'}` past the 42d window fires `A-BACKUP-001` (alert wiring lives in T17.1). Auto-release lifecycle policy on the bucket (Decision §9) is the defense-in-depth backstop.
+
+### 6. Object-lock predicate library shape — cooperative-caller defense (binding)
+
+The library treats object-lock as a STORE-SIDE invariant the caller cannot weaken:
+
+```
+// BACKUP_OBJECT_LOCK_DAYS is a library constant; not a caller-supplied parameter.
+const lock_until_ms = nowMs() + BACKUP_OBJECT_LOCK_DAYS * MS_PER_DAY;
+await store.putWithObjectLock(object_ref, blob, lock_until_ms);
+```
+
+The `BackupStore.putWithObjectLock` signature accepts a `lock_until_ms` for testability (so `TestBackupStore.__debug*` can vary it), but the production caller (`runBackupPass`) computes it from the library constant. The library NEVER exposes a config field that lets a caller pass a shorter lock duration; `BackupPassConfig` (Decision §11) deliberately omits any lock-duration field. A future ADR amendment to shorten the window must (a) change `BACKUP_OBJECT_LOCK_DAYS`, (b) ratify via ADR-0012 amendment, (c) re-ratify HG-15 for the bucket-policy change.
+
+`MemoryBackupStore` models the same invariant: an attempt to `deleteObjectIfUnlocked(object_ref)` where `nowMs() < unlocked_at_ms` returns `{deleted: false, reason: 'still_locked'}` regardless of caller "intent." Tests assert this explicitly (F-71 in §12).
+
+### 7. The `backup_manifests` row + `backup.manifest_written` audit-row jsonb meta layout (binding)
+
+**Manifest row (one per backup pass, persisted in `backup_manifests` table — T17.1 lands the SQL):**
+
+```
+{
+  run_id: uuid,
+  status: 'pending' | 'committed' | 'aborted_upload_failed' | 'aborted_object_lock_policy_rejected' | 'aborted_unknown_storage_error' | 'hard_deleted',
+  started_at_ms: number,
+  committed_at_ms: number | null,
+  finalized_at_ms: number | null,
+  hard_deleted_at_ms: number | null,
+  object_ref: string,                          // structurally derived; never caller-supplied
+  sha256: hex,                                 // pinned-determinism per G-T11-23
+  bytes: number,
+  retention_class: '42d',
+  lock_until_ms: number,
+  committee_data_key_kid: string,              // ADR-0007 wrap reference
+  audit_log_head: { id: uuid, ts_ms: number, hash: hex } | null,
+  per_table_row_counts: { [table_name: BackupTable]: number },
+  per_event_row_counts: { [event_type: string]: number },   // G-T16-RECONCILE-CEILING — NEVER aggregated to '__ceiling__'
+  retention_sweep_runs_snapshot_ts_ms: number,
+  schedule_hash: hex,                          // sourced from ADR-0017 §7 helper
+  node_runtime_pin: { node_version: string, openssl_version: string }
+}
+```
+
+**`backup.manifest_written` audit row (mirrors ADR-0017 §7 layout exactly):**
+
+```
+{
+  event_type: 'backup.manifest_written',
+  actor_pseudonym: HMAC(synthetic_actor_id 'system:backup-pass'),
+  target_class: 'C1',
+  severity: 'info',
+  retention_class: '7y',                        // mirrors retention.deleted; manifest audit row outlives the manifest itself
+  target_id: null,
+  meta: {
+    run_id: uuid,                               // joins to backup_manifests.run_id
+    sha256: hex,
+    bytes: number,
+    retention_class: '42d',                     // the backup's retention; distinct from the audit row's 7y
+    table_list: BACKUP_TABLES,                  // closed allowlist snapshot for the pass; binds the audit row to the schedule version
+    status: 'committed',
+    committee_data_key_kid: string,
+    audit_log_head: { id, ts_ms, hash },
+    per_event_row_counts: { ... },
+    per_table_row_counts: { ... },
+    retention_sweep_runs_snapshot_ts_ms: number,
+    schedule_hash: hex,
+    node_runtime_pin: { node_version, openssl_version }
+  }
+}
+```
+
+**G-T16-PRIV-1 invariant (verbatim quotable):** `actor_pseudonym` appears at the TOP LEVEL of the audit row ONLY. It MUST NOT be duplicated into `meta.actor_pseudonym`. Test F-79 asserts.
+
+**G-T16-PRIV-7 invariant (verbatim quotable):** the T18 reconciliation join against `backup_manifests` MUST read only structural fields: `run_id`, `sha256`, `audit_log_head.{id, ts_ms, hash}`, `per_event_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`. The join MUST NOT surface `actor_pseudonym` or any meta-jsonb field of the manifest-written audit row. Test F-80 asserts (library-side: assert the manifest row contains no pseudonym field; structural type test).
+
+### 8. Encryption-at-rest contract + rotation interaction (binding)
+
+The backup blob is encrypted by the store before object-lock upload:
+
+- DEK is freshly generated for each backup pass.
+- DEK is wrapped with the current `committee_data_key` (kid recorded on the manifest).
+- The wrapped DEK is stored alongside the blob (or in the manifest's `object_ref` metadata; T17.1 wire-up decides the storage location; the library only commits to the kid recording).
+- On restore, the historical wrap is fetched from `committee_key_wraps_history` (per ADR-0007 amendment lineage); if the historical wrap has aged out, the backup is undecryptable — this is the crypto-shred-on-retention design (ADR-0012 amendment HG-12 + ADR-0007 §coherence note).
+
+**Rotation interaction (accepted; recorded as a documented race):** if `committee_data_key` is rotated during the 42d backup window, the bucket holds backups under both kids. Each manifest carries its own kid; restore selects the correct wrap. The library does NOT re-encrypt old backups (re-encrypting object-locked content is forbidden by contract — defeats object-lock). After 42d hard-delete, the old-key backup ages out; if the historical wrap also ages out per `committee_key_wraps_history` retention, crypto-shred is structural.
+
+### 9. 42-day hard-delete enforcement — closed semantics (binding)
+
+Two enforcement layers:
+
+- **Layer 1 (defense-in-depth, T17.1):** S3-compatible bucket lifecycle policy auto-releases the object-lock at 42d + auto-deletes the object via a lifecycle rule. This is the failsafe if Layer 2 is skipped.
+- **Layer 2 (audit-trail-bearing, T17 + T17.1):** the library's `runBackupRetentionPass` lists manifests older than 42d, calls `store.deleteObjectIfUnlocked(object_ref)`, transitions the manifest to `status: 'hard_deleted'`, and emits a `backup.hard_deleted` audit row (new enum value; T17.1 enum extension dance). A `still_locked` response past 42d fires `A-BACKUP-001`.
+
+Both layers MUST be present. The library is the source of truth on the cadence; the bucket policy is the backstop. **Constraints.md "Deletion is real deletion"** is honoured by both — neither pseudonymizes-but-retains; both hard-delete.
+
+### 10. Cross-border egress invariant — library-side guard rail (binding)
+
+The library's `BackupStore.putWithObjectLock` MAY return `{committed: false, reason: 'cross_region_destination_refused'}` if the production store detects a destination outside `ca-central-1`. The library NEVER specifies a region in its calls — the bucket region is a deployment-time concern T17.1 ratifies — but the library's structured rejection vocabulary explicitly includes `cross_region_destination_refused` so a misconfigured production deploy surfaces the failure visibly rather than silently shipping data abroad. ADR-0001 cross-border egress invariant is preserved: any departure from `ca-central-1` is a flagged decision per Hard Rule #4, and T17.1's runbook documents the bucket region pin.
+
+### 11. `BackupPassConfig` (binding)
+
+```
+export interface BackupPassConfig {
+  /** Default: false (dry-run posture for CI). Dry-run computes head_pointer + dump SHAPE but skips upload. */
+  readonly dry_run?: boolean;
+  /** Default: 30 minutes (longer than ADR-0017 retention pass; backup is heavier). */
+  readonly lease_window_ms?: number;
+  /** No lock_duration_ms field — the library uses BACKUP_OBJECT_LOCK_DAYS exclusively (cooperative-caller defense). */
+  /** No object_ref field — the library derives from manifest.run_id + manifest.committed_at_ms. */
+  /** No table_list field — the library uses BACKUP_TABLES exclusively. */
+}
+```
+
+Every defaulted field has a closed allowlist semantic; there is no caller-supplied lock duration, object_ref, table list, or destination region.
+
+### 12. Acceptance criteria (F-### list — test-writer consumes)
+
+The test-writer turns each into a test obligation. Numbering continues from existing F-69 (last assigned by threat-modeler for ADR-0017 family); the threat-modeler's next pass MAY renumber to fit `.context/threat-model.md` §3.10 sub-section ordering (placeholders are F-70..F-85 per the librarian briefing's suggested range):
+
+- **F-70 (closed-allowlist drift; mirrors F-55).** `BackupTable` enum and `BACKUP_TABLES` const drift-check: every enum value has exactly one allowlist entry; every allowlist entry is in the enum; allowlist is `Object.isFrozen`. Test: drift CI passes; remove a `BACKUP_TABLES` entry; CI fails.
+- **F-71 (object-lock cooperative-caller defense).** `MemoryBackupStore.deleteObjectIfUnlocked` returns `{deleted: false, reason: 'still_locked'}` for any object whose `unlocked_at_ms > nowMs()` regardless of caller "intent." Test: put an object with a 42d lock; immediately attempt delete; assert refusal.
+- **F-72 (F-24 inversion — manifest before upload).** `runBackupPass` writes `manifest.status='pending'` BEFORE `putWithObjectLock`; the manifest write order is observable via `__debugListManifests()`. Test: force `putWithObjectLock` to fail; assert the manifest row exists in `aborted_upload_failed` status, sha256 + run_id intact.
+- **F-73 (encryption-key kid recording).** Every committed manifest carries a non-empty `committee_data_key_kid` string matching the current kid at the start of the pass. Test: rotate kid mid-test (via `__debugForceCurrentKid`); assert two consecutive passes carry different kids.
+- **F-74 (hard-delete at age-out — explicit pass).** `runBackupRetentionPass` lists manifests older than 42d AND in `committed` status, deletes each, transitions to `hard_deleted`. Test: fixture with manifests at -41d, -42d, -43d; assert -42d and -43d hard_deleted, -41d preserved.
+- **F-75 (hard-delete refusal pre-window).** `runBackupRetentionPass` MUST NOT delete a manifest whose `lock_until_ms > nowMs()`. Test: fixture with `committed_at_ms = -45d` but `lock_until_ms = nowMs + 1d` (impossible in production; harness-forced state); assert delete refused with `'still_locked'`; assert `A-BACKUP-001` fires (library returns `would_fire_alert: 'A-BACKUP-001'`; alert sink lands in T17.1).
+- **F-76 (head-pointer extraction — RA-2 follow-up anchor).** Every committed manifest carries `audit_log_head` populated from the highest `audit_log.id` at the moment of dump start. The id/ts/hash triple is structurally present (no missing fields). Test: insert N audit rows; run backup; assert manifest's `audit_log_head.id === highest_id` and `audit_log_head.hash === audit_log[highest_id].hash`.
+- **F-77 (per-event attribution preservation — G-T16-RECONCILE-CEILING).** The manifest's `per_event_row_counts` is per-event-type (never aggregated to `__ceiling__` or any other synthetic key). Test: fixture with rows of 5 event types; assert manifest carries 5 keys with the correct counts; assert NO `__ceiling__` key appears on the wire.
+- **F-78 (hash-determinism pin — G-T11-23).** A fixture blob produces a sha256 that matches a hex value pinned in the test. A future Node/OpenSSL upgrade that silently changes the hash fails CI. Test: fixed-content blob; assert sha256 equals the pinned hex.
+- **F-79 (actor_pseudonym not duplicated into meta — G-T16-PRIV-1).** The `backup.manifest_written` audit row carries `actor_pseudonym` at the TOP LEVEL only. `meta` MUST NOT contain an `actor_pseudonym` field. Test: snapshot the emitted audit row; assert `'actor_pseudonym' in meta === false`.
+- **F-80 (manifest carries no pseudonyms — G-T16-PRIV-7).** The `backup_manifests` row schema contains zero pseudonym fields. Test: TypeScript structural assertion + runtime field-name grep on a sample manifest; no field matches `/pseudonym/i`.
+- **F-81 (no PII in errors — G-T16-PRIV-3 / G-T11-29).** Every error path in `runBackupPass` carries `{run_id, status, error_code, upload_reason?}` and NEVER a row value, target_id, blob excerpt, kid, or PI shape. Test: force every error path; grep error message for PII shapes (UUIDs except `run_id`, email shapes, pseudonym shapes, hex longer than 64 chars except `sha256` / `hash`).
+- **F-82 (structured upload-failure rejection — G-T11-29).** `runBackupPass` NEVER returns `{status: 'completed'}` when `putWithObjectLock` returns `{committed: false}`. Test: force `__debugForceUploadFailure('object_lock_policy_rejected')`; assert `{status: 'errored', error_code: 'backup_upload_failed', upload_reason: 'object_lock_policy_rejected'}`.
+- **F-83 (RA-2 compensating control #4 preservation — the pg_dump backup is the secondary witness).** The committed manifest contains a non-null `audit_log_head` AND a non-empty `per_event_row_counts` AND a non-zero `retention_sweep_runs_snapshot_ts_ms`. These three together are the join surface T18 inherits. Test: assert all three fields present and well-typed on every committed manifest.
+- **F-84 (no caller-supplied object_ref / table-list / lock-duration — F-19 generalized to backup).** `BackupPassConfig` does not surface `object_ref`, `table_list`, or `lock_duration_ms` fields. TypeScript-level type assertion + runtime test that constructing a config with these fields type-errors. Test: TS `tsc --noEmit` failure on a config with `object_ref`.
+- **F-85 (TestStore interface split — mirrors F-65 / G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1).** `BackupStore` does NOT expose `__debug*` methods; only `TestBackupStore` does. Test: TypeScript type assertion that `BackupStore` does not have `__debugListManifests` etc.
+
+**Threat-modeler handoff:** F-70..F-85 placeholders are recommendations; the threat-modeler's next pass assigns final F-### in `.context/threat-model.md` §3.10 "Backup posture (T17)" sub-section and may renumber. All sixteen are mandatory for T17's four-way reviewer pass clearance.
+
+### 13. Non-interaction with T16 sweep (binding; structural)
+
+**T17 MUST NOT introduce a backup-completion dependency in the T16 sweep.** ADR-0015 :1028 commits to "transient inconsistency is acceptable." The T16 implementer is forbidden from adding any such dependency in a future amendment without re-opening ADR-0017 + this ADR.
+
+Structural enforcement: `apps/web/src/lib/retention/` does NOT import from `apps/web/src/lib/backup/`. CI test `apps/web/test/T17/no-retention-on-backup-coupling.test.ts` parses `retention-core.ts` imports and asserts no `backup/` path appears. The reverse direction is allowed and expected: `apps/web/src/lib/backup/manifest.ts` imports `computeScheduleHash` from `apps/web/src/lib/retention/schedule.ts` (the schedule_hash binding).
+
+## Open-question dispositions (a)–(g) from the librarian briefing — answered
+
+| Q | Disposition | Rationale |
+|---|---|---|
+| (a) pg_dump scope: full-schema vs PI-bearing only | **Full-schema (closed `BACKUP_TABLES` allowlist).** | Option A above. RA-2 trigger #3 requires audit + retention surfaces; OHSA 7y obligations cover the operational PI tables; a single dump is the simplest restore unit. The closed allowlist is the F-19 defense — no "spread the dump scope" attack surface. |
+| (b) Encryption key per-backup / per-day / per-rotation | **Per-backup random DEK wrapped with current `committee_data_key`; kid recorded on manifest.** | Option B(i) above. Keeps backup encryption inside ADR-0007 / ADR-0010 trust boundary; rotation interaction documented as accepted race; crypto-shred is structural via `committee_key_wraps_history` aging out alongside backup. |
+| (c) Object-lock duration: auto-release vs explicit delete | **Both — explicit `runBackupRetentionPass` delete + auto-release lifecycle policy backstop.** | Option C above + Decision §9. Audit-trail-bearing path is the source of truth; lifecycle is the failsafe. "Deletion is real deletion" requires the audited path. |
+| (d) Restore drill cadence | **Monthly; missed drill fires A-BACKUP-002.** | Option D above. Aligns with ADR-0012 recovery-testing intent; weekly is too aggressive for 12-active-user committee. T17.1 ships the runbook + the alert wiring. |
+| (e) Backup-manifest schema fields | **Superset of the briefing's suggestion:** `run_id, status, started_at_ms, committed_at_ms, finalized_at_ms, hard_deleted_at_ms, object_ref, sha256, bytes, retention_class, lock_until_ms, committee_data_key_kid, audit_log_head, per_table_row_counts, per_event_row_counts, retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin`. | Option E + Decision §7. The RA-2 / G-T16-* anchors are NOT optional — they make the difference between an unattributed RA-2 trigger #3 firing and a clean reconciliation. |
+| (f) Library scope for "object-lock" | **Boolean predicate the store satisfies (`isObjectLocked`, `putWithObjectLock`, `deleteObjectIfUnlocked`); MemoryBackupStore models in-memory; SupabaseBackupStore (T17.1) defers to S3-compatible policy.** | Option F + Decision §6. Mirrors G-T16-1 pattern. Cooperative-caller defense via library-controlled lock duration. |
+| (g) Interaction with T16 sweep | **Independent passes; `retention_sweep_runs_snapshot_ts_ms` on manifest is the join surface.** | Option G + Decision §13. ADR-0015 §Risks already commits to transient inconsistency. **T17 MUST NOT add backup-completion dependency in T16 sweep — structurally enforced by CI no-import test.** |
+
+## Reversibility
+
+**Easy** on manifest schema additions (additive — new fields land via TS-side const update + T17.1 migration column add). **Easy** on `BACKUP_OBJECT_LOCK_DAYS` numeric value if ADR-0012 amendment ratifies a change (three mirrors: TS const, SQL bucket policy, ADR-0012 itself). **Medium** on the backup-pass algorithm (re-architecting requires changing both `MemoryBackupStore` and the future `SupabaseBackupStore` + the SQL transaction wrapper). **Hard** on the closed `BackupTable` enum (every new table touches the four mirrors — TS const, SQL grant footprint, §PI inventory, ADR-0016 schedule if operational). **Hard** on the encryption-key anchor (changing away from `committee_data_key` requires re-opening ADR-0007 + ADR-0010 + ADR-0012). **Hard** on the residency invariant (`ca-central-1` only; any change is a flagged decision per ADR-0001).
+
+## Consequences
+
+### Positive
+
+- RA-2 compensating control #4 is no longer narrative — the library produces dumps T18 can reconcile against structurally. The manifest's `audit_log_head` + `per_event_row_counts` + `retention_sweep_runs_snapshot_ts_ms` are the join surface that pins RA-2 trigger #3 attribution.
+- G-T16-8 closes (T17 is the data source; T18 will inherit the integrity-job join in its next pass). G-T16-PRIV-7 closes (manifest carries no pseudonyms — structural). G-T16-RECONCILE-CEILING closes (per-event attribution preserved — never aggregated).
+- F-19 / F-24 / hash-determinism / structured-error patterns from T11/T12/T16 are reused, not reinvented. The reviewer surface is small.
+- ADR-0012 amendment + ADR-0007 + ADR-0001 + ADR-0010 + ADR-0015 + ADR-0016 + ADR-0017 are honoured without re-opening any of them.
+- HG-10 NOT firing is structural (no user-facing copy); HG-15 fires at T17.1 PR submission for the one new physical table + the new Storage bucket.
+- Amendment H pattern is honoured: T17 library-only; T17.1 SQL + storage + production wire-up + HG-15.
+
+### Negative / accepted tradeoffs
+
+- One new physical table (`backup_manifests`) + one new Supabase Storage bucket introduced by T17.1. **HG-15 fires.** Mitigated by the bucket-policy + schedule-row + §PI inventory amendments all landing in T17.1 as a single PR (no cross-PR drift).
+- Hard-delete-at-age-out is enforced via TWO layers (lifecycle policy + explicit pass). Operational complexity is two probes (bucket policy attribute + manifest table query) instead of one. Mitigated by F-74 + F-75 covering both.
+- The `backup.manifest_written` and `backup.hard_deleted` audit enum values cross the ADR-0003 Amendment A extension dance (6 mirrors: TS enum, SQL enum, RETENTION_SCHEDULE, audit_log_retention_schedule, audit-log.md §1, scripts/check-audit-enum-coverage.sh). Mitigated by the same procedure that landed it for G-T08-9 / G-T13-14 / G-T14-7.
+- Rotation-during-window leaves old-key backups undecryptable IF the historical wrap ages out before 42d (crypto-shred). Accepted by design — this is the ADR-0007 / ADR-0012 amendment coherence claim.
+
+### Risks
+
+- **Manifest-vs-upload race.** Mitigated by Decision §5 step 7–9 ordering + Decision §5 step 9 transition-on-failure semantics + F-72 / F-82 tests + T17.1 single-transaction wrap.
+- **Lock-policy bypass via caller-supplied params.** Mitigated by Decision §6 + Decision §11 + F-71 / F-84 (no `lock_duration_ms` on `BackupPassConfig`; library uses `BACKUP_OBJECT_LOCK_DAYS` constant exclusively).
+- **Restore-as-superuser bypasses RLS.** Mitigated by Decision §D + runbook (T17.1) — restore-to-staging default; restore-to-prod forbidden outside approved incident. Hard Rule #2 cross-referenced.
+- **Schedule-mirror drift between PRs.** Mitigated by the F-70 library-side drift test + T17.1 cross-mirror SQL drift test.
+- **Node/OpenSSL toolchain upgrade silently changes sha256.** Mitigated by F-78 pinned-hex test (G-T11-23 lesson).
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.5 (Limiting Retention) — 42d hard-delete on backups; two-layer enforcement.
+- [x] PIPEDA Principle 4.7 (Safeguards) — backups encrypted at rest under `committee_data_key`; object-lock prevents ransomware-delete; residency pinned in `ca-central-1`.
+- [x] `.context/constraints.md` data-lifecycle requirements — "Deletion is real deletion" honoured by explicit hard-delete path + bucket lifecycle backstop.
+- [x] `.context/constraints.md` "No PII in app logs / error messages" — F-81 asserts.
+- [x] `.context/constraints.md` "Parameterized queries only" — `BackupStore` interface forbids caller-supplied table-list / object_ref / predicate.
+- [x] `.context/constraints.md` Hard Rule #4 (cross-border egress is a flagged decision) — library exposes `cross_region_destination_refused` structured rejection; T17.1 ratifies the `ca-central-1` bucket region.
+- [x] `.context/constraints.md` Hard Rule #2 (restore-as-superuser default behaviour) — runbook (T17.1) forbids restore-into-prod outside approved incident.
+- [x] Data residency — no new processor outside Supabase; backup storage stays in Supabase's `ca-central-1` infra.
+- [x] ADR-0001 (`ca-central-1` pin) — preserved.
+- [x] ADR-0007 (`committee_data_key` anchors crypto) — preserved.
+- [x] ADR-0010 (single non-Supabase subprocessor) — no new subprocessor.
+- [x] ADR-0012 amendment (42d hard-delete + 7y longest audit retention coherence) — preserved.
+- [x] ADR-0015 §Risks (transient inconsistency at restore is acceptable) — preserved.
+- [x] ADR-0016 (operational-table schedule) — new `backup_manifests` row added in T17.1.
+- [x] ADR-0017 (T16 retention sweep) — T17 does NOT add a backup-completion dependency in T16 sweep (Decision §13; structurally enforced by CI no-import test).
+- [x] ADR-0002 Amendment H (sibling-task pattern) — T17 library-only; T17.1 SQL + storage + production wire-up.
+- [x] HG-9 (retention schedule) — RATIFIED 2026-05-22 for ADR-0012 amendment; not re-fired.
+- [x] HG-15 (operational-table retention gate + new storage surfaces) — fires at T17.1 PR submission for the one new physical table + the new Storage bucket; this ADR identifies the trigger explicitly.
+- [x] HG-10 (user-facing pre-deletion copy) — explicitly NOT fired. T17 ships zero user-facing copy.
+
+## Validation pass (architect self-check)
+
+- **RA-1 re-open?** No. T17 does NOT touch the export pipeline. The backup is a snapshot operation; it does not cross B3 in the way an export does. No interaction with `export.generated` retention. RA-1 is a no-op for this ADR.
+- **RA-2 re-open?** No. The library STRENGTHENS RA-2 compensating control #4 (the pg_dump backup is the secondary witness) by giving the witness a structured manifest with the join surface T18 needs. RA-2 trigger #3 (live-chain vs backup divergence for a row older than the dump) is anchored by `audit_log_head` + `per_event_row_counts` + `retention_sweep_runs_snapshot_ts_ms`. None of the 4 re-open triggers fire: no platform-admin compromise, no authenticity challenge, no current divergence (T18's check is the detector; T17 the witness), no expansion of `audit_writer_role` reach (the new `backup_writer_role` is a sibling role with its own GRANTs, not an expansion of audit's).
+- **HG-15 trigger identified for new tables / new buckets?** Yes. One new physical table (`backup_manifests`) + one new Supabase Storage bucket (with object-lock policy) land in T17.1; HG-15 fires at T17.1 PR submission. T17 itself introduces ZERO new physical tables and ZERO new buckets.
+- **HG-10 explicitly NOT fired?** Confirmed. Zero user-facing copy.
+- **Cross-border egress invariant preserved?** Confirmed. Library is region-agnostic but exposes `cross_region_destination_refused` structured rejection; T17.1 ratifies the `ca-central-1` bucket region.
+- **All carry-forward IDs this design closes (library-side):** G-T16-8 (data source for T18 reconciliation; structural manifest schema), G-T16-PRIV-7 (manifest carries no pseudonyms; structural type test), G-T16-RECONCILE-CEILING (per-event attribution preserved; never aggregated-then-stripped on the wire). RA-2 follow-up backstop ("weekly head pointer extraction") is partially served by F-76 (manifest carries head pointer for every pass; weekly off-app extraction is T18's responsibility per RA-2 follow-up).
+- **All carry-forward IDs this design defers to T17.1:** G-T16-1-mirror (`pg_try_advisory_xact_lock` for `SupabaseBackupStore` — same pattern as T16.1), G-T16-9-mirror (`xact_start()` shim for production), G-T16-10-mirror (SECURITY DEFINER signatures + REVOKE posture for `backup_writer_role`), the new `backup.manifest_written` + `backup.hard_deleted` enum extension dance (ADR-0003 Amendment A), the `training_records` PI-class verification flag, the §PI inventory amendments, the cross-mirror drift test, the A-BACKUP-001 + A-BACKUP-002 alert wiring, the restore runbook.
+- **T16 sweep dependency NOT introduced?** Confirmed. Decision §13 + CI no-import test pin it structurally.
+
+## Task breakdown (ordered; each task ≤ 1 file of work)
+
+| # | Title | Description | Deps | Acceptance (F-### from §12) | Owner | Risk | Estimate |
+|---|---|---|---|---|---|---|---|
+| 1 | Add `types.ts` | `BackupTable` closed string-literal union; `BackupManifest` / `BackupManifestPending` / `BackupPassResult` discriminated unions; `BACKUP_OBJECT_LOCK_DAYS = 42`, `BACKUP_HARD_DELETE_DAYS = 42`, `BACKUP_OBJECT_REF_PREFIX`, `MS_PER_DAY` constants; `BackupPassConfig` (no caller-supplied lock / table / object_ref fields). | none | F-70 (type-level), F-84 (type-level) | implementer | low | S (2h) |
+| 2 | Add `backup-tables.ts` | `BACKUP_TABLES` frozen closed-allowlist (19 entries per Decision §2); `runBackupTablesDriftCheck()` returning structured verdict; `__assertBackupTableExhaustive(t: never): never` exhaustiveness anchor. | 1 | F-70 | implementer | low | S (2h) |
+| 3 | Add `backup-store.ts` | `BackupStore` (production) and `TestBackupStore extends BackupStore` (test-only) interfaces per Decision §4. ESLint comment header forbidding `__debug*` outside Test. | 1 | F-84, F-85 | implementer | low | M (3h) |
+| 4 | Add `memory-backup-store.ts` | `MemoryBackupStore implements TestBackupStore`. In-memory: manifests array, objects map keyed by `object_ref` with `(blob, unlocked_at_ms)` tuples, audit rows array, registered table populations map, current kid shim. Monotonic `nowMs()`. HMAC pseudonym for `'system:backup-pass'`. Object-lock predicate enforced. Structured rejection vocabulary. | 2, 3 | F-71, F-73, F-75, F-79, F-80, F-82, F-85 | implementer | high | L (8h) |
+| 5 | Add `manifest.ts` | `buildBackupManifest(args)` constructs the Decision §7 layout; `hexSha256(blob)` (pinned-hex helper, G-T11-23); `backupObjectRefFor(manifest)` derives object_ref from `(BACKUP_OBJECT_REF_PREFIX, run_id, committed_at_ms)`; `generateBackupRunId()` with PII-shape rejection (mirrors ADR-0017 §6); imports `computeScheduleHash` from `apps/web/src/lib/retention/schedule.ts` for `schedule_hash` field; `nodeRuntimePin()` returns `{node_version, openssl_version}`. | 1 | F-77, F-78, F-83 | implementer | medium | M (4h) |
+| 6 | Add `backup-core.ts` | `runBackupPass({store, config})` implementing the 11-step algorithm (Decision §5). `runBackupRetentionPass({store, config})` implementing the explicit-delete-at-age-out pass (Decision §5 step 11 + Decision §9 Layer 2). Exhaustive switches with `never` cast. Dry-run mode. Structured error vocabulary (`{run_id, status, error_code, upload_reason?}`). | 2, 3, 4, 5 | F-72, F-74, F-75, F-76, F-77, F-78, F-79, F-81, F-82, F-83 | implementer | high | L (10h) |
+| 7 | Add `index.ts` | Public surface re-exports (`BackupStore`, `runBackupPass`, `runBackupRetentionPass`, `BACKUP_TABLES`, `BACKUP_OBJECT_LOCK_DAYS`, `BACKUP_HARD_DELETE_DAYS`, types). Deliberately omits `MemoryBackupStore`, `TestBackupStore`, `__debug*` hooks, `__assertBackupTableExhaustive` — deep-import surface only. | 6 | (surface) | implementer | low | S (1h) |
+| 8 | ESLint rule `no-spread-into-backup-tables` | Mirrors T11/T12 + T16 spread bans; forbids spread-into-`BACKUP_TABLES` outside `backup-tables.ts`. | 2 | F-70, F-84 | implementer | low | S (2h) |
+| 9 | Drift-check test file | `apps/web/test/T17/backup-tables-drift.test.ts` covering F-70 (set-equality, frozen-ness, §PI inventory pinning fixture, no caller-supplied table name). | 2 | F-70 | test-writer | low | M (3h) |
+| 10 | Backup pass test file | `apps/web/test/T17/backup-pass.test.ts` covering F-71, F-72, F-73, F-74, F-75, F-76, F-77, F-78, F-79, F-81, F-82, F-83, F-85. | 4, 5, 6 | (per F-### above) | test-writer | medium | L (10h) |
+| 11 | RA-2 anchor regression test | `apps/web/test/T17/ra2-anchor-preservation.test.ts` — every committed manifest has non-null `audit_log_head`, non-empty `per_event_row_counts`, non-zero `retention_sweep_runs_snapshot_ts_ms`. Snapshot-pins the three field names so a future ADR amendment that renames any of them fails CI. | 5, 6 | F-83 | test-writer | low | S (2h) |
+| 12 | T16/T17 no-coupling test | `apps/web/test/T17/no-retention-on-backup-coupling.test.ts` — parses `apps/web/src/lib/retention/` import graph; asserts no `backup/` path. Reverse direction (backup importing retention's `computeScheduleHash`) is allowed and expected. | 6 | (Decision §13) | test-writer | low | S (2h) |
+| 13 | Hash-determinism pin test | `apps/web/test/T17/sha256-determinism.test.ts` — fixed-content blob; assert sha256 equals a pinned hex. G-T11-23 lesson. | 5 | F-78 | test-writer | low | S (1h) |
+| 14 | Object-lock cooperative-caller defense test | `apps/web/test/T17/object-lock-cooperative-caller.test.ts` — put object with 42d lock; attempt delete; assert refused. TypeScript-level assertion that `BackupPassConfig` does NOT expose `lock_duration_ms`. | 4, 6 | F-71, F-84 | test-writer | low | S (2h) |
+| 15 | No-PII-in-errors test | `apps/web/test/T17/no-pii-in-errors.test.ts` — force every error path; grep error message for PII shapes per F-81 vocabulary. | 6 | F-81 | test-writer | medium | M (3h) |
+
+Total estimate: ~55h library implementer + test-writer (matches the T16 / T07 library precedents' order-of-magnitude with a slight uptick for the additional state-machine + retention-pass).
+
+## Sibling task spec — T17.1 scope
+
+T17.1 ships AFTER T17's four-way reviewer pass clears. T17.1 deliverables (no PR until HG-15 ratification arrives):
+
+1. **`SupabaseBackupStore implements BackupStore`** — talks to live Postgres + Supabase Storage via `SECURITY DEFINER` functions owned by `backup_writer_role` (non-login; GRANT EXECUTE per F-19 pattern; mirrors `retention_service_role` from T16.1 + `audit_writer_role` from audit-log.md §3).
+2. **SQL migration** at `supabase/migrations/0000000000000Y_backup.sql` (Y TBD by migration-handler) creating:
+   - `backup_manifests` (Decision §7 schema, one row per backup pass; partial-index on `status='committed'` for the reconciliation join; partial-index on `status='pending'` for the in-flight rollback sweep). **HG-15 trigger.**
+3. **Supabase Storage bucket** `backups-ca-central-1` with S3-compatible object-lock policy (governance mode, 42-day retention) + versioning enabled + bucket lifecycle rule (auto-delete after object-lock expiry). Region pin: **`ca-central-1`** (ADR-0001 invariant; any departure is a flagged decision per Hard Rule #4). **HG-15 trigger.**
+4. **SQL functions** (each SECURITY DEFINER, owner `migration_role`, GRANT EXECUTE to `backup_writer_role`, per-function justification comment; mirrors G-T16-10):
+   - `backup_extract_head_pointer() returns table(id uuid, ts_ms bigint, hash bytea)`
+   - `backup_dump_closed_allowlist(p_tables text[]) returns table(blob bytea, per_table_row_counts jsonb, per_event_row_counts jsonb, retention_sweep_runs_snapshot_ts_ms bigint)` — wraps `pg_dump` of the explicit table list
+   - `backup_write_manifest_pending(...)`, `backup_transition_manifest_status(...)`, `backup_list_manifests_older_than_ms(...)`, `backup_emit_manifest_written(...)`, `backup_has_open_run_within_window(...)`
+   - Each function MUST hold `pg_try_advisory_xact_lock(...)` for the duration of the pass (mirrors G-T16-1).
+5. **Audit-log enum extension** for `backup.manifest_written` AND `backup.hard_deleted` (ADR-0003 Amendment A extension dance; mirrors G-T08-9 / G-T13-14 / G-T14-7):
+   - (a) TS `AuditEventType` enum addition (both values)
+   - (b) SQL enum domain addition
+   - (c) `RETENTION_SCHEDULE` rows: `'backup.manifest_written': { kind: 'fixed_years', years: 7 }`, `'backup.hard_deleted': { kind: 'fixed_years', years: 7 }`
+   - (d) `audit_log_retention_schedule` SQL rows
+   - (e) `audit-log.md §1` enum table update
+   - (f) `scripts/check-audit-enum-coverage.sh` update
+6. **CI drift test (cross-mirror)** asserting TS `BACKUP_TABLES` const = SQL `backup_writer_role` GRANT footprint on the listed tables; failing CI on any drift.
+7. **CI drift test (object-lock duration mirror)** asserting `BACKUP_OBJECT_LOCK_DAYS === 42 === bucket policy retention days`; failing CI on any drift.
+8. **pg_cron schedule.** Daily 03:00 ET pg_dump (per ADR-0012 original); explicit hard-delete pass daily 04:00 ET.
+9. **ADR-0016 schedule rows** for the new `backup_manifests` table: retention = `7y` (mirrors the audit row's retention; manifest is the audit anchor surface). **HG-15 re-ratifies.**
+10. **§PI inventory amendments** for `backup_manifests` (no PI; structural metadata only; carries kid + sha256 + counts) AND for `training_records` (verify class per architect flag at Decision §2). ~2 rows added.
+11. **`backup_writer_role` GRANT documentation** — explicit GRANT EXECUTE on each SECURITY DEFINER function; REVOKE on all base tables EXCEPT explicit SELECT on the `BACKUP_TABLES` allowlist for the dump function; non-login (cannot be reached via JWT); no `BYPASSRLS` (the dump function operates with the role's own grants).
+12. **pgTAP integration tests** covering every SECURITY DEFINER function + the cross-mirror drift tests + the object-lock policy enforcement (test that a delete attempt within the lock window is refused at the SQL boundary).
+13. **A-BACKUP-001 alert wiring** (still-locked-past-window) + **A-BACKUP-002 alert wiring** (missed-monthly-drill) + **A-BACKUP-003 alert wiring** (storage quota approaching cap). observability-setup's next pass after T17.1 wires the alert sinks.
+14. **Restore runbook** at `observability/runbooks/restore-from-backup.md`: default target staging (`ca-central-1`); restore-into-prod forbidden outside approved incident (Hard Rule #2); explicit kid-lookup procedure (manifest → `committee_key_wraps_history` → DEK unwrap); monthly drill checklist.
+15. **HG-15 re-ratification** of the operational-table schedule with the new `backup_manifests` row AND the new Supabase Storage bucket. **The HG-15 trigger is named explicitly: T17.1 introduces `backup_manifests` (one new physical table) AND `backups-ca-central-1` (one new Supabase Storage bucket with object-lock policy).** Approval recorded in this ADR pre-T17.1 PR is not possible; user ratifies at T17.1 PR submission.
+
+T17.1 does NOT ship until HG-15 ratification for the table + the bucket is recorded.
+
+## Cross-references
+
+- **ADR-0001** — Supabase `ca-central-1` pin (residency invariant; cross-border egress is a flagged decision).
+- **ADR-0007** — `committee_data_key` anchors backup encryption (kid recorded on manifest; rotation interaction is documented as accepted race).
+- **ADR-0010** — single non-Supabase subprocessor posture; no new subprocessor introduced by T17.
+- **ADR-0012 + amendments** — 35d rolling backups, 42d hard-delete, object-lock + versioning, crypto-shred-on-retention coherence; T17 the library, T17.1 the production wire-up.
+- **ADR-0015** — per-event audit-log retention; manifest preserves the chain state for T18's reconciliation; transient inconsistency at restore is acceptable per §Risks.
+- **ADR-0016** — operational-table retention schedule; new `backup_manifests` row added in T17.1.
+- **ADR-0017** — T16 retention sweep; `retention_sweep_runs_snapshot_ts_ms` on manifest is the join surface; T17 MUST NOT add a backup-completion dependency in T16 sweep (Decision §13; CI no-import test).
+- **ADR-0003 Amendment A** — audit-log enum extension procedure; T17.1 lands `backup.manifest_written` + `backup.hard_deleted` via the same dance as G-T08-9 / G-T13-14 / G-T14-7.
+- **ADR-0002 Amendment H** — sibling-task pattern; T17 = library, T17.1 = SQL + storage + production wire-up.
+- **RA-2 compensating control #4** — "the pg_dump backup is the secondary witness"; T17 the witness, T18 the detector.
+- **RA-2 trigger #3** — live-chain vs backup divergence for a row older than the dump; manifest's `audit_log_head` + `per_event_row_counts` + `retention_sweep_runs_snapshot_ts_ms` are the join anchor.
+- **G-T16-8** — T18 integrity-job reconciliation join (T17 the data source).
+- **G-T16-PRIV-7** — T18 integrity-job join structural-fields-only (manifest carries no pseudonyms).
+- **G-T16-RECONCILE-CEILING** — per-event attribution preserved on manifest (never aggregated to `__ceiling__` on the wire).
+- **G-T16-1 / G-T16-9 / G-T16-10** — patterns mirrored in T17.1's `SupabaseBackupStore` (advisory lock, `xact_start()` shim, SECURITY DEFINER + REVOKE).
+- **G-T11-23** — hash-determinism pin (F-78 enforces).
+- **G-T11-29** — stub side-effects do NOT silently succeed (F-82 enforces).
+- **G-T16-PRIV-1 / G-T16-PRIV-3** — pseudonym not duplicated into meta; no PII in errors (F-79 + F-81 enforce).
+- **F-19 / F-24 (threat-model)** — closed-allowlist + audit-before-side-effect; both patterns reused.
+
+## Follow-ups
+
+- [ ] **T17 implementer pass** — execute tasks 1–8 above in order.
+- [ ] **T17 test-writer pass** — execute tasks 9–15 above.
+- [ ] **T17 four-way reviewer pass** — security + second-opinion + privacy + threat-model cross-check on the library deliverable.
+- [ ] **threat-modeler next pass** — add F-70 through F-85 (placeholders; threat-modeler may renumber) to `.context/threat-model.md` under a new §3.10 "Backup posture (T17)" sub-section. Map to existing F-19 / F-24 / F-55..F-69 lineage explicitly. Score residuals. Specifically:
+  - F-70 closed-allowlist drift (mirrors F-55)
+  - F-71 object-lock cooperative-caller defense (NEW SURFACE)
+  - F-72 F-24 inversion manifest-before-upload (mirrors F-58)
+  - F-73 encryption-key kid recording (NEW SURFACE — ADR-0007 anchor)
+  - F-74 hard-delete-at-age-out explicit pass (NEW SURFACE — constraints.md Hard Rule deletion)
+  - F-75 hard-delete refusal pre-window + A-BACKUP-001 (NEW SURFACE)
+  - F-76 head-pointer extraction RA-2 anchor (RA-2 follow-up)
+  - F-77 per-event attribution preservation (G-T16-RECONCILE-CEILING anchor)
+  - F-78 hash-determinism pin (G-T11-23 anchor)
+  - F-79 actor_pseudonym not duplicated into meta (G-T16-PRIV-1 anchor)
+  - F-80 manifest carries no pseudonyms (G-T16-PRIV-7 anchor)
+  - F-81 no PII in errors (G-T16-PRIV-3 / G-T11-29 anchor)
+  - F-82 structured upload-failure rejection (G-T11-29 anchor)
+  - F-83 RA-2 compensating control #4 preservation (RA-2 anchor — load-bearing)
+  - F-84 no caller-supplied object_ref / table-list / lock-duration (F-19 generalized)
+  - F-85 TestStore interface split (mirrors F-65)
+- [ ] **T17.1 (sibling task)** — see "Sibling task spec — T17.1 scope" above. Runs before any deploy carrying real PI. HG-15 fires at T17.1 PR submission for the new table + the new Storage bucket.
+- [ ] **observability-setup next pass after T17.1** — wire `A-BACKUP-001` (still-locked-past-window), `A-BACKUP-002` (missed-monthly-drill), `A-BACKUP-003` (storage quota) alert sinks.
+- [ ] **T18 next pass** — additive reconciliation check (live `audit_log` head vs latest committed `backup_manifests.audit_log_head` for rows whose `ts < (latest_dump_ts - 1 hour)`) per RA-2 follow-up. The join surface is pinned by F-83. No new task; additive to T18.
+
+---
+
 ## ADR-0017 — T16 retention sweep library + MemoryRetentionStore
 
 **Status:** Accepted
