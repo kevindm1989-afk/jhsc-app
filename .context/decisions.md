@@ -25,6 +25,474 @@ pointing to the new one. The history is the value.
 
 ---
 
+## ADR-0017 — T16 retention sweep library + MemoryRetentionStore
+
+**Status:** Accepted
+**Date:** 2026-05-23
+**Decider(s):** architect (T16 design pass on the carry-forward set G-T05-6 / G-T05-7 / G-T07-1+ / G-T08-1 / G-T10-4 / G-T11-1 / G-T13-1 / G-T14-1 and the ADR-0015 + ADR-0016 + ADR-0002 Amendment H constraint set). **No new HG fires in this pass** — T16 ships library-only per Amendment H; HG-15 fires on T16.1 when the two new physical tables (`retention_sweep_runs`, `audit_log_retention_schedule`) land. HG-14 was RATIFIED 2026-05-22 for the ADR-0015 schedule and does NOT re-fire in this pass.
+
+**Source:** ADR-0015 (per-event audit-log retention schedule, authoritative), ADR-0016 (operational-table retention schedule + HMAC pseudonym standard, authoritative), ADR-0002 Amendment H (sibling-task pattern; library-only T_n + production-wire-up T_n.1), threat-model F-19 (closed-allowlist), F-24 (audit-before-side-effect), F-50 (chain-integrity), F-51 (retention bug), F-52 (retention-pass auditing), RA-1 compensating control #5 (post-export notification surface — sweep must not break), RA-2 trigger #3 (live-chain vs pg_dump divergence — sweep must respect backup window or document the race), G-T05-6 (`retention_class_for()` vs schedule-table drift), G-T05-7 (`auth_totp_consumed_log` 24h sweep), G-T07-3 / G-T07-10 (interface split + integration tests live in T_n.1), G-T08-14 / G-T13-9 (`transaction_ts_ms` shim), G-T11-21 / G-T13-15 / G-T14-17 (TestStore split). Cross-references **ADR-0012 amendment** (42-day backup hard-delete vs 7y longest audit retention coherence).
+
+## Context
+
+ADR-0015 and ADR-0016 ratify two schedules but stop short of specifying the sweep mechanism that enforces them. T16 is the sweep. Per Amendment H, T16 ships library code + `MemoryRetentionStore` only; T16.1 ships the `SupabaseRetentionStore` + the SQL migration that creates `audit_log_retention_schedule` (authoritative schedule table) and `retention_sweep_runs` (idempotency checkpoint) + the pg_cron schedule + the Edge Function trigger + the ADR-0016 schedule rows for the two new tables + the §PI inventory amendments + HG-15 re-ratification.
+
+This ADR ratifies the library contract the sweep ships against and the open-question dispositions (a)–(g) the librarian briefing surfaced.
+
+The carry-forward set this ADR closes (library-side) and defers (T16.1-side):
+
+- **Closes in T16:** G-T05-6 (drift assertion is encoded as a `RETENTION_SCHEDULE` const + a CI test against the SQL function; the SQL-side mirror moves to T16.1's migration), G-T05-7 (sweep iterates `auth_totp_consumed_log` per the ADR-0016 schedule; library exercise lands against `MemoryRetentionStore`).
+- **Defers to T16.1:** every operational-table SQL function + the `retention_sweep_runs` table + the `audit_log_retention_schedule` table + pg_cron + Edge Function + the ADR-0016 schedule rows for the two new T16-introduced tables + §PI inventory amendments + HG-15 re-ratification.
+
+## Decision drivers
+
+- **PIPEDA Principle 4.5 (Limiting Retention):** the only structural enforcer of the per-event-type floor + the underlying-record ceiling + the operational-table schedule is the sweep. Without it, every retention promise in ADR-0015 / ADR-0016 is aspirational.
+- **F-51 (retention bug blast radius):** a deletion bug aged-out by clock drift or filter mistake can take out active reprisal entries (C4). The library must make dry-run the test default and emit an alert above a configurable per-pass threshold.
+- **F-52 (retention itself audited):** every pass emits exactly one `retention.deleted` summary row with per-event-type and per-table counts in jsonb, hash-chained, before the deletes commit (F-24 ordering inverted: see Decision §5).
+- **G-T05-6 (drift between code paths):** SQL `retention_class_for()`, TS `RETENTION_SCHEDULE` const, and the future `audit_log_retention_schedule` table are three mirrors of the same truth. The library's CI drift assertion is the structural backstop; SQL drift fails CI in T16.1, but the TS side fails CI now.
+- **RA-1 control #5 (post-export notification):** the sweep must not delete the `export.generated` audit row before the post-export notification surface has a chance to read it. The 7y retention on `export.generated` (ADR-0015 §schedule) already covers this; the sweep must NOT shorten any retention.
+- **RA-2 trigger #3 (live-chain vs backup divergence):** the sweep is the legitimate DELETE path on `audit_log`; a divergence between the live chain and the most recent pg_dump for a row older than the dump must be attributable to a sweep pass, not silently treated as a tamper. The sweep records `prev_pass_hash`, run id, ms-epoch start/end, and the rows-deleted-per-event-type so the T18 + RA-2 backstop check can reconcile.
+- **Amendment H pattern:** the library ships against `MemoryRetentionStore`; tests are fast, deterministic, and do not depend on a Supabase local stack. SQL invariants land in T16.1's pgTAP suite.
+
+## Options considered
+
+### Option A: Sweep semantics — hard-delete uniformly (chosen)
+
+ADR-0015 §"Retention job behaviour" reads `:queued for deletion on the next pass`. ADR-0016 §"Operational rules" reads `hard-deleted on consume` and `Scheduled sweep deletes rows where consumed_at < now() - interval '24 hours'`. The literal reading is hard-delete on every operational surface; pseudonym-only redaction is NOT specified anywhere and would re-introduce a "shape preserved but PI removed" surface that the privacy-reviewer has not approved. **We choose hard-delete uniformly** per ADR-0015 + ADR-0016 literal reading. Pseudonym-only is a v2 amendment if a regulator surfaces a "preserve the row, scrub the PI" request; documented as deferred in Follow-ups.
+
+### Option B: Pseudonym-only redaction for `audit_log` rows whose `target_id` is gone (rejected)
+
+Considered because it preserves the chain-integrity surface (T18 / F-50) without requiring chain-rebuild on delete. Rejected because (1) ADR-0015 §schema requirement #3's drift check already handles enum-vs-schedule alignment; (2) deletes leave the prev_hash/hash linkage in place (Postgres DELETE does not modify other rows); (3) the redaction surface adds a second "deletion-shaped operation" path that the threat-model would have to score independently. Hard-delete + the chain-detect-the-gap posture is simpler and the threat-model already covers it (F-50 + F-52).
+
+### Option C: Idempotency — checkpoint table (chosen) vs advisory lock vs jsonb time window
+
+Three mechanisms for "two simultaneous pg_cron firings, or a re-run after crash mid-pass, don't double-delete or double-emit":
+
+- **(a) Checkpoint table `retention_sweep_runs`** with `(run_id, started_at_ms, ended_at_ms, status, prev_pass_hash, per_event_counts jsonb, per_table_counts jsonb)`. A pass that finds an open `status='running'` row younger than the configured lease window refuses to start. **Chosen.** It doubles as the F-52 forensic surface and the RA-2 trigger #3 reconciliation anchor.
+- **(b) `pg_try_advisory_xact_lock` only.** Lighter, but no forensic surface; reconciling against the pg_dump backup for RA-2 trigger #3 has no anchor point.
+- **(c) jsonb time window in `retention.deleted` meta only.** No idempotency outside the emitted row; a crashed pass leaves no breadcrumb. Rejected.
+
+The checkpoint table lands in T16.1; the library's `MemoryRetentionStore` mirrors the semantic with an in-memory `runs` array. **HG-15 fires for `retention_sweep_runs` at T16.1 PR submission.**
+
+### Option D: Recovery semantics — single transaction (chosen)
+
+Per F-24 (audit-before-side-effect, generalized): the `retention.deleted` summary row commits BEFORE — or atomically WITH — the deletes it summarizes. We choose **single transaction**: emit the summary row, perform all per-event-type and per-table deletes, commit. On any failure mid-batch (lock timeout, statement timeout, deadlock), the entire pass rolls back and the next pass retries. **The summary row is the LAST row written in the transaction** (after the deletes) so its `meta.deleted_per_table` / `meta.deleted_per_event_type` counts are authoritative for what landed. F-24 generalizes here as "audit-WITH-side-effect" rather than "audit-BEFORE-side-effect"; the threat-modeler will score this as F-24 variant. Per-batch savepoints rejected: they admit a partial-state failure mode where some deletes commit and the summary row records fewer counts than actually landed.
+
+The lock-hold-time risk on high-churn tables (`auth_sessions`) is mitigated by **per-event-type / per-table batch limits** (Decision §3 below) and a **per-pass row-cap** (Decision §6 below). A pass that hits the cap commits what it has + emits its summary; the next pass picks up the remainder.
+
+### Option E: Interaction with RA-2 trigger #3 + T17 backup window — tolerate transient inconsistency (chosen)
+
+ADR-0015 §Risks reads: "the retention job's next pass cleans them up; transient inconsistency is acceptable." We honour this. The sweep does NOT defer rows younger than the most recent successful backup; instead, the T18 integrity job + the RA-2 backstop check use the `retention_sweep_runs.per_event_counts` jsonb as the reconciliation anchor — if a row is missing from the live chain but its deletion is accounted for in a `retention_sweep_runs` row, that is the audited explanation. RA-2 trigger #3 fires only on **unattributed** divergence. This ADR commits to the reconciliation anchor; T18's integrity job inherits the check on its next pass (additive to T18 follow-ups; no new task).
+
+### Option F: Pre-deletion user notification — none in v1 (chosen)
+
+No ADR mandates pre-deletion copy. HG-10 (if it existed) is NOT fired in this pass; **HG-10 explicitly does NOT fire** by this ADR's design. A user's right of access (PIPEDA Principle 4.9) is preserved by retention floors that match the underlying record's retention — the user can query their own data while their membership is active and for the post-membership tail per ADR-0015 / ADR-0016. Deletion at the floor is the structural promise; pre-deletion notification would re-introduce a "deletion is pending; please confirm" surface that this design deliberately omits. Recorded as deferred for any future ADR amendment that surfaces a regulator-driven need.
+
+### Option G: `retention_class` backfill — none required (confirmed)
+
+T05 migration landed the column `audit_log.retention_class text NOT NULL` (per `supabase/migrations/00000000000001_auth.sql:84` and amendment pass #4 cross-cutting #2). Every row emitted via `audit_emit(...)` stamps the column at write time. **No backfill required.** The library's sweep reads the column directly.
+
+### Option H: Schedule authority — `audit_log_retention_schedule` table is authoritative; `retention_class_for()` SQL function and `RETENTION_SCHEDULE` TS const are mirrors (chosen)
+
+Per ADR-0015 §schema requirement #2 the table is authoritative. The SQL function (T05) and the TS const (this ADR) are both mirrors. CI drift assertion (G-T05-6 closure):
+
+1. **Library CI test (lands in T16):** parses `RETENTION_SCHEDULE` const + asserts every value in the closed `EventType` enum (see Decision §2) has exactly one entry; every entry's `event_type` is in the enum.
+2. **Cross-mirror CI test (lands in T16.1):** asserts `RETENTION_SCHEDULE` (TS const), `retention_class_for(p_event_type)` output (SQL function), and `SELECT event_type, retention_class FROM audit_log_retention_schedule` (SQL table) are pairwise-equal on the closed enum domain. Drift fails CI.
+
+The library ships test (1); test (2) lands in T16.1's migration PR. The library's contract is that `RETENTION_SCHEDULE` is the authoritative TS source; T16.1's drift test pins the TS-vs-SQL parity.
+
+## Decision
+
+**We choose Options A + C(a) + D + E + F + G + H.**
+
+### 1. File-level structure (binding for T16 ship)
+
+Library lives under `apps/web/src/lib/retention/`:
+
+```
+apps/web/src/lib/retention/
+  types.ts                  — RetentionEventType, RetentionClass, schedule shapes
+  schedule.ts               — RETENTION_SCHEDULE frozen const + drift-check helpers
+  retention-store.ts        — RetentionStore (production) + TestRetentionStore (test-only)
+  memory-retention-store.ts — MemoryRetentionStore implements TestRetentionStore
+  retention-core.ts         — runRetentionPass + per-event-type sweep iteration
+  audit-emission.ts         — buildRetentionDeletedSummary + jsonb meta shape
+  index.ts                  — public surface re-exports (RetentionStore, runRetentionPass, RETENTION_SCHEDULE)
+```
+
+No SQL ships in T16. No new physical tables ship in T16. PR-review-time assertion mirrors Amendment H's §Testable assertions: `git diff --name-only main...T16-branch -- supabase/migrations/` returns empty.
+
+### 2. Closed `RetentionEventType` enum (binding; mirrors ADR-0015 + ADR-0016 verbatim)
+
+The library defines a closed string-literal union `RetentionEventType` covering exactly the event types in the librarian briefing (29 event types as of this ADR). The union is exhaustive-switched in `retention-core.ts` with a `never` cast on the default branch (F-19 closed-allowlist pattern from T11/T12). ESLint rule `no-spread-into-retention-schedule` (added by implementer; mirrors T11/T12's spread ban) forbids spread-into-`RETENTION_SCHEDULE`.
+
+**Enum (verbatim, alphabetized for review stability):**
+
+```
+'alert.fired'
+'audit.forensic_reveal.4eyes_completed'
+'audit.forensic_reveal.4eyes_pending'
+'auth.passkey.enrolled'
+'auth.passkey.revoked'
+'client.cache_policy_violation'
+'client.identity_selftest_fail'
+'committee_data_key.member_revoked'
+'committee_data_key.rotation.completed'
+'committee_data_key.rotation.started'
+'committee_data_key.unwrap'
+'committee_data_key.wrapped_for_member'
+'committee.key_rotated'
+'concern.created'
+'concern.source_revealed'
+'concern.updated'
+'export.contained_concern_derived_items'
+'export.delivered'
+'export.generated'
+'identity_keypair.created'
+'identity_privkey.recovery_blob.restored'
+'identity_privkey.recovery_blob.viewed'
+'identity_privkey.recovery_blob.written'
+'inspection.synced'
+'member.added'
+'member.removed'
+'photo.sanitize.unsupported_format'
+'queue.integrity_fail'
+'recommendation.created'
+'recommendation.employer_response_logged'
+'recommendation.overdue.alert'
+'reprisal.created'
+'reprisal.read'
+'reprisal.status_changed.4eyes_completed'
+'reprisal.status_changed.4eyes_pending'
+'reprisal.update'
+'retention.deleted'
+'s51_evidence.create.rejected'
+'s51_evidence.created'
+'s51_evidence.read'
+'s51_evidence.update'
+'sensitive.access_attempt'
+'session.revoked'
+'work_refusal.created'
+'work_refusal.read'
+'work_refusal.update'
+```
+
+The enum is the closed allowlist for the sweep. Any new event type added to the system in a future task MUST add (a) a `RetentionEventType` entry, (b) a `RETENTION_SCHEDULE` entry, (c) a `retention_class_for()` branch (T16.1 SQL), and (d) a row in `audit_log_retention_schedule` (T16.1). All four mirror; CI drift fails on any single-mirror update.
+
+### 3. `RETENTION_SCHEDULE` frozen const (binding; mirrors ADR-0015 §schedule verbatim)
+
+`schedule.ts` exports:
+
+```
+export const RETENTION_SCHEDULE = Object.freeze({
+  // ADR-0015 audit-log retention schedule, verbatim.
+  'auth.passkey.enrolled':          { kind: 'fixed_days', days: 90 },
+  'auth.passkey.revoked':           { kind: 'fixed_days', days: 90 },
+  'session.revoked':                { kind: 'fixed_days', days: 90 },
+  'client.cache_policy_violation':  { kind: 'fixed_days', days: 90 },
+  'client.identity_selftest_fail':  { kind: 'fixed_days', days: 90 },
+  'committee_data_key.unwrap':      { kind: 'fixed_months', months: 24 },
+  'alert.fired':                    { kind: 'fixed_months', months: 24 },
+  'identity_keypair.created':       { kind: 'fixed_years', years: 7 },
+  'committee_data_key.rotation.started':   { kind: 'fixed_years', years: 7 },
+  'committee_data_key.rotation.completed': { kind: 'fixed_years', years: 7 },
+  'committee_data_key.member_revoked':     { kind: 'fixed_years', years: 7 },
+  'committee.key_rotated':                 { kind: 'fixed_years', years: 7 },
+  'export.generated':                       { kind: 'fixed_years', years: 7 },
+  'export.contained_concern_derived_items': { kind: 'fixed_years', years: 7 },
+  'export.delivered':                       { kind: 'fixed_years', years: 7 },
+  'retention.deleted':                      { kind: 'fixed_years', years: 7, no_target_id: true },
+  'audit.forensic_reveal.4eyes_pending':   { kind: 'fixed_years', years: 7 },
+  'audit.forensic_reveal.4eyes_completed': { kind: 'fixed_years', years: 7 },
+  'identity_privkey.recovery_blob.written':  { kind: 'membership_plus_months', months: 24 },
+  'identity_privkey.recovery_blob.restored': { kind: 'membership_plus_months', months: 24 },
+  'identity_privkey.recovery_blob.viewed':   { kind: 'membership_plus_months', months: 24 },
+  'committee_data_key.wrapped_for_member':   { kind: 'years_from_rotation', years: 7 },
+  'member.added':   { kind: 'membership_plus_years', years: 7 },
+  'member.removed': { kind: 'membership_plus_years', years: 7 },
+  // match_underlying — defers to the linked target row's retention + 30d ceiling.
+  'concern.created':         { kind: 'match_underlying' },
+  'concern.updated':         { kind: 'match_underlying' },
+  'concern.source_revealed': { kind: 'match_underlying' },
+  'inspection.synced':       { kind: 'match_underlying' },
+  'queue.integrity_fail':    { kind: 'match_underlying' },
+  'photo.sanitize.unsupported_format': { kind: 'match_underlying' },
+  'recommendation.created':                       { kind: 'match_underlying' },
+  'recommendation.employer_response_logged':      { kind: 'match_underlying' },
+  'recommendation.overdue.alert':                 { kind: 'match_underlying' },
+  'reprisal.created':                              { kind: 'match_underlying' },
+  'reprisal.read':                                 { kind: 'match_underlying' },
+  'reprisal.update':                               { kind: 'match_underlying' },
+  'reprisal.status_changed.4eyes_pending':         { kind: 'match_underlying' },
+  'reprisal.status_changed.4eyes_completed':       { kind: 'match_underlying' },
+  'sensitive.access_attempt':                      { kind: 'match_underlying' },
+  'work_refusal.created':       { kind: 'match_underlying' },
+  'work_refusal.read':          { kind: 'match_underlying' },
+  'work_refusal.update':        { kind: 'match_underlying' },
+  's51_evidence.created':         { kind: 'match_underlying' },
+  's51_evidence.read':            { kind: 'match_underlying' },
+  's51_evidence.update':          { kind: 'match_underlying' },
+  's51_evidence.create.rejected': { kind: 'match_underlying' }
+} as const);
+```
+
+`kind` discriminator drives the sweep's filter construction. The schedule for operational tables (ADR-0016 §schedule) is a sibling const `OPERATIONAL_TABLE_SCHEDULE` in the same file, keyed by table name with the same discriminator shape.
+
+### 4. `RetentionStore` interface vs `TestRetentionStore` test-only extension
+
+Per the G-T11-21 / G-T13-15 / G-T14-17 pattern (TestStore split):
+
+- `RetentionStore` — production interface. Methods: `listSweepableEventTypes()`, `countCandidatesForEventType(event_type, cutoff_ms)`, `deleteForEventType(event_type, cutoff_ms, max_rows)` returning `{deleted_count, oldest_remaining_ts_ms | null}`, `countCandidatesForTable(table_name, predicate)`, `deleteForTable(table_name, predicate, max_rows)`, `recordSweepRun(run)`, `findOpenRun(lease_window_ms)`, `closeSweepRun(run_id, end_state)`, `emitRetentionDeleted(summary)`, `nowMs()`.
+- `TestRetentionStore extends RetentionStore` — adds `__debugListRuns()`, `__debugForceFail(table_name)`, `__debugSetClock(ms)`, `__debugInsertFixture(table_name, row)`. These hooks live ONLY on `TestRetentionStore`; production code paths receive `RetentionStore` and CANNOT reach the `__debug*` methods at type level.
+
+The interface forbids caller-supplied WHERE clauses; the function body hard-codes the schedule lookup (defense-in-depth per the librarian's threat-model delta).
+
+### 5. `MemoryRetentionStore` shape + composition with existing memory stores
+
+`MemoryRetentionStore implements TestRetentionStore` is the canonical test-time double. It composes with existing memory stores via a **sweepable-surface registry** rather than inheritance — at construction it accepts an array of `SweepableSurface` adapters that wrap `MemoryAuthStore` / `MemoryConcernStore` / `MemoryExportStore` / `MemoryReprisalStore` / etc. Each adapter exposes:
+
+```
+interface SweepableSurface {
+  readonly table_name: string;     // matches OPERATIONAL_TABLE_SCHEDULE key OR 'audit_log'
+  count(predicate): Promise<number>;
+  deleteWhere(predicate, max_rows): Promise<number>;
+  // For target-linked audit rows under the underlying-record-ceiling rule:
+  isTargetGoneFor?(target_id: string, table_name: string): Promise<boolean>;
+}
+```
+
+This is **standalone-with-registry**, not inheritance. The library does not subclass existing memory stores; T16.1's `SupabaseRetentionStore` does not subclass `SupabaseAuthStore` etc. — it issues table-scoped DELETEs against a single Postgres connection with the `retention_service_role` GRANTs (T16.1).
+
+The pseudonym key shim from `MemoryExportStore` (HMAC-SHA-256, per-store random or caller-supplied) is replicated so cross-store pseudonym equality holds for the `retention.deleted` audit row's `actor_pseudonym` (which is the synthetic `retention_service` pseudonym; see §6).
+
+The `transaction_ts_ms` shim from G-T08-14 / G-T13-9 (`now() + 1` for ordering tests) is replicated: `MemoryRetentionStore.nowMs()` returns the per-store monotonic clock that advances by ≥1 on every call. T16.1's `SupabaseRetentionStore` uses `xact_start()`.
+
+### 6. Sweep-pass algorithm (binding for T16 ship)
+
+```
+runRetentionPass({store, config}) -> RetentionPassResult
+```
+
+Algorithm:
+
+1. **Acquire lease.** Call `store.findOpenRun(config.lease_window_ms)`. If a run row exists with `status='running'` and `started_at_ms > now - lease_window_ms`, **refuse to start** and return `{status: 'lease_held', existing_run_id}`. Otherwise `store.recordSweepRun({run_id: randomUUID(), started_at_ms: now, status: 'running'})` and proceed.
+2. **Resolve cutoffs.** For each `RetentionEventType` in iteration order (alphabetized; deterministic), resolve the cutoff timestamp from `RETENTION_SCHEDULE`. For `match_underlying` events, the cutoff is "linked record has been deleted for >30 days OR underlying record's own retention floor has passed."
+3. **Per-event-type batched delete.** For each event type, call `store.deleteForEventType(event_type, cutoff_ms, config.per_event_batch_size)`. Default `per_event_batch_size = 1000`. Accumulate `{event_type: deleted_count}` into `per_event_counts`.
+4. **Per-operational-table batched delete.** Iterate `OPERATIONAL_TABLE_SCHEDULE` (alphabetized). For each, resolve the predicate from the `kind` discriminator and call `store.deleteForTable(table_name, predicate, config.per_table_batch_size)`. Default `per_table_batch_size = 1000`. Accumulate `{table_name: deleted_count}` into `per_table_counts`.
+5. **Per-pass row-cap.** A `config.max_total_rows_per_pass` cap (default `20000`) bounds the pass. If the cap is reached mid-iteration, commit what was done + emit the summary + close the run with `status='capped'`; the next pass continues. Lock-hold-time on high-churn tables (`auth_sessions`) is implicitly bounded by the batch size + cap combination.
+6. **F-51 over-delete alarm.** If the total deleted rows for this pass exceeds `config.alarm_threshold` (default `20` per F-51's testable mitigation), the pass marks `result.alarm_fired = true` and the caller (T16.1's Edge Function) emits `A-RETENTION-001`. Library returns the flag; alert wiring lives in T16.1.
+7. **Emit summary.** Build the `retention.deleted` audit row via `audit-emission.ts buildRetentionDeletedSummary(...)` and call `store.emitRetentionDeleted(...)`. The summary row is the LAST write in the transaction.
+8. **Close run.** `store.closeSweepRun(run_id, {status: 'completed' | 'capped' | 'errored', ended_at_ms, prev_pass_hash, per_event_counts, per_table_counts})`.
+9. **Error recovery.** Any throw inside steps 3–7 rolls back the entire transaction (`SupabaseRetentionStore` wraps the whole pass in a single Postgres transaction; `MemoryRetentionStore` discards the in-flight delete batch and re-throws). The run row is closed with `status='errored'` and the error message (no PI; per `.context/constraints.md`).
+10. **Dry-run mode (CI default).** `config.dry_run = true` causes every `deleteForEventType` / `deleteForTable` to be replaced with `countCandidatesForEventType` / `countCandidatesForTable`. The summary row is built but NOT emitted; the result returns the would-delete counts. Dry-run is the CI test default per F-51's testable mitigation.
+
+### 7. The `retention.deleted` audit-row jsonb meta layout (binding; mirrors ADR-0015 §schema requirement #4)
+
+```
+{
+  event_type: 'retention.deleted',
+  actor_pseudonym: HMAC(synthetic_actor_id 'retention_service'),
+  target_class: 'C1',
+  severity: 'info' | 'warn',          // warn when alarm_fired
+  retention_class: '7y',               // no target_id; ADR-0015 carve-out
+  target_id: null,
+  meta: {
+    run_id: uuid,
+    started_at_ms: number,
+    ended_at_ms: number,
+    status: 'completed' | 'capped' | 'errored',
+    alarm_fired: boolean,
+    deleted_per_table: { [table_name: string]: number },
+    deleted_per_event_type: { [event_type: string]: number },
+    schedule_hash: hex,                // SHA-256 of canonical-JSON serialization
+                                       // of RETENTION_SCHEDULE + OPERATIONAL_TABLE_SCHEDULE;
+                                       // binds the audit row to the schedule version
+                                       // that produced it (mirrors F-27 from T11/T12).
+    prev_pass_hash: hex | null,        // SHA-256 of the prior pass's summary row hash
+    lease_window_ms: number,
+    per_pass_row_cap: number,
+    alarm_threshold: number,
+    dry_run: boolean                   // false in production; preserved for test introspection
+  }
+}
+```
+
+### 8. Underlying-record-ceiling enforcement (binding; mirrors ADR-0015 §"underlying-record-ceiling rule" verbatim)
+
+For every audit-log event whose `RETENTION_SCHEDULE` kind is `'match_underlying'`, the sweep applies:
+
+1. **Floor:** the per-event-type floor (always `'match_underlying'` for these; effectively the linked record's own retention).
+2. **Ceiling:** if `target_id` is set AND the linked record has been deleted for more than 30 days, the audit row is in scope for deletion.
+3. **Carve-out:** `retention.deleted` is exempt (no `target_id`; 7y independent).
+4. **Linked-record lookup:** the sweep asks `store.isTargetGoneFor(target_id, source_table)` to determine whether the linked record is gone. `source_table` is derived from a closed `EVENT_TYPE_TO_SOURCE_TABLE` mapping in `schedule.ts` (e.g., `concern.*` → `concerns`, `reprisal.*` → `reprisal_log`, etc.). The mapping is a frozen const; the same drift-check pattern applies.
+
+### 9. F-19-style closed-allowlist drift assertion (binding; closes G-T05-6 library-side)
+
+Library CI test (lands in T16, file `apps/web/test/T16/retention-schedule-drift.test.ts`):
+
+```
+test('every RetentionEventType has exactly one RETENTION_SCHEDULE entry')
+test('every RETENTION_SCHEDULE key is a RetentionEventType')
+test('every match_underlying event_type has an EVENT_TYPE_TO_SOURCE_TABLE entry')
+test('every OPERATIONAL_TABLE_SCHEDULE key matches a table in the canonical list')
+test('RETENTION_SCHEDULE is Object.isFrozen')
+test('OPERATIONAL_TABLE_SCHEDULE is Object.isFrozen')
+```
+
+T16.1 adds the cross-mirror SQL drift test (TS const vs SQL function vs SQL schedule table). The library-side CI test is the prerequisite for the SQL test.
+
+### 10. Acceptance criteria (F-### list — test-writer consumes)
+
+The test-writer turns each into a test obligation. Numbering continues from existing F-### in the threat-model (next available range in §3.6 retention block; threat-modeler assigns; placeholders are F-Rxx for "retention-sweep family"):
+
+- **F-R1 (closes G-T05-6, library half).** `RetentionEventType` enum and `RETENTION_SCHEDULE` const drift-check: every enum value has exactly one schedule entry; every schedule key is in the enum. Test: drift CI passes; remove a `RETENTION_SCHEDULE` entry; CI fails.
+- **F-R2 (closes G-T05-7).** `auth_totp_consumed_log` rows older than 24h are deleted by the sweep. Test: fixture with rows at `consumed_at` of -23h, -25h, -100h; run sweep; assert -25h and -100h gone, -23h present.
+- **F-R3 (F-51 generalized to all tables).** Dry-run is the CI default. Test: a fixture with 25 candidate rows triggers `alarm_fired = true` (default threshold = 20); the run summary `meta.alarm_fired = true`.
+- **F-R4 (F-52 with F-24 inversion).** Exactly one `retention.deleted` summary row per pass, written in the SAME transaction as the deletes, AFTER the deletes (the row records what landed). Test: force `emitRetentionDeleted` to throw; assert deletes rolled back (no rows deleted); assert no summary row.
+- **F-R5 (idempotency).** A pass that finds an open `retention_sweep_runs` row inside the lease window refuses to start. Test: open a fake `running` run; call `runRetentionPass`; assert `{status: 'lease_held'}`.
+- **F-R6 (per-pass row-cap).** A pass that would delete > `max_total_rows_per_pass` commits the cap's worth, marks `status='capped'`, and the next pass picks up the remainder. Test: fixture of 25000 expired rows + cap of 20000; first pass deletes 20000 with `status='capped'`; second pass deletes 5000 with `status='completed'`.
+- **F-R7 (underlying-record-ceiling).** A `concern.source_revealed` audit row whose linked `concerns` row was deleted 31 days ago IS swept. Same audit row at 29 days is NOT swept. Test: two fixtures; assert correct disposition.
+- **F-R8 (retention.deleted carve-out).** `retention.deleted` rows are NOT swept by the underlying-record-ceiling rule (no `target_id`); they age out at 7y independently. Test: a `retention.deleted` row at 6y is preserved; at 7y+1d is swept.
+- **F-R9 (schedule-hash binding).** The summary row's `meta.schedule_hash` matches `SHA-256(canonical-JSON(RETENTION_SCHEDULE + OPERATIONAL_TABLE_SCHEDULE))`. Test: monkey-patch the schedule between runs; assert different hashes; assert each summary row binds to its own pass's schedule version (mirrors F-27 from T11/T12).
+- **F-R10 (closed-allowlist defense-in-depth).** No caller-supplied WHERE clause path exists in `RetentionStore`; the interface only exposes `deleteForEventType(event_type, cutoff_ms, max_rows)` and `deleteForTable(table_name, predicate, max_rows)` with the predicate constructed by the library from the schedule discriminator. Test: TypeScript compile failure on attempting to pass arbitrary SQL through the interface; ESLint rule rejects `RETENTION_SCHEDULE` spread outside `schedule.ts`.
+- **F-R11 (TestStore interface split, mirrors G-T11-21 / G-T13-15 / G-T14-17).** `RetentionStore` does NOT expose `__debug*` methods; only `TestRetentionStore` does. Test: TypeScript type assertion that `RetentionStore` does not have `__debugListRuns` etc.
+- **F-R12 (transaction_ts_ms shim, mirrors G-T08-14 / G-T13-9).** `MemoryRetentionStore.nowMs()` advances ≥1 per call for ordering tests; T16.1's `SupabaseRetentionStore` uses `xact_start()`. Test: two adjacent `nowMs()` calls return distinct values.
+- **F-R13 (no PII in errors).** Every error path in `runRetentionPass` carries `{run_id, status, error_code}` and NEVER a row value, target_id, or PI shape. Test: force every error path; grep error message for PII shapes (uuids except run_id, email-shaped strings, pseudonym-shaped strings).
+- **F-R14 (RA-1 control #5 preserved).** `export.generated` retention is 7y; the sweep MUST NOT shorten it. Test: snapshot the resolved cutoff for `export.generated`; assert it is exactly 7y back from `nowMs()`.
+- **F-R15 (RA-2 trigger #3 reconciliation anchor).** Every sweep pass writes a `retention_sweep_runs` row with `per_event_counts` jsonb; the test-writer's reconciliation test (T18 carry-forward) joins live `audit_log` absences to `retention_sweep_runs.per_event_counts` for attribution. Test: delete N rows via sweep; assert `retention_sweep_runs.per_event_counts` sums to N.
+
+## Sibling task spec — T16.1 scope
+
+T16.1 ships AFTER T16's four-way reviewer pass clears. T16.1 deliverables (no PR until HG-15 ratification arrives):
+
+1. **`SupabaseRetentionStore implements RetentionStore`** — talks to the live Postgres schema via `SECURITY DEFINER` functions owned by `retention_service_role` (non-login; GRANT EXECUTE per F-19 pattern).
+2. **SQL migration** at `supabase/migrations/0000000000000X_retention.sql` (X TBD by migration-handler) creating:
+   - `audit_log_retention_schedule` (one row per `RetentionEventType` enum value; ADR-0015 §schema requirement #2). **HG-15 trigger.**
+   - `retention_sweep_runs` (idempotency checkpoint + RA-2 trigger #3 reconciliation anchor). **HG-15 trigger.**
+3. **SQL functions** (each SECURITY DEFINER, owner `migration_role`, GRANT EXECUTE to `retention_service_role`, per-function justification comment):
+   - `sweep_for_event_type(p_event_type text, p_cutoff_ms bigint, p_max_rows int) returns int`
+   - `sweep_for_table(p_table_name text, p_predicate_kind text, p_cutoff_ms bigint, p_max_rows int) returns int`
+   - `record_sweep_run(...)`, `find_open_run(...)`, `close_sweep_run(...)`, `emit_retention_deleted(...)`
+4. **CI drift test (cross-mirror)** asserting `RETENTION_SCHEDULE` (TS) = `retention_class_for(p_event_type)` (SQL function) = `audit_log_retention_schedule` (SQL table) on the closed enum domain.
+5. **pg_cron schedule.** Daily 03:30 ET (after the 03:00 ET pg_dump per ADR-0012; tolerates the transient-inconsistency posture per Decision §5).
+6. **Edge Function trigger** as the alternative to pg_cron for environments where pg_cron is unavailable. The Edge Function invokes a wrapping SQL function inside a single transaction.
+7. **ADR-0016 schedule rows** for the two new tables (`audit_log_retention_schedule`, `retention_sweep_runs`). The schedule entries are: `audit_log_retention_schedule` = `permanent_schema_table` (no retention; schema artifact); `retention_sweep_runs` = `7y` (mirrors `retention.deleted` retention — they are a pair). **HG-15 re-ratifies.**
+8. **§PI inventory amendments** for `retention_sweep_runs` (no PI; counts + run metadata only) and confirmation that `audit_log_retention_schedule` carries no PI. ~2 rows added.
+9. **`retention_service_role` GRANT documentation** — explicit GRANT EXECUTE on each SECURITY DEFINER function; REVOKE on all base tables; the role is non-login (cannot be reached via JWT).
+10. **pgTAP integration tests** covering every SECURITY DEFINER function + the cross-mirror drift test.
+11. **HG-15 re-ratification** of the operational-table schedule with the two new rows. **The HG-15 trigger is named explicitly: T16.1 introduces `retention_sweep_runs` and `audit_log_retention_schedule` (two new physical tables).** Approval recorded in this ADR pre-T16.1 PR is not possible; user ratifies at T16.1 PR submission.
+12. **A-RETENTION-001 alert wiring** for the F-R3 over-delete threshold; observability-setup's next pass after T16.1 wires the alert sink.
+
+T16.1 does NOT ship until HG-15 ratification for the two new tables is recorded.
+
+## Open-question dispositions (a)–(g) from the librarian briefing — answered
+
+| Q | Disposition | Rationale |
+|---|---|---|
+| (a) Sweep semantics: hard-delete vs redact-but-retain-shape | **Hard-delete uniformly** | Option A above. ADR-0015 + ADR-0016 literal reading. Pseudonym-only is a v2 amendment if a regulator demands it. |
+| (b) Idempotency mechanism | **Checkpoint table `retention_sweep_runs`** | Option C(a) above. Doubles as F-52 forensic surface + RA-2 trigger #3 reconciliation anchor. Library mirrors in-memory via `MemoryRetentionStore`. |
+| (c) Recovery semantics mid-batch | **Single transaction; summary is LAST row** | Option D above. F-24 generalizes to audit-WITH-side-effect; on any failure the entire pass rolls back. Per-batch savepoints rejected. |
+| (d) Interaction with T17 / RA-2 trigger #3 | **Tolerate transient inconsistency; `retention_sweep_runs` is the reconciliation anchor** | Option E above. ADR-0015 §Risks already commits to "transient inconsistency is acceptable." T18's integrity job inherits the reconciliation check (additive). |
+| (e) Pre-deletion user notification | **No notification in v1** | Option F above. No ADR mandates; **HG-10 NOT fired.** Deferred for any future regulator-driven need. |
+| (f) `retention_class` backfill | **None required** | Option G above. T05 migration landed the column; every row stamps at write time. |
+| (g) Schedule-table vs `retention_class_for()` vs `RETENTION_SCHEDULE` authority | **`audit_log_retention_schedule` table is authoritative; SQL function and TS const are mirrors; CI drift assertion enforces equality** | Option H above. Library ships TS-side drift test in T16; T16.1 ships cross-mirror drift test. |
+
+## Reversibility
+
+**Easy** on schedule values (additive migration; `RETENTION_SCHEDULE` const edit + matching SQL row in T16.1). **Easy** on batch sizes / row cap / alarm threshold (config values). **Medium** on the sweep-pass algorithm itself (re-architecting requires changing both `MemoryRetentionStore` and the future `SupabaseRetentionStore` + the SQL functions). **Hard** on the closed `RetentionEventType` enum (every new event type touches the four mirrors — TS const, SQL function, SQL schedule table, and the ADR-0015 schedule itself). **Hard** on the hard-delete-uniformly semantics (reversing to pseudonym-only is a v2 ADR amendment + reviewer pass).
+
+## Consequences
+
+### Positive
+
+- ADR-0015 + ADR-0016 retention promises are no longer aspirational; the sweep is the structural enforcer.
+- G-T05-6 closes (library half); the drift between `RETENTION_SCHEDULE` (TS), `retention_class_for()` (SQL), and `audit_log_retention_schedule` (SQL table) is structurally caught by CI in T16 (TS half) and T16.1 (cross-mirror half).
+- G-T05-7 closes (library exercise; SQL DELETE path lands in T16.1).
+- F-51 / F-52 / F-19 / F-24 mitigations are all encoded in the library contract; the threat-modeler scores them with concrete test obligations rather than narrative mitigations.
+- RA-1 control #5 is preserved (sweep cannot shorten `export.generated` retention; F-R14 asserts).
+- RA-2 trigger #3 has a reconciliation anchor (`retention_sweep_runs.per_event_counts`); T18's integrity job inherits the check.
+- Amendment H pattern is honoured: T16 library-only; T16.1 SQL + production wire-up + HG-15.
+
+### Negative / accepted tradeoffs
+
+- Two new physical tables (`audit_log_retention_schedule`, `retention_sweep_runs`) introduced by T16.1. **HG-15 fires.** Mitigated by the schedule-row addition being part of T16.1's deliverable, not amortized.
+- Hard-delete-uniformly cannot be partially reversed without a v2 amendment.
+- Cross-mirror drift surface (three mirrors: TS const, SQL function, SQL table). Mitigated by CI drift tests on every PR.
+
+### Risks
+
+- **Schedule-mirror drift between PRs.** A T16-only PR adds an event type to `RETENTION_SCHEDULE` (TS) without touching `retention_class_for()` (SQL) or `audit_log_retention_schedule` (SQL table). Mitigated: library-side drift test fails when the TS const has more keys than `RetentionEventType` enum; the cross-mirror test in T16.1 catches the SQL drift. Pre-T16.1, a new event type added in TS cannot affect production (no SQL execution path in T16).
+- **Lock-hold-time on `auth_sessions` (high-churn).** Per-event-type batching + per-pass row-cap bound the lock window. Cap of 20000 rows + batch of 1000 = at most 20 batches per table per pass. Statement timeout in T16.1's SQL functions is set conservatively (default Postgres 30s; sweep functions override to 60s; recorded in T16.1's function comments).
+- **`retention.deleted` rate vs `alarm_threshold`.** A backlog (e.g., first sweep after a long pause) trips the F-R3 alarm. The alarm is informational (does not block the pass); operator reviews and re-runs with a higher threshold if the backlog is legitimate.
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.5 (Limiting Retention) — every persistent record now has an enforced deletion path.
+- [x] PIPEDA Principle 4.9 (Individual Access) — underlying-record-ceiling rule preserves traceability while a record lives; deletion is structural at the floor.
+- [x] `.context/constraints.md` data-lifecycle requirements (lines 130–131) — "Deletion is real deletion" honoured by hard-delete-uniformly; "Retention schedule defined per data type and ENFORCED" honoured by the sweep + the closed-allowlist drift test.
+- [x] `.context/constraints.md` "No PII in app logs / error messages" — F-R13 asserts.
+- [x] `.context/constraints.md` "Parameterized queries only" — `RetentionStore` interface forbids caller-supplied WHERE; the predicate is constructed from the schedule discriminator only.
+- [x] Data residency — no new processor; no new cross-border flow.
+- [x] ADR-0016 hard rule "every operational table touching PI MUST appear in this schedule before the table ships in any migration that lands in `main`" — `audit_log_retention_schedule` and `retention_sweep_runs` are added to the ADR-0016 schedule in T16.1 BEFORE the migration lands. Structurally enforced by Amendment H.
+- [x] HG-14 (ADR-0015 schedule ratification) — RATIFIED 2026-05-22; not re-fired by this ADR.
+- [x] HG-15 (operational-table retention gate) — fires at T16.1 PR submission for the two new tables; this ADR identifies the trigger explicitly.
+- [x] HG-10 (user-facing pre-deletion copy) — explicitly NOT fired. Option F decision: no pre-deletion notification in v1.
+
+## Validation pass (architect self-check)
+
+- **RA-1 compensating control #5 re-open?** No. The sweep does NOT shorten `export.generated` retention (7y) and does NOT touch the post-export notification surface (which lives in `ExportStore.sendPostExportNotification` and is not a retention target). F-R14 is the test obligation that pins this.
+- **RA-2 trigger #3 re-open?** No. The sweep introduces a structured reconciliation anchor (`retention_sweep_runs.per_event_counts`) so the T18 backstop check can attribute live-chain-vs-backup divergence to a sweep pass. Unattributed divergence still re-opens RA-2 (the trigger semantics are unchanged); attributed divergence is the audited expected case.
+- **HG-15 trigger identified for new tables?** Yes. Two new physical tables (`retention_sweep_runs`, `audit_log_retention_schedule`) land in T16.1; HG-15 fires at T16.1 PR submission. T16 itself introduces ZERO new physical tables.
+- **HG-10 explicitly NOT fired?** Confirmed. Option F decision: no user-facing pre-deletion copy in v1.
+- **All carry-forward IDs this design closes:** G-T05-6 (library half — TS drift CI), G-T05-7 (library exercise; SQL DELETE deferred to T16.1).
+- **All carry-forward IDs this design defers to T16.1:** G-T07-1+ (T07's SQL still pending T07.1; sweep can iterate the tables once they exist), G-T08-1, G-T10-4, G-T11-1, G-T13-1 (T13's hard-DELETE on `reprisal_log` is the T16 enforcer per HG-7; library-side honoured by the schedule, SQL DELETE lands in T16.1), G-T14-1.
+
+## Task breakdown (ordered; each task ≤ 1 file of work)
+
+| # | Title | Description | Deps | Acceptance (F-R# from §10) | Owner | Risk | Estimate |
+|---|---|---|---|---|---|---|---|
+| 1 | Add `types.ts` | `RetentionEventType` closed string-literal union; `RetentionClass` discriminator; schedule-shape types; `SweepableSurface` interface. | none | F-R1, F-R10 (type-level) | implementer | low | S (2h) |
+| 2 | Add `schedule.ts` | `RETENTION_SCHEDULE` and `OPERATIONAL_TABLE_SCHEDULE` frozen consts; `EVENT_TYPE_TO_SOURCE_TABLE` map; canonical-JSON helper for `schedule_hash`. | 1 | F-R1, F-R8, F-R9 | implementer | low | M (3h) |
+| 3 | Add `retention-store.ts` | `RetentionStore` (production) and `TestRetentionStore extends RetentionStore` (test-only) interfaces. ESLint comment header forbidding `__debug*` outside Test. | 1 | F-R10, F-R11 | implementer | low | S (1h) |
+| 4 | Add `memory-retention-store.ts` | `MemoryRetentionStore implements TestRetentionStore`; registry-based composition with existing memory stores via `SweepableSurface`; `nowMs()` monotonic shim; HMAC pseudonym for synthetic `retention_service` actor. | 2, 3 | F-R11, F-R12 | implementer | medium | L (6h) |
+| 5 | Add `audit-emission.ts` | `buildRetentionDeletedSummary(...)` constructs the F-52 jsonb meta with `schedule_hash`, `per_event_counts`, `per_table_counts`, `run_id`, `prev_pass_hash`, `lease_window_ms`, etc. | 2 | F-R4, F-R8, F-R9 | implementer | low | M (3h) |
+| 6 | Add `retention-core.ts` | `runRetentionPass({store, config})` implementing the 10-step algorithm (Decision §6). Exhaustive switch on `RetentionEventType` with `never` cast. Dry-run mode. F-51 alarm flag. Per-pass row-cap. | 2, 3, 4, 5 | F-R2, F-R3, F-R4, F-R5, F-R6, F-R7, F-R13, F-R14, F-R15 | implementer | high | L (8h) |
+| 7 | Add `index.ts` | Public surface re-exports. | 6 | (surface) | implementer | low | S (1h) |
+| 8 | ESLint rule `no-spread-into-retention-schedule` | Mirrors T11/T12's allowlist spread ban; forbids spread-into-`RETENTION_SCHEDULE` outside `schedule.ts`. | 2 | F-R10 | implementer | low | S (2h) |
+| 9 | Drift-check test file | `apps/web/test/T16/retention-schedule-drift.test.ts` covering F-R1, F-R8, F-R9 (schedule-vs-enum, `match_underlying`-vs-source-table, frozen-ness). | 2 | F-R1, F-R8, F-R9 | test-writer | low | M (3h) |
+| 10 | Sweep algorithm test file | `apps/web/test/T16/retention-sweep.test.ts` covering F-R2, F-R3, F-R4, F-R5, F-R6, F-R7, F-R11, F-R12, F-R13, F-R14, F-R15. | 4, 5, 6 | (per F-R# above) | test-writer | medium | L (8h) |
+| 11 | RA-1 control #5 regression test | `apps/web/test/T16/ra1-control-5-preserved.test.ts` — snapshot the resolved cutoff for `export.generated`; asserts exactly 7y. | 2, 6 | F-R14 | test-writer | low | S (1h) |
+| 12 | F-19 / F-24 cross-task assertion | `apps/web/test/T16/closed-allowlist-and-audit-before.test.ts` — TypeScript-level type assertion that `RetentionStore` does not surface caller-supplied WHERE; behavioural assertion that summary row is written ONLY if deletes commit (rollback on emit failure). | 3, 6 | F-R4, F-R10 | test-writer | medium | M (3h) |
+
+Total estimate: ~41h library implementer + test-writer (matches the T07 library precedent's order-of-magnitude).
+
+## Cross-references
+
+- **ADR-0015** — per-event-type audit-log retention schedule (authoritative; mirrored verbatim in `RETENTION_SCHEDULE`).
+- **ADR-0016** — operational-table retention schedule (authoritative; mirrored verbatim in `OPERATIONAL_TABLE_SCHEDULE`).
+- **ADR-0002 Amendment H** — sibling-task pattern; T16 = library, T16.1 = production wire-up.
+- **ADR-0012 amendment** — 42-day backup hard-delete + 7y longest audit retention coherence; sweep respects ADR-0015 §Risks "transient inconsistency is acceptable."
+- **RA-1 compensating control #5** — post-export notification surface; F-R14 pins `export.generated` retention.
+- **RA-2 trigger #3** — live-chain vs pg_dump divergence; `retention_sweep_runs.per_event_counts` is the reconciliation anchor.
+- **F-19 / F-24 (threat-model)** — closed-allowlist + audit-before-side-effect; both patterns reused.
+- **F-50 / F-51 / F-52 (threat-model)** — chain-integrity / retention-bug / retention-itself-audited; F-51 and F-52 fully encoded; F-50 is T18's surface (sweep DELETE path is the only legitimate audit-row deletion path and is itself auditable via `retention_sweep_runs`).
+- **G-T05-6 / G-T05-7** — closed library-side; SQL half deferred to T16.1.
+- **G-T07-* / G-T08-1 / G-T10-4 / G-T11-1 / G-T13-1 / G-T14-1** — sweep iterates these tables once they exist (per task); SQL DELETE path lands in T16.1.
+- **G-T08-14 / G-T13-9** — `transaction_ts_ms` shim mirrored.
+- **G-T11-21 / G-T13-15 / G-T14-17** — TestStore interface split mirrored.
+
+## Follow-ups
+
+- [ ] **T16 implementer pass** — execute tasks 1–8 above in order.
+- [ ] **T16 test-writer pass** — execute tasks 9–12 above.
+- [ ] **T16 four-way reviewer pass** — security + second-opinion + privacy + threat-model cross-check on the library deliverable.
+- [ ] **threat-modeler next pass** — add F-R1 through F-R15 to `.context/threat-model.md` under a new §3.6 "Retention sweep" sub-section. Map to existing F-19 / F-24 / F-51 / F-52 lineage explicitly. Score residuals.
+- [ ] **T16.1 (sibling task)** — see "Sibling task spec — T16.1 scope" above. Runs before any deploy carrying real PI. HG-15 fires at T16.1 PR submission.
+- [ ] **observability-setup next pass after T16.1** — wire `A-RETENTION-001` alert sink for F-R3 over-delete threshold.
+- [ ] **T18 next pass** — additive reconciliation check (live `audit_log` absences vs `retention_sweep_runs.per_event_counts` attribution) per RA-2 trigger #3 anchor. No new task; additive to T18.
+
+---
+
 # Amendment pass #5 (2026-05-23) — T07 scope reduction + Argon2id fail-closed
 
 **Decider(s):** architect (amendment pass #5 per privacy-review-t07 §12 BLOCKING findings T07-1 / T07-2 / T07-3 and the consolidated security/second-opinion/privacy reviewer blockers B1–B8 in commit `31f80d3`); **user** ratified the "drop migration to T07.1; fix the 3 small TS blockers" remediation path.
