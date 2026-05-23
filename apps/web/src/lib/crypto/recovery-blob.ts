@@ -58,6 +58,16 @@ export function __setTestOverrideUseBlake2bFallback(fn: (() => boolean) | null):
 }
 
 function isBlake2bFallbackOverrideActive(): boolean {
+  // ADR-0003 Amendment G Testable Assertion #3: in production builds, setting
+  // the override flag MUST NOT enable the BLAKE2b path — even if a future
+  // contributor or an XSS attacker calls the setter. The structural guard:
+  // when NODE_ENV === 'production' the function always returns false.
+  // T07.1's libsodium-wrappers-sumo swap (G-T07-12) makes this moot at the
+  // dep level; this guard is the library-layer defense-in-depth that closes
+  // the contract textually.
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') {
+    return false;
+  }
   if (__testOverrideUseBlake2bFallback === null) return false;
   try {
     return __testOverrideUseBlake2bFallback() === true;

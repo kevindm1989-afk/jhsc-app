@@ -157,6 +157,24 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Resolution scope (T07.1):** swap `libsodium-wrappers` → `libsodium-wrappers-sumo` in `apps/web/package.json`; boot-time assertion in `apps/web/src/lib/crypto/recovery-blob.ts` that throws if `crypto_pwhash` is missing and `NODE_ENV !== 'test'`; pnpm `lockfile-lint` rule asserting `libsodium-wrappers-sumo` is the resolved dep in production builds.
 **Blocker for:** production deploy with real PI.
 
+### G-T07-13 — Svelte 5 + TS `@ts-expect-error` suppressions on event handlers
+**Source:** second-opinion-reviewer T07 final pass.
+**Finding:** `apps/web/src/lib/onboarding/recovery/RecoveryPassphraseScreen.svelte:107, :117` use `@ts-expect-error` on event-handler parameter type annotations because the Svelte AST printer (esrap) cannot emit them. Runtime guards (`e.key === ' ' || e.code === 'Space'`) are in place. Cosmetic / type-system friction; not a correctness defect.
+**Resolution scope:** revisit when esrap or svelte-check upgrades remove the friction. Replace suppressions with proper typed event handlers.
+**Blocker for:** none. Cleanup.
+
+### G-T07-14 — `rotate_committee_data_key` precondition: at-least-one-active-member
+**Source:** second-opinion-reviewer T07 final pass (advisory 8).
+**Finding:** The rotation path does not enforce "at least one active member exists" before `finalize_committee_data_key_rotation`. If `rotateCommitteeDataKey` is called when `revoke_committee_member` has emptied the active set, the new epoch has no wraps and the data key under that epoch is unrecoverable — data-loss risk on a corner case the in-memory tests don't exercise.
+**Resolution scope (T07.1):** add a `SELECT count(*) FROM users WHERE active = true >= 1` precondition inside `rotate_committee_data_key` SQL function; raise on zero. Fold into G-T07-3's pgTAP integration test plan.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-15 — `client.identity_selftest_fail` audit-emission interface unification
+**Source:** second-opinion-reviewer T07 final pass (advisory 10).
+**Finding:** `apps/web/src/lib/crypto/index.ts:382` emits `client.identity_selftest_fail` via the `recordKeyEvent` path with an `as unknown as never` cast because the closed enum forbids the value at the type level. The CI gate `check-audit-enum-coverage.sh` enforces the closed enum at build time, so the cast is structurally safe — but the cast itself is type-uglyness that should disappear in T07.1.
+**Resolution scope (T07.1):** either widen the audit-emission interface to admit a structured-log-shaped emission path that doesn't go through the closed enum, OR route this event through a separate AuthStore-style emission method. Folds with G-T07-10 (KeyStore interface split).
+**Blocker for:** none. Cleanup.
+
 ---
 
 ## How to use this file

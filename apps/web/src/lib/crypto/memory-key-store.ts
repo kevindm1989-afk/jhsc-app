@@ -1,8 +1,10 @@
 /**
  * In-memory implementation of KeyStore for the Vitest harness.
  *
- * Mirrors the SQL semantics that ship in `supabase/migrations/
- * 00000000000002_identity.sql` for the surface the T07 tests exercise.
+ * Mirrors the SQL semantics that will ship in T07.1 (the migration was
+ * deferred per ADR-0002 Amendment H; see G-T07-1 in `.context/known-gaps.md`).
+ * The shape here is the canonical reference for T07.1's SECURITY DEFINER
+ * functions.
  *
  * Determinism: every mutation is synchronous on the JS event loop. No
  * concurrent mutators in tests (vitest singleThread).
