@@ -15,7 +15,7 @@
  * `BACKUP_OBJECT_LOCK_DAYS`.
  */
 
-import type { BackupAuditLogHead, BackupManifest, BackupManifestStatus } from './types';
+import type { BackupAuditLogHead, BackupManifest, BackupManifestStatus, BackupNodeRuntimePin } from './types';
 
 /**
  * Structured upload-rejection reason vocabulary (F-82). Closed literal union;
@@ -81,6 +81,8 @@ export interface BackupManifestPendingInput {
   readonly per_table_row_counts: Readonly<Record<string, number>>;
   readonly per_event_row_counts: Readonly<Record<string, number>>;
   readonly retention_sweep_runs_snapshot_ts_ms: number;
+  readonly schedule_hash: string;
+  readonly node_runtime_pin: BackupNodeRuntimePin;
 }
 
 /**

@@ -87,6 +87,18 @@ export interface BackupManifest {
   readonly per_table_row_counts: Readonly<Record<string, number>>;
   readonly per_event_row_counts: Readonly<Record<string, number>>;
   readonly retention_sweep_runs_snapshot_ts_ms: number;
+  /** SHA-256 of the live `RETENTION_SCHEDULE` + `OPERATIONAL_TABLE_SCHEDULE`
+   *  at pass-start; lets T18 attribute legitimate schedule drift across the
+   *  reconciliation join (ADR-0018 §7). */
+  readonly schedule_hash: string;
+  /** Node + OpenSSL versions at pass-start; the hash-determinism toolchain
+   *  anchor (G-T11-23 lineage; F-78 test obligation per threat-model §3.10). */
+  readonly node_runtime_pin: BackupNodeRuntimePin;
+}
+
+export interface BackupNodeRuntimePin {
+  readonly node_version: string;
+  readonly openssl_version: string;
 }
 
 /**
@@ -126,7 +138,11 @@ export type BackupPassErrorCode =
   | 'cross_region_destination_refused'
   | 'manifest_write_failed'
   | 'head_pointer_failed'
-  | 'kid_lookup_failed';
+  | 'kid_lookup_failed'
+  | 'dump_failed'
+  | 'lease_check_failed'
+  | 'transition_failed'
+  | 'audit_emit_failed';
 
 /**
  * Result discriminated union for `runBackupPass` (F-65 pattern; F-82 closed).
@@ -166,6 +182,10 @@ export type BackupRetentionPassResult =
       readonly status: 'completed';
       readonly deleted_count: number;
       readonly would_fire_alert?: 'A-BACKUP-001';
+    }
+  | {
+      readonly status: 'dry_run';
+      readonly would_delete_count: number;
     }
   | {
       readonly status: 'errored';

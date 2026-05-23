@@ -32,6 +32,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { computeScheduleHash } from '../retention';
 import { BACKUP_TABLES } from './backup-tables';
 import type {
   BackupManifestWrittenAuditRow,
@@ -40,6 +41,7 @@ import type {
 } from './backup-store';
 import type {
   BackupAuditLogHead,
+  BackupNodeRuntimePin,
   BackupPassConfig,
   BackupPassErrorCode,
   BackupPassResult,
@@ -53,6 +55,13 @@ import {
   BACKUP_OBJECT_LOCK_DAYS,
   BACKUP_OBJECT_REF_PREFIX
 } from './types';
+
+function nodeRuntimePin(): BackupNodeRuntimePin {
+  return {
+    node_version: process.versions.node ?? '',
+    openssl_version: process.versions.openssl ?? ''
+  };
+}
 
 /**
  * Pseudonym + phone shapes — used by `generateRunId` to rejection-sample
@@ -156,8 +165,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
 
   // Step 1 — lease check (F-59 mirror).
   const startedAtMs = store.nowMs();
-  if (await store.hasOpenBackupRunWithinWindow(startedAtMs, lease_window_ms)) {
-    return { status: 'skipped', reason: 'pass_already_in_window' };
+  try {
+    if (await store.hasOpenBackupRunWithinWindow(startedAtMs, lease_window_ms)) {
+      return { status: 'skipped', reason: 'pass_already_in_window' };
+    }
+  } catch {
+    return { status: 'errored', run_id: generateRunId(), error_code: 'lease_check_failed' };
   }
 
   const run_id = generateRunId();
@@ -182,13 +195,23 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
 
   // Step 6 — dump the closed allowlist (the per-event histogram + the
   // retention sweep ts come bundled with the snapshot).
-  const dump = await store.dumpClosedAllowlist();
+  let dump: Awaited<ReturnType<BackupStore['dumpClosedAllowlist']>>;
+  try {
+    dump = await store.dumpClosedAllowlist();
+  } catch {
+    return { status: 'errored', run_id, error_code: 'dump_failed' };
+  }
 
   // Step 7 — sha256 over the dump bytes (F-78; G-T11-23 hash-determinism pin).
   const sha256 = hexSha256(dump.blob);
 
   // Step 8 — derive object_ref structurally (F-84).
   const object_ref = deriveObjectRef(run_id, startedAtMs);
+
+  // Step 6b — bind manifest to the retention schedule version + Node/OpenSSL
+  // toolchain (ADR-0018 §7; F-78 test obligation; T18 reconciliation anchor).
+  const schedule_hash = computeScheduleHash();
+  const node_runtime_pin = nodeRuntimePin();
 
   // Dry-run short-circuit: compute the manifest shape but skip the upload.
   if (dry_run) {
@@ -212,7 +235,9 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
       audit_log_head: auditLogHead,
       per_table_row_counts: dump.per_table_row_counts,
       per_event_row_counts: dump.per_event_row_counts,
-      retention_sweep_runs_snapshot_ts_ms: dump.retention_sweep_runs_snapshot_ts_ms
+      retention_sweep_runs_snapshot_ts_ms: dump.retention_sweep_runs_snapshot_ts_ms,
+      schedule_hash,
+      node_runtime_pin
     });
   } catch {
     return { status: 'errored', run_id, error_code: 'manifest_write_failed' };
@@ -235,7 +260,11 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
 
   // Step 11 — transition manifest to `committed`.
   const committedAtMs = store.nowMs();
-  await store.transitionManifestStatus(run_id, 'committed', committedAtMs);
+  try {
+    await store.transitionManifestStatus(run_id, 'committed', committedAtMs);
+  } catch {
+    return { status: 'errored', run_id, error_code: 'transition_failed' };
+  }
 
   // Step 12 — emit `backup.manifest_written` audit row AS THE LAST step.
   // G-T16-PRIV-1: actor_pseudonym at TOP LEVEL only; never duplicated into meta.
@@ -255,10 +284,16 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
       audit_log_head: auditLogHead,
       per_event_row_counts: dump.per_event_row_counts,
       per_table_row_counts: dump.per_table_row_counts,
-      retention_sweep_runs_snapshot_ts_ms: dump.retention_sweep_runs_snapshot_ts_ms
+      retention_sweep_runs_snapshot_ts_ms: dump.retention_sweep_runs_snapshot_ts_ms,
+      schedule_hash,
+      node_runtime_pin
     }
   };
-  await store.emitBackupManifestWritten(auditRow);
+  try {
+    await store.emitBackupManifestWritten(auditRow);
+  } catch {
+    return { status: 'errored', run_id, error_code: 'audit_emit_failed' };
+  }
 
   return { status: 'completed', run_id, manifest_ref: object_ref };
 }
@@ -274,7 +309,8 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
 export async function runBackupRetentionPass(
   opts: RunBackupRetentionPassOpts
 ): Promise<BackupRetentionPassResult> {
-  const { store } = opts;
+  const { store, config = {} } = opts;
+  const dry_run = config.dry_run === true;
   const nowMs = store.nowMs();
   const hardDeleteCutoffMs = BACKUP_HARD_DELETE_DAYS * BACKUP_MS_PER_DAY;
 
@@ -285,24 +321,56 @@ export async function runBackupRetentionPass(
     return { status: 'errored', error_code: 'retention_list_failed' };
   }
 
+  // Dry-run short-circuit: count past-window candidates without touching state.
+  // Mirrors T16 G-T16-PRIV-4 in-cycle resolution pattern.
+  if (dry_run) {
+    let would_delete_count = 0;
+    for (const m of committed) {
+      if (nowMs - m.committed_at_ms >= hardDeleteCutoffMs) {
+        would_delete_count += 1;
+      }
+    }
+    return { status: 'dry_run', would_delete_count };
+  }
+
   let deleted_count = 0;
   let stillLockedPastWindow = false;
+  let nonStillLockedFailure = false;
 
   for (const m of committed) {
     if (nowMs - m.committed_at_ms < hardDeleteCutoffMs) {
       continue;
     }
-    const result = await store.deleteObjectIfUnlocked(m.object_ref);
+    let result: Awaited<ReturnType<BackupStore['deleteObjectIfUnlocked']>>;
+    try {
+      result = await store.deleteObjectIfUnlocked(m.object_ref);
+    } catch {
+      nonStillLockedFailure = true;
+      continue;
+    }
     if (result.deleted === true) {
-      await store.hardDeleteManifestRow(m.run_id, store.nowMs());
-      deleted_count += 1;
+      try {
+        await store.hardDeleteManifestRow(m.run_id, store.nowMs());
+        deleted_count += 1;
+      } catch {
+        nonStillLockedFailure = true;
+      }
       continue;
     }
     // F-75: past-window manifest that the bucket still refuses to delete.
     // Surface the alert symbol; the actual sink wires in T17.1.
-    if (result.deleted === false && result.reason === 'still_locked') {
+    if (result.reason === 'still_locked') {
       stillLockedPastWindow = true;
+    } else {
+      nonStillLockedFailure = true;
     }
+  }
+
+  // Surface non-still-locked failures via the closed-literal error_code
+  // (security Finding 3: previously the literal was declared in the union but
+  // unreachable; now wired so T17.1 production failures surface structurally).
+  if (nonStillLockedFailure) {
+    return { status: 'errored', error_code: 'retention_delete_failed' };
   }
 
   if (stillLockedPastWindow) {

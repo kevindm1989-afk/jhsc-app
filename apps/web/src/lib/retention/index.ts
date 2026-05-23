@@ -34,7 +34,7 @@ export {
   UNDERLYING_RECORD_CEILING_DAYS
 } from './types';
 
-export { RETENTION_SCHEDULE, OPERATIONAL_TABLE_SCHEDULE } from './schedule';
+export { RETENTION_SCHEDULE, OPERATIONAL_TABLE_SCHEDULE, computeScheduleHash } from './schedule';
 
 export type { RetentionStore, DeleteBatchResult, RetentionDeletedAuditRow } from './retention-store';
 

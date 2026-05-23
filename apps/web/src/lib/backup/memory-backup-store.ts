@@ -34,6 +34,7 @@ import type {
 } from './backup-store';
 import type {
   BackupAuditLogHead,
+  BackupNodeRuntimePin,
   BackupManifest,
   BackupManifestStatus
 } from './types';
@@ -95,6 +96,8 @@ interface ManifestRow {
   per_table_row_counts: Record<string, number>;
   per_event_row_counts: Record<string, number>;
   retention_sweep_runs_snapshot_ts_ms: number;
+  schedule_hash: string;
+  node_runtime_pin: BackupNodeRuntimePin;
   insert_sequence: number;
 }
 
@@ -281,6 +284,8 @@ export class MemoryBackupStore implements TestBackupStore {
       per_table_row_counts: { ...input.per_table_row_counts },
       per_event_row_counts: { ...input.per_event_row_counts },
       retention_sweep_runs_snapshot_ts_ms: input.retention_sweep_runs_snapshot_ts_ms,
+      schedule_hash: input.schedule_hash,
+      node_runtime_pin: { ...input.node_runtime_pin },
       insert_sequence: seq
     };
     this.manifests.push(row);
@@ -437,6 +442,8 @@ export class MemoryBackupStore implements TestBackupStore {
       per_table_row_counts: {},
       per_event_row_counts: {},
       retention_sweep_runs_snapshot_ts_ms: input.committed_at_ms,
+      schedule_hash: '',
+      node_runtime_pin: { node_version: '', openssl_version: '' },
       insert_sequence: seq
     };
     this.manifests.push(row);
@@ -530,7 +537,9 @@ export class MemoryBackupStore implements TestBackupStore {
       audit_log_head: row.audit_log_head,
       per_table_row_counts: { ...row.per_table_row_counts },
       per_event_row_counts: { ...row.per_event_row_counts },
-      retention_sweep_runs_snapshot_ts_ms: row.retention_sweep_runs_snapshot_ts_ms
+      retention_sweep_runs_snapshot_ts_ms: row.retention_sweep_runs_snapshot_ts_ms,
+      schedule_hash: row.schedule_hash,
+      node_runtime_pin: { ...row.node_runtime_pin }
     };
   }
 }
