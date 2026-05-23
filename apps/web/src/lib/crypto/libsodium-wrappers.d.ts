@@ -39,6 +39,10 @@ declare module 'libsodium-wrappers' {
     randombytes_buf: (n: number) => Uint8Array;
     // Generic hash (BLAKE2b)
     crypto_generichash: (outlen: number, m: Uint8Array, k?: Uint8Array) => Uint8Array;
+    // Curve scalarmult (derive public key from private key)
+    crypto_scalarmult_base: (sk: Uint8Array) => Uint8Array;
+    crypto_box_PUBLICKEYBYTES: number;
+    crypto_box_SECRETKEYBYTES: number;
     // Utilities
     to_hex: (b: Uint8Array) => string;
     from_hex: (s: string) => Uint8Array;

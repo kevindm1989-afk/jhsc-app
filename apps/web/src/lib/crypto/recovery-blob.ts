@@ -96,12 +96,12 @@ export async function decryptRecoveryBlob(
     const key = await deriveKey(passphrase, blob.salt, blob.kdf_params);
     const privateKey = s.crypto_secretbox_open_easy(blob.ciphertext, blob.nonce, key);
     if (privateKey.length !== 32) return null;
-    // The caller usually re-derives the public key from the private key
-    // via curve scalarmult. For the test surface we accept an optional
-    // public_key_for_pairing so the same row that was written returns
-    // its paired public; production restore uses libsodium's
-    // crypto_scalarmult_base to derive the matching pubkey.
-    const public_key = public_key_for_pairing ?? privateKey; // placeholder
+    // Derive the matching X25519 public key from the recovered private key
+    // via curve scalarmult. (Invariant 1: server only ever sees ciphertext;
+    // the pairing happens on-device.) The optional override is retained
+    // for callers that already hold the pubkey (e.g., test harness).
+    const public_key =
+      public_key_for_pairing ?? s.crypto_scalarmult_base(privateKey);
     return { private_key: privateKey, public_key };
   } catch {
     return null;
