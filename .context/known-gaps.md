@@ -177,10 +177,65 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 
 ---
 
+## T08 carry-forwards (T08.1 sibling production-wire-up)
+
+All eight are ratified under ADR-0002 Amendment H + ADR-0007 + the T08 four-reviewer pass. T08 ships as TS library only (concern intake form + library code + MemoryConcernStore); T08.1 ships the SQL migration + SupabaseConcernStore + integration tests.
+
+### G-T08-1 — SQL migration deferred to T08.1
+**Source:** ADR-0002 Amendment H (sibling-task pattern, mirrors G-T07-1).
+**Finding:** the `concerns` table + `is_active_member()` RLS gate + `concern_rate_limit_consume()` SECURITY DEFINER function + `concerns_list_default_projection()` view (F-18 default-list payload) ship in T08.1, not T08. T08's library tests run against `MemoryConcernStore` exclusively.
+**Resolution scope (T08.1):** ship `supabase/migrations/00000000000003_concerns.sql` with the `concerns` table, RLS policies for INSERT/UPDATE/SELECT, `concerns_default_view` (omitting `source_name_ct` per F-18), rate-limit table + `consume_concern_rate_budget` function, and pgTAP integration tests covering F-15/F-16/F-17/F-18/F-20.
+**Blocker for:** first production deploy carrying real PI.
+
+### G-T08-2 — SupabaseConcernStore production wire-up
+**Source:** ADR-0002 Amendment H.
+**Finding:** Only `MemoryConcernStore implements ConcernStore`. No Edge Function call, no RPC binding to T08's SQL functions, no JWT-validating active-membership check.
+**Resolution scope (T08.1):** wire `SupabaseConcernStore` against the live Postgres schema; route handler at `/api/concerns` validates JWT, calls `is_active_member()`, enforces rate limit via SECURITY DEFINER function, emits audit row in same transaction as INSERT.
+**Blocker for:** production deploy with real PI.
+
+### G-T08-3 — Real Supabase integration tests for T08 SQL functions
+**Source:** ADR-0002 Amendment H + privacy-review-t07 pattern.
+**Finding:** every adminQuery in the T08 test file resolves through the in-memory MemoryConcernStore via the test harness's mini-parser. The SECURITY DEFINER functions + RLS policies in the deferred migration have zero automated test coverage.
+**Resolution scope (T08.1):** pgTAP suite covering `is_active_member()` for INSERT/UPDATE/SELECT; `consume_concern_rate_budget` (20/hr, 200/24h); `concerns_default_view` projection (no source_name_ct); per-record reveal flow with audit-emit-before-return ordering.
+**Blocker for:** T08.1 PR submission.
+
+### G-T08-4 — ADR-0016 schedule row for `concerns` table
+**Source:** ADR-0016 hard rule "every operational table touching PI MUST appear in this schedule before the table ships in any migration that lands in `main`".
+**Finding:** `concerns` (C3 body + C4 source_name + C1 hazard/severity/location + actor anchor) needs an ADR-0016 operational-table schedule row before the T08.1 migration lands.
+**Resolution scope (T08.1):** architect amendment adds the schedule row; HG-15 user re-ratification covers the new table.
+**Blocker for:** T08.1 PR submission.
+
+### G-T08-5 — §PI inventory amendment for `concerns` columns
+**Source:** privacy-review pattern (mirror of G-T07-5).
+**Finding:** new PI inventory rows for `concerns.id`, `concerns.actor_id`, `concerns.title_ct`, `concerns.body_ct`, `concerns.source_name_ct`, `concerns.hazard_class`, `concerns.severity`, `concerns.location_id`, `concerns.created_at`, `concerns.updated_at`.
+**Resolution scope (T08.1):** architect amendment to `.context/decisions.md` §PI inventory.
+**Blocker for:** T08.1 PR submission.
+
+### G-T08-6 — Per-record passphrase storage / verification for reveal flow
+**Source:** F-18 mitigation refers to "server tracks an ephemeral unlock token bound to the audit-log row" but T08 library-layer concern-core accepts the passphrase as an opaque string and does not enforce a verification policy (the in-memory store does not store per-record passphrases at all).
+**Finding:** the F-18 reveal-flow contract requires that the per-record passphrase be (a) set at submit time when `anonymous === false`, (b) stored in a form the server can verify without seeing the plaintext source_name. T08 library does not yet implement this — only the audit-emit-before-return ordering.
+**Resolution scope (T08.1):** add per-record passphrase column + bcrypt/argon2 hash + verify step in `reveal_concern_source` SECURITY DEFINER function; surface the per-record passphrase field in the intake form's named-source branch.
+**Blocker for:** T08.1 PR submission.
+
+### G-T08-7 — Route inventory binding to actual SvelteKit `+server.ts` files
+**Source:** ADR-0007 route inventory contract.
+**Finding:** the ADR-0007 route-inventory test passes in T08 because the harness's `getRouteInventory()` returns a hand-curated list. There is no SvelteKit `+server.ts` for `/api/concerns` yet; the harness's "no public-write surface" guarantee is structural-by-absence (no file exists) but the test's assertion is harness-driven.
+**Resolution scope (T08.1):** land the SvelteKit `/api/concerns/+server.ts` with `requireAuthenticated` middleware; update `getRouteInventory()` to read from the real route tree.
+**Blocker for:** first production deploy.
+
+### G-T08-8 — F-30 session-invalidation timing in production
+**Source:** F-30 — "removed member with a still-valid JWT: INSERT denied within 60 seconds of `committee_membership.active = false`".
+**Finding:** T08's MemoryConcernStore + harness `callProtected` enforce the active-member gate synchronously (immediate denial after `coChairUpdateMembership({active: false})`). Production needs the same gate at the Edge Function layer with documented ≤60s propagation (the 5s SLO already established in F-39 / T05 is stricter than F-30's 60s but the test uses 60s).
+**Resolution scope (T08.1):** document the gate in the route handler; integration test asserts the ≤60s budget against the live Supabase stack.
+**Blocker for:** T08.1 PR submission.
+
+---
+
 ## How to use this file
 
 - When working on T05.1 / production wire-up: search for `G-T05-*` and resolve them in a single pass.
 - When working on T07.1 / production wire-up: search for `G-T07-*` and resolve them in a single pass.
+- When working on T08.1 / production wire-up: search for `G-T08-*` and resolve them in a single pass.
 - When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.

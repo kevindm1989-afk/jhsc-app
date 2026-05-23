@@ -28,6 +28,7 @@
  * dependencies and works in every environment.
  */
 
+import { createHash } from 'node:crypto';
 import { vi } from 'vitest';
 import { MemoryAuthStore } from '../../src/lib/auth/memory-store';
 import { makeAuthClient } from '../../src/lib/auth/auth-core';
@@ -39,10 +40,18 @@ import {
 import type { AuthClient, PasskeyCredential } from '../../src/lib/auth/types';
 import {
   enrollIdentityKeypair,
+  initCommitteeKey,
   makeKeyCore,
   MemoryKeyStore,
   type KeyCore
 } from '../../src/lib/crypto';
+import {
+  listConcerns as listConcernsCore,
+  MemoryConcernStore,
+  revealSource as revealSourceCore,
+  submitConcern as submitConcernCore,
+  updateConcernText as updateConcernTextCore
+} from '../../src/lib/concerns';
 import {
   __setShowAgainAuditObserverForTest,
   __setShowAgainAuditOverrideForTest
@@ -535,6 +544,21 @@ class TestSupabaseImpl implements TestSupabase {
   private auditSpyDomRenderTs: number | null = null;
   private auditEndpoint500ForEvents = new Set<string>();
   private concernRowsById = new Map<string, { title_ct: Buffer; body_ct: Buffer }>();
+  /**
+   * T08 — concern intake store + concern-core wiring. Lives alongside the
+   * key store so pseudonyms join across surfaces (ADR-0016 §Decision 1
+   * shared HMAC key). Lazily initialised at first concern-related call so
+   * tests that never touch concerns pay no setup cost.
+   */
+  private concernStoreInst: MemoryConcernStore;
+  /**
+   * Cleartext committee data key the concern-core library encrypts with.
+   * Set in `ensureCommitteeDataKey()` the first time a T08 client surface
+   * is used. In production this comes from `unwrapForSession` against the
+   * caller's per-member wrap; the harness shortcuts directly because the
+   * key-bytes are already in `MemoryKeyStore` test-only storage.
+   */
+  private committeeDataKeyBytes: Uint8Array | null = null;
   private __adminQuery: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
 
   retentionService = {
@@ -599,6 +623,12 @@ class TestSupabaseImpl implements TestSupabase {
       };
     }
     this.keyCoreInst = makeKeyCore({ store: this.keyStoreInst, idbBlobs: this.idbBlobs });
+    // T08 — concern store sharing the same HMAC key so audit pseudonyms
+    // join across auth / key / concern surfaces (ADR-0016 §Decision 1).
+    this.concernStoreInst = new MemoryConcernStore(
+      () => Date.now(),
+      this.store.__debugHmacKey()
+    );
     this.idb = {
       setRaw: async (name: string, bytes: Uint8Array) => {
         this.idbBlobs.set(name, new Uint8Array(bytes));
@@ -655,6 +685,10 @@ class TestSupabaseImpl implements TestSupabase {
     (this.keyStoreInst as unknown as {
       __setActiveMember: (uid: string, active: boolean) => void;
     }).__setActiveMember(uid, isActive);
+    // T08 — F-15 concern-store RLS gate mirrors the key-store active-
+    // member set. Inactive enrollments stay out of the active set so
+    // `attemptInsertConcernRaw` returns `rls_denied` per the F-15 test.
+    this.concernStoreInst.__setActiveMember(uid, isActive);
     const identity = {
       public_key: enroll.public_key,
       private_key: await this.keyStoreInst.__getIdentityPrivateKeyLocalOnly(uid)
@@ -690,6 +724,14 @@ class TestSupabaseImpl implements TestSupabase {
     opts: { active?: boolean; role?: string }
   ): Promise<void> {
     await this.store.ensureUser(uid, opts);
+    // Mirror the membership flip to the concern store so F-15 + F-30
+    // tests observe the same active-member set across surfaces.
+    if (opts.active !== undefined) {
+      this.concernStoreInst.__setActiveMember(uid, opts.active);
+      (this.keyStoreInst as unknown as {
+        __setActiveMember: (uid: string, active: boolean) => void;
+      }).__setActiveMember(uid, opts.active);
+    }
   }
 
   async coChairIssueRecoveryReset(_cochair: { user_id: string }, target: string): Promise<void> {
@@ -697,13 +739,60 @@ class TestSupabaseImpl implements TestSupabase {
     await this.keyStoreInst.markRecoveryResetIssued(target);
   }
 
-  client(user: { user_id: string }): unknown {
-    // Minimal client surface for the T07 ciphertext-shape + canary tests.
-    // The client encrypts via the committee data key (held in the
-    // MemoryKeyStore) and inserts into an in-memory `concerns` table on
-    // the same store.
+  /**
+   * Lazy-init the committee data key. T07 tests call `initCommitteeKey`
+   * explicitly; T08 tests do not, so we initialise once on first use.
+   * The bytes are sourced from the MemoryKeyStore's test-only data-key
+   * map (the same path the existing T07 client flow consumed).
+   */
+  private async ensureCommitteeDataKey(actor_user_id: string): Promise<Uint8Array> {
+    if (this.committeeDataKeyBytes !== null) return this.committeeDataKeyBytes;
+    let meta = await this.keyStoreInst.getCurrentCommitteeKeyMetadata();
+    if (!meta) {
+      await initCommitteeKey(this.keyCoreInst, { user_id: actor_user_id });
+      meta = await this.keyStoreInst.getCurrentCommitteeKeyMetadata();
+    }
+    if (!meta) throw new Error('ensureCommitteeDataKey: init failed');
+    const dataKey = (this.keyStoreInst as unknown as {
+      __getDataKeyBytesForKeyId: (k: string) => Uint8Array | null;
+    }).__getDataKeyBytesForKeyId(meta.key_id);
+    if (!dataKey) throw new Error('ensureCommitteeDataKey: data key bytes missing');
+    this.committeeDataKeyBytes = dataKey;
+    return dataKey;
+  }
+
+  client(user: { user_id?: string; session_id?: string }): unknown {
+    // The harness accepts two shapes:
+    //   - `{ user_id }` from `enrollUser` (most callers).
+    //   - `{ access_token, session_id }` from `makeAuthSession` (the
+    //     F-15 "authenticated-but-no-membership" path passes this shape
+    //     because makeAuthSession does NOT enroll a `committee_membership`
+    //     row). The session_id format is `sess-{n}-{user_id}` so we
+    //     recover the uid from it.
+    let resolvedUserId = user.user_id;
+    if (!resolvedUserId && user.session_id) {
+      const m = user.session_id.match(/^sess-\d+-(.+)$/);
+      resolvedUserId = m?.[1] ?? '';
+    }
+    if (!resolvedUserId) {
+      throw new Error('supa.client(user): could not resolve user_id from input');
+    }
+    const userId = resolvedUserId;
+    // T07 + T08 — client surface for concern intake.
+    //
+    // T07 uses `insertConcern(...)` against the inline encryption +
+    // `concernRowsById` map so it can grep the ct bytes for the canary.
+    // T08 uses the same `insertConcern` (with the new `anonymous` /
+    // `source_name_plaintext` fields) plus update / list / reveal /
+    // attempt-raw flows, routed through `concern-core` + `MemoryConcernStore`.
+    //
+    // Backwards compat: the T07 inline path runs FIRST so its existing
+    // `SELECT title_ct, body_ct FROM concerns WHERE id = $1` adminQuery
+    // continues to find the row. The concern-store row exists in parallel.
+    const self = this;
     const ks = this.keyStoreInst;
     const idMap = this.concernRowsById;
+    const concerns = this.concernStoreInst;
     return {
       insertConcern: async (concern: {
         title: string;
@@ -711,33 +800,66 @@ class TestSupabaseImpl implements TestSupabase {
         hazard_class: string;
         severity: string;
         location_id: string;
+        /** T08 — when false the rep is recording a worker's name. */
+        anonymous?: boolean;
+        /** T08 — required when `anonymous === false`. */
+        source_name_plaintext?: string;
       }) => {
+        // T07 inline path — preserves the canary-grep + ciphertext-shape
+        // round-trip the T07 ADR-0003 Invariant 1 tests depend on.
         const meta = await ks.getCurrentCommitteeKeyMetadata();
-        if (!meta) throw new Error('insertConcern: no committee data key initialised');
-        const dataKey = (ks as unknown as {
-          __getDataKeyBytesForKeyId: (k: string) => Uint8Array | null;
-        }).__getDataKeyBytesForKeyId(meta.key_id);
-        if (!dataKey) throw new Error('insertConcern: data key bytes missing in test store');
-        const { ready } = await import('../../src/lib/crypto/sodium');
-        const s = await ready();
-        const nonce = s.randombytes_buf(s.crypto_secretbox_NONCEBYTES);
-        // Use Buffer.from(string, 'utf8') — libsodium accepts Uint8Array
-        // shaped inputs but jsdom's TextEncoder output sometimes fails
-        // a strict-typeof check inside the wasm bridge. Buffer is a
-        // Uint8Array subclass so the bridge accepts it cleanly.
-        const titleBytes = new Uint8Array(Buffer.from(concern.title, 'utf8'));
-        const bodyBytes = new Uint8Array(Buffer.from(concern.body, 'utf8'));
-        // Stored shape: [24-byte nonce][secretbox ciphertext]. Total
-        // length is content + 24 (nonce) + 16 (MAC) — at minimum 40
-        // bytes; with a non-empty payload >= 48 (which the T1 test
-        // asserts as the "sealed-box-ish" floor).
-        const titleCt = s.crypto_secretbox_easy(titleBytes, nonce, dataKey);
-        const bodyCt = s.crypto_secretbox_easy(bodyBytes, nonce, dataKey);
-        const title_ct = Buffer.concat([Buffer.from(nonce), Buffer.from(titleCt)]);
-        const body_ct = Buffer.concat([Buffer.from(nonce), Buffer.from(bodyCt)]);
-        const id = `concern-${idMap.size + 1}`;
-        idMap.set(id, { title_ct, body_ct });
-        return id;
+        let inlineId: string | null = null;
+        if (meta) {
+          const dataKey = (ks as unknown as {
+            __getDataKeyBytesForKeyId: (k: string) => Uint8Array | null;
+          }).__getDataKeyBytesForKeyId(meta.key_id);
+          if (dataKey) {
+            const { ready } = await import('../../src/lib/crypto/sodium');
+            const s = await ready();
+            const nonce = s.randombytes_buf(s.crypto_secretbox_NONCEBYTES);
+            const titleBytes = new Uint8Array(Buffer.from(concern.title, 'utf8'));
+            const bodyBytes = new Uint8Array(Buffer.from(concern.body, 'utf8'));
+            const titleCt = s.crypto_secretbox_easy(titleBytes, nonce, dataKey);
+            const bodyCt = s.crypto_secretbox_easy(bodyBytes, nonce, dataKey);
+            const title_ct = Buffer.concat([Buffer.from(nonce), Buffer.from(titleCt)]);
+            const body_ct = Buffer.concat([Buffer.from(nonce), Buffer.from(bodyCt)]);
+            inlineId = `concern-${idMap.size + 1}`;
+            idMap.set(inlineId, { title_ct, body_ct });
+          }
+        }
+
+        // T08 concern-core path. The T07 tests call this without the new
+        // T08-only fields (`anonymous` / `source_name_plaintext`); default
+        // them to the safer values (anonymous=true; no source name).
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const result = await submitConcernCore(
+          { store: concerns, committeeKeyBytes: dataKeyBytes, now: () => Date.now() },
+          { user_id: userId },
+          {
+            title: concern.title,
+            body: concern.body,
+            hazard_class: concern.hazard_class as
+              | 'physical' | 'chemical' | 'biological' | 'ergonomic' | 'psychosocial' | 'other',
+            severity: concern.severity as 'low' | 'medium' | 'high' | 'critical',
+            location_id: concern.location_id,
+            anonymous: concern.anonymous ?? true,
+            source_name_plaintext: concern.source_name_plaintext
+          }
+        );
+        if (result.ok === false) {
+          // T07 path: a T07 caller did not expect a thrown error from a
+          // happy-path insert. The only failure modes here are RLS (not
+          // hit if the user is enrolled active) and rate-limit (T07
+          // tests do not exercise concerns at the rate limit). Surface
+          // as a thrown error so a real bug surfaces instead of silently
+          // returning the inline id.
+          throw new Error(
+            `insertConcern: concern-core denied (${result.reason})`
+          );
+        }
+        // Prefer the inline id for T07 compatibility; fall back to the
+        // concern-store id for T08 callers who need to update/reveal.
+        return inlineId ?? result.id;
       },
       insertConcernCanary: async (_opts: { canary: string }) => {
         // The implementer's contract: regardless of what the canary
@@ -745,21 +867,182 @@ class TestSupabaseImpl implements TestSupabase {
         // (sealed by the committee data key). The Edge Function path is
         // a no-op in tests.
         return { ok: true };
+      },
+
+      // -----------------------------------------------------------------
+      // T08 — F-15 attempt-raw insert. Returns a structured result
+      // (no thrown error) so the test can branch on `status`.
+      // -----------------------------------------------------------------
+      attemptInsertConcernRaw: async (concern: {
+        title: string;
+        body: string;
+        anonymous: boolean;
+        source_name_plaintext?: string;
+      }) => {
+        // The unauthenticated route is rejected at the route layer (see
+        // `fetch('/api/concerns', ...)`); this method represents an
+        // authenticated user whose membership may or may not be active.
+        //
+        // Short-circuit before encryption + committee-key init when the
+        // actor is not an active member — the F-15 RLS gate denies at
+        // the SQL boundary, and there is no committee-key wrap to
+        // unwrap. Mirroring that, the harness avoids the test-only
+        // initCommitteeKey path entirely for inactive actors. This
+        // matches the production posture: an inactive user's `/api/
+        // concerns` POST is rejected at the route gateway before the
+        // encryption pipeline runs.
+        const active = await concerns.isActiveMember(userId);
+        if (!active) {
+          return {
+            status: 'rls_denied' as const,
+            body: { error: 'forbidden' }
+          };
+        }
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const result = await submitConcernCore(
+          { store: concerns, committeeKeyBytes: dataKeyBytes, now: () => Date.now() },
+          { user_id: userId },
+          {
+            title: concern.title,
+            body: concern.body,
+            // F-15 / F-20 do not depend on these fields, so we default
+            // them to the lowest-information shapes.
+            hazard_class: 'physical',
+            severity: 'medium',
+            location_id: 'loc-1',
+            anonymous: concern.anonymous,
+            source_name_plaintext: concern.source_name_plaintext
+          }
+        );
+        if (result.ok === true) {
+          return { status: 200, body: { id: result.id } };
+        }
+        if (result.reason === 'rls_denied') {
+          return { status: 'rls_denied', body: result.body };
+        }
+        // rate_limited
+        return { status: result.status, body: result.body };
+      },
+
+      // -----------------------------------------------------------------
+      // T08 — F-16 update flow. Re-encrypts each provided plaintext and
+      // emits `concern.updated` with prev_field_hashes via concern-core.
+      // -----------------------------------------------------------------
+      updateConcern: async (
+        id: string,
+        patch: {
+          title?: string;
+          body?: string;
+          hazard_class?:
+            | 'physical' | 'chemical' | 'biological' | 'ergonomic' | 'psychosocial' | 'other';
+          severity?: 'low' | 'medium' | 'high' | 'critical';
+          location_id?: string;
+        }
+      ) => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await updateConcernTextCore(
+          { store: concerns, committeeKeyBytes: dataKeyBytes, now: () => Date.now() },
+          { user_id: userId },
+          id,
+          patch
+        );
+        if (r.ok === false) throw new Error(`updateConcern: ${r.reason}`);
+        return { ok: true };
+      },
+
+      // -----------------------------------------------------------------
+      // T08 — F-18 default-projection list (no source_name_ct on rows).
+      // -----------------------------------------------------------------
+      listConcerns: async () => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        return listConcernsCore(
+          { store: concerns, committeeKeyBytes: dataKeyBytes, now: () => Date.now() },
+          { user_id: userId }
+        );
+      },
+
+      // -----------------------------------------------------------------
+      // T08 — F-18 reveal-source flow. Audit row commits BEFORE plaintext
+      // is returned (concern-core enforces; tests assert ts ordering).
+      // -----------------------------------------------------------------
+      revealConcernSource: async (id: string, per_record_passphrase: string) => {
+        const dataKeyBytes = await self.ensureCommitteeDataKey(userId);
+        const r = await revealSourceCore(
+          { store: concerns, committeeKeyBytes: dataKeyBytes, now: () => Date.now() },
+          { user_id: userId },
+          id,
+          per_record_passphrase
+        );
+        if (r === null) throw new Error('revealConcernSource: no source');
+        return r;
       }
     };
   }
 
-  async fetch(path: string, _opts?: Record<string, unknown>): Promise<unknown> {
+  async fetch(
+    path: string,
+    opts?: Record<string, unknown>
+  ): Promise<{ status: number; body: unknown }> {
     // Invariant 2 — no admin-recovery routes exist. Any /api/admin/
     // recover-*  or /api/admin/decrypt-as/* path returns 404.
     if (path.startsWith('/api/admin/recover-') || path.startsWith('/api/admin/decrypt-as')) {
       return { status: 404, body: {} };
     }
+    // T08 / ADR-0007 — concern-write routes have no public-write surface.
+    // An anonymous (unauthenticated) POST returns 401 per the route
+    // inventory. The actual route lives in the SvelteKit + Edge Function
+    // layer in T08.1; the harness mirrors the contract here.
+    const isAnonymous = opts?.anonymous === true;
+    const method = (opts?.method as string | undefined)?.toUpperCase();
+    if (isAnonymous && method && method !== 'GET') {
+      if (
+        path.startsWith('/api/concerns') ||
+        path.startsWith('/api/reprisal') ||
+        path.startsWith('/api/inspections') ||
+        path.startsWith('/api/work-refusal') ||
+        path.startsWith('/api/s51')
+      ) {
+        return { status: 401, body: { error: 'unauthorized' } };
+      }
+    }
     return { status: 200, body: {} };
   }
 
-  async callProtected(jwt: string, opts?: { route?: string }): Promise<unknown> {
-    return this.authClientInst.callProtected(jwt, opts);
+  async callProtected(
+    jwt: string,
+    opts?: { route?: string; path?: string; method?: string; body?: unknown }
+  ): Promise<{ status: number; body?: unknown }> {
+    // First check session validity through the auth client. F-39 / T05
+    // semantics: revoked sessions and expired tokens → 401.
+    const innerOpts: { route?: string } = {};
+    if (opts?.route !== undefined) innerOpts.route = opts.route;
+    const r = (await this.authClientInst.callProtected(jwt, innerOpts)) as {
+      status: number;
+      body?: unknown;
+    };
+    if (r.status !== 200) return r;
+
+    // T08 / F-30 — for concern routes the route handler ALSO consults the
+    // active-member set per request. A removed member's JWT is still
+    // session-valid until expiry; the membership flip causes a 403 at the
+    // route layer within the F-30 budget.
+    if (opts?.path && opts.path.startsWith('/api/concerns')) {
+      const parts = jwt.split('.');
+      const session_id = parts[0] ?? '';
+      // session_id shape from MemoryAuthStore.createSession is
+      // `sess-{n}-{user_id}`; the user_id is everything after the second '-'.
+      const m = session_id.match(/^sess-\d+-(.+)$/);
+      const uid = m?.[1] ?? '';
+      if (!uid) return { status: 401, body: { error: 'unauthorized' } };
+      const isActive = await this.concernStoreInst.isActiveMember(uid);
+      if (!isActive) {
+        return { status: 403, body: { error: 'forbidden' } };
+      }
+      // The harness does not actually execute the route body here; the
+      // F-30 test asserts a 401/403 status only. A wider integration
+      // test lands in T08.1 against the live Supabase stack.
+    }
+    return r;
   }
 
   async adminQuery(
@@ -772,6 +1055,51 @@ class TestSupabaseImpl implements TestSupabase {
       const id = String((params ?? [])[0]);
       const row = this.concernRowsById.get(id);
       return { rows: row ? [{ title_ct: row.title_ct, body_ct: row.body_ct }] : [] };
+    }
+
+    // T08 — F-17 audit-row probes. The audit row is in the
+    // MemoryConcernStore (not the AuthStore or KeyStore), so we intercept
+    // before falling through to the auth-store-only generic handler.
+    {
+      const eventTypeMatch = norm.match(
+        /^SELECT\s+(actor_pseudonym(?:,\s*meta)?|meta(?:,\s*actor_pseudonym)?)\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'(concern\.[a-z_]+)'\s+ORDER\s+BY\s+id\s+DESC\s+LIMIT\s+1$/i
+      );
+      if (eventTypeMatch) {
+        const event = eventTypeMatch[2]!;
+        const rows = this.concernStoreInst
+          .__debugAuditRows()
+          .filter((r) => r.event_type === event)
+          .sort((a, b) => b.id - a.id)
+          .slice(0, 1)
+          .map((r) => ({ actor_pseudonym: r.actor_pseudonym, meta: r.meta }));
+        return { rows };
+      }
+    }
+
+    // T08 — F-20 actor row count.
+    if (/^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+concerns\s+WHERE\s+actor_id\s*=\s*\$1$/i.test(norm)) {
+      const uid = String((params ?? [])[0]);
+      const n = await this.concernStoreInst.countConcernsByActor(uid);
+      return { rows: [{ n }] };
+    }
+
+    // T08 — F-16 prior-ciphertext sha256 probe. The concern-store holds
+    // the canonical row; the inline `concernRowsById` map (T07-compat) is
+    // ignored here because the F-16 audit row was emitted off the concern-
+    // store path. The `encode(digest(..., 'sha256'), 'hex')` aggregate is
+    // computed in JS over the row's `title_ct` bytes.
+    if (
+      /^SELECT\s+encode\(digest\(title_ct,\s*'sha256'\),\s*'hex'\)\s+AS\s+h\s+FROM\s+concerns\s+WHERE\s+id\s*=\s*\$1$/i.test(
+        norm
+      )
+    ) {
+      const id = String((params ?? [])[0]);
+      const row = this.concernStoreInst
+        .__debugConcerns()
+        .find((r) => r.id === id);
+      if (!row) return { rows: [] };
+      const h = createHash('sha256').update(row.title_ct).digest('hex');
+      return { rows: [{ h }] };
     }
     if (/__test_force_wrap_for_inactive_member/i.test(norm)) {
       // Emit the A-KEY-ROT-001 alert row to satisfy the alerting test.
@@ -873,6 +1201,34 @@ class TestSupabaseImpl implements TestSupabase {
           this.auditSpyEntries.push({ event_type: e.event_type, meta: e.meta, ts });
         }
       };
+    }
+    // T08 — patch the concern store's recordConcernEvent so F-18 ordering
+    // tests can read the audit ts via `last_written_ts_for(...)`.
+    {
+      const cs = this.concernStoreInst as unknown as {
+        recordConcernEvent: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+        }) => Promise<void>;
+        __originalRecordConcernEvent?: (e: {
+          event_type: string;
+          meta: Record<string, unknown>;
+          target_id: string;
+          actor_pseudonym: string;
+        }) => Promise<void>;
+      };
+      if (!cs.__originalRecordConcernEvent) {
+        cs.__originalRecordConcernEvent = cs.recordConcernEvent.bind(this.concernStoreInst);
+        cs.recordConcernEvent = async (e) => {
+          const ts = Date.now();
+          await cs.__originalRecordConcernEvent!(e);
+          if (this.auditSpyEnabled) {
+            this.auditSpyEntries.push({ event_type: e.event_type, meta: e.meta, ts });
+          }
+        };
+      }
     }
     // Bridge the show-again controller's audit observer to the spy. The
     // Svelte component's default `onAudit` doesn't itself emit; the
