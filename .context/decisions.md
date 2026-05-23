@@ -509,6 +509,14 @@ The implementer picks these up in order. Each task is ≤1 file or 1 closed PR u
 13. **Cross-mirror SQL drift test.** Asserts TS `INTEGRITY_CHECK_EVENT_TYPES` const ⊆ SQL `audit_log.event_type` CHECK constraint values; asserts the three new strings are in BOTH the TS const AND the SQL CHECK constraint widening.
 14. **HG-15 re-ratification at PR submission.** New physical `integrity_check_runs` table + optional `audit_chain_anchors` table trigger HG-15.
 
+## Threat-model cross-reference (ratified by §3.11)
+
+`.context/threat-model.md` §3.11 ("Audit-log integrity (T18 library + T18.1 SQL)") scores this ADR's placeholder set F-86..F-100 with **final numbering F-86..F-100** (no renumbering — the placeholder range was assigned correctly; F-86..F-100 are sequential after §3.10's F-70..F-85 and have no collision in `.context/threat-model.md`). The §Acceptance criteria F-### list above is the authoritative test-obligation source; §3.11's table is the STRIDE / lineage / scope rationale for each.
+
+- **Final F-### range:** F-86 (closed-allowlist drift), F-87 (audit-before-alert-fanout), F-88 (summary-LAST in tx), F-89 (chain-walk mismatch — primary surface), F-90 (sequential-id gap detection with sweep attribution), F-91 (backup-diff mismatch — **LOAD-BEARING for RA-2 trigger #3**), F-92 (attributable-vs-unattributable reconciliation — Option G binding rule), F-93 (runtime-pin coherence — OPERATIONAL not A-AUDIT-001), F-94 (no PII in mismatch / ran / anchor rows), F-95 (A-AUDIT-001 vs A-INTEGRITY-002 distinct), F-96 (weekly chain anchor emission — RA-2 manual backstop), F-97 (no caller-supplied predicate / pivot / WHERE / row-range / runtime_pin), F-98 (TestStore split + barrel re-export check), F-99 (row-cap + `capped` state), F-100 (no PII in errors — closed-literal error_codes).
+- **§3.11 verdicts (architect asks):** #1 F-91 is LOAD-BEARING (pivot-rewrite attack walk-through confirms only backup-diff catches it); #2 F-92 attribution rule pinnable in BOTH directions (five sub-directions); #3 F-88 is F-58 mirror, invariant holds; #4 F-87 vs F-88 are COHERENT not contradictory (mismatch rows first within tx; ran row last within tx; alert symbol after commit); #5 F-93 routing `runtime_pin_mismatch` to OPERATIONAL is correct (false-positive prevention on toolchain upgrades); #6 F-95 distinct causes confirmed; #7 RA-2 compensating control #3 STRENGTHENED (not re-opened); #8 none of the four RA-2 re-open triggers fires.
+- **§3.11 carry-forwards:** G-T18-1..G-T18-14 + G-T18-NO-T16-T17-COUPLING + G-T18-RA2-PRE-SNAPSHOT (the load-bearing pre-snapshot test obligation).
+
 ---
 
 ## ADR-0018 — T17 backup object-lock library + MemoryBackupStore
