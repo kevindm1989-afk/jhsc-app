@@ -25,6 +25,155 @@ pointing to the new one. The history is the value.
 
 ---
 
+# ADR-0016: Operational-table retention schedule + HMAC pseudonymization standard for Postgres (HG-15)
+
+**Status:** Accepted
+**Date:** 2026-05-23
+**Decider(s):** architect (amendment pass #4 per privacy-review-t05 §2.1 / §3 / §7 / §9 and consolidated security-reviewer blockers B1–B4); **HG-15 (NEW) — user ratification of (a) the operational-table retention schedule below and (b) the HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC posture before T16 ships.**
+
+**Source:** privacy-review-t05 §2.1 Findings 1+2 / §2.2 (24h retention) / §3 / §7 (PI inventory rows) / §8 cross-cuttings / §9 architect-amendment list (items 1, 3, 6); consolidated security-reviewer blockers B1 (HMAC-not-SHA), B2 (TOTP consumed-log documentation), B4 (drop plaintext `totp_code`); threat-model F-38 (TOTP code reuse-detection). Cross-references **ADR-0002** (passkeys + TOTP-enrollment bootstrap, the parent), **ADR-0002 Amendment G** (this pass; folds the four T05 auth-side-table decisions into the auth ADR), **ADR-0015** (audit-log per-event retention — this ADR is a sibling for *non-audit-log* operational tables), **observability/audit-log.md §2** (`actor_pseudonym = HMAC-BLAKE2b-256(uid)[:16hex]` — the canonical pseudonymization wording, which observability-setup updates on its next pass to permit HMAC-SHA-256 with `app.hmac_pseudonym_key`).
+
+## Context
+
+T05 (auth core + auth migration) introduced four classes of **operational, non-audit-log** Postgres tables that touch PI or PI-adjacent material:
+
+- `auth_totp_bootstraps` — single-use TOTP bootstrap rows, 15-minute ceiling, hard-deleted on consume (F-43).
+- `auth_totp_consumed_log` — F-38 reuse-detection log; persists past consume; **not previously documented**.
+- `auth_sessions` — short-lived session rows + revocation history.
+- `webauthn_credentials` — per-passkey credential rows.
+
+ADR-0015 covers `audit_log` retention. It does **not** cover these tables. Without an explicit schedule for them, the retention job (T16) and the PI inventory have no source of truth, and the privacy-reviewer's PIPEDA Principle 4.5 "limited to purpose" defensibility cannot be asserted.
+
+Separately, the T05 migration introduced **plain unkeyed `digest(X, 'sha256')`** as the pseudonymization primitive in four places (consumed-log code hash + cred_id pseudonym + session_id pseudonym + an `alert.fired`-shaped pseudonym). Plain SHA over a 10^6 TOTP space is brute-forceable in microseconds; plain SHA on credential / session IDs also breaks the cross-surface pseudonym equality property (audit_log ↔ structured log ↔ Sentry) because the TS-side pseudonymizer is already keyed-HMAC. This is the same Principle 4.7 (Safeguards) gap the privacy-reviewer named.
+
+This ADR is the standard for both.
+
+## Decision drivers
+
+- **PIPEDA Principle 4.4 (Limiting Collection) + 4.5 (Limiting Use, Disclosure, Retention):** every operational table touching PI needs a documented purpose and retention.
+- **PIPEDA Principle 4.7 (Safeguards):** pseudonymization must use a keyed primitive when the underlying value-space is brute-forceable (10^6 TOTP codes, but also any pseudonym whose collision space the adversary can enumerate offline).
+- **Cross-surface pseudonym equality:** the same uid (or credential_id, or session_id) must produce the same pseudonym in `audit_log`, in structured logs, and in Sentry tags. This requires a shared HMAC key between the Postgres-side derivation and the TS-side derivation.
+- **`observability/audit-log.md` §2:** the canonical wording today is "HMAC-BLAKE2b-256(uid)[:16hex]." The security property is provided by the keyed-HMAC; the specific hash is operationally fungible. PostgreSQL's `pgcrypto.hmac` is first-class for SHA-256 + SHA-512 + MD5 only; BLAKE2b-keyed in Postgres requires either `pgcrypto-blake2` (not bundled with Supabase) or a custom plpgsql wrapper. The TS-side library (`libsodium`) supports BLAKE2b natively.
+- **Reversibility:** changing the hash function later is a one-time chain re-keying; changing the key-storage mechanism later is a deployment script change. Both are doable. Locking in a hash function the platform doesn't natively support is a constant ops tax.
+
+## Options considered
+
+### Option A: HMAC-BLAKE2b-256 in Postgres via custom function + `pgcrypto-blake2` ext (rejected for v1)
+
+Supabase Cloud does not ship `pgcrypto-blake2`. A plpgsql wrapper is doable but adds a function in the security-critical path that has to be reviewed every release, and the test harness has to mirror it. The observability spec wording would be honoured verbatim, but at the cost of a non-standard function in the migration boundary.
+
+### Option B: HMAC-SHA-256 in Postgres via `pgcrypto.hmac` (chosen)
+
+Standard, well-understood, first-class in PostgreSQL. The security property of the pseudonymization is the **keyed HMAC**, not the choice of hash. SHA-256 collision resistance is more than adequate at the [:16hex] truncation length (effectively 64 bits — the truncation, not the hash, is the dominant collision floor). The observability spec wording at `observability/audit-log.md:131-138` is amended on the next observability-setup pass to read "HMAC-SHA-256 with `app.hmac_pseudonym_key` truncated to 16hex" (or to permit either function, with implementation choosing SHA-256). The architect does NOT modify `observability/*` per amendment-pass hard rules; the pointer is recorded here.
+
+### Option C: Per-tenant key derived from a master (rejected for v1)
+
+Single-tenant per ADR-0005. The complexity of a key hierarchy is unjustified. v2 multi-tenant work re-opens this.
+
+### Key-storage sub-options (storing `HMAC_PSEUDONYM_KEY` for the Postgres side)
+
+- **(a) Postgres GUC** via `current_setting('app.hmac_pseudonym_key')`, loaded by `ALTER DATABASE jhsc SET app.hmac_pseudonym_key = '...';` at deploy time. Read by `audit_emit` and any `SECURITY DEFINER` function that derives pseudonyms. **Chosen.**
+- **(b) Supabase Vault** entry queried via `supabase_vault.decrypted_secrets`. Defensible, adds an extension dependency, query cost per derivation, and another surface to audit. Rejected for v1.
+- **(c) Hardcoded in the SECURITY DEFINER function body.** Rejected up front (key is in source control; rotation requires a code change).
+
+## Decision
+
+**We choose Option B + key-storage sub-option (a).**
+
+### The HMAC standard (binding for the Postgres side; applies to every migration in `supabase/migrations/`)
+
+1. **Algorithm:** `pgcrypto.hmac(value, current_setting('app.hmac_pseudonym_key'), 'sha256')`. Truncate to 16 hex characters (`encode(...) :: text → substring(..., 1, 16)`) when matching the `actor_pseudonym varchar(16)` column shape per `observability/audit-log.md:130-133`.
+2. **No bare `digest(..., 'sha256')` in any pseudonym derivation.** A semgrep rule (ratified in this pass; file added by migration-handler or implementer at `.semgrep/no-bare-sha256-in-migrations.yml`) bans the bare-`digest` pattern in `supabase/migrations/`. The rule MAY allow `digest()` in genuinely non-pseudonym contexts (checksums for content-addressable storage, for example); the pattern targets the pseudonym-assignment context (`= digest(`, `:= digest(`, `INSERT ... digest(`, returned-value-of-`digest()`-used-as-pseudonym). The implementer or migration-handler writes the file; this ADR ratifies the rule's existence and its scope.
+3. **TS-side parity.** `apps/web/src/lib/log/safe-fields.ts` (and any other TS-side pseudonymizer) reads the same key from environment variable `HMAC_PSEUDONYM_KEY`. The deployment process is responsible for asserting `env.HMAC_PSEUDONYM_KEY === current_setting('app.hmac_pseudonym_key')`; a smoke test on boot (implementer respin) compares the SHA-of-the-key to a posted-from-Postgres SHA-of-the-key and refuses to start on mismatch. **The smoke test does NOT log the key.**
+4. **Key rotation is out of scope for this ADR (still deferred per amendment pass #3 cross-cutting #3).** This ADR locks in the key-loading mechanism; the rotation cadence + era-encoding lands in a future ADR-0012 amendment per amendment pass #3.
+
+### The operational-table retention schedule (binding; the canonical table for non-audit-log persistent tables touching PI)
+
+| Table | Retention | Purpose | Hard-delete trigger | Classification ceiling |
+|---|---|---|---|---|
+| `auth_totp_bootstraps` | **15-minute ceiling**, hard-deleted on consume (F-43) | Single-use TOTP bootstrap for first-passkey enrollment per ADR-0002. | (a) consume (immediate, atomic with `enroll_first_passkey`); (b) 15-minute scheduled sweep for unconsumed rows. | C1 (user_id) + C2 (`secret_hash`). After this ADR's B4 decision, **no plaintext code column.** |
+| `auth_totp_consumed_log` | **24 hours after `consumed_at`** | F-38 reuse-detection (block code re-submission within the ~15-min bootstrap lifetime + safety margin). | Scheduled sweep deletes rows where `consumed_at < now() - interval '24 hours'`. | C1 (user_id, HMAC-of-code, ts). |
+| `auth_sessions` (active rows) | **15-minute TTL** on access tokens; row deleted when `revoked_at` is set OR `expires_at < now()`. | Session validation + revocation surface. | TTL expiry + explicit revoke. | C1 (user_id, session_id) + C2 (`device_label`, `device_fingerprint`). |
+| `auth_sessions` (revoked rows) | **90 days after `revoked_at`** then hard-delete. | Revocation-history forensic window per ADR-0002 Operational Rules. | Scheduled sweep. | Same as above. |
+| `webauthn_credentials` | **Until passkey revoked OR membership inactive + 24 months**, then hard-delete. | The passkey itself. Co-anchored to `committee_membership`. | Explicit `auth.passkey.revoked` event + 24mo membership-inactive grace. | C1 (cred_id, pubkey, aaguid, rp_id) + C0 (transports) + C2 (`device_label`). |
+| `public.users` (auth side-table) | **Membership + 24 months** (per ADR-0002). | Identity attribution anchor; `active`/`role`/`totp_destroyed_at` lookup. | Tied to `committee_membership` retention. | See PI inventory. |
+
+**Out of scope of this table:** `audit_log` (covered by ADR-0015); content tables `concerns` / `inspections` / `minutes` / `recommendations` / `reprisal_log` / `work_refusal` / `s51_evidence` / `training_records` (covered by plan §8 retention schedule).
+
+### Operational rules (binding for the implementer + migration-handler)
+
+1. **Every operational table touching PI MUST appear in this schedule before the table ships in any migration that lands in `main`.** A new table that does not appear in this schedule is a CI failure (drift assertion test-writer adds, mirroring ADR-0015 §3 drift check pattern).
+2. **The retention sweep is a single nightly job (T16-owned) that walks the schedule.** It emits one `retention.deleted` summary row per pass per the ADR-0015 jsonb shape, with per-table counts added to the existing per-event-type counts in `meta.deleted_per_table`. T16 acceptance is extended (see Task-list amendments at end).
+3. **`auth_totp_bootstraps` hard-delete on consume is atomic with the consume operation,** not a sweep responsibility. The sweep only collects orphaned/expired bootstraps.
+4. **`webauthn_credentials.device_label` is user-provided** (per privacy-review-t05 §3.2). The implementer MUST NOT derive a default from User-Agent or any platform-derived signal. The migration's column comment carries this rule.
+
+### Reversibility
+
+**Easy** on schedule values (additive migration). **Medium** on the HMAC primitive choice (SHA-256 vs BLAKE2b is one column / one function rewrite + chain re-key — the security property is identical; only the names change). **Hard** on the *fact* of using a keyed HMAC at all (reverting to bare SHA is the privacy-reviewer's BLOCK finding; we won't).
+
+## Consequences
+
+### Positive
+
+- Every persistent table touching PI has documented purpose, retention, and hard-delete trigger.
+- The TOTP consumed-log is no longer undocumented; it is now a first-class entry under PIPEDA Principle 4.5 minimization.
+- The pseudonymization primitive is keyed; brute-forcing the consumed-log requires the HMAC key (which lives only in the GUC + matching env var, both controlled by the deployer).
+- Cross-surface pseudonym equality holds once TS-side + Postgres-side share the key.
+- The semgrep rule is a structural backstop against future migrations regressing to bare `digest`.
+
+### Negative / accepted tradeoffs
+
+- One new GUC to manage in deployment (offset by avoiding a Vault dependency).
+- `observability/audit-log.md` §2 wording is now slightly drifted (specifies BLAKE2b; we ship SHA-256). Resolved on observability-setup's next pass; architect-NOT-touch per hard rules.
+- Key rotation is deferred (still amendment-pass #3 deferred item). A v1 key compromise requires a chain re-key + an audit pass; documented as a known operational risk on top of RA-2.
+
+### Risks
+
+- **Env-var ↔ GUC drift.** If the deployment sets `app.hmac_pseudonym_key` to value X and the app environment to value Y, pseudonyms generated on the two sides will not match — every cross-surface pseudonym join silently breaks. Mitigated by the boot smoke test (Decision §3 above).
+- **Backup-restore + key rotation interaction.** If the key is rotated, a backup restored from before the rotation has pseudonyms in the old era. Re-derivation on restore is impractical (the underlying uid is in the row; the audit row's pseudonym would need to be re-stamped). Documented as a deferred concern for the key-rotation ADR amendment per amendment pass #3 cross-cutting #3.
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.4 (Limiting Collection): every operational table has a documented purpose.
+- [x] PIPEDA Principle 4.5 (Limiting Retention): every operational table has a documented retention.
+- [x] PIPEDA Principle 4.7 (Safeguards): pseudonyms use a keyed HMAC; brute-forcing a 10^6 TOTP code space requires the key, not just the hash function.
+- [x] PIPEDA Principle 4.9 (Individual Access): retention windows preserve a user's ability to query their own session / passkey history while membership is active.
+- [x] `.context/constraints.md` data-residency: keys + tables remain in Supabase Cloud `ca-central-1`.
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+
+## Cross-references
+
+- **privacy-review-t05 §2.1 Findings 1 + 2** — the source of the HMAC-not-SHA decision and the documentation-of-`auth_totp_consumed_log` requirement.
+- **privacy-review-t05 §2.2** — the 24h retention defensibility for the consumed log.
+- **privacy-review-t05 §7** — the PI inventory amendment table; folded into §PI inventory in this pass.
+- **privacy-review-t05 §9** — the architect-amendment pointer list; items 1, 3, 6 are closed by this ADR.
+- **consolidated security-reviewer B1** — HMAC-vs-SHA + key-storage decisions.
+- **consolidated security-reviewer B2** — operational-table documentation.
+- **consolidated security-reviewer B4** — `auth_totp_bootstraps.totp_code` plaintext column (closed in ADR-0002 Amendment G; this ADR provides the broader frame).
+- **threat-model F-38** — TOTP code reuse-detection; the consumed-log is the structural mitigation.
+- **threat-model F-43** — TOTP bootstrap 15-min ceiling.
+- **ADR-0002 Amendment G** (this pass) — folds the auth-side-table-specific decisions into the auth ADR; this ADR-0016 is the general standard.
+- **ADR-0015** — the audit-log retention schedule; this ADR sits beside it for non-audit-log operational tables.
+- **observability/audit-log.md §2** — `actor_pseudonym = HMAC-BLAKE2b-256(uid)[:16hex]`; observability-setup's next pass amends the wording to permit HMAC-SHA-256.
+
+## Follow-ups
+
+- [ ] **HG-15 user ratification (NEW)** — user signs off on (a) the operational-table retention schedule above and (b) the HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC posture before T16 ships. The architect's recommendation is APPROVE both as proposed.
+- [ ] **migration-handler respin (T05 migration):** replace every `digest(X, 'sha256')` used as a pseudonym with `hmac(X, current_setting('app.hmac_pseudonym_key'), 'sha256')`; add `ALTER DATABASE ... SET app.hmac_pseudonym_key` deployment step (or a `_setup_app_settings.sql` companion); drop `auth_totp_bootstraps.totp_code` column (B4); rewrite the unique constraint to `(user_id)`; rewrite `enroll_first_passkey`'s code comparison to `v_bootstrap.secret_hash = hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')`.
+- [ ] **migration-handler respin (T05 migration) — cross-cutting #2 fold-in:** `audit_log.retention_class text NOT NULL` column added in T05 migration rather than backfilled in T18. Per privacy-review-t05 §8 observation #2 + architect recommendation in this pass.
+- [ ] **migration-handler respin (T05 migration) — cross-cutting #4 fold-in:** `audit_emit(...)` function signature gains `p_request_id uuid` parameter and writes it to `audit_log.request_id`. Per privacy-review-t05 §8 observation #4 + `observability/audit-log.md:147-148`. Adding now is cheaper than rewriting every caller in T18.
+- [ ] **migration-handler respin (T05 migration) — A5 fold-in:** SECURITY DEFINER functions get explicit `GRANT EXECUTE TO supabase_auth_admin` (or the chosen server role). Per security-reviewer A5.
+- [ ] **implementer respin (T05 auth-core):** `apps/web/src/lib/log/safe-fields.ts` (and `apps/web/src/lib/auth/memory-store.ts` per A3) HMAC TOTP code the same way the SQL path does — uses `HMAC_PSEUDONYM_KEY` env var; mirrors prod. A boot-time smoke test compares SHA-of-key on TS side to SHA-of-key reported by Postgres; on mismatch, refuses to start (no key value logged).
+- [ ] **implementer respin (T05 auth-core) — A4 fold-in:** TOTP-attempt enumeration differential collapsed to uniform 401 for the unauthenticated client; the differential reason (`410 GONE` vs `429 TOO MANY REQUESTS` vs `401 UNAUTHORIZED`) goes only to `audit_log.meta`. Per security-reviewer A4.
+- [ ] **implementer respin (T05 auth-core) — A6 fold-in:** burst-alert emission deduplicated to one emission per crossing of the threshold (not one per evaluation). Per security-reviewer A6.
+- [ ] **implementer respin (T05 auth-core) — A7 fold-in:** dead `revoked_at` arithmetic branch removed. Per security-reviewer A7.
+- [ ] **Semgrep rule added** at `.semgrep/no-bare-sha256-in-migrations.yml` (architect ratifies; migration-handler or implementer writes the file). Pattern targets pseudonym-assignment use of `digest(..., 'sha256')` in `supabase/migrations/`; non-pseudonym uses of `digest()` (content checksums) are exempt.
+- [ ] **observability-setup next pass** — amends `observability/audit-log.md §2` wording at lines 131-138 to permit HMAC-SHA-256 with `app.hmac_pseudonym_key` (the security property is the keyed HMAC, not the hash). Architect does NOT modify `observability/*` per hard rules.
+- [ ] **test-writer** — adds drift-check tests (every persistent operational table touching PI appears in this schedule); HMAC-not-SHA semgrep coverage check; env-var-vs-GUC boot-smoke test; consumed-log 24h sweep test; per-table count fold-in to `retention.deleted` summary.
+
+---
+
 # ADR-0015: Per-event-type audit-log retention schedule (HG-14)
 
 **Status:** Accepted
@@ -2466,6 +2615,154 @@ passkeys would be a security regression we wouldn't do.
 
 ---
 
+## Amendment G (2026-05-23, amendment pass #4, HG-15): T05 auth-side-table schema reconciliation, TOTP consumed-log, plaintext-code drop, HMAC standard adopted
+
+**Amends ADR-0002** above. Trigger: privacy-review-t05 §2.1 Findings 1 + 2 + §3.4 Finding 5 + §3.5 Finding 6 + §7 PI inventory rows + §9 architect-amendment items 1–3; consolidated security-reviewer blockers B1 (HMAC-not-SHA), B2 (TOTP consumed-log documentation), B3 (`public.users` field-set divergence), B4 (`auth_totp_bootstraps.totp_code` plaintext column). Cross-references **ADR-0016** (this pass; the general operational-table retention + HMAC-pseudonymization standard); **threat-model F-38** (TOTP code reuse-detection — the consumed log's *raison d'être*); **threat-model F-43** (TOTP bootstrap 15-minute ceiling); **HG-15** (the new architect-owned gate covering this Amendment and ADR-0016).
+
+### The amendment
+
+T05 (auth core + auth migration) introduced four auth-supporting tables whose schema or behaviour was not yet documented at the ADR level. The amendment closes the four privacy-review-t05 / security-reviewer blockers (B1, B2, B3, B4) and ratifies the resulting schema shape.
+
+#### G.1 — `auth_totp_consumed_log` is a first-class table for F-38 reuse-detection
+
+**Status:** ratified.
+
+The migration creates `auth_totp_consumed_log (user_id uuid, totp_code_hash bytea, consumed_at timestamptz)`. The table's purpose is to **detect TOTP-code re-submission within the bootstrap's lifetime + a safety margin** — without this table, an attacker who obtains a consumed TOTP code and replays it before the issuing co-chair notices has a structural racing window. The detection requires retaining the keyed hash of consumed codes for the longest plausible attacker window.
+
+**Operational rules:**
+1. **Retention:** 24 hours after `consumed_at`. Per ADR-0016 schedule. Defensible: the bootstrap's own life ceiling is 15 minutes; 24 hours is a ~100x safety margin against clock-skew + delayed-replay + investigation-latency. Longer retention does not serve any documented purpose under PIPEDA Principle 4.5.
+2. **`totp_code_hash`:** stores `hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')` per ADR-0016 §Decision 1. **NEVER** stores `digest(p_totp_code, 'sha256')`. A 10^6-element value space against a plain hash is brute-forceable in microseconds; against a keyed HMAC the brute-force requires the key, which is not on the row.
+3. **Classification (per privacy-review-t05 §7):** `user_id` C1, `totp_code_hash` C1 (HMAC of a short-lived secret), `consumed_at` C1.
+4. **Hard-delete:** scheduled retention sweep per ADR-0016. T16 acceptance is extended (see Task-list amendments at end).
+
+#### G.2 — `auth_totp_bootstraps.totp_code` plaintext column is DROPPED
+
+**Status:** ratified per blocker B4.
+
+The T05 migration as-shipped creates BOTH `secret_hash bytea NOT NULL` AND `totp_code text NOT NULL` with `UNIQUE (user_id, totp_code)`. The plaintext column duplicates the same secret in two columns; a backup taken in the 15-minute window between issue and consume captures the code in plaintext (Principle 4.7 Safeguards gap; Principle 4.4 over-collection).
+
+**Operational rules:**
+1. **Drop the `totp_code` column.** Migration-handler respin.
+2. **Rewrite the unique constraint** to `UNIQUE (user_id)` — one bootstrap per user at a time (the 15-min ceiling enforces this in time; the unique constraint enforces it in the table).
+3. **Rewrite the consume comparison** in `enroll_first_passkey` from `v_bootstrap.totp_code = p_totp_code` to `v_bootstrap.secret_hash = hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')`. The plaintext code is in the function's argument bind only; never persists.
+4. **Test-mode is not a justification for keeping the plaintext column.** The architect REJECTS the alternative (CHECK constraint allowing plaintext in test mode) — adds complexity without materially helping; the test harness can compute the HMAC itself.
+
+#### G.3 — `public.users` field set: AMEND the PI inventory to match the migration
+
+**Status:** ratified per blocker B3.
+
+The T05 migration creates `public.users` as the **auth side-table**, containing only the fields needed for auth + role gating: `{id, active, role, totp_destroyed_at, created_at, updated_at}`. This is the cleaner design (auth side-table; `committee_membership` is a separate concept introduced in T06; identity-key material lands in T07). The PI inventory as written in the original ADR-0001 → §PI inventory section described a `users` table whose composition was the *future* end-state including T06 + T07 fields.
+
+**The PI inventory is amended in this pass (see §PI inventory below) to reflect the T05 truth:**
+- `users.id` (C1) — Supabase Auth UUID, retention "Membership + 24mo" per ADR-0016. Unchanged in essence.
+- `users.active` (C1) — boolean; migrated from the originally-planned `committee_membership.active` to `users` per the T05 schema. Retention "Membership + 24mo."
+- `users.role` (C1) — text/enum; same migration; same retention.
+- `users.totp_destroyed_at` (C1) — timestamptz; **NEW field** from T05 for F-43 audit (records when the per-user TOTP enrollment closed). Retention "Membership + 24mo."
+- `users.created_at` / `users.updated_at` (C0) — operational timestamps; not PI.
+
+**Deferred to later tasks (recorded for traceability, not part of T05's schema):**
+- `users.display_name` (C2) — T06 owns. The original `users.display_name` row in §PI inventory is **deferred from "exists today" to "added in T06"**; the row is preserved in §PI inventory with an explicit T06-introduction note.
+- `users.off_employer_contact` (C2) — T06 owns. Same treatment.
+- `users.identity_pubkey` (C1) — T07 owns. Same treatment.
+- `users.identity_privkey_recovery_blob` (C2) — T07 owns. Same treatment.
+
+**`committee_membership` as a separate table is preserved as a T06-owned concept.** The T05 migration does NOT create `committee_membership`. T06 acceptance is extended (see Task-list amendments at end): T06 creates `committee_membership` and may carry the `active` / `role` semantics there if T06's design supersedes — but T06 cannot retroactively drop the columns from `public.users` without an explicit architect amendment.
+
+#### G.4 — Every pseudonym derivation in `supabase/migrations/` is HMAC-keyed
+
+**Status:** ratified per blocker B1 + ADR-0016.
+
+The migration's four pseudonym derivation sites — `auth_totp_consumed_log.totp_code_hash`, `audit_emit(...).meta.cred_id_pseudonym`, `audit_emit(...).meta.session_id_pseudonym`, and the `alert.fired`-shaped pseudonym at the fourth site — are all rewritten to use `hmac(X, current_setting('app.hmac_pseudonym_key'), 'sha256')` per ADR-0016 §Decision 1.
+
+**The `alert.fired` site (privacy-review-t05 §8 cross-cutting observation #5) is renamed in `meta`** from `actor_pseudonym` to `subject_pseudonym`. The outer audit row's `actor_pseudonym` is the alert-dispatcher (`sys-alert-dispatcher`); the embedded one is the **subject** the alert is firing on — a distinct semantic. Renaming avoids the column-name collision and clarifies that the embedded value is "who the alert is *about*", not "who fired it." The observability spec wording for the `alert.fired` meta shape is amended on observability-setup's next pass to document `subject_pseudonym`; the architect does NOT modify `observability/*` per hard rules.
+
+#### G.5 — `auth.passkey.assert` structured-log emission is per-attempt (canonical wording fix)
+
+**Status:** ratified per privacy-review-t05 §3 Finding 3.
+
+ADR-0003 **Amendment A extension** (structured-log-only event vocabulary table) was ambiguous on whether `auth.passkey.assert` emits **per attempt** or **per successful assertion**. The implementation emits per-attempt (success path AND failure paths, before the rate-limit gate). The architect adopts **per-attempt as canonical** — failure-path emissions provide load-bearing operational signal (rate-limit pressure, credential-not-found patterns, signature-verification-failure patterns) that a per-success-only posture would lose. This matches the current code; no implementer respin is needed for this point.
+
+**Wording fix to ADR-0003 Amendment A extension structured-log table:**
+- Existing wording at line ~1927 reads `auth.passkey.assert | High-frequency per-request authentication assertion. Volumetric (every request that performs WebAuthn assertion emits one).`
+- The wording is **clarified, not replaced**, in this pass: emission is **per-attempt** (success and failure paths both emit; emission happens BEFORE the rate-limit gate so that rate-limit-induced rejections still produce signal). The line above is read as already covering this when "every request that performs WebAuthn assertion" is interpreted literally; this amendment makes that reading binding.
+
+#### G.6 — `audit_emit` gains `retention_class` write at T05 (cross-cutting #2 fold-in)
+
+**Status:** ratified per privacy-review-t05 §8 cross-cutting observation #2.
+
+ADR-0015 §Schema Requirements #1 requires an `audit_log.retention_class text NOT NULL` column populated by `audit_emit` at write time. The T05 migration ships the `audit_log` stub. **Adding `retention_class` in the T05 migration is materially cheaper than adding it in T18 + backfilling.** The architect ratifies adding the column AND the `audit_emit` write of it **now**, in T05's migration-handler respin. The schedule-table population (per ADR-0015 §Schema Requirements #2) remains a T16 deliverable; T05 establishes the column shape only.
+
+#### G.7 — `audit_emit` gains `p_request_id` parameter at T05 (cross-cutting #4 fold-in)
+
+**Status:** ratified per privacy-review-t05 §8 cross-cutting observation #4.
+
+`observability/audit-log.md:147-148` requires `audit_log.request_id` for correlation with the structured logger and Sentry. The T05 `audit_emit` signature omits `p_request_id`. **Adding it now (T05 migration-handler respin) is cheaper than rewriting every caller in T18** — every caller will need to pass it eventually, and the few T05 + pre-T18 callers can pass `null` as a fallback (the column allows null per `observability/audit-log.md:146`).
+
+#### G.8 — `audit_log` RLS deny-default is a T13 prerequisite, not a T05 fix
+
+**Status:** ratified per privacy-review-t05 §8 cross-cutting observation #3.
+
+The T05 migration ships `audit_log` with default-deny RLS for SELECT. ADR-0003 **Amendment B** + **Amendment D** call for an active-member SELECT path **via the pseudonymized projection view** (`reprisal_audit_feed_pseudonymized`) — that view is a T13 deliverable. The architect ratifies that **deny-default at T05 is the correct posture** (no view-projected SELECT can be wired until the view exists, and the view is a T13 artefact). T13's migration-handler **replaces** the deny-default policy with the projection-view-SELECT policy when T13 ships. The replacement is documented as a T13 prerequisite, not a T05 fix.
+
+#### G.9 — `audit_log` stub vs T18 hash-chain backfill: chain starts fresh at T18
+
+**Status:** ratified per privacy-review-t05 §8 cross-cutting observation #1.
+
+T05's `audit_log` stub does not yet implement hash-chaining (the `prev_hash` / `hash` columns exist on the schema per `observability/audit-log.md §2` but T05's `audit_emit` does not yet compute them). The architect ratifies that **T18 starts the chain fresh** — pre-T18 rows are pre-chain, and the T18 migration MAY rewrite their `prev_hash` / `hash` to seed the chain OR may treat the first T18-written row as the genesis row. The choice is a T18 migration-handler call; either is acceptable as long as it is documented in the T18 commit.
+
+This is a **deliberately accepted gap** — pre-T18 audit rows are pre-launch operational telemetry; the chain's forensic value begins when forensic events begin (which is at the earliest T07, after T05's auth scaffolding is in place).
+
+### Testable assertions (T05 + T06 acceptance amended — see Task-list amendments at end)
+
+The four blocker resolutions are tested by:
+
+1. **G.1 — `auth_totp_consumed_log` 24h retention:** unit-test the retention sweep; insert a row with `consumed_at = now() - interval '25 hours'`; run the sweep; assert the row is deleted; insert one with `consumed_at = now() - interval '23 hours'`; run the sweep; assert the row remains.
+2. **G.1 — HMAC-of-code shape:** assert `auth_totp_consumed_log.totp_code_hash` is the truncated `hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')` value (compute the expected value in the test fixture using the test-mode key; assert equality).
+3. **G.2 — no plaintext column:** `\d+ auth_totp_bootstraps` (or pg_attribute query) returns no `totp_code` column; the `UNIQUE` constraint is `(user_id)` only.
+4. **G.2 — consume path uses HMAC comparison:** issue a bootstrap; consume with the correct code → success; consume with a wrong code → failure; consume with the correct code AGAIN → failure (single-use) AND a row appears in `auth_totp_consumed_log`.
+5. **G.3 — `public.users` shape:** the migration creates exactly `{id, active, role, totp_destroyed_at, created_at, updated_at}`; absence of `display_name`, `off_employer_contact`, `identity_pubkey`, `identity_privkey_recovery_blob` at T05; T06 acceptance (cross-referenced) creates `committee_membership` and confirms the `active` / `role` semantics carry forward.
+6. **G.4 — no bare `digest('sha256')`:** semgrep CI rule asserts zero matches in `supabase/migrations/` outside the documented checksum-context allowlist.
+7. **G.4 — `alert.fired` meta uses `subject_pseudonym`:** snapshot test of a fired `alert.fired` audit row; assert `meta.subject_pseudonym` exists; assert `meta.actor_pseudonym` does NOT exist (the outer row's `actor_pseudonym` is `sys-alert-dispatcher`).
+8. **G.6 — `audit_log.retention_class` populated at write:** every T05-shipped `audit_emit(...)` call writes a non-null `retention_class`.
+9. **G.7 — `audit_emit` signature includes `p_request_id`:** function signature query asserts the parameter is present; integration test passes a known UUID and reads it back from `audit_log.request_id`.
+
+### Reversibility
+
+**Easy** on each operational rule (additive migration changes; the columns / constraints / function signatures land in the same T05 respin). **Hard** on the architectural posture (HMAC-keyed pseudonymization is non-negotiable post-amendment; reverting is the privacy-reviewer's BLOCK finding).
+
+### Compliance check additions
+
+- [x] PIPEDA Principle 4.4 (Limiting Collection): `auth_totp_bootstraps.totp_code` removed; `public.users` field set minimized to T05's auth needs.
+- [x] PIPEDA Principle 4.5 (Limiting Retention): `auth_totp_consumed_log` 24h retention; every operational table covered by ADR-0016.
+- [x] PIPEDA Principle 4.7 (Safeguards): every pseudonymization site uses keyed HMAC; the consumed-log is not brute-forceable without the GUC key.
+- [x] PIPEDA Principle 4.9 (Individual Access): a user's session / passkey history is queryable through `auth_sessions` / `webauthn_credentials` per the existing ADR-0002 surface.
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+- [x] threat-model F-38 / F-43 structurally addressed.
+
+### Cross-references
+
+- **privacy-review-t05 §2 / §3 / §7 / §9** — the source review and the architect-amendment pointer list.
+- **consolidated security-reviewer B1 / B2 / B3 / B4** — the four blockers closed by G.1–G.4.
+- **ADR-0016** — the general operational-table retention + HMAC-pseudonymization standard; this Amendment G is the auth-specific application.
+- **ADR-0003 Amendment A extension** — `auth.passkey.assert` structured-log-only entry; G.5 clarifies the per-attempt vs per-success wording.
+- **ADR-0015 §Schema Requirements #1 + #2** — `retention_class` column + schedule table; G.6 lands the column in T05.
+- **observability/audit-log.md §2 line 130-138** — `actor_pseudonym` shape; observability-setup amends on next pass per ADR-0016.
+- **observability/audit-log.md §1 alert.fired meta shape** — observability-setup amends on next pass to document `subject_pseudonym` (G.4).
+- **observability/audit-log.md §2 line 147-148** — `request_id` requirement; G.7 lands the parameter at T05.
+- **HG-15** — the new architect-owned gate covering Amendment G + ADR-0016; bundled.
+
+### Follow-ups (T05 + T06 + T16 + T18 acceptance amended — see Task-list amendments at end)
+
+- [ ] **T05 acceptance amended** — migration-handler respin per G.1 / G.2 / G.4 / G.6 / G.7; implementer respin for HMAC parity + boot smoke test + A3-A7 fold-ins; tests 1–9 above land before the implementer touches the respun migration.
+- [ ] **T06 acceptance cross-referenced** — T06 creates `committee_membership`; T06 acceptance must NOT retroactively drop `users.active` / `users.role` without a successor architect amendment.
+- [ ] **T16 acceptance extended** — the retention sweep now covers ADR-0016's operational-table schedule in addition to ADR-0015's audit-log schedule; per-table counts in `retention.deleted` summary jsonb.
+- [ ] **T18 acceptance cross-referenced** — chain genesis-or-backfill choice documented in the T18 migration commit (G.9).
+- [ ] **observability-setup next pass** — amends `observability/audit-log.md §2` lines 131-138 (HMAC-SHA-256 permitted with `app.hmac_pseudonym_key`); amends `observability/audit-log.md §1` `alert.fired` meta shape to document `subject_pseudonym`.
+- [ ] **HG-15 user ratification** — bundled with ADR-0016's HG-15.
+
+---
+
 # ADR-0001: Hosting on Supabase Cloud (ca-central-1) with E2EE as load-bearing mitigation
 
 **Status:** Accepted — **Note added 2026-05-22 (HG-1 linked risk acceptance)**
@@ -2950,12 +3247,30 @@ Every field, classification per plan §5.4, retention default, encryption postur
 
 | Entity / field | Class | Encryption | Retention | Notes |
 |---|---|---|---|---|
-| `users.id` (Supabase auth UUID) | C1 | TLS + AES-256 at rest | Membership + 24mo | Identifier only |
-| `users.display_name` | C2 | TLS + AES-256 at rest | Membership + 24mo | First name / chosen name |
-| `users.off_employer_contact` (email or phone) | C2 | TLS + AES-256 at rest | Membership + 24mo | NOT employer-domain; validated on entry |
-| `users.identity_pubkey` | C1 | TLS only | Membership + 24mo | Public key, no secrecy needed |
-| `users.identity_privkey_recovery_blob` | C2 (ciphertext of a secret) | TLS + AES-256 at rest; ciphertext wraps the actual secret | Membership + 24mo | Decrypts only with user passphrase |
-| `committee_membership.role[]` | C1 | TLS + AES-256 at rest | Membership + 24mo | {worker_member, worker_co_chair, certified_member} |
+| `users.id` (Supabase auth UUID) | C1 | TLS + AES-256 at rest | Membership + 24mo | Identifier only. T05-owned. |
+| `users.active` | C1 | TLS + AES-256 at rest | Membership + 24mo | Boolean; T05-owned per ADR-0002 Amendment G.3 (this pass). Originally planned on `committee_membership.active`; relocated to `users` per T05 schema. |
+| `users.role` | C1 | TLS + AES-256 at rest | Membership + 24mo | Enum {worker_member, worker_co_chair, certified_member}; T05-owned per ADR-0002 Amendment G.3 (this pass). Originally planned on `committee_membership.role`; relocated to `users` per T05 schema. |
+| `users.totp_destroyed_at` | C1 | TLS + AES-256 at rest | Membership + 24mo | Timestamptz; NEW field per ADR-0002 Amendment G.3 (this pass). F-43 audit field: records when the per-user TOTP enrollment closed. |
+| `users.created_at` / `users.updated_at` | C0 | TLS + AES-256 at rest | Membership + 24mo | Operational timestamps; not PI. |
+| `users.display_name` | C2 | TLS + AES-256 at rest | Membership + 24mo | **DEFERRED to T06.** First name / chosen name. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T06 adds it. |
+| `users.off_employer_contact` (email or phone) | C2 | TLS + AES-256 at rest | Membership + 24mo | **DEFERRED to T06.** NOT employer-domain; validated on entry. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T06 adds it. |
+| `users.identity_pubkey` | C1 | TLS only | Membership + 24mo | **DEFERRED to T07.** Public key, no secrecy needed. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T07 adds it. |
+| `users.identity_privkey_recovery_blob` | C2 (ciphertext of a secret) | TLS + AES-256 at rest; ciphertext wraps the actual secret | Membership + 24mo | **DEFERRED to T07.** Decrypts only with user passphrase. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T07 adds it. |
+| `auth_totp_bootstraps.user_id` | C1 | TLS + AES-256 at rest | 15-min ceiling, hard-deleted on consume (F-43) per ADR-0016 | FK to `users.id`. T05-owned. |
+| `auth_totp_bootstraps.secret_hash` | C2 | TLS + AES-256 at rest | 15-min ceiling, hard-deleted on consume per ADR-0016 | Single-use bootstrap secret. After ADR-0002 Amendment G.2 (this pass), the plaintext `totp_code` column is DROPPED; only `secret_hash` (HMAC-keyed per ADR-0016) remains. |
+| `auth_totp_consumed_log.user_id` | C1 | TLS + AES-256 at rest | 24h after `consumed_at` per ADR-0016 | F-38 reuse detection. T05-owned per ADR-0002 Amendment G.1 (this pass). |
+| `auth_totp_consumed_log.totp_code_hash` | C1 (HMAC of a short-lived secret) | TLS + AES-256 at rest | 24h after `consumed_at` per ADR-0016 | MUST be `hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')` per ADR-0016 §Decision 1; NEVER bare `digest()`. T05-owned per ADR-0002 Amendment G.1. |
+| `auth_totp_consumed_log.consumed_at` | C1 | TLS + AES-256 at rest | 24h after `consumed_at` per ADR-0016 | Timestamptz. T05-owned per ADR-0002 Amendment G.1. |
+| `webauthn_credentials.credential_id` | C1 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Pseudonymized in `audit_log` per ADR-0016 §Decision 1 / G.4. T05-owned. |
+| `webauthn_credentials.public_key` | C1 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Public key — no secrecy required. T05-owned. |
+| `webauthn_credentials.aaguid` | C1 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Authenticator model. T05-owned. |
+| `webauthn_credentials.transports[]` | C0 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Enum. T05-owned. |
+| `webauthn_credentials.device_label` | C2 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | USER-PROVIDED only; the migration's column comment carries this rule (no platform-derived defaults). T05-owned. |
+| `webauthn_credentials.rp_id` | C0 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Server-determined. T05-owned. |
+| `auth_sessions.session_id` | C1 | TLS + AES-256 at rest | 15-min TTL + 90d revocation history per ADR-0016 | Pseudonymized in `audit_log` per ADR-0016 §Decision 1 / G.4. T05-owned. |
+| `auth_sessions.device_label` | C2 | TLS + AES-256 at rest | 15-min TTL + 90d revocation history per ADR-0016 | USER-PROVIDED only. T05-owned. |
+| `auth_sessions.device_fingerprint` | C2 | TLS + AES-256 at rest | 15-min TTL + 90d revocation history per ADR-0016 | HASHED by caller; NEVER raw UA. T05-owned. |
+| `committee_membership.role[]` | C1 | TLS + AES-256 at rest | Membership + 24mo | **T06-owned.** {worker_member, worker_co_chair, certified_member}. Per ADR-0002 Amendment G.3 (this pass), `committee_membership` is created in T06; the `active` / `role` semantics for the auth path live on `users` (T05). T06 acceptance must not retroactively drop the columns from `users` without a successor architect amendment. |
 | `committee_key.wrapped_privkey_blob` (per member) | C3 (wraps committee key) | E2EE at rest | Membership + 24mo | One row per (committee, member) |
 | `concerns.title_ciphertext` | C3 | E2EE | 7y post-closure | Body field of concern |
 | `concerns.body_ciphertext` | C3 | E2EE | 7y post-closure | Free text |
@@ -2975,11 +3290,13 @@ Every field, classification per plan §5.4, retention default, encryption postur
 | `work_refusal.notes_ciphertext` | C4 | E2EE + per-record key | Active matter + 7y | s.43 |
 | `s51_evidence.*_ciphertext` | C4 | E2EE + per-record key | Active matter + 7y | s.51 |
 | `training_records.evidence_ciphertext` | C2 | E2EE | Membership + 24mo | Certified-member proof |
-| `audit_log.*` | C1 | TLS + AES-256 at rest; NOT E2EE | 24mo | Tamper-evident hash chain |
-| `audit_log.actor_id` | C1 | TLS + AES-256 at rest | 24mo | Supabase user UUID |
-| `audit_log.action` | C1 | TLS + AES-256 at rest | 24mo | Enum |
-| `audit_log.target_id` | C1 | TLS + AES-256 at rest | 24mo | FK to affected row |
-| `audit_log.prev_hash` | C1 | TLS only | 24mo | Hash chain |
+| `audit_log.*` | C1 | TLS + AES-256 at rest; NOT E2EE | Per-event-type per ADR-0015 (supersedes uniform 24mo) | Tamper-evident hash chain. T18 implements chain hashing; T05 ships the stub with `retention_class` + `request_id` columns per ADR-0002 Amendment G.6 / G.7 (this pass). |
+| `audit_log.actor_pseudonym` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | varchar(16); `hmac(uid, current_setting('app.hmac_pseudonym_key'), 'sha256')` truncated to 16hex per ADR-0016 §Decision 1. Supersedes the prior `actor_id`-as-raw-UUID shape. |
+| `audit_log.event_type` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | Closed-enum text; ADR-0003 Amendment A + extensions. |
+| `audit_log.target_id` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | FK to affected row. Subject to underlying-record-ceiling rule per ADR-0015 §3.5. |
+| `audit_log.retention_class` | C0 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | NEW per ADR-0002 Amendment G.6 (this pass). Populated by `audit_emit` at write time; lands in T05 migration (not T18 backfill). |
+| `audit_log.request_id` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | NEW per ADR-0002 Amendment G.7 (this pass). Correlation key to structured logs + Sentry. Nullable; pre-T18 callers may pass null. |
+| `audit_log.prev_hash` | C1 | TLS only | Per-event-type per ADR-0015 | Hash chain; T18 implements. T05 ships the column without backfilling pre-T18 rows per ADR-0002 Amendment G.9. |
 | `feature_flags.*` | C0 | TLS only | n/a | Operational config |
 | `document_library.*` | C0 | TLS only | n/a | OHSA quick-ref text, etc. |
 | `i18n_strings.*` | C0 | TLS only | n/a | en-CA catalog |
@@ -4157,3 +4474,131 @@ For brevity the test-writer's full obligation list is the union of:
 **Re-stated handoff to test-writer.** The test-writer's deliverable is the failing-test suite landed BEFORE any implementer touches T07, T08, T10, T11, T12, T13, T14, T16, T17, T18, or T19 code. The amendment pass #3 invariants are the latest layer; they sit on top of the pass #1 and pass #2 obligations rather than replacing them. The test-writer reads this file (final state), the threat-model file (final state including the second pass), the privacy-review file (final state), and the observability files (latest state, subject to the amendment-pass #3 prioritization note); the union of test obligations is the deliverable.
 
 **No new cross-border transfers introduced.** **No new PI subprocessors introduced.** **No locked decisions re-opened.** ADR-0010's "Sentry is the only non-Supabase PI-adjacent subprocessor" posture preserved. ADR-0001's hosting tradeoff defensibility preserved (E2EE + B3 narrow + ADR-0015 retention coherence + crypto-shred via ADR-0012 amendment).
+
+---
+
+# Amendment pass #4 summary (2026-05-23)
+
+T05 (auth core + auth migration) verifier + security-reviewer + privacy-reviewer all returned with consolidated blocker set B1–B4 plus eight cross-cutting observations + seven advisories. Amendment pass #4 closes the four blockers, folds the cross-cutting observations into the T05 respin where they are cheaper to land now than later, and ratifies the semgrep rule. New artifacts: **ADR-0016** (top-of-file; operational-table retention + HMAC-pseudonymization standard); **ADR-0002 Amendment G** (T05 auth-side-table reconciliation, TOTP consumed-log, plaintext-code drop, HMAC standard adopted, retention_class + request_id fold-ins, alert.fired meta rename); **§PI inventory amendments** (per privacy-review-t05 §7 + Amendment G.3); **HG-15 (NEW)** — bundled user-ratification gate covering ADR-0016 + Amendment G.
+
+| Change | Source | Amendment artifact | Downstream task(s) |
+|---|---|---|---|
+| **B1 — HMAC-not-SHA for all pseudonym derivations + TOTP code hashing** | privacy-review-t05 §2.1 Finding 2; consolidated security-reviewer B1 | **ADR-0016** (general HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC standard); **ADR-0002 Amendment G.4** (auth-specific application at four migration sites). Algorithm: HMAC-SHA-256. Key storage: Postgres GUC `app.hmac_pseudonym_key`. TS-side parity via `HMAC_PSEUDONYM_KEY` env var + boot smoke test. | **T05 migration-handler respin** (replace `digest('sha256')` with `hmac(..., current_setting('app.hmac_pseudonym_key'), 'sha256')` at all 4 sites; add `ALTER DATABASE ... SET app.hmac_pseudonym_key` deploy step). **T05 implementer respin** (`safe-fields.ts` + `memory-store.ts` HMAC parity; boot smoke test). |
+| **B2 — Document `auth_totp_consumed_log` table** | privacy-review-t05 §2.1 Finding 1 + §2.2; consolidated security-reviewer B2 | **ADR-0002 Amendment G.1** (purpose, classification, HMAC pseudonymization); **ADR-0016** retention schedule row (24h after `consumed_at`); **§PI inventory** new rows for `user_id`, `totp_code_hash`, `consumed_at`. | **T16 acceptance extended** (the retention sweep covers ADR-0016 operational-table schedule in addition to ADR-0015 audit-log schedule). **HG-15 user ratification** (NEW) before T16 ships. |
+| **B3 — `public.users` field-set divergence** | privacy-review-t05 §3.3 Finding 5; consolidated security-reviewer B3 | **ADR-0002 Amendment G.3** — PI inventory amended to match the T05 migration. `active` / `role` / `totp_destroyed_at` are T05-owned in `users`; `display_name` / `off_employer_contact` deferred to T06; `identity_pubkey` / `identity_privkey_recovery_blob` deferred to T07; `committee_membership` is a T06 concept. | **T06 acceptance cross-referenced** (T06 creates `committee_membership`; cannot retroactively drop `users.active` / `users.role` without a successor amendment). **T07 acceptance cross-referenced** (T07 adds identity-key columns to `users`). |
+| **B4 — `auth_totp_bootstraps.totp_code` plaintext column** | privacy-review-t05 §3.5 Finding 6; consolidated security-reviewer B4 | **ADR-0002 Amendment G.2** — column dropped; UNIQUE constraint becomes `(user_id)` only; `enroll_first_passkey` rewrites comparison to `v_bootstrap.secret_hash = hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')`. | **T05 migration-handler respin** (drop column, rewrite constraint, rewrite function body). |
+| **Privacy-review-t05 §8 obs #1 — `audit_log` stub vs T18 hash-chain backfill** | privacy-review-t05 §8 cross-cutting #1 | **ADR-0002 Amendment G.9** — T18 starts the chain fresh (or seeds from the last pre-T18 row; T18 migration-handler's call). Deliberately accepted gap. | **T18 acceptance cross-referenced** — chain genesis-or-backfill choice documented in T18 commit. |
+| **Privacy-review-t05 §8 obs #2 — `audit_emit` missing `retention_class`** | privacy-review-t05 §8 cross-cutting #2 | **ADR-0002 Amendment G.6** — column AND `audit_emit` write added in T05 migration (not T18 backfill); cheaper now. | **T05 migration-handler respin** (`audit_log.retention_class text NOT NULL` + `audit_emit` writes it). |
+| **Privacy-review-t05 §8 obs #3 — `audit_log` RLS deny-default vs Amendment B/D projection** | privacy-review-t05 §8 cross-cutting #3 | **ADR-0002 Amendment G.8** — deny-default at T05 is correct (no view exists yet); T13 replaces the policy with the Amendment D projection-view SELECT path when T13 ships. Documented as T13 prerequisite. | **T13 acceptance cross-referenced** — the T13 migration REPLACES the deny-default audit_log SELECT policy. |
+| **Privacy-review-t05 §8 obs #4 — `audit_emit` missing `p_request_id`** | privacy-review-t05 §8 cross-cutting #4 | **ADR-0002 Amendment G.7** — `p_request_id uuid` parameter added in T05; pre-T18 callers may pass null. Cheaper than rewriting every caller in T18. | **T05 migration-handler respin** (`audit_emit(..., p_request_id uuid)` signature). |
+| **Privacy-review-t05 §8 obs #5 — `alert.fired` meta `actor_pseudonym` collision** | privacy-review-t05 §8 cross-cutting #5 | **ADR-0002 Amendment G.4** — rename `meta.actor_pseudonym` to `meta.subject_pseudonym` in the `alert.fired` row shape. The outer row's `actor_pseudonym` is the dispatcher; the embedded one is the subject. Different semantics, different names. | **T05 implementer respin** (rename in the alert-emitter code). **observability-setup next pass** — documents `subject_pseudonym` in `observability/audit-log.md §1` `alert.fired` meta shape. |
+| **Privacy-review-t05 §3.3 Finding 3 / G.5 — `auth.passkey.assert` per-attempt vs per-success canonical wording** | privacy-review-t05 §3 Finding 3 | **ADR-0002 Amendment G.5** — adopt **per-attempt** as canonical; matches current code; failure-path emissions provide operational signal. Wording in ADR-0003 Amendment A extension line ~1927 clarified, not replaced. | **No code change; documentation only.** |
+| **Security-reviewer A3 — memory-store should HMAC the TOTP code** | consolidated security-reviewer A3 | Folded into **ADR-0016 §Decision 3** (TS-side parity) and **ADR-0002 Amendment G.4**. | **T05 implementer respin** (memory-store mirrors prod HMAC). |
+| **Security-reviewer A4 — TOTP-attempt enumeration differential (401 vs 410 vs 429)** | consolidated security-reviewer A4 | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Collapse to uniform 401 to client; differential reason → `audit_log.meta` only. | **T05 implementer respin** (collapse client response code; preserve audit-side differential). |
+| **Security-reviewer A5 — SECURITY DEFINER GRANT EXECUTE** | consolidated security-reviewer A5 | Captured in **ADR-0016 follow-up** (T05 migration-handler respin item). `GRANT EXECUTE ... TO supabase_auth_admin` (or chosen server role). | **T05 migration-handler respin** (explicit GRANT). |
+| **Security-reviewer A6 — burst-alert duplicates emission** | consolidated security-reviewer A6 | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Emit once per threshold crossing. | **T05 implementer respin** (deduplicate). |
+| **Security-reviewer A7 — dead `revoked_at` arithmetic branch** | consolidated security-reviewer A7 | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Remove the dead branch. | **T05 implementer respin** (remove dead code). |
+| **Privacy-review-t05 §3 Finding 4 — `actor_pseudonym` omitted from structured-log INFO** | privacy-review-t05 §3 Finding 4 | **Deferred.** T05-prod-deployment obligation; test-writer adds. Not architect-amendable shape; structurally a code-side fix in the production wiring. | **T05 test-writer adds** the obligation; **T05 implementer** addresses in production wiring (browser-side intentionally omits per spec; server-side includes). |
+| **Semgrep rule ratification** | privacy-review-t05 §9 item 6; consolidated security-reviewer ratification ask | **ADR-0016 §Operational rules 2** ratifies the rule's existence + scope. File path: `.semgrep/no-bare-sha256-in-migrations.yml`. Architect does NOT write the file; migration-handler or implementer adds it. | **T05 migration-handler or implementer respin** (write the semgrep file). **CI**: rule enforced on every PR touching `supabase/migrations/`. |
+
+## New artifacts in this file (pass #4)
+
+- **ADR-0016** — Operational-table retention schedule + HMAC pseudonymization standard for Postgres (HG-15). **Top of file** per hard rule "newest ADR on top."
+- **ADR-0002 Amendment G** — Auth-side-table reconciliation, TOTP consumed-log, plaintext-code drop, HMAC standard adopted, T05 cross-cutting fold-ins. New sibling block under ADR-0002 (after Follow-ups).
+- **§PI inventory amendments** — `users.*` rows reshaped per G.3; new rows for `auth_totp_bootstraps.*` / `auth_totp_consumed_log.*` / `webauthn_credentials.*` / `auth_sessions.*`; `audit_log.*` rows updated to reflect ADR-0015 retention + new `retention_class` / `request_id` columns; `committee_membership` row deferred-to-T06 annotation.
+- **HG-15 (NEW)** — bundled gate covering ADR-0016 + ADR-0002 Amendment G; user ratifies before T16 ships.
+- **T05, T06, T07, T13, T16, T18 acceptance cross-references** updated to reflect the new schema-shape and respin obligations.
+
+## Reversibility note (pass #4)
+
+All amendments use the additive "amends" / "extends" pattern. Original ADR-0002 text is preserved verbatim; Amendment G is a new sibling block. ADR-0016 is a new top-of-file ADR (no prior version to preserve). The §PI inventory amendments preserve the original rows where they still apply and annotate deferred rows with the deferral target task. No prior decision is silently overridden — every change cites privacy-review-t05 / consolidated security-reviewer source and the relevant downstream task.
+
+## Hard rules observed
+
+- Newest ADR on top — ADR-0016 placed above ADR-0015.
+- Amendments are additive blocks under the original ADR; original text preserved verbatim.
+- Cross-references: every amendment cites the source review file (privacy-review-t05 §X) or security-reviewer blocker (B1–B4 / A3–A7) and the relevant downstream task.
+- All new dates are `2026-05-23`.
+- Files NOT modified by this pass (per hard rules): `.context/threat-model.md`, `.context/constraints.md`, `.context/preferences.md`, `.context/a11y-review.md`, `.context/privacy-review.md`, `.context/privacy-review-t05.md`, `.context/test-plan.md`, `observability/*`, `i18n/*`, `design-tokens.json`, `.context/design-system.md`, `apps/web/*`, `supabase/*`. All cross-references in this amendment pass point to existing content in those files; the next-pass owners (observability-setup for `observability/audit-log.md §1` `subject_pseudonym` + §2 HMAC-SHA-256 permission; migration-handler for the T05 migration; implementer for the T05 auth-core + memory-store + safe-fields) fold the pointers in.
+
+## Locked decisions not re-opened
+
+- ADR-0001 hosting tradeoff preserved.
+- ADR-0002 passkeys + TOTP-enrollment-bootstrap posture preserved (Amendment G is operational, not architectural — passkeys-only stays; TOTP-bootstrap-then-destroy stays).
+- ADR-0010 "Sentry is the only non-Supabase PI-adjacent subprocessor" preserved.
+- ADR-0015 per-event-type retention preserved (ADR-0016 sits *beside*, not on top of, ADR-0015).
+- No new cross-border transfers. No new PI subprocessors.
+
+## Cross-table mapping (source → amendment → task)
+
+| Source | Amendment | Task |
+|---|---|---|
+| privacy-review-t05 §2.1 Finding 1 + §2.2 (consumed-log) | ADR-0002 Amendment G.1 + ADR-0016 schedule row | T05 respin, T16 |
+| privacy-review-t05 §2.1 Finding 2 (HMAC-not-SHA) | ADR-0016 §Decision 1 + ADR-0002 Amendment G.4 | T05 respin (migration + auth-core) |
+| privacy-review-t05 §3.3 Finding 5 (`users` field set) | ADR-0002 Amendment G.3 + §PI inventory amendments | T05 (no code change), T06 (cross-ref), T07 (cross-ref) |
+| privacy-review-t05 §3.5 Finding 6 (plaintext `totp_code`) | ADR-0002 Amendment G.2 | T05 migration respin |
+| privacy-review-t05 §8 obs #1 (audit_log chain backfill) | ADR-0002 Amendment G.9 | T18 (cross-ref) |
+| privacy-review-t05 §8 obs #2 (`retention_class`) | ADR-0002 Amendment G.6 | T05 migration respin |
+| privacy-review-t05 §8 obs #3 (RLS deny-default) | ADR-0002 Amendment G.8 | T13 (cross-ref) |
+| privacy-review-t05 §8 obs #4 (`p_request_id`) | ADR-0002 Amendment G.7 | T05 migration respin |
+| privacy-review-t05 §8 obs #5 (`subject_pseudonym`) | ADR-0002 Amendment G.4 | T05 implementer respin + observability-setup next pass |
+| privacy-review-t05 §3 Finding 3 (per-attempt wording) | ADR-0002 Amendment G.5 | (documentation only) |
+| privacy-review-t05 §3 Finding 4 (`actor_pseudonym` in INFO) | Deferred to T05 production wiring + test-writer | T05 implementer + test-writer |
+| privacy-review-t05 §9 item 1 (Amendment G — TOTP consumed-log) | ADR-0002 Amendment G.1 | T05, T16 |
+| privacy-review-t05 §9 item 2 (PI inventory) | §PI inventory amendments | T05 |
+| privacy-review-t05 §9 item 3 (operational-table retention schedule) | ADR-0016 | T05, T16 |
+| privacy-review-t05 §9 item 4 (Amendment A wording) | ADR-0002 Amendment G.5 | (documentation only) |
+| privacy-review-t05 §9 item 5 (observability/audit-log.md `alert.fired`) | Deferred to observability-setup next pass | (observability follow-on) |
+| privacy-review-t05 §9 item 6 (semgrep rule) | ADR-0016 §Operational rules 2 (ratification) | T05 (file written by migration-handler or implementer) |
+| privacy-review-t05 §9 item 7 (HG-9 / HG-14 ratification) | HG-15 (new; bundled with ADR-0016 + Amendment G) | T16 |
+| consolidated security-reviewer A3 (memory-store HMAC parity) | ADR-0016 §Decision 3 + ADR-0002 Amendment G.4 follow-up | T05 implementer respin |
+| consolidated security-reviewer A4 (TOTP-attempt enumeration differential) | ADR-0016 follow-up | T05 implementer respin |
+| consolidated security-reviewer A5 (SECURITY DEFINER GRANT) | ADR-0016 follow-up | T05 migration-handler respin |
+| consolidated security-reviewer A6 (burst-alert deduplication) | ADR-0016 follow-up | T05 implementer respin |
+| consolidated security-reviewer A7 (dead `revoked_at` branch) | ADR-0016 follow-up | T05 implementer respin |
+
+---
+
+# Handoff (re-stated for amendment pass #4)
+
+Amendment pass #4 closes the T05 verifier + security-reviewer + privacy-reviewer blocker set (B1–B4 + cross-cuttings + advisories) and ratifies the semgrep rule. No new architectural posture introduced — every change is operational application of existing posture (ADR-0015 + ADR-0016 retention discipline; ADR-0003 invariants; ADR-0002 auth model) to the T05 schema and code.
+
+**HUMAN GATE TRIGGERED (HG-15, NEW):** Before T16 ships, the user explicitly ratifies (a) the ADR-0016 operational-table retention schedule (24h `auth_totp_consumed_log`, 90d `auth_sessions` revoked rows, until-revoked-or-membership-inactive+24mo `webauthn_credentials`), AND (b) the HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC posture. Architect's recommendation is APPROVE both as proposed. No other human gate triggered by this pass (no new subprocessor, no cross-border transfer, no locked-decision re-open).
+
+**The canonical pipeline is:**
+
+**1. migration-handler respins the T05 migration `supabase/migrations/00000000000001_auth.sql`** — per Amendment G + ADR-0016 follow-ups:
+- B1: replace `digest(..., 'sha256')` at lines 294-295, 317, 357, 437 with `hmac(..., current_setting('app.hmac_pseudonym_key'), 'sha256')`; add deploy-time `ALTER DATABASE ... SET app.hmac_pseudonym_key = '...'` (or `_setup_app_settings.sql` companion).
+- B2: no migration change beyond G.1 documentation; the existing `auth_totp_consumed_log` table shape is correct once the hash column is HMAC.
+- B3: no migration change; the `public.users` field set as-shipped is ratified.
+- B4: DROP the `auth_totp_bootstraps.totp_code` column; rewrite `UNIQUE (user_id, totp_code)` to `UNIQUE (user_id)`; rewrite `enroll_first_passkey`'s `v_bootstrap.totp_code = p_totp_code` to `v_bootstrap.secret_hash = hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')`.
+- G.4: rename `alert.fired` meta key from `actor_pseudonym` to `subject_pseudonym` (any place the migration emits one).
+- G.6: ADD `audit_log.retention_class text NOT NULL`; `audit_emit(...)` writes it from a static map of `event_type → retention_class` (or the ADR-0015 schedule table; T16 may supersede).
+- G.7: extend `audit_emit(...)` signature with `p_request_id uuid`; write it to `audit_log.request_id`.
+- A5: explicit `GRANT EXECUTE ON FUNCTION ... TO supabase_auth_admin` (or chosen server role) for every SECURITY DEFINER function.
+- semgrep rule: write `.semgrep/no-bare-sha256-in-migrations.yml` per ADR-0016 §Operational rules 2.
+
+**2. implementer respins the auth-core `apps/web/src/lib/auth/auth-core.ts` + `memory-store.ts` + `safe-fields.ts`** — per Amendment G + ADR-0016 follow-ups:
+- A3: memory-store stores HMAC-of-code (not plaintext); mirrors prod.
+- A4: collapse the TOTP-attempt enumeration differential (401 / 410 / 429) to uniform `401 UNAUTHORIZED` for the unauthenticated client; preserve the differential reason in the audit-log meta only.
+- A6: burst-alert emission deduplicated to one emission per threshold crossing.
+- A7: remove the dead `revoked_at` arithmetic branch.
+- ADR-0016 §Decision 3: TS-side reads `HMAC_PSEUDONYM_KEY` env var; boot smoke test compares SHA-of-key to a Postgres-reported SHA-of-key (does NOT log the key value); refuses to start on mismatch.
+- G.4: rename any `meta.actor_pseudonym` write inside the `alert.fired` emitter to `meta.subject_pseudonym`.
+
+**3. verifier + security-reviewer + privacy-reviewer re-review** the respun migration + auth-core. Verifier asserts:
+- The four blockers (B1–B4) are addressed in the diff.
+- The cross-cutting #1–#5 fold-ins are present.
+- The seven advisories (A3–A7 + the two non-blocking findings 3 + 4) are addressed.
+- The semgrep rule fails any reintroduction of bare `digest(..., 'sha256')` in `supabase/migrations/`.
+- Tests 1–9 from Amendment G "Testable assertions" pass.
+
+Security-reviewer asserts the HMAC-keyed pseudonyms hold equality across SQL ↔ TS ↔ Sentry surfaces. Privacy-reviewer asserts the §PI inventory amendments are coherent with the resulting diff and re-asserts the Q1–Q5 verdicts now read APPROVED (no -WITH-CHANGES).
+
+**4. test-writer adds the deferred obligation** from privacy-review-t05 §3 Finding 4 (`actor_pseudonym` in server-side structured-log INFO lines).
+
+**5. After re-review APPROVAL:** T05 merges. T06, T07, T13, T16, T18 acceptance cross-references stand as documented above and are honoured by their respective implementer + migration-handler turns.
+
+**6. HG-15 user ratification** is collected before T16 ships (not before T05 merges; T16 is the retention-sweep task that operationalizes the schedule).
+
+**No new cross-border transfers introduced.** **No new PI subprocessors introduced.** **No locked decisions re-opened.** ADR-0010's "Sentry is the only non-Supabase PI-adjacent subprocessor" posture preserved. ADR-0001's hosting tradeoff preserved.
