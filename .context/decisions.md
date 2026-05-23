@@ -25,6 +25,238 @@ pointing to the new one. The history is the value.
 
 ---
 
+# Amendment pass #5 (2026-05-23) — T07 scope reduction + Argon2id fail-closed
+
+**Decider(s):** architect (amendment pass #5 per privacy-review-t07 §12 BLOCKING findings T07-1 / T07-2 / T07-3 and the consolidated security/second-opinion/privacy reviewer blockers B1–B8 in commit `31f80d3`); **user** ratified the "drop migration to T07.1; fix the 3 small TS blockers" remediation path.
+
+**Source:** `/home/user/agent-os/.context/privacy-review-t07.md` §12; consolidated reviewer blockers B1 (Argon2id fallback) / B2 (`issue_recovery_blob_reset` missing authz+audit) / B3 (`record_recovery_blob_viewed` missing server-side cap-of-3) / B4 (module-level rotation lock) / B5 (`Math.random()` fallback) / B6 (untested SQL) / B7 (ADR-0016 schedule rows missing) / B8 (`view_count` over-collection); commit `31f80d3` message.
+
+**Hard rules for this pass (binding on this commit only):**
+- Only `.context/decisions.md` is modified in this pass. Known-gaps additions are written by the orchestrator in a separate commit per the carry-forward list below.
+- No application-code edits (`apps/web/`, `supabase/`, `observability/`, `i18n/`, test files all untouched).
+- Newest amendment on top per file convention.
+
+**The four ratified decisions and where they landed:**
+
+1. **T07 scope reduced to TS library only.** SQL migration moves to T07.1 (sibling production-wire-up task). T07 ships the library code with 41/41 tests against `MemoryKeyStore`; T07.1 ships `SupabaseKeyStore` + SQL functions + integration tests against a Supabase local stack. Structural reduction closes B2 / B3 / B6 / B7 / B8 — no SQL function ships in this PR, no new physical tables ship in this PR, no `view_count` column ships in this PR. Privacy BLOCKING findings T07-1 / T07-2 / T07-3 from `/home/user/agent-os/.context/privacy-review-t07.md` are deferred to T07.1 by structural deferral of the schema itself. **Landed as ADR-0002 Amendment H below.** The Amendment H pattern is now the canonical sibling-task posture: each library task ships its in-memory store; its `Supabase*Store` production wire-up is a numbered sibling task (T05.1, T07.1, …) that runs before any deploy carrying real PI.
+
+2. **Argon2id fallback: fail-closed.** `encryptRecoveryBlob` MUST throw `argon2id_unavailable_libsodium_wrappers_sumo_required` when `crypto_pwhash` is unavailable. No silent BLAKE2b substitution. Closes B1. **Landed as ADR-0003 Amendment G below** (sibling of Amendment F, not a folded extension of Amendment F's addendum block, because the fail-closed contract is architecturally distinct from the show-again accommodation and will be cross-referenced from T07.1's `libsodium-wrappers-sumo` swap).
+
+3. **Rotation lock scoped to per-`KeyStore` instance.** Module-level `rotationLockBusy` replaced with a per-`KeyStore` lock. Closes B4. **No new ADR.** This is an implementation detail; SQL-side `pg_try_advisory_xact_lock` is the production source of truth (lands in T07.1). The per-store TS lock is for test determinism only. Implementer applies the fix per its in-house judgment; per-store scoping is the contract. Recorded here for traceability only.
+
+4. **`Math.random()` → libsodium.** `generateRotationId()` in `committee-key.ts` uses `libsodium.randombytes_buf` exclusively; `Math.random()` fallback removed. Closes B5. **No new ADR.** Direct enforcement of **ADR-0003 Invariant 4** (libsodium-only primitives) as reaffirmed. Recorded here for traceability only.
+
+**Advisories deliberately deferred to T07.1 / known-gaps (NOT ratified in this pass):**
+
+- Security F4 — history-purge architectural choice. Privacy review §4 already verdicted "right call" (Principle 4.4 minimization wins; audit row carries attribution). The deliberate exception to "preserve history" is documented in ADR-0015 implicitly via the per-event-type retention of `committee_data_key.member_revoked` (7y) holding the forensic value. **No new ADR; recorded as carry-forward G-T07-* under the T07.1 wire-up so the privacy review of T07.1 can re-confirm the audit-before-purge ordering test (T07-A1) lands with the SQL function.**
+- Security F5 — KeyStore interface accepts `private_key` (read interface should not surface private material). Split into two interfaces in T07.1.
+- Security F6 — F-02 self-test is client-side only; server-issued nonce challenge lands in T07.1.
+- Privacy T07-A1 — test-writer audit-row-ordering assertion on member-revoke (lands with T07.1 SQL function).
+- Privacy T07-A2 — moot under Decision 1 (no `issue_recovery_blob_reset` SQL function ships in T07).
+- Privacy T07-A3 — static-lint glob widening to `src/lib/recovery/`. Small implementer fix; the architect does NOT direct it in this pass (per hard rules, no implementer steering on file edits beyond the four ratified items). Recorded as carry-forward.
+- Privacy Cross-cutting A — `identity_pubkey` relocation ADR documentation. Lands when T07.1 ships the migration; until then no drift exists because no `identity_keys` table exists.
+
+**Carry-forwards the orchestrator will write to `.context/known-gaps.md` under a new T07 section (verbatim entries):**
+
+- **G-T07-1: SQL migration deferred to T07.1.** The `supabase/migrations/00000000000002_identity.sql` file (and any sibling identity / recovery-blob / committee-key migrations) does NOT land in T07. It lands in T07.1 alongside `SupabaseKeyStore`. Closure: T07.1 migration-handler + privacy-reviewer re-run on the new tables.
+- **G-T07-2: SupabaseKeyStore production wire-up (T07.1).** T07 ships `MemoryKeyStore` only. T07.1 implements `SupabaseKeyStore` against the live Postgres schema. Closure: T07.1 implementer respin with integration tests.
+- **G-T07-3: Real Supabase integration tests for T07 SQL functions (T07.1).** The library's 41/41 tests cover `MemoryKeyStore`. SQL-function behaviour (`issue_recovery_blob_reset`, `record_recovery_blob_viewed`, member-revoke rotation, etc.) is tested only against the SupabaseKeyStore that lands in T07.1, using a Supabase local stack. Closure: T07.1 test-writer pass.
+- **G-T07-4: ADR-0016 schedule rows for 6 tables (T07.1 — when migration actually lands).** `identity_keys`, `recovery_blobs`, `recovery_blob_resets`, `committee_data_keys`, `committee_key_wraps`, `committee_key_wraps_history`. Privacy review T07-1 BLOCKING is structurally deferred (no tables exist yet in main). Closure: ADR-0016 amendment + HG-15 re-ratification when T07.1 lands.
+- **G-T07-5: §PI inventory amendments for 6 tables (T07.1).** ~20 new PI inventory rows + two amendments to existing rows for `identity_pubkey` / `identity_privkey_recovery_blob` relocation per the privacy review §11. Closure: T07.1 architect pass folds into §PI inventory.
+- **G-T07-6: `view_count` decision (T07.1 — preferred removal at design time).** Privacy review T07-2 BLOCKING preferred-fix: remove `recovery_blobs.view_count`, derive at read-time from `audit_log` rows where `event_type='identity_privkey.recovery_blob.viewed'`. Closure: T07.1 migration-handler implements the preferred path; if the alternative (keep the column) is chosen instead, an ADR-0003 Amendment F addendum is required.
+- **G-T07-7: Server-side cap-of-3 enforcement in `record_recovery_blob_viewed` (T07.1).** TS-side cap-of-3 from ADR-0003 Amendment F is necessary but not sufficient; the SQL function must enforce. Closes B3 in T07.1. Closure: T07.1 SQL function + test-writer assertion.
+- **G-T07-8: `issue_recovery_blob_reset` authz + audit emission (T07.1).** Closes B2 + privacy T07-A2 in T07.1. Closure: T07.1 SQL function with caller-authz check + `audit_emit` row.
+- **G-T07-9: Server-issued nonce for F-02 self-test (T07.1).** Closes security F6 in T07.1. Closure: T07.1 wires the self-test challenge to a server-issued nonce endpoint.
+- **G-T07-10: KeyStore interface split (T07.1).** Read interface MUST NOT surface `private_key`. Closes security F5 in T07.1. Closure: T07.1 TS interface refactor + implementer respin.
+- **G-T07-11: `identity_pubkey` relocation documentation (T07.1).** ADR-0002 Amendment G.3 addendum documenting the `users.identity_pubkey` → `identity_keys.public_key` relocation lands when T07.1 lands the migration. Also: test-harness query update + ADR-0003 Amendment A CI grep target update. Closure: T07.1 architect pass.
+- **G-T07-12: `libsodium-wrappers-sumo` dep swap (T07.1) — production guard for the Argon2id fallback even though fail-closed makes it moot.** Per ADR-0003 Amendment G below, the library refuses to run without Argon2id, so production cannot silently downgrade. Swapping the dep to the `-sumo` variant in T07.1 makes the fallback unreachable rather than merely refused. Closure: T07.1 implementer pass + pnpm `lockfile-lint` rule.
+
+**Reviewer re-run posture after this pass:**
+
+Orchestrator drops the SQL migration from the T07 PR; implementer applies the three TS fixes (per Decisions 2, 3, 4); then the four-way reviewer re-run (security + second-opinion + privacy + threat-model cross-check) verifies T07 is now library-only with the fail-closed Argon2id contract intact and the four privacy/security advisories listed above explicitly carried forward to T07.1.
+
+---
+
+# ADR-0003 Amendment G (2026-05-23, amendment pass #5, B1 resolution): Recovery-blob encryption refuses to operate without Argon2id
+
+**Amends ADR-0003** above. Trigger: consolidated reviewer blocker B1 (`/home/user/agent-os/.context/privacy-review-t07.md` §9 cross-cutting B / T07-A4 advisory; security-reviewer + second-opinion-reviewer + privacy-reviewer agreement). Cross-references **ADR-0003 Invariant 4** (libsodium-only crypto primitives — non-negotiable), **ADR-0003 Amendment F** (recovery-passphrase show-again accommodation; same module surface), and **carry-forward G-T07-12** (production `libsodium-wrappers-sumo` dep swap in T07.1).
+
+### The problem
+
+T07's library implementation of `encryptRecoveryBlob` (in the `src/lib/recovery/` module) historically degraded silently to BLAKE2b when `libsodium.crypto_pwhash` was unavailable at runtime. The KDF-params claim block in the resulting blob still labelled the algorithm `argon2id13`, while the actual derivation was BLAKE2b. Three downstream failures cascade from this:
+
+1. **Restore-time forensic incoherence.** `decryptRecoveryBlob` reads `kdf_params.alg`, sees `argon2id13`, derives via Argon2id, and fails to match the BLAKE2b-derived key. The user's recovery sheet becomes unusable through no fault of theirs.
+2. **PIPEDA Principle 4.7 (Safeguards) regression.** BLAKE2b without the work-factor properties of Argon2id is not "sensitivity-appropriate" for a long-lived offline-brute-force target (F-08). The label-vs-derivation drift makes the regression undetectable by inspection of the stored blob alone.
+3. **Mixed-deployment data-integrity bomb.** A deployment where some nodes have `crypto_pwhash` and others do not produces blobs that the next node cannot restore. The failure mode is not flagged by tests that all run against the same build.
+
+The four-reviewer agreement is unanimous: silent algorithm substitution in cryptographic code is unacceptable under Invariant 4. The two remediation paths were:
+
+- **Path X: extend the alg field + add a forward-compat plan for old blobs.** Adds a new code path that the test matrix must cover; doubles the restore-time logic; widens the threat space.
+- **Path Y: fail-closed at write-time.** No old blobs exist yet (T07 has not shipped). The smallest change that prevents the data-integrity bomb is to refuse to write a blob the deployment cannot honestly label.
+
+### The amendment — fail-closed contract
+
+`encryptRecoveryBlob` (in `src/lib/recovery/`) MUST throw the error message `argon2id_unavailable_libsodium_wrappers_sumo_required` when `libsodium.crypto_pwhash` is unavailable at the call site. The error MUST be thrown BEFORE any key derivation attempt. The error MUST NOT be caught and silently retried with a different KDF. `decryptRecoveryBlob` MUST also assert `kdf_params.alg === 'argon2id13'` against runtime capability and fail loudly on mismatch (this half is already specified by privacy-reviewer T07-A4; restated here for completeness).
+
+**The fail-closed contract binds:**
+
+1. **Write-time detection.** `encryptRecoveryBlob` checks `typeof libsodium.crypto_pwhash === 'function'` (or the equivalent feature-test the implementer chooses; the canonical wording is "crypto_pwhash is callable") at entry, BEFORE generating any randomness, BEFORE deriving any key, BEFORE allocating any buffer. If false, throws `argon2id_unavailable_libsodium_wrappers_sumo_required`.
+2. **Error message is canonical.** The string `argon2id_unavailable_libsodium_wrappers_sumo_required` is the exact wording the test-writer asserts on. No prefix, no localization, no enriched JSON wrapper at this layer (higher layers may wrap; the bottom-layer throw is the canonical string).
+3. **No silent BLAKE2b substitution.** Any code path that previously fell through to BLAKE2b is removed. Static lint asserts zero matches for `crypto_generichash` (or any BLAKE2b primitive) inside `src/lib/recovery/` outside the documented HMAC-of-blob-id allowlist if one exists. Implementer pass confirms.
+4. **Test-harness override is explicit and documented.** Tests that need a fast KDF (because Argon2id at production work-factors is slow) MUST provide an explicit override flag (the implementer chooses the shape — environment variable, constructor argument, factory-function parameter); the override flag's existence is logged by the library at construction time when set, and the production build MUST NOT honor the override (a build-time assertion or runtime `NODE_ENV !== 'production'` guard is acceptable). The architect does NOT prescribe the flag shape; the implementer picks per its in-house judgment with the constraints above as the contract.
+
+### Production posture (binding on T07.1 — see G-T07-12)
+
+Production builds use `libsodium-wrappers-sumo`. The `-sumo` variant ships `crypto_pwhash` in all environments; the fail-closed throw becomes unreachable in production. A pnpm `lockfile-lint` rule (added by T07.1) asserts the production lockfile contains `libsodium-wrappers-sumo` rather than `libsodium-wrappers`. A boot-time assertion refusing to start if `crypto_pwhash` is absent and `NODE_ENV === 'production'` is added in T07.1 (privacy-reviewer T07-A4 fix list, item 1).
+
+The architect's posture: the fail-closed throw is the smallest correct change at the library layer; the dep swap is the smallest correct change at the production layer; together they make the BLAKE2b code path structurally impossible to reach.
+
+### Rationale (why fail-closed over alg-field extension)
+
+- **Minimization.** No new code path means no new test surface and no new branch in restore-time logic.
+- **No forward-compat debt.** T07 has not shipped; no blobs exist in any environment that would need to be readable by a future fail-closed-only version. The window to choose fail-closed is now.
+- **Detectability of misconfiguration.** A fail-closed throw at write-time is louder than a label-vs-derivation drift discoverable only at restore-time (which may be months later, in the field, when the user needs the data).
+- **Reviewer agreement.** Three independent reviewers chose fail-closed over alg-field extension. The architect ratifies.
+
+### Reversibility
+
+**Easy** on the library implementation (one module: `src/lib/recovery/`; one feature-test; one throw). **Hard** on the architectural posture: once T07.1 lands the dep swap and the boot-time assertion, downgrading the library to silent-substitute mode would require re-introducing a regression that three reviewers blocked.
+
+### Compliance check additions
+
+- [x] PIPEDA Principle 4.7 (Safeguards) — sensitivity-appropriate KDF is structurally enforced; no silent downgrade.
+- [x] ADR-0003 Invariant 4 (libsodium-only crypto) — reaffirmed; the fail-closed throw is the enforcement mechanism at the library layer.
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+- [x] Threat-model F-08 — long-lived offline-brute-force resistance is preserved; no BLAKE2b-derived blobs can be written.
+
+### Testable assertions (T07 acceptance amended)
+
+1. **Fail-closed throw on absent `crypto_pwhash`.** Stub libsodium with `crypto_pwhash` set to `undefined`; call `encryptRecoveryBlob(...)`; assert the call throws; assert the error message is exactly `argon2id_unavailable_libsodium_wrappers_sumo_required`.
+2. **No silent BLAKE2b path.** Static lint asserts zero matches for `crypto_generichash` in `src/lib/recovery/` outside the test-fixture path (or the documented allowlist if one exists; implementer documents in the module).
+3. **Test-harness override is explicit.** With the override flag NOT set: the library uses Argon2id (or throws). With the override flag set: the library uses the fast KDF AND logs a clear "test KDF override active" warning at construction time. In production-mode (build-time `NODE_ENV === 'production'`): setting the flag does NOT enable the fast KDF.
+4. **`decryptRecoveryBlob` mismatch detection.** A blob with `kdf_params.alg = 'argon2id13'` in a runtime where `crypto_pwhash` is absent → `decryptRecoveryBlob` throws (does NOT silently substitute BLAKE2b and produce a wrong-key-derivation failure). Privacy T07-A4 fix-list item 3.
+
+### Cross-references
+
+- **ADR-0003 Invariant 4** — libsodium-only primitives; this amendment is the enforcement mechanism at the recovery-blob layer.
+- **ADR-0003 Amendment F** — recovery-passphrase show-again accommodation; same module surface (`src/lib/recovery/`). Amendment G binds the cryptographic write path; Amendment F binds the reveal UX. They compose without conflict.
+- **privacy-review-t07 §9 + T07-A4** — the source review verdict; the four fix-list items are split between this Amendment G (items 1, 3, the labelling assertion) and carry-forward G-T07-12 (production dep swap + boot-time assertion).
+- **consolidated reviewer B1** — the source blocker.
+- **carry-forward G-T07-12** — production `libsodium-wrappers-sumo` dep swap and boot-time assertion.
+
+### Follow-ups (T07 + T07.1 acceptance amended — see ADR-0002 Amendment H below)
+
+- [ ] **T07 acceptance amended** — implementer respin: write-time `crypto_pwhash` feature-test; canonical error message; test-harness override flag; lint assertion; restore-time mismatch detection. Tests 1–4 above land before the implementer touches the respun module.
+- [ ] **T07.1 acceptance cross-referenced** — `libsodium-wrappers-sumo` dep swap; boot-time assertion; pnpm `lockfile-lint` rule (G-T07-12).
+- [ ] **second-opinion-reviewer re-run** — confirms the fail-closed throw is the only path when `crypto_pwhash` is absent.
+- [ ] **privacy-reviewer re-run** — confirms T07-A4 fix-list items 1 + 3 are addressed at the library layer; items 2 + 4 (boot-time assertion, `lockfile-lint`) deferred to T07.1 with explicit carry-forward.
+
+---
+
+# ADR-0002 Amendment H (2026-05-23, amendment pass #5): Sibling production-wire-up tasks (T05.1, T07.1, …) — library code ships in the parent task, `Supabase*Store` production wire-up ships in a numbered sibling before any deploy carrying real PI
+
+**Amends ADR-0002** above (and the broader task-list posture established alongside ADR-0001 / ADR-0003). Trigger: privacy-review-t07 BLOCKING findings T07-1 / T07-2 / T07-3 (six new tables shipping without ADR-0016 schedule rows); consolidated reviewer blockers B2 / B3 / B6 / B7 / B8 (untested SQL, missing server-side authz/audit/cap-of-3 enforcement, missing schedule rows, `view_count` over-collection). Cross-references **ADR-0001** (the parent hosting + E2EE-as-load-bearing posture), **ADR-0003 Amendment G** (Argon2id fail-closed at the library layer — composable with this pattern), **ADR-0015** + **ADR-0016** (audit-log + operational-table retention schedules that gate any new physical table from landing in `main`), and **HG-15** (operational-table retention gate; bound to T05's tables historically and now to T07.1's tables prospectively).
+
+### The pattern
+
+Each library-shaped task in the plan (T05 auth core, T07 E2EE key core + recovery blob + committee key wrap + Amendment F, and any future analogous task) ships **only the library code** under its parent task number. The library code is exercised by tests against an **in-memory store** (`MemoryAuthStore`, `MemoryKeyStore`, …). The **production wire-up** — the `Supabase*Store` implementation that talks to the live Postgres schema, the SQL functions, the migrations that create the underlying tables, and the integration tests against a Supabase local stack — ships as a **numbered sibling task** (T05.1, T07.1, …) that runs **before any deploy carrying real PI**.
+
+The pattern is binding on every future task whose acceptance includes both "library code with crypto / auth / privacy invariants" AND "Postgres tables / SQL functions / migrations that store or process the resulting PI."
+
+### Why the pattern (the failure mode it prevents)
+
+Reviewer history establishes that bundling library + production wire-up + schema + SQL functions + migrations into a single task produces:
+
+1. **Reviewer overload.** Four parallel reviewers (security, second-opinion, privacy, threat-model) each find blockers on different surfaces; the consolidated blocker count exceeds what one implementer respin can address coherently. T07's eight blockers (B1–B8) are the worst-case demonstration.
+2. **Schedule-gating drift.** ADR-0016's "every operational table touching PI MUST appear in this schedule before the table ships in any migration that lands in `main`" rule is structurally violated whenever a task's PR includes both the migration AND the schedule-row amendment; the order-of-operations becomes a reviewer dependency rather than a structural property.
+3. **Test-coverage opacity.** Library tests against `MemoryStore` and integration tests against Supabase local stack measure different things; bundling them produces a single coverage number that masks gaps on either side.
+4. **Irreversibility of half-shipped schemas.** A migration that lands in `main` is hard to retract (downstream tasks depend on it, ADR-0011 rolling-deploy posture assumes no backward-incompatible drops). Forcing the schema to land in a separate task with its own privacy + security review makes the retraction window explicit.
+
+### The contract (binding on T05 / T05.1 retrospectively and on T07 / T07.1 in this pass; binding on all future library-shaped tasks prospectively)
+
+For any task T_n whose acceptance includes "Postgres tables / SQL functions / migrations that store or process PI":
+
+1. **T_n ships:** library code + `Memory*Store` implementation + library-layer tests (unit + property + fuzz where applicable) against `Memory*Store` + any TS-side invariants (e.g., ADR-0003 Amendment G fail-closed throw) + ADR amendments that bind the library-layer contract.
+2. **T_n.1 ships:** `Supabase*Store` implementation + SQL functions + migrations + ADR-0016 schedule-row additions for any new operational tables + §PI inventory amendments + integration tests against a Supabase local stack + any SQL-side invariants (e.g., server-side cap-of-3 enforcement, server-side authz + audit emission) + HG-15 re-ratification when the new tables widen the operational-table schedule.
+3. **T_n.1 runs before any deploy carrying real PI.** "Deploy carrying real PI" is defined as any deploy that creates `webauthn_credentials` rows for real users (post-T05.1), `identity_keys` rows (post-T07.1), `recovery_blobs` rows (post-T07.1), and any analogous future PI-bearing table.
+4. **T_n's library code MAY use an injectable store interface that T_n.1 supplies the production implementation for.** The interface MUST NOT surface private key material on read APIs (per security-reviewer F5 carry-forward G-T07-10 for T07.1; the same posture binds future analogous tasks).
+5. **T_n.1 carries its own four-way reviewer pass.** Privacy-reviewer re-runs against the new schema rows; security-reviewer + second-opinion-reviewer re-run against the SQL functions; threat-model cross-checks any new trust-boundary surface.
+
+### Application to T05 / T05.1 (retrospective, formalizing the existing pattern)
+
+T05 (auth core + auth migration) already shipped its `MemoryAuthStore` library code under its parent task number. ADR-0002 Amendment G (this file, lines ~2618–2763) folded the four T05-side blockers (B1–B4) into the auth ADR. The SQL migration + `SupabaseAuthStore` production wire-up was treated as a continuation of T05 historically. **In this Amendment H pass, the retrospective formalization is: T05's SQL migration + `SupabaseAuthStore` wire-up is the T05.1 sibling task**, even though it was not numbered T05.1 at the time. Future references to "T05.1" in this file and downstream refer to the auth-side production wire-up: `auth_totp_bootstraps`, `auth_totp_consumed_log`, `auth_sessions`, `webauthn_credentials`, `public.users` (auth side-table), and the `audit_emit` / `enroll_first_passkey` SQL functions.
+
+### Application to T07 / T07.1 (this pass)
+
+T07 (E2EE key core + recovery blob + committee key wrap + Amendment F) ships in this pass with library code only:
+
+- `src/lib/recovery/` (recovery-blob encrypt + decrypt + show-again controller per Amendment F)
+- `src/lib/identity/` (identity keypair generation + IndexedDB storage + recovery-blob round-trip)
+- `src/lib/committee/` (committee-data-key wrap + unwrap + rotation orchestration at the library layer)
+- `MemoryKeyStore` exercising all three modules; 41/41 tests passing
+- ADR-0003 Amendment G fail-closed throw at the library layer
+
+T07.1 (E2EE key core production wire-up) is the numbered sibling. T07.1 ships:
+
+- `SupabaseKeyStore` against the live Postgres schema
+- Migration creating `identity_keys`, `recovery_blobs`, `recovery_blob_resets`, `committee_data_keys`, `committee_key_wraps`, `committee_key_wraps_history` (six new tables)
+- SQL functions `issue_recovery_blob_reset`, `record_recovery_blob_viewed`, `revoke_committee_member` (with the audit-row-emission-before-history-purge ordering per privacy review §4 + T07-A1), `rotate_committee_data_key` (with `pg_try_advisory_xact_lock` as the production source of truth for the rotation lock per Decision 3 of Amendment pass #5)
+- ADR-0016 schedule rows for the six new tables (G-T07-4)
+- §PI inventory amendments (~20 new rows; G-T07-5)
+- Server-side cap-of-3 enforcement in `record_recovery_blob_viewed` (B3 / G-T07-7)
+- Authz + audit emission in `issue_recovery_blob_reset` (B2 / G-T07-8)
+- `libsodium-wrappers-sumo` dep swap + boot-time `crypto_pwhash` assertion + pnpm `lockfile-lint` (G-T07-12; the production half of ADR-0003 Amendment G)
+- Server-issued nonce challenge for F-02 self-test (G-T07-9)
+- KeyStore interface split — read interface MUST NOT surface `private_key` (G-T07-10)
+- `identity_pubkey` relocation documentation: ADR-0002 Amendment G.3 addendum + test-harness query update + ADR-0003 Amendment A CI grep target update (G-T07-11)
+- HG-15 re-ratification covering the six new tables
+
+T07.1 runs before any deploy that creates `identity_keys` rows for real users.
+
+### Reversibility
+
+**Easy** on the task-numbering convention (renaming a numbered sibling is a plan-doc edit). **Hard** on the architectural posture: the four-reviewer overload + schedule-gating drift + test-coverage opacity + half-shipped-schema irreversibility that motivate the pattern do not go away if the pattern is abandoned. Future tasks of analogous shape must follow the pattern; deviation requires an explicit architect amendment.
+
+### Compliance check additions
+
+- [x] PIPEDA Principle 4.5 (Limiting Retention) — every new operational table goes through ADR-0016 schedule-row ratification in its T_n.1 sibling before landing in `main`; no schedule-gating drift.
+- [x] PIPEDA Principle 4.7 (Safeguards) — server-side enforcement (cap-of-3, authz, audit emission) lands as part of the SQL function in T_n.1, with its own privacy + security review; not bundled with library tests that cannot exercise SQL invariants.
+- [x] ADR-0016 hard rule "every operational table touching PI MUST appear in this schedule before the table ships in any migration that lands in `main`" — structurally enforced by the pattern (schedule rows are part of T_n.1's deliverable).
+- [x] HG-15 — each T_n.1 sibling re-ratifies the schedule when it widens; the gate fires per-task rather than being amortized across multi-surface PRs.
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+
+### Testable assertions (process-level, not code-level)
+
+The pattern's adherence is verified at PR-review time, not in code-level tests:
+
+1. **T07 PR (this pass) contains no SQL migration** in `supabase/migrations/`. PR-review-time assertion: `git diff --name-only main...T07-branch -- supabase/migrations/` returns empty (or contains only files that pre-existed T07).
+2. **T07 PR contains no Postgres function definitions** in any migration file. PR-review-time assertion: a grep for `CREATE OR REPLACE FUNCTION` in T07-touched files in `supabase/migrations/` returns zero matches.
+3. **T07 PR's library tests pass against `MemoryKeyStore`** with the 41-test count documented in the privacy-review-t07 source material.
+4. **T07.1 PR (future) contains the six-table migration AND the ADR-0016 schedule rows AND the §PI inventory rows AND HG-15 re-ratification** in a single coherent privacy + security review pass.
+
+### Cross-references
+
+- **ADR-0001** — the parent hosting + E2EE-as-load-bearing posture; the four-reviewer overload risk this pattern mitigates is a function of how much PI surface lands per task, which is bounded by ADR-0001's "no third-party PI processor beyond Supabase" + ADR-0003's "server holds ciphertext only" combination.
+- **ADR-0002 Amendment G** — the retrospective T05 / T05.1 split. Amendment H formalizes the pattern Amendment G already implicitly followed.
+- **ADR-0003 Amendment G** — the Argon2id fail-closed contract at the library layer; composable with the pattern (T07's library code carries the throw; T07.1's production wire-up makes the throw unreachable via the dep swap).
+- **ADR-0015** — per-event-type audit-log retention schedule; binding on any new event type a T_n.1 sibling introduces.
+- **ADR-0016** — operational-table retention schedule; binding on any new physical table a T_n.1 sibling introduces. ADR-0016's hard rule on schedule-row presence pre-migration is the structural enforcement mechanism this pattern leans on.
+- **HG-15** — the operational-table retention gate; fires per T_n.1 sibling.
+- **privacy-review-t07 §12 + §14** — the source review that triggered this pass; the BLOCKING findings T07-1 / T07-2 / T07-3 are structurally closed by deferring the schema to T07.1.
+- **consolidated reviewer B2 / B3 / B6 / B7 / B8** — the source blockers; structurally closed by the pattern (no SQL in T07 = no missing authz/audit, no missing cap-of-3, no untested SQL, no missing schedule rows, no `view_count` over-collection).
+
+### Follow-ups (T07 + T07.1 + future task-list updates)
+
+- [ ] **T07 acceptance amended** — library-only deliverable; 41/41 tests against `MemoryKeyStore`; ADR-0003 Amendment G fail-closed throw; per-`KeyStore` rotation lock (Decision 3, amendment pass #5); libsodium-only `generateRotationId` (Decision 4, amendment pass #5). No SQL migration in this PR. Implementer respin applies Decisions 2, 3, 4; four-way reviewer re-run verifies library-only posture.
+- [ ] **T07.1 acceptance ratified (new task)** — see "Application to T07 / T07.1" above for the full deliverable list. Privacy-reviewer + security-reviewer + second-opinion-reviewer + threat-model cross-check all re-run on the T07.1 PR. HG-15 user re-ratification required.
+- [ ] **Plan / task-list update** — the architect-coordinator / orchestrator folds the T05.1 + T07.1 naming convention into the canonical task list on its next pass. Future library-shaped tasks (TBD which) inherit the pattern at task-list-authoring time, not retrospectively.
+- [ ] **observability-setup next pass** — no changes triggered by this Amendment H directly; the `identity_privkey.recovery_blob.viewed` event from ADR-0003 Amendment F lands its server-side audit emission in T07.1 (G-T07-7 / G-T07-8), at which point observability-setup verifies the integrity-checker + retention-job recognize it (ADR-0003 Amendment F follow-up item is preserved; no new observability work in amendment pass #5).
+- [ ] **HG-15 — re-ratification posture** — Amendment pass #5 does NOT trigger HG-15 (no new operational tables ship in this pass). The next HG-15 fire is at T07.1 PR submission.
+
+---
+
 # ADR-0016: Operational-table retention schedule + HMAC pseudonymization standard for Postgres (HG-15)
 
 **Status:** Accepted
