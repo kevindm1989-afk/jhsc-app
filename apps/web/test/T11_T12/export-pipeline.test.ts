@@ -215,8 +215,15 @@ describe('T11 / F-27 — allowlist hash audit binding', () => {
   it('T11 / F-27 — monkey-patch render to use a different allowlist → integrity_fail audit row + export aborted', async () => {
     const cochair = await supa.enrollUser(SYNTHETIC_USER_COCHAIR, { role: 'worker_co_chair' });
     const minutesId = await supa.client(cochair).finalizeMinutes({ agenda_items: ['x'], decisions: [] });
+    // Deep-import the test-only override per T13 F-1 / T11/T12 security
+    // Finding 1: __setRendererAllowlistOverrideForTest is NOT re-exported
+    // from the public ./export barrel. Tests reach it via the internal
+    // export-core module path.
     const { exportMinutes: exportMinutesPatched } = await import('../../src/lib/export');
-    (exportMinutesPatched as any).__test_overrideRendererAllowlist(['source_name_ct']);
+    const { __setRendererAllowlistOverrideForTest } = await import(
+      '../../src/lib/export/export-core'
+    );
+    __setRendererAllowlistOverrideForTest(['source_name_ct']);
     const r = await exportMinutesPatched(supa.client(cochair), minutesId);
     expect(r.status).toBe('error');
     const audit = await supa.adminQuery(

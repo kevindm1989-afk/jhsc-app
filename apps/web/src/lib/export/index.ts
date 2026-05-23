@@ -146,11 +146,6 @@ async function exportOne(
 export async function exportMinutes(client: unknown, minutes_id: string): Promise<ExportResult> {
   return exportOne(client, minutes_id, 'minutes.final');
 }
-exportMinutes.__test_overrideRendererAllowlist = function (
-  override: readonly string[] | null
-): void {
-  __setRendererAllowlistOverrideForTest(override);
-};
 
 /** Public adapter — recommendation export. */
 export async function exportRecommendation(
@@ -159,8 +154,12 @@ export async function exportRecommendation(
 ): Promise<ExportResult> {
   return exportOne(client, recommendation_id, 'recommendation');
 }
-exportRecommendation.__test_overrideRendererAllowlist = function (
-  override: readonly string[] | null
-): void {
-  __setRendererAllowlistOverrideForTest(override);
-};
+
+// NOTE: __setRendererAllowlistOverrideForTest is NOT re-exported from this
+// barrel (T13 F-1 lesson). Tests reach it via deep-import:
+//   import { __setRendererAllowlistOverrideForTest } from
+//     '../../src/lib/export/export-core';
+// Previously a `.__test_overrideRendererAllowlist` property was attached to
+// the public exportMinutes / exportRecommendation functions; security
+// review T11/T12 Finding 1 (BLOCK) flagged that as the same exposure
+// in a different form. Removed.
