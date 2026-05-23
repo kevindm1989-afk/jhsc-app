@@ -169,3 +169,45 @@ Architect-coordinator must:
 6. Ratify T07-A4 production guards.
 
 Then migration-handler, test-writer, implementer, and privacy-reviewer re-runs.
+
+---
+
+## Final pass after architect amendment #5 (2026-05-23)
+
+**Status: APPROVED** — all three prior BLOCKING findings closed; all four advisories either fixed at the library layer or carried forward to T07.1 with explicit known-gap entries.
+
+### HUMAN GATES — re-check
+
+- **HG-15 does NOT fire in this T07 pass.** Verified: `supabase/migrations/` contains only `00000000000000_init.sql` and `00000000000001_auth.sql`; no new operational PI table ships in this PR. Next HG-15 fire is at T07.1 PR submission.
+- No cross-border transfer introduced. No new subprocessor.
+
+### Re-verification
+
+| Finding | Verdict | Closure mechanism |
+|---|---|---|
+| T07-1 (6 tables without ADR-0016 rows) | CLOSED-IN-T07 | Migration dropped; G-T07-4 + G-T07-5 capture T07.1 obligations |
+| T07-2 (view_count over-collection) | CLOSED-IN-T07 | No view_count column ships; G-T07-6 captures "preferred removal" for T07.1 |
+| T07-3 (recovery_blobs/recovery_blob_resets retention) | CLOSED-IN-T07 | Tables don't ship; G-T07-4 covers |
+| T07-A1 (audit-row ordering test) | DEFERRED-TO-T07.1 | ADR-0002 Amendment H T07.1 deliverable list captures |
+| T07-A2 (issue_recovery_blob_reset authz+audit) | DEFERRED-TO-T07.1 | G-T07-8 captures |
+| T07-A3 (lint glob widening) | CLOSED-IN-T07 | scripts/check-recovery-surface-lint.sh wired into verify.sh:147; covers both recovery surfaces; passes |
+| T07-A4 library half (Argon2id safeguard) | CLOSED-IN-T07 | ADR-0003 Amendment G fail-closed contract at recovery-blob.ts:144-146 + :184-190; data-integrity bomb structurally prevented |
+| T07-A4 production half (sumo dep + boot guard + lockfile-lint) | DEFERRED-TO-T07.1 | G-T07-12 captures |
+| Cross-cutting A (identity_pubkey relocation) | DEFERRED-TO-T07.1 | G-T07-11 captures |
+| Cross-cutting B (Argon2id) | CLOSED-IN-T07-LIBRARY | Same as T07-A4 |
+
+### Threat-model cross-check
+
+- F-08: strengthened (fail-closed makes silent KDF substitution structurally impossible).
+- F-12: SQL-side authz + audit deferred to T07.1 via G-T07-8.
+- M-54a/b/c/d: unchanged; T07-A3 widened lint hardens M-54d defense surface.
+- No flow upgraded; no border crossed; no retention extended; no purpose expanded.
+
+### Overall T07 privacy final verdict
+
+**APPROVED.** T07 ships as library-only per ADR-0002 Amendment H. T07.1 is the production-deploy gate per ADR-0002 Amendment H. All twelve G-T07-* obligations are tracked in `.context/known-gaps.md`.
+
+### Handoff
+
+1. **Orchestrator:** T07 merge unblocked from privacy perspective. The pending PIPEDA-Principle-4.7 production guards (G-T07-12) MUST land before the first deploy that creates real recovery_blobs rows.
+2. **T07.1 privacy-reviewer (future):** re-verify (a) view_count is NOT a column in T07.1's migration, (b) audit-before-purge ordering test lands with revoke_committee_member, (c) issue_recovery_blob_reset carries authz + audit, (d) sumo dep swap + boot-time assertion + lockfile-lint land, (e) identity_pubkey relocation ADR addendum lands.
