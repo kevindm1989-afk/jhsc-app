@@ -113,6 +113,45 @@ export default [
     }
   },
   {
+    // T17 / ADR-0018 mirror — production code (outside the backup library
+    // itself) must NEVER deep-import the backup test-only override hooks.
+    // Tests reach these via deep-import; production consumes only the public
+    // barrel `lib/backup`. All three path shapes covered from the start
+    // (Finding 1 lesson from T16 reviewer pass).
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: ['src/lib/backup/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/lib/backup/memory-backup-store',
+                '**/lib/backup/backup-tables',
+                '**/lib/backup/backup-core',
+                '**/lib/backup/backup-store',
+                '**/lib/backup/types',
+                '**/backup/memory-backup-store',
+                '**/backup/backup-tables',
+                '**/backup/backup-core',
+                '**/backup/backup-store',
+                '**/backup/types',
+                '$lib/backup/memory-backup-store',
+                '$lib/backup/backup-tables',
+                '$lib/backup/backup-core',
+                '$lib/backup/backup-store',
+                '$lib/backup/types'
+              ],
+              message:
+                'Use the public backup barrel `lib/backup`. Deep-import surfaces (MemoryBackupStore, __forceUploadFailure, __debug*) are test-only.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     ignores: [
       'node_modules/',
       '.svelte-kit/',
