@@ -38,7 +38,10 @@ export default [
       '@typescript-eslint/no-unused-vars': [
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
-      ]
+      ],
+      // (T16 / G-T11-9 mirror is scoped below to non-retention production
+      //  source so files within the retention library can deep-import from
+      //  their sibling modules.)
     }
   },
   {
@@ -69,6 +72,34 @@ export default [
     files: ['src/lib/log/**/*.ts', 'src/lib/observability/**/*.ts'],
     rules: {
       'no-console': 'off'
+    }
+  },
+  {
+    // T16 / G-T11-9 mirror — production code (outside the retention library
+    // itself) must NEVER deep-import the retention test-only override hooks.
+    // Tests reach these via deep-import; production consumes only the public
+    // barrel `lib/retention`.
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: ['src/lib/retention/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/lib/retention/memory-retention-store',
+                '**/lib/retention/schedule',
+                '**/lib/retention/retention-core',
+                '**/lib/retention/retention-store',
+                '**/lib/retention/types'
+              ],
+              message:
+                'Use the public retention barrel `lib/retention`. Deep-import surfaces (MemoryRetentionStore, __setScheduleOverrideForTest, __debug*) are test-only.'
+            }
+          ]
+        }
+      ]
     }
   },
   {
