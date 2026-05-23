@@ -382,10 +382,18 @@
     outline: none;
     /*
       Two-layer focus ring per design-tokens.json shadow.focus_ring.
-      Inner line is the WCAG 1.4.11 load-bearing layer.
+      Inner line is the WCAG 1.4.11 load-bearing layer (#16181d at 2px);
+      outer halo is the accent yellow (#fbbf24 at 5px).
+
+      Fallback values are inline because no global stylesheet currently
+      emits `--shadow-focus-ring` / `--color-border-focus` as CSS custom
+      properties from the token file. When the design-system pass lands
+      that emitter, the var() will resolve and these fallbacks become
+      defense-in-depth.
     */
-    box-shadow: var(--shadow-focus-ring);
-    border-color: var(--color-border-focus);
+    box-shadow:
+      var(--shadow-focus-ring, 0 0 0 2px #16181d, 0 0 0 5px #fbbf24);
+    border-color: var(--color-border-focus, #16181d);
   }
 
   button[role='switch'] {
