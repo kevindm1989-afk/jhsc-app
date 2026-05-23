@@ -25,6 +25,492 @@ pointing to the new one. The history is the value.
 
 ---
 
+## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore
+
+**Status:** Accepted
+**Date:** 2026-05-23
+**Decider(s):** architect (T18 design pass on the carry-forward set RA-2 compensating control #3 + RA-2 trigger #3 + G-T16-8 + G-T17-PRIV-7 + G-T17-9 + G-T17-RA2-ANCHOR-CONSUMER and the ADR-0001 + ADR-0003 Amendment A + ADR-0010 + ADR-0012-amendments + ADR-0015 + ADR-0016 + ADR-0017 + ADR-0018 + ADR-0002 Amendment H constraint set). **No new HG fires in this pass** — T18 ships library-only per Amendment H; **HG-15 fires on T18.1** when (a) the new physical `integrity_check_runs` table lands and (b) the SupabaseIntegrityStore + pg_cron schedule + Edge Function trigger surface land. **HG-10 explicitly does NOT fire** — T18 ships zero user-facing copy (operator-facing alerts only). **HG-9 does NOT re-fire** — the three new audit-log enum values (`audit.integrity_check.ran`, `audit.integrity_check.mismatch`, `audit.chain_anchor.weekly`) ride the standard ADR-0003 Amendment A extension dance covered by ADR-0015 + ADR-0016.
+
+**Source:** RA-2 §4222-4300 verbatim (compensating control #3 — "T18 chain-integrity job runs ≥daily + post-rotation + post-export per F-50"; trigger #3 — "any divergence between the live chain and the most recent pg_dump backup for a row older than the dump … the first such firing re-opens RA-2 regardless of cause"; the RA-2 follow-up at §4297 — "audit-log vs latest backup head diff for all rows whose `ts < (latest_dump_ts - 1 hour)`"). ADR-0018 §7 verbatim (the manifest field set T18 consumes: `audit_log_head{id, ts_ms, hash}` + `per_event_row_counts` + `retention_sweep_runs_snapshot_ts_ms` + `schedule_hash` + `node_runtime_pin` — snapshot-pinned per G-T17-RA2-ANCHOR-CONSUMER). ADR-0017 §6 (T16 sweep emits `retention.deleted` LAST in transaction with `per_event_counts` jsonb on `retention_sweep_runs`; "attributed divergence is the new audited expected case" per threat-model §3.9 G-T16-8). ADR-0015 (per-event audit-log retention; library reserves three new enum values + recommended retention classes for T18.1 fold-in). ADR-0003 Amendment A (audit-log enum extension procedure — the three new T18 events ride the standard six-mirror dance covered by G-T08-9 / G-T13-14 / G-T14-7 / ADR-0018 Option H). ADR-0010 (Sentry-only subprocessor — re-opening for an external signer / KMS is a separately-flagged decision; RA-2 acceptable while no new subprocessor is added). ADR-0001 (Supabase `ca-central-1` pin; T18 reads `audit_log` + `retention_sweep_runs` + `backup_manifests` in-region only). observability/audit-log.md §2 lines 188-198 (BLAKE2b-256 prev_hash-linear chain; `hash = BLAKE2b-256(canonical_json(row + prev_hash))`). observability/audit-log.md §3-§4 (RLS / GRANT footprint — `audit_writer_role` non-login; UPDATE revoked everywhere; DELETE only via `retention_service_role` aged-out path). observability/audit-log.md §5 obligations (the 10 test obligations the library satisfies the library half of). Amendment H (sibling-task pattern — library + MemoryIntegrityStore in T18, SupabaseIntegrityStore + SQL + pg_cron + Edge Function in T18.1). Pattern lineage: F-19 closed-allowlist (T11/T12 + T16 + T17), F-24 audit-before-side-effect (T11) for alert-fanout, F-58 audit-WITH-side-effect (T16) for summary-LAST inversion, F-72 state machine (T17), MemoryStore/SupabaseStore + TestStore split (G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 / G-T17), F-66 `xact_start()` shim (G-T08-14 / G-T13-9 / G-T16-9), hash-determinism pin (G-T11-23), structured-error-not-PII (G-T11-29 / G-T16-PRIV-3 / G-T17 F-81).
+
+## Context
+
+ADR-0018 ratified the backup manifest as the secondary witness for RA-2 trigger #3 and committed five field names on `BackupManifest` as the load-bearing join surface for T18: `audit_log_head{id, ts_ms, hash}`, `per_event_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`, `node_runtime_pin`. ADR-0017 ratified `retention_sweep_runs.per_event_counts` as the attribution surface that converts a legitimate sweep-driven divergence from a tamper-driven divergence. Neither ADR specifies the library that performs the reconciliation. T18 is that library. Per Amendment H, T18 ships library code + `MemoryIntegrityStore` only; T18.1 ships the `SupabaseIntegrityStore` + the SQL migration that creates `integrity_check_runs` (and, if the implementer chooses, `audit_chain_anchors` for the weekly head-pointer extraction) + the pg_cron 04:30 ET daily job + the Edge Function trigger surface (`post_rotation`, `post_export`) + the ADR-0016 schedule rows for the new tables + the §PI inventory amendments + HG-15 re-ratification + the cross-mirror SQL drift test + A-AUDIT-001 / A-INTEGRITY-001 / A-INTEGRITY-002 alert wiring + `pg_advisory_xact_lock` coordination with the backup pass + the off-app weekly anchor delivery (worker co-chair email).
+
+This ADR ratifies the library contract the integrity check ships against and the open-question dispositions (a)–(g) the librarian briefing surfaced.
+
+**The load-bearing reason T18 exists at all:** RA-2 compensating control #3 — "The T18 chain-integrity job runs at least daily and on every key rotation and every export (F-50)" — is the only operational test of the v1 hash-only chain. ADR-0018 produced the secondary-witness data; T18 is what makes it visible. The two RA-2 detection surfaces are (i) chain-walk (catches in-place mutation that breaks the chain) and (ii) live-vs-backup diff (catches the pivot-rewrite attack the chain-walk cannot, because a chain re-hashed forward from a pivot is internally consistent). T18 implements both. **Any T18 design that makes either detection surface optional, caller-suppressible, or silently degraded re-opens RA-2 by construction.**
+
+The carry-forward set this ADR closes (library-side) and defers (T18.1-side):
+
+- **Closes in T18:** G-T16-8 (the integrity-job join over (audit_log, retention_sweep_runs, backup_manifest) is library-modelled; attributed-vs-unattributable reconciliation rule lands here); G-T17-PRIV-7 (the join reads only structural fields — no pseudonyms surfaced; library-side type test pins this); G-T17-9 (zero-event-count convention — "absent from manifest = zero" — is the reconciliation arithmetic floor); G-T17-RA2-ANCHOR-CONSUMER (T18 reads `manifest.audit_log_head`, `manifest.per_event_row_counts`, `manifest.retention_sweep_runs_snapshot_ts_ms`; the three field names are snapshot-pinned in T17 and T18 inherits the snapshot contract); hash-determinism pin (G-T11-23) on any chain recompute — `node_runtime_pin` from the manifest is checked before reconciliation begins; closed-allowlist of integrity-check inputs (mirrors F-19 — only the trigger discriminator); F-58 summary-LAST inversion (the `audit.integrity_check.ran` summary row is the LAST write in the integrity-check transaction); F-72 state machine on the integrity-check lifecycle (`running → completed | errored | capped`); cooperative-caller defense on row-cap (mirrors F-60 — 20000 row hard cap; library-controlled, not config-driven).
+- **Defers to T18.1:** SupabaseIntegrityStore implementing the production `IntegrityStore` interface against the live Postgres chain; the `integrity_check_runs` SQL table + migration; (optional) `audit_chain_anchors` SQL table for the weekly head-pointer extraction (or jsonb-on-manifest for v1 — implementer choice at T18.1, the library is agnostic); pg_cron 04:30 ET daily schedule; Edge Function trigger surface (`post_rotation` + `post_export`) wiring `runIntegrityCheck` from the rotation/export code paths with the 5-min upper-bound contract (F-50); `pg_advisory_xact_lock` SHARED with the backup pass + EXCLUSIVE with restore (key `hashtext('audit_chain_global')`); ADR-0016 schedule rows for the new tables; §PI inventory amendments; pgTAP integration tests; cross-mirror SQL drift test (TS `INTEGRITY_CHECK_EVENT_TYPES` vs SQL CHECK constraint on `audit_log.event_type`); A-AUDIT-001 / A-INTEGRITY-001 / A-INTEGRITY-002 alert wiring (T18.1 + observability-setup next pass); HG-15 re-ratification at PR submission; weekly off-app head-pointer delivery to the worker co-chair email (RA-2 manual backstop — NOT a compensating control); the ADR-0003 Amendment A extension SQL half for the three new enum values (T18 reserves the TS constants + recommended retention classes; T18.1 lands the SQL CHECK constraint widening + `audit_log_retention_schedule` rows + `audit-log.md §1` table update + `scripts/check-audit-enum-coverage.sh` update — six-mirror dance per G-T08-9 / G-T13-14 / G-T14-7 / ADR-0018 Option H).
+
+## Decision drivers
+
+- **PIPEDA Principle 4.7 (Safeguards) + RA-2 compensating control #3:** the chain-integrity job is the only operational verification that the hash-only chain has not been tampered. Without it, every RA-2 acceptance claim becomes aspirational. The library is the structural enforcer for "the chain is walked; every mismatch fires A-AUDIT-001; the run is itself audited."
+- **RA-2 trigger #3 (load-bearing):** "Any divergence between the live chain and the most recent pg_dump backup for a row older than the dump. **The first such firing re-opens RA-2 regardless of cause.**" T18 owns this fire-control. The library MUST distinguish (a) attributed sweep-driven divergence (legitimate; no alert) from (b) unattributed divergence (A-AUDIT-001 + A-INTEGRITY-002 fire). Conflating the two would either flood the operator with false positives (alert fatigue → real fires missed) or silently swallow a tamper. The reconciliation rule (Decision §5.3 below) is the structural separator.
+- **G-T16-8:** the integrity-job join over `(audit_log, retention_sweep_runs, backup_manifest)` is the v1 detection surface for RA-2. ADR-0017 produced `retention_sweep_runs.per_event_counts`; ADR-0018 produced `backup_manifest.{audit_log_head, per_event_row_counts, retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin}`. T18 consumes both. This ADR pins the consumer contract.
+- **G-T17-PRIV-7:** the join MUST read only structural fields. The integrity-check output deliberately omits pseudonyms; the mismatch audit row carries `(row_id, expected_hash, actual_hash, prev_hash_match, detected_via, attribution_attempted)` — no `actor_pseudonym`, no `meta` jsonb excerpt, no `target_id`. Cross-reference to the T18 join is structural-only. Library-side type test pins this (F-94 below).
+- **G-T17-9 ("zero-event-count convention"):** "absent from manifest = zero". The reconciliation arithmetic depends on this — if the manifest lists `concern.created: 17` and the live chain has 17 fewer such rows than the dump did, the difference is fully attributed iff a `retention_sweep_runs.per_event_counts` row in the manifest's `retention_sweep_runs_snapshot_ts_ms` window accounts for those 17. The library's reconciliation walker MUST treat missing keys as 0, not undefined.
+- **G-T17-RA2-ANCHOR-CONSUMER:** "T18 integrity-job join reads `manifest.audit_log_head`, `manifest.per_event_row_counts`, `manifest.retention_sweep_runs_snapshot_ts_ms` for RA-2 trigger #3 reconciliation. The three field names are snapshot-pinned in T17; T18 inherits the snapshot contract." A rename in any of the three across T17 / T17.1 / T18 / T18.1 fails CI before merge.
+- **F-50 detection-latency upper bounds:** 5 minutes for triggered (post-rotation / post-export), 24 hours for scheduled. The library does NOT own the wall-clock — the trigger surface is in the caller (pg_cron in T18.1; the Edge Function for the triggered paths). The library DOES own the rule that any chain-walk or backup-diff mismatch fires A-AUDIT-001 in the same transaction as the integrity-check run row (F-24 audit-before-alert-fanout). The 5-min / 24h budget is consumed by trigger latency + chain-walk runtime; the library MUST run within the budget when given a chain of MVP scale (≤1M rows in the chain-walk pass per row-cap).
+- **F-19 closed-allowlist:** `runIntegrityCheck({trigger})` accepts ONLY the closed-set discriminator `'scheduled' | 'post_rotation' | 'post_export'`. No caller-supplied predicate, WHERE-fragment, row filter, pivot-id, or chain-segment range. The closed-allowlist defense-in-depth lineage (T11/T12 + T16 + T17) is mirrored verbatim.
+- **F-58 audit-WITH-side-effect (T16) + F-72 state machine (T17):** the integrity-check run row is the audit anchor. The state machine is `running → completed | errored | capped`. The `audit.integrity_check.ran` summary audit row is the LAST write in the transaction (F-58); any chain-walk or backup-diff mismatch is recorded as a `audit.integrity_check.mismatch` row BEFORE the alert fan-out (F-24). On any failure, the run row transitions to `errored` and no `audit.integrity_check.ran` summary row is emitted — the absence is itself the signal that an integrity check was attempted but did not complete.
+- **G-T11-23 hash-determinism pin:** any chain recompute requires the exact `node_runtime_pin` from the manifest. If the live runtime's `(node_version, openssl_version)` does not match the manifest's, the library RETURNS a structured error with `error_code: 'runtime_pin_mismatch'` — it does NOT silently recompute under a different runtime (silent divergence would falsely fire A-AUDIT-001 on legitimate toolchain upgrades).
+- **G-T16-PRIV-3 / G-T17 F-81 structured-error-not-PII:** every error path returns `{run_id, status, error_code}` only. No row_id under PII-bearing rows leaks; the `audit.integrity_check.mismatch` row's `row_id` is the `audit_log.id` (a bigint generated identity, structurally non-PII); the row's `expected_hash` / `actual_hash` are 32-byte hex (structurally non-PII). The error vocabulary is a closed literal union (F-93 below).
+- **Amendment H pattern:** library ships against `MemoryIntegrityStore`; tests are fast, deterministic, do not depend on a Supabase local stack. SQL invariants land in T18.1's pgTAP suite. The `pg_advisory_xact_lock` semantic the production wire-up needs is modelled in T18 as a `BackupSnapshot` data structure the `MemoryIntegrityStore` produces synchronously; T18.1 satisfies the same interface against the live `backup_manifests` table.
+- **No new subprocessor (ADR-0010):** the weekly off-app head-pointer extraction emits a `audit.chain_anchor.weekly` row inside the chain; the off-app delivery channel (worker co-chair email) is wired in T18.1 and is NOT a subprocessor in the ADR-0010 sense (the co-chair's email is the channel they already use for committee correspondence; the destination is chosen by the co-chair, not stored in the app). The library only emits the row; the delivery is operator action. **External signer / KMS remains out of scope at T18** — that would re-open RA-2 and ADR-0010 simultaneously.
+
+## Options considered
+
+### Option A: Chain shape — prev_hash-linear (chosen) vs Merkle anchor-per-batch
+
+The v1 chain (observability/audit-log.md §2 lines 188-198) is `prev_hash`-linear: `prev_hash = BLAKE2b-256(prev_row.hash)`; `hash = BLAKE2b-256(canonical_json(row + prev_hash))`. A Merkle anchor-per-batch posture would add an additional anchor-table + a periodic root computation; it enables sparser external-witness publication (one root per N rows instead of one head pointer per week) and parallel verification. **We choose prev_hash-linear** because T18 is the OPERATIONAL TEST of v1, not an evolution. Merkle + signature is v2 work bundled with the Ed25519 signer (RA-2 re-open trigger #1 default response). Staying on prev_hash-linear honours the librarian-briefing pin and avoids invalidating ADR-0018's `audit_log_head` triple shape (the triple is `(id, ts_ms, hash)` — a Merkle root would require a fourth field).
+
+### Option B: Daily job timing — 04:30 ET (chosen) vs 03:30 ET vs noon
+
+T17 backup pass runs at 02:00 ET (ADR-0018 §J). T16 retention sweep runs at 03:30 ET (ADR-0017 §H). T18 needs both to have completed so its backup-diff check reads a stable manifest and its reconciliation join reads a stable `retention_sweep_runs` row. 03:30 ET would race the sweep; noon would push the 24h detection budget close to the wall. **We choose 04:30 ET** — 2.5h after the backup, 1h after the sweep, with operational headroom for both passes to overrun without colliding. The library is timing-agnostic; this is the production schedule T18.1's pg_cron carries. A schedule change requires updating both T18.1's pg_cron + the operator runbook; no library mirror to update.
+
+### Option C: Weekly anchor cadence + destination — Mon 00:00 ET to worker co-chair email (chosen) vs daily vs no anchor
+
+RA-2 documents the off-app head pointer as a **manual backstop, NOT a compensating control** (§4298). Its absence does NOT re-open RA-2. Cadence options: daily (every chain head pinned weekly+; high signal-to-noise but operationally noisy — 365 emails/yr); weekly (52/yr — manageable for the co-chair); none (skip entirely — relies on the in-app head pointer + the backup secondary witness alone). **We choose weekly Mon 00:00 ET** with destination = worker co-chair email (T18.1 wires the delivery; T18 emits the `audit.chain_anchor.weekly` row only). The library is destination-agnostic; the row carries the head-pointer triple `(id, ts_ms, hash)` in its `meta` field; T18.1's Edge Function reads the row and sends the email to the co-chair's email-of-record. **The library does NOT model the email delivery** — the row's existence is the in-chain evidence; the email is the off-app witness. A missed email does not fire any alert (manual backstop, not a control).
+
+### Option D: Batch size + lock-hold — 20000 row cap + `status='capped' → resume` (chosen) vs single-pass full-walk
+
+The chain-walk pass must traverse `audit_log` in id-order, recomputing the canonical-JSON + BLAKE2b-256 of each row and comparing against the stored hash. At MVP scale (≤1M rows by 7y mark) this fits a single pass in under a minute on a 2-vCPU Postgres. The row-cap is defense for two scenarios: (i) a future scale event (chain >5M rows), and (ii) a pathological row that causes the canonical-JSON serializer to allocate excessively. **We choose 20000 row cap per pass** (mirrors T16 F-60). A pass that hits the cap returns `status: 'capped'` with `resume_after_id` on the next pass's input; the next scheduled or triggered pass picks up where this one left off. T18.1 sets `statement_timeout 60s` + `lock_timeout 5s` on the SQL side (operational-safety belt; library does not model wall-clock timeouts).
+
+### Option E: Alarm thresholds — A-AUDIT-001 zero-threshold + A-INTEGRITY-001 missed-cron + A-INTEGRITY-002 unattributable-divergence (chosen)
+
+Three distinct alert IDs:
+
+- **A-AUDIT-001** — any chain-walk or backup-diff mismatch. **Zero threshold.** The detection surface is the alert; a single mismatch is the fire condition. The `audit.integrity_check.mismatch` row's `meta.detected_via ∈ {'chain_walk', 'backup_diff'}` discriminates the surface for the responder.
+- **A-INTEGRITY-001** — missed-cron (T18.1 + observability-setup; library does not own the wall-clock). Fires when the daily 04:30 ET job has not emitted an `audit.integrity_check.ran` row within the 24h SLO window. Surface lives in T18.1's observability pass.
+- **A-INTEGRITY-002** — unattributable divergence. Distinct cause from A-AUDIT-001: A-AUDIT-001 fires on the FACT of mismatch; A-INTEGRITY-002 fires on the CAUSE classification failing (the reconciliation walker found a sweep_runs.per_event_counts that did not account for the divergence). The two alerts may fire together; the responder uses A-INTEGRITY-002's presence to decide whether the divergence is operational (sweep bug) vs adversarial (potential tamper).
+
+The library returns alert symbols (`would_fire_alert: 'A-AUDIT-001'`, etc.) on the run result; T18.1 wires the actual sink. **The library NEVER swallows a mismatch** — every mismatch detection produces both an `audit.integrity_check.mismatch` audit row AND a `would_fire_alert` symbol on the run result.
+
+### Option F: Restore-from-backup race — `pg_advisory_xact_lock` SHARED with backup + EXCLUSIVE with restore (chosen, T18.1 scope)
+
+The integrity-check pass reads `audit_log` + `retention_sweep_runs` + `backup_manifests`. The backup pass reads `audit_log` + writes `backup_manifests`. A restore pass writes `audit_log` (overwriting). These three passes must not race. The production posture (T18.1) uses `pg_advisory_xact_lock('hashtext("audit_chain_global")')` SHARED for backup + integrity-check + EXCLUSIVE for restore. The library does NOT model the lock — it accepts an opaque `chainSnapshot` from the store; the production store acquires the lock around the snapshot read. **T18 library scope is the contract; T18.1 scope is the lock acquisition.**
+
+### Option G: Reconciliation correctness with retention.deleted post-dump — sweep-attribution rule (chosen)
+
+The hard case: the dump captured at `latest_dump_ts` lists row `X` (event_type `concern.created`, id 42, hash `H`). A subsequent retention sweep at `latest_dump_ts + 1h` legitimately deleted row 42. The live chain no longer contains row 42. Is this a tamper (rewrite the chain to remove row 42) or a legitimate sweep?
+
+**Decision (binding):** for each row in the dump but absent from the live chain, attribute IFF (the dump's `retention_sweep_runs_snapshot_ts_ms` window contains a sweep row whose `per_event_counts[row.event_type] > 0` AND row.ts is within that sweep's `started_at_ms..completed_at_ms` window). Otherwise → unattributable → A-AUDIT-001 + A-INTEGRITY-002 fire. Conversely: for each row in the live chain absent from the dump, the row was inserted post-dump — no reconciliation required (RA-2 trigger #3 explicitly covers only rows older than the dump per §4297 "`ts < (latest_dump_ts - 1 hour)`"). The 1h buffer is per the RA-2 follow-up — rows inside the 1h-since-dump window are not yet eligible for the backup-diff check.
+
+Test-writer must pin BOTH directions:
+- Attributed: dump has row X, sweep accounts for it, live chain absent → no fire.
+- Unattributable: dump has row X, no sweep accounts for it, live chain absent → A-AUDIT-001 fires with `meta.detected_via: 'backup_diff'`, `meta.attribution_attempted: true`, AND A-INTEGRITY-002 fires distinctly.
+
+### Option H: `audit.integrity_check.ran` summary vs `audit.integrity_check.mismatch` per-mismatch — both (chosen)
+
+Two distinct emission patterns:
+- **`audit.integrity_check.ran`** — exactly one per non-errored pass. Carries `{run_id, trigger, started_at_ms, completed_at_ms, status, rows_walked, mismatches_count, attributable_count, unattributable_count, node_runtime_pin, schedule_hash}`. LAST write in transaction (F-58). Recommended retention: 24 months — operational telemetry.
+- **`audit.integrity_check.mismatch`** — one per mismatch detected. Carries `{run_id, detected_via ∈ {'chain_walk','backup_diff'}, row_id, expected_hash, actual_hash, prev_hash_match, attribution_attempted}`. Written BEFORE the alert fan-out (F-24). Recommended retention: 7 years — load-bearing forensic.
+- **`audit.chain_anchor.weekly`** — one per week. Carries `{anchor_at_ms, head: {id, ts_ms, hash}}`. Recommended retention: 7 years — load-bearing forensic.
+
+Three new enum values; standard six-mirror dance (TS const + SQL CHECK + RETENTION_SCHEDULE + audit_log_retention_schedule SQL row + audit-log.md §1 table + scripts/check-audit-enum-coverage.sh). **T18 reserves the TS constants; T18.1 lands the SQL + doc updates** (mirrors ADR-0018 Option H / G-T08-9 / G-T13-14 / G-T14-7).
+
+### Option I: TestStore split — IntegrityStore vs TestIntegrityStore (chosen)
+
+Per the G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 / G-T17 lineage: production `IntegrityStore` has zero `__` properties. `TestIntegrityStore extends IntegrityStore` adds `__debugForceMismatch`, `__debugSetClock`, `__debugListRuns`, `__debugInsertFixtureRow`, `__debugForceRuntimePinMismatch`, `__debugInsertBackupManifestFixture`, `__debugInsertSweepRunFixture`. `.test-d.ts` asserts `keyof IntegrityStore` contains zero `__debug*`. `SupabaseIntegrityStore` (T18.1) implements `IntegrityStore` only; narrowing it back to `TestIntegrityStore` is a type error. **Binding.**
+
+### Option J: ESLint no-restricted-imports — three path shapes (chosen)
+
+T16 reviewer Finding 1 lesson: cover all three path shapes (`**/lib/audit-integrity/`, `**/audit-integrity/`, `$lib/audit-integrity/`) for all internal modules — `memory-integrity-store`, `integrity-store`, the test-only forceXyz helpers. Production callers consume only the barrel; deep-import is allowed for tests and is gated by file-path glob in eslint config (the test-only deep-import surface is `apps/web/test/T18/**`). **Binding.**
+
+## Decision
+
+**We choose Options A + B + C + D + E + F + G + H + I + J.**
+
+### 1. File-level structure (binding for T18 ship)
+
+Library lives under `apps/web/src/lib/audit-integrity/`:
+
+```
+apps/web/src/lib/audit-integrity/
+  types.ts                       — IntegrityCheckTrigger, IntegrityRunResult, INTEGRITY_* constants
+  integrity-event-types.ts       — INTEGRITY_CHECK_EVENT_TYPES frozen closed-allowlist + drift-check helpers
+  integrity-store.ts             — IntegrityStore (production) + TestIntegrityStore (test-only)
+  memory-integrity-store.ts      — MemoryIntegrityStore implements TestIntegrityStore
+  chain-walk.ts                  — walkChainOnce: id-ordered prev_hash/hash recompute + sequential-id gap detection
+  backup-diff.ts                 — reconcileAgainstBackupManifest: live-vs-dump head pointer walk + sweep attribution
+  reconciliation.ts              — attributeDivergence: per-event_counts sweep attribution rule (Option G)
+  integrity-core.ts              — runIntegrityCheck + runWeeklyChainAnchor; composes chain-walk + backup-diff + reconciliation
+  audit-emission.ts              — buildIntegrityCheckRanRow + buildIntegrityCheckMismatchRow + buildChainAnchorWeeklyRow
+  index.ts                       — public surface re-exports (IntegrityStore, runIntegrityCheck, runWeeklyChainAnchor, INTEGRITY_CHECK_EVENT_TYPES)
+```
+
+No SQL ships in T18. No new physical tables ship in T18. No pg_cron / Edge Function ships in T18. PR-review-time assertion mirrors Amendment H's §Testable assertions: `git diff --name-only main...T18-branch -- supabase/migrations/ supabase/seed.sql supabase/functions/` returns empty AND `git diff --name-only main...T18-branch | grep -E '(pg_cron|crontab|schedule\.sql)'` returns empty.
+
+### 2. Closed `INTEGRITY_CHECK_EVENT_TYPES` frozen const + drift assertion (binding; reserves the three new event-type strings T18.1 lands in SQL)
+
+`integrity-event-types.ts` exports:
+
+```
+export const INTEGRITY_CHECK_EVENT_TYPES = Object.freeze([
+  'audit.integrity_check.ran',
+  'audit.integrity_check.mismatch',
+  'audit.chain_anchor.weekly'
+] as const) satisfies readonly IntegrityCheckEventType[];
+```
+
+Where `IntegrityCheckEventType` is the closed union of the same three literals. Drift assertion (CI test, lands in T18, file `apps/web/test/T18/integrity-event-types-drift.test.ts`):
+
+```
+test('INTEGRITY_CHECK_EVENT_TYPES is set-equal to IntegrityCheckEventType union')   // F-86
+test('INTEGRITY_CHECK_EVENT_TYPES is Object.isFrozen')                              // F-86 spread-then-mutate defense
+test('every INTEGRITY_CHECK_EVENT_TYPES entry has a recommended retention class')   // structural; T18.1 ratifies via RETENTION_SCHEDULE
+test('no caller-supplied event_type reaches the audit-emission helper')             // F-86 defense-in-depth; type-level + runtime
+```
+
+T18.1 adds the cross-mirror SQL drift test (TS `INTEGRITY_CHECK_EVENT_TYPES` const vs SQL `audit_log.event_type` CHECK constraint widening to include the three new strings). The library-side CI test is the prerequisite for the SQL test.
+
+**Recommended retention classes (library-reserved; T18.1 lands the SQL row):**
+
+```
+'audit.integrity_check.ran':       { kind: 'fixed_months', months: 24 }   // operational telemetry
+'audit.integrity_check.mismatch':  { kind: 'fixed_years',  years: 7 }     // load-bearing forensic
+'audit.chain_anchor.weekly':       { kind: 'fixed_years',  years: 7 }     // load-bearing forensic
+```
+
+### 3. `IntegrityStore` interface vs `TestIntegrityStore` test-only extension (binding)
+
+Per the G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 / G-T17 F-85 pattern (TestStore split):
+
+- `IntegrityStore` — production interface. Closed-allowlist methods only. No caller-supplied predicate, WHERE-fragment, table-name string, row id range, or pivot. Methods:
+  - `nowMs(): number` — monotonic ms-epoch (F-66 pattern; library shim, production reads `xact_start()`).
+  - `systemActorPseudonym(): string` — HMAC pseudonym for `'system:integrity-check'` (mirrors ADR-0017 §6 / ADR-0018 §5).
+  - `readNodeRuntimePin(): { node_version: string; openssl_version: string }` — the LIVE runtime pin; the library compares against the manifest's pin before reconciliation begins (G-T11-23). Library calls `process.versions` indirectly via the store so tests can poison it.
+  - `walkAuditChainSegment(opts: { start_after_id: bigint | null; max_rows: number }): Promise<readonly AuditChainRowMaterialized[]>` — id-ordered read of chain rows materialized for canonical-JSON recompute. The `AuditChainRowMaterialized` shape carries the structural fields the chain hashes over: `{ id, ts_ms, actor_pseudonym, event_type, target_id, target_class, severity, request_id, rotation_id, meta, prev_hash, hash }`. No PI is loaded by name — actor_pseudonym is the HMAC, target_id is the structural uuid.
+  - `readLatestCommittedBackupManifest(): Promise<BackupManifestSnapshot | null>` — reads the manifest the integrity-check joins against. `BackupManifestSnapshot` is the structural subset T18 consumes: `{ run_id, committed_at_ms, audit_log_head: { id, ts_ms, hash } | null, per_event_row_counts, retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin }`. Returns null when no committed manifest exists (Phase-0 / first run / RA-2 trigger condition documented in §6 below).
+  - `listRetentionSweepRunsThrough(snapshot_ts_ms: number): Promise<readonly RetentionSweepRunSnapshot[]>` — reads sweep rows whose `started_at_ms ≤ snapshot_ts_ms`. `RetentionSweepRunSnapshot` is `{ run_id, started_at_ms, completed_at_ms, per_event_counts, status }`.
+  - `readChainRowsByIds(ids: ReadonlyArray<bigint>): Promise<Readonly<Record<string, AuditChainRowMaterialized | null>>>` — point-reads used by the backup-diff walk; null entries signal "live chain absent for this dump id".
+  - `emitIntegrityCheckRunAndMismatches(args: { run: IntegrityCheckRunRow; mismatches: ReadonlyArray<IntegrityCheckMismatchRow>; ran_row: IntegrityCheckRanAuditRow | null }): Promise<void>` — F-58 + F-72: atomically transition the integrity-check run row to its terminal state, write all mismatch audit rows BEFORE the ran row, and emit the `audit.integrity_check.ran` row LAST (omitted on errored runs). Mirrors ADR-0017 §6 `emitRetentionDeletedAndRegisterRun` shape.
+  - `emitChainAnchorWeekly(row: ChainAnchorWeeklyAuditRow): Promise<void>` — single-row emission for the weekly anchor.
+  - `hasOpenIntegrityRunWithinWindow(now_ms: number, lease_window_ms: number): Promise<boolean>` — F-59 pattern (mirrors G-T16-1 / ADR-0018 §5 step 1).
+  - `recordIntegrityRunStarted(run: { run_id: string; trigger: IntegrityCheckTrigger; started_at_ms: number }): Promise<void>` — F-72 state machine: writes the run row in `status: 'running'` BEFORE the chain walk begins.
+  - `snapshot(): symbol` + `restore(token: symbol): void` — F-58 rollback hooks (mirrors ADR-0017 §6).
+
+- `TestIntegrityStore extends IntegrityStore` — adds `__debugForceMismatch(opts)`, `__debugSetClock(ms)`, `__debugListRuns()`, `__debugListMismatches()`, `__debugListEmittedAuditRows()`, `__debugInsertFixtureRow(row)`, `__debugCorruptHashAtId(id)`, `__debugDeleteRowAtId(id)`, `__debugInsertBackupManifestFixture(manifest)`, `__debugInsertSweepRunFixture(run)`, `__debugForceRuntimePinMismatch(on)`, `__debugForceChainWalkException(on)`, `__debugForceEmitException(on)`. These hooks live ONLY on `TestIntegrityStore`; production code paths receive `IntegrityStore` and CANNOT reach the `__debug*` methods at type level. `SupabaseIntegrityStore` (T18.1) implements `IntegrityStore` only — narrowing it back to `TestIntegrityStore` is a type error.
+
+The interface forbids caller-supplied predicates, row-id ranges, pivots, or table-name strings; the library hard-codes the closed-allowlist + the trigger discriminator (defense-in-depth per the librarian's threat-model delta).
+
+### 4. `MemoryIntegrityStore` composition (binding)
+
+The MemoryIntegrityStore is constructed empty and seeded by test-injected hooks:
+
+- `auditChainRows: AuditChainRowMaterialized[]` — id-ordered; mutable only via `__debugInsertFixtureRow` (append), `__debugCorruptHashAtId` (in-place mutation simulating A5 tamper), `__debugDeleteRowAtId` (gap simulation).
+- `backupManifests: BackupManifestSnapshot[]` — mutable only via `__debugInsertBackupManifestFixture`. `readLatestCommittedBackupManifest` returns the most-recently-committed by `committed_at_ms`.
+- `retentionSweepRuns: RetentionSweepRunSnapshot[]` — mutable only via `__debugInsertSweepRunFixture`. `listRetentionSweepRunsThrough` filters by `started_at_ms ≤ cutoff`.
+- `integrityRuns: IntegrityCheckRunRow[]` — written by `recordIntegrityRunStarted` + transitioned by `emitIntegrityCheckRunAndMismatches`; inspected via `__debugListRuns`.
+- `emittedAuditRows: EmittedAuditRow[]` — every `audit.integrity_check.ran` / `audit.integrity_check.mismatch` / `audit.chain_anchor.weekly` row the library emits; inspected via `__debugListEmittedAuditRows` + `__debugListMismatches`.
+- `nodeRuntimePin: { node_version: string; openssl_version: string }` — bootstrapped from `process.versions`; mutable only via `__debugForceRuntimePinMismatch(on)` which swaps to a sentinel value.
+- `lastIssuedNowMs: number` — F-66 monotonic clock floor (mirrors MemoryBackupStore / MemoryRetentionStore).
+- `hmacKey: Buffer` — random per-instance; HMAC-SHA-256 over `'system:integrity-check'` for the system actor pseudonym.
+
+The composition matches T16/T17: the SQL the production store satisfies is modelled by the in-memory store; tests compose `__debugInsertBackupManifestFixture` + `__debugInsertSweepRunFixture` + `__debugInsertFixtureRow` to build the reconciliation scenarios without touching Postgres. **The `MemoryIntegrityStore` is never re-exported from the barrel** (deep-import only — T11/T12 F-1 BLOCK lesson; mirrors T16/T17).
+
+### 5. The integrity-check algorithm (binding for T18 ship)
+
+```
+runIntegrityCheck({store, config: { trigger: 'scheduled' | 'post_rotation' | 'post_export' }}) -> IntegrityRunResult
+```
+
+Algorithm:
+
+1. **Lease check (F-59).** `if await store.hasOpenIntegrityRunWithinWindow(nowMs, INTEGRITY_DEFAULT_LEASE_WINDOW_MS) → return {status: 'skipped', reason: 'pass_already_in_window'}.` Library constant: `INTEGRITY_DEFAULT_LEASE_WINDOW_MS = 5 * 60 * 1000` (5 min — matches F-50 triggered upper bound).
+2. **Generate run_id (G-T16-PRIV-3 PII-shape rejection sample; mirrors ADR-0017 §6 + ADR-0018 §5 `generateRunId`).** Prefix: `ic_` to break 32-hex pseudonym shape and `\d{3}-\d{3}-\d{4}` phone shape.
+3. **Write `status: 'running'` run row FIRST (F-72 state machine + F-24 inversion).** `await store.recordIntegrityRunStarted({run_id, trigger, started_at_ms: nowMs})`. If this throws → return `{status: 'errored', run_id, error_code: 'run_start_failed'}` — no chain walk attempted.
+4. **Snapshot for rollback (F-58 mirror).** `snapshotToken = store.snapshot()`.
+5. **Read backup manifest (G-T17-RA2-ANCHOR-CONSUMER).** `manifest = await store.readLatestCommittedBackupManifest()`. If null (Phase-0 or no committed manifest exists yet): the backup-diff portion is SKIPPED for this run (no manifest = no secondary witness possible); the chain-walk portion proceeds.
+6. **Runtime-pin coherence check (G-T11-23).** If `manifest !== null`: `livePin = store.readNodeRuntimePin()`. If `livePin.node_version !== manifest.node_runtime_pin.node_version OR livePin.openssl_version !== manifest.node_runtime_pin.openssl_version` → restore snapshot → return `{status: 'errored', run_id, error_code: 'runtime_pin_mismatch'}`. The error is the signal that a toolchain upgrade landed between backup and integrity-check; T18.1 / observability fires A-INTEGRITY-001-variant; no A-AUDIT-001 (this is operational, not adversarial).
+7. **Chain walk (the primary detection surface).** Iterate `walkAuditChainSegment` in `INTEGRITY_CHAIN_WALK_BATCH_SIZE = 1000` row batches, id-ascending, accumulating `mismatches[]`:
+   - Recompute `expected_hash = BLAKE2b-256(canonical_json(row + row.prev_hash))` per observability/audit-log.md §2.
+   - If `expected_hash !== row.hash` → push `{detected_via: 'chain_walk', row_id: row.id, expected_hash, actual_hash: row.hash, prev_hash_match: true, attribution_attempted: false}` into mismatches.
+   - If `row.prev_hash !== BLAKE2b-256(prev_row.hash)` (or genesis hash for row 1) → push `{detected_via: 'chain_walk', row_id: row.id, expected_hash: BLAKE2b-256(prev_row.hash), actual_hash: row.prev_hash, prev_hash_match: false, attribution_attempted: false}`.
+   - Sequential-id gap detection: if `row.id !== prev_row.id + 1` AND the gap is NOT attributable to a retention sweep (check via `listRetentionSweepRunsThrough` against the gap's id-range time window) → push gap mismatch. **Note:** gap attribution is permissive — sweeps legitimately delete rows; a gap covered by a sweep_run's per_event_counts is not a mismatch. The test-writer pins both directions.
+   - Row-cap (F-60 mirror): if `rows_walked ≥ INTEGRITY_MAX_ROWS_PER_PASS = 20000` → break; set `truncated = true`; the run will report `status: 'capped'` and the next pass resumes from `resume_after_id`.
+8. **Backup-diff (the RA-2 trigger #3 detection surface; only if `manifest !== null` AND `manifest.audit_log_head !== null`).** Per RA-2 follow-up §4297 (load-bearing — verbatim quotable):
+   - `cutoff_ts_ms = manifest.committed_at_ms - INTEGRITY_BACKUP_DIFF_BUFFER_MS` where `INTEGRITY_BACKUP_DIFF_BUFFER_MS = 60 * 60 * 1000` (1 hour per RA-2 §4297).
+   - Read live chain rows by id in `[..., manifest.audit_log_head.id]` whose stored `ts < cutoff_ts_ms`. The manifest's `audit_log_head.{id, ts_ms, hash}` is the join anchor.
+   - For each dump row in the manifest's id-range whose `ts < cutoff_ts_ms`:
+     - If live row exists AND `live.hash === dump.hash AND live.prev_hash === dump.prev_hash` → match, no mismatch.
+     - If live row exists AND `(live.hash !== dump.hash OR live.prev_hash !== dump.prev_hash)` → mismatch: `{detected_via: 'backup_diff', row_id: dump.id, expected_hash: dump.hash, actual_hash: live.hash, prev_hash_match: live.prev_hash === dump.prev_hash, attribution_attempted: false}`. **A-AUDIT-001 fires** (pivot-rewrite detection).
+     - If live row absent → apply reconciliation rule (step 9).
+   - Live rows newer than `cutoff_ts_ms` are NOT walked (no false-positive on rows inserted post-dump; F-89 test obligation).
+   - **MVP note:** the in-memory backup-diff materializes the dump's row-id range from the same `auditChainRows[]` snapshot taken at manifest-insertion time (the test fixture seeds both); the SupabaseIntegrityStore (T18.1) reads the dump's recorded rows via the manifest's `sha256` + the object-locked bucket fetch. The library's contract is the matching predicate, not the dump-source mechanics.
+9. **Reconciliation (Option G binding rule).** For each dump row absent from the live chain:
+   - For each sweep_run in `listRetentionSweepRunsThrough(manifest.retention_sweep_runs_snapshot_ts_ms)` whose `started_at_ms ≤ row.ts ≤ completed_at_ms` AND `per_event_counts[row.event_type] > 0`: candidate-attribute the row. Decrement the candidate sweep's per_event_counts attribution budget (the library walks attribution greedily — first-eligible-sweep takes the row).
+   - If no eligible sweep remains → push UNATTRIBUTABLE: `{detected_via: 'backup_diff', row_id: dump.id, expected_hash: dump.hash, actual_hash: null, prev_hash_match: false, attribution_attempted: true}`. **A-AUDIT-001 fires AND A-INTEGRITY-002 fires distinctly** (the latter signals the cause classification failed).
+   - The reconciliation walker MUST treat `per_event_counts[k]` missing-key as 0 (G-T17-9 zero-event-count convention). The library never reads `per_event_counts['__ceiling__']` (G-T16-RECONCILE-CEILING: that key is structurally absent on the wire).
+10. **State machine terminal transition + emission (F-58 + F-24 + F-72).** Compose:
+    - `mismatch_rows`: one `audit.integrity_check.mismatch` audit row per accumulated mismatch.
+    - `ran_row` (if NOT errored): one `audit.integrity_check.ran` summary row with `{run_id, trigger, started_at_ms, completed_at_ms, status, rows_walked, mismatches_count, attributable_count, unattributable_count, backup_diff_performed, node_runtime_pin, schedule_hash, resume_after_id?: bigint}`.
+    - `run_terminal_status: 'completed' | 'capped' | 'errored'`.
+    - `await store.emitIntegrityCheckRunAndMismatches({run: {...started, terminal_status, completed_at_ms}, mismatches: mismatch_rows, ran_row})`. The store implementation MUST: (i) write each mismatch row BEFORE the ran row (F-24 audit-before-alert-fanout); (ii) write the ran row LAST in the transaction (F-58); (iii) transition the run row to its terminal state atomically with both. If the emission throws → `store.restore(snapshotToken)` → return `{status: 'errored', run_id, error_code: 'audit_emit_failed'}`. The mismatches that would have been written are NOT lost — the next pass detects them again from the unchanged chain state.
+11. **Build IntegrityRunResult.** Closed discriminated-union return shape:
+    ```
+    | { status: 'completed';  run_id; trigger; rows_walked; mismatches_count; attributable_count; unattributable_count; backup_diff_performed; would_fire_alert?: 'A-AUDIT-001' | readonly ('A-AUDIT-001' | 'A-INTEGRITY-002')[] }
+    | { status: 'capped';     run_id; trigger; rows_walked; mismatches_count; attributable_count; unattributable_count; backup_diff_performed; truncated_to_row_cap: true; resume_after_id: string }
+    | { status: 'errored';    run_id; error_code: 'run_start_failed' | 'runtime_pin_mismatch' | 'chain_walk_failed' | 'backup_diff_failed' | 'audit_emit_failed' }
+    | { status: 'skipped';    reason: 'pass_already_in_window' }
+    ```
+    The library NEVER returns `{status: 'completed'}` if any mismatch was detected but unsuccessfully emitted (G-T11-29 lesson: stub side-effects do NOT silently succeed). The `would_fire_alert` symbol surfaces the structural alert; T18.1 wires the actual sink.
+
+### 6. Trigger surface (binding; F-19 closed allowlist)
+
+```
+runIntegrityCheck({store, config: { trigger: IntegrityCheckTrigger }})
+where IntegrityCheckTrigger = 'scheduled' | 'post_rotation' | 'post_export'
+```
+
+The library accepts ONLY the trigger discriminator. NO caller-supplied:
+- predicate / WHERE / row filter / pivot id / chain-segment range
+- batch_size (library constant `INTEGRITY_CHAIN_WALK_BATCH_SIZE`)
+- row_cap (library constant `INTEGRITY_MAX_ROWS_PER_PASS`)
+- lease_window_ms beyond a defaulted optional that has no caller override path at the production call sites
+- backup_manifest selector (always the latest committed)
+- runtime_pin override (always `store.readNodeRuntimePin()`)
+
+The defense-in-depth lineage (F-19 + ADR-0017 §11 + ADR-0018 §11) is mirrored verbatim. The `IntegrityCheckTrigger` union is the closed allowlist; `runIntegrityCheck` exhaustive-switches with a `never` cast on the default branch.
+
+**Trigger semantic (T18.1 scope; documented for completeness):** `'scheduled'` is fired by pg_cron at 04:30 ET; `'post_rotation'` is fired by the rotation Edge Function within 5 min of `committee_data_key.rotation.completed`; `'post_export'` is fired by the export Edge Function within 5 min of `export.generated`. The library is trigger-agnostic — it consumes only the discriminator.
+
+### 7. Weekly chain anchor (binding; emission-only library scope)
+
+```
+runWeeklyChainAnchor({store}) -> { status: 'completed'; anchor_at_ms: number; head: { id: string; ts_ms: number; hash: string } | null }
+                              | { status: 'errored'; error_code: 'head_read_failed' | 'audit_emit_failed' }
+                              | { status: 'skipped'; reason: 'empty_chain' }
+```
+
+Algorithm:
+1. Read chain head: take the highest-id row from `walkAuditChainSegment({start_after_id: null, max_rows: Infinity})` (production T18.1 implements as `SELECT id, ts, hash FROM audit_log ORDER BY id DESC LIMIT 1`). If empty → `{status: 'skipped', reason: 'empty_chain'}`.
+2. Emit `audit.chain_anchor.weekly` audit row with `meta: { anchor_at_ms: nowMs, head: { id, ts_ms, hash } }`. `actor_pseudonym = store.systemActorPseudonym()`. `target_id = null`.
+3. Return `{status: 'completed', anchor_at_ms, head}`.
+
+**Off-app delivery is OUT OF LIBRARY SCOPE.** The library emits the row; T18.1's Edge Function reads the row and sends the email to the worker co-chair's email-of-record (chosen by the co-chair, not stored in the app). RA-2 §4298 (verbatim quotable): "Weekly off-app `(id, ts, hash)` head pointer to co-chair is documented as **manual backstop, NOT a control under the compensating set** — its absence does NOT re-open RA-2." The library's only obligation is the in-chain row.
+
+### 8. The `audit.integrity_check.mismatch` row jsonb meta layout (binding; G-T17-PRIV-7)
+
+```
+{
+  event_type: 'audit.integrity_check.mismatch',
+  actor_pseudonym: HMAC(synthetic_actor_id 'system:integrity-check'),
+  target_id: null,                              // mismatch is chain-global, not row-targeted
+  target_class: 'C1',
+  severity: 'alert',                            // distinct from normal audit-row severity; routes A-AUDIT-001
+  meta: {
+    run_id: string,                             // joins to integrity_check_runs.run_id (T18.1)
+    detected_via: 'chain_walk' | 'backup_diff', // closed discriminator
+    row_id: string,                             // the audit_log.id of the mismatching row (structural; bigint stringified)
+    expected_hash: string,                      // 64-hex (BLAKE2b-256); from the chain recompute (chain_walk) or the dump (backup_diff)
+    actual_hash: string | null,                 // 64-hex from the live chain; null for backup_diff + live-row-absent unattributable case
+    prev_hash_match: boolean,                   // structural; whether prev_hash agreed
+    attribution_attempted: boolean,             // true ONLY on backup_diff path where the reconciliation walker ran
+    backup_manifest_run_id?: string             // present on backup_diff path; structural join anchor
+  }
+}
+```
+
+**G-T17-PRIV-7 invariant (verbatim quotable):** the mismatch row carries no `actor_pseudonym` of any user (only the system pseudonym at top level); no `target_id` (chain-global); no meta excerpts from the mismatching row (no event_type of the mismatching row leaked — that would correlate to a specific user's action). Test F-94 asserts: structural type test + runtime grep over `meta` keys against the PII shape allowlist (mirrors T17 F-80 / F-81).
+
+**G-T16-PRIV-1 invariant (verbatim quotable):** `actor_pseudonym` appears at the TOP LEVEL of the audit row ONLY. It MUST NOT be duplicated into `meta.actor_pseudonym`. Test F-94 asserts.
+
+### 9. The `audit.integrity_check.ran` row jsonb meta layout (binding)
+
+```
+{
+  event_type: 'audit.integrity_check.ran',
+  actor_pseudonym: HMAC(synthetic_actor_id 'system:integrity-check'),
+  target_id: null,
+  target_class: 'C1',
+  severity: 'info',
+  meta: {
+    run_id: string,
+    trigger: 'scheduled' | 'post_rotation' | 'post_export',
+    started_at_ms: number,
+    completed_at_ms: number,
+    status: 'completed' | 'capped',             // 'errored' runs do NOT emit this row (F-58)
+    rows_walked: number,
+    mismatches_count: number,
+    attributable_count: number,
+    unattributable_count: number,
+    backup_diff_performed: boolean,             // false iff no committed manifest existed
+    backup_manifest_run_id: string | null,      // null iff backup_diff_performed === false
+    resume_after_id: string | null,             // non-null iff status === 'capped'
+    node_runtime_pin: { node_version: string; openssl_version: string },
+    schedule_hash: string | null                // mirrors manifest.schedule_hash for the diff-window join; null on null-manifest runs
+  }
+}
+```
+
+### 10. The `audit.chain_anchor.weekly` row jsonb meta layout (binding)
+
+```
+{
+  event_type: 'audit.chain_anchor.weekly',
+  actor_pseudonym: HMAC(synthetic_actor_id 'system:integrity-check'),
+  target_id: null,
+  target_class: 'C1',
+  severity: 'notice',
+  meta: {
+    anchor_at_ms: number,
+    head: { id: string; ts_ms: number; hash: string } | null  // null only on the skipped-empty-chain path
+  }
+}
+```
+
+### 11. `IntegrityCheckRunConfig` (binding; narrow)
+
+```
+export interface IntegrityCheckRunConfig {
+  /** The closed-allowlist trigger discriminator. F-19 binding. */
+  readonly trigger: 'scheduled' | 'post_rotation' | 'post_export';
+  /** Default: 5 minutes (matches F-50 triggered upper bound). */
+  readonly lease_window_ms?: number;
+  /** Default: false. Dry-run computes the walk + reconciliation without writing any audit rows or transitioning the run row to terminal state. */
+  readonly dry_run?: boolean;
+  /** No max_rows field — library uses INTEGRITY_MAX_ROWS_PER_PASS exclusively. */
+  /** No batch_size field — library uses INTEGRITY_CHAIN_WALK_BATCH_SIZE exclusively. */
+  /** No predicate / WHERE / pivot / row-range field — F-19 closed-allowlist defense. */
+  /** No backup_manifest selector — library always uses latest committed. */
+  /** No runtime_pin override — library always reads store.readNodeRuntimePin(). */
+}
+```
+
+### 12. Library constants (binding; mirrors ADR-0017 / ADR-0018 magic-number ban)
+
+```
+export const INTEGRITY_MS_PER_SECOND = 1000;
+export const INTEGRITY_MS_PER_MINUTE = 60 * INTEGRITY_MS_PER_SECOND;
+export const INTEGRITY_MS_PER_HOUR   = 60 * INTEGRITY_MS_PER_MINUTE;
+
+export const INTEGRITY_DEFAULT_LEASE_WINDOW_MS  = 5 * INTEGRITY_MS_PER_MINUTE;   // F-50 triggered upper bound
+export const INTEGRITY_CHAIN_WALK_BATCH_SIZE    = 1000;                          // memory-bounded per batch
+export const INTEGRITY_MAX_ROWS_PER_PASS        = 20000;                         // F-60 mirror
+export const INTEGRITY_BACKUP_DIFF_BUFFER_MS    = 1 * INTEGRITY_MS_PER_HOUR;     // RA-2 §4297 1h buffer
+export const INTEGRITY_NOW_MS_MIN_INCREMENT     = 1;                             // F-66 monotonic clock floor
+```
+
+Changing `INTEGRITY_BACKUP_DIFF_BUFFER_MS` requires updating RA-2 §4297 (or a new RA-2 amendment) — three-mirror coordination.
+
+## Open-question dispositions (a)–(g) from the librarian briefing — answered
+
+- **(a) Chain shape:** prev_hash-linear (Option A). T18 is the operational test of v1, not an evolution. Merkle-anchor + Ed25519 signature is v2 work, bundled with RA-2 re-open trigger #1 default response.
+- **(b) Daily job timing:** 04:30 ET (Option B). 2.5h after the T17 02:00 ET backup, 1h after the T16 03:30 ET sweep. Library is timing-agnostic; the schedule lands in T18.1's pg_cron.
+- **(c) Anchor cadence + destination:** weekly Mon 00:00 ET to worker co-chair email (Option C). Library emits the `audit.chain_anchor.weekly` row only; T18.1 wires the delivery; absence does NOT re-open RA-2 (manual backstop per §4298).
+- **(d) Batch size + lock-hold:** `INTEGRITY_CHAIN_WALK_BATCH_SIZE = 1000` per batch; `INTEGRITY_MAX_ROWS_PER_PASS = 20000` row cap with `status: 'capped' → resume_after_id` (Option D). T18.1 sets `statement_timeout 60s + lock_timeout 5s` (operational-safety belt; library does not model wall-clock timeouts).
+- **(e) Alarm thresholds:** A-AUDIT-001 zero-threshold + A-INTEGRITY-001 missed-cron + A-INTEGRITY-002 unattributable-divergence (Option E). The library returns `would_fire_alert` symbols; T18.1 wires the sink.
+- **(f) Restore-from-backup race:** `pg_advisory_xact_lock` SHARED with backup pass + EXCLUSIVE with restore; key `hashtext('audit_chain_global')` (Option F; T18.1 scope). Library is lock-agnostic — accepts an opaque chain snapshot from the store; production store acquires the lock around the snapshot read.
+- **(g) Reconciliation correctness with retention.deleted post-dump:** sweep-attribution rule (Option G). Per row in dump but absent from live, attribute IFF a sweep_run in the manifest's sweep-snapshot window accounts for `per_event_counts[row.event_type] > 0` AND `row.ts ∈ sweep.started..completed` window. Otherwise → A-AUDIT-001 + A-INTEGRITY-002 distinct fire. Test-writer pins both directions (attributed: no fire; unattributable: both alerts).
+
+## Acceptance criteria (F-### list — test-writer consumes)
+
+The test-writer turns each into a test obligation. Numbering continues from F-85 (last assigned by threat-modeler for ADR-0018 family); threat-modeler's next pass MAY renumber to fit `.context/threat-model.md` §3.11 sub-section ordering (placeholders are F-86..F-100 per the librarian briefing's suggested range):
+
+- **F-86 (closed-allowlist drift; mirrors F-55 / F-70).** `INTEGRITY_CHECK_EVENT_TYPES` enum and frozen const drift-check: every union value has exactly one const entry; every const entry is in the union; const is `Object.isFrozen`. Test: drift CI passes; remove an entry; CI fails.
+- **F-87 (F-24 audit-before-alert-fanout).** Every `audit.integrity_check.mismatch` row is written BEFORE any `would_fire_alert: 'A-AUDIT-001'` symbol surfaces on the IntegrityRunResult. Test: force one mismatch via `__debugCorruptHashAtId`; assert the mismatch row is in `__debugListEmittedAuditRows()` BEFORE asserting the result's `would_fire_alert` symbol; assert the run row's terminal_status is `completed` not `errored`.
+- **F-88 (F-58 audit-WITH-side-effect — summary LAST in transaction).** The `audit.integrity_check.ran` row is the LAST audit row written in the integrity-check transaction. Test: corrupt 3 rows; run integrity check; assert order of writes in `__debugListEmittedAuditRows()` is `[mismatch, mismatch, mismatch, ran]`. Force the emit to throw on the ran row; assert NO audit rows are visible (full rollback); assert NO `would_fire_alert` symbol on the errored result.
+- **F-89 (chain-walk mismatch detection — primary surface).** With 100 fixture rows and `__debugCorruptHashAtId(50)`, `runIntegrityCheck({trigger: 'scheduled'})` returns `status: 'completed'`, `mismatches_count: 1`, `would_fire_alert: 'A-AUDIT-001'`. The mismatch row's `meta.detected_via === 'chain_walk'`; `meta.row_id` is the corrupted id; `meta.prev_hash_match === true` (single-row mutation doesn't break prev_hash chain).
+- **F-90 (sequential-id gap detection).** With 5 fixture rows and `__debugDeleteRowAtId(3)`, integrity check reports a chain-walk mismatch on row 4 (its `prev_hash` no longer matches row 2's `hash` — gap detected). With a sweep_runs fixture that accounts for the deletion of row 3's event_type in the gap's time window, no mismatch.
+- **F-91 (backup-diff mismatch detection — RA-2 trigger #3).** Seed 50 rows + insert a backup manifest fixture whose `audit_log_head.hash` matches the seeded row 50. Advance clock 1h. `__debugCorruptHashAtId(10)` (a row older than the dump-buffer cutoff). `runIntegrityCheck({trigger: 'scheduled'})`: the mismatch row's `meta.detected_via === 'backup_diff'`, `meta.expected_hash === <row 10's dump hash>`, `meta.actual_hash === <corrupted hash>`, `meta.backup_manifest_run_id === <fixture.run_id>`. `would_fire_alert: 'A-AUDIT-001'`. **No false positive on rows NEWER than the dump-buffer cutoff** — a row inserted AFTER `manifest.committed_at_ms - 1h` is structurally excluded from the diff (F-89 inversion test).
+- **F-92 (attributable-vs-unattributable reconciliation — Option G binding rule).** Seed 50 rows + insert a backup manifest fixture whose `audit_log_head` includes id 30 (event_type `concern.created`). Insert a sweep_run fixture with `per_event_counts: {'concern.created': 1}`, `started_at_ms` ≤ row 30's ts ≤ `completed_at_ms`, snapshot ts ≤ `manifest.retention_sweep_runs_snapshot_ts_ms`. `__debugDeleteRowAtId(30)`. `runIntegrityCheck`: NO `would_fire_alert`; mismatch row absent; `attributable_count: 1`, `unattributable_count: 0`. Conversely with NO eligible sweep_run: `would_fire_alert` includes both `'A-AUDIT-001'` AND `'A-INTEGRITY-002'`; `unattributable_count: 1`; mismatch row's `meta.attribution_attempted === true`, `meta.actual_hash === null`.
+- **F-93 (runtime-pin coherence — G-T11-23).** Seed a backup manifest with `node_runtime_pin: {node_version: '21.5.0', openssl_version: '3.0.10'}`. `__debugForceRuntimePinMismatch(true)` (swaps live pin to a sentinel that doesn't match). `runIntegrityCheck` returns `{status: 'errored', error_code: 'runtime_pin_mismatch'}`. NO `audit.integrity_check.mismatch` rows emitted (the error is operational, not adversarial). NO `would_fire_alert: 'A-AUDIT-001'` (false-positive prevention).
+- **F-94 (no PII in mismatch / ran / anchor rows — G-T17-PRIV-7 + G-T16-PRIV-1).** Structural type test: `keyof MismatchRowMeta` does not contain any name matching `/pseudonym/i` (except the top-level `actor_pseudonym`); does not contain `target_id`-of-mismatching-row; does not contain any field name from the audit_log row schema other than `row_id`. Runtime grep over emitted rows: no field matches PII shapes (32-hex pseudonym, phone, email, UUID-other-than-run_id-and-manifest_run_id, hex > 64 chars except `expected_hash` and `actual_hash`). `actor_pseudonym` appears at top level only; not duplicated into `meta`.
+- **F-95 (A-AUDIT-001 trigger correctness — distinct from A-INTEGRITY-002).** A chain-walk mismatch fires A-AUDIT-001 only. An unattributable backup-diff divergence fires BOTH A-AUDIT-001 AND A-INTEGRITY-002 distinctly. An attributable backup-diff divergence fires NEITHER. Test: three scenarios; assert the `would_fire_alert` shape exactly.
+- **F-96 (weekly anchor emission — RA-2 manual backstop).** `runWeeklyChainAnchor` with seeded 50 rows emits exactly one `audit.chain_anchor.weekly` row with `meta.head` matching the highest-id row's `(id, ts_ms, hash)`. With empty chain: `{status: 'skipped', reason: 'empty_chain'}`; NO row emitted. Force `extractAuditLogHead`-equivalent to throw: `{status: 'errored', error_code: 'head_read_failed'}`; NO row emitted.
+- **F-97 (no caller-supplied predicate / pivot / WHERE — F-19 mirror).** TypeScript structural test: `IntegrityCheckRunConfig` has no field whose name matches `/predicate|where|pivot|row_range|start_id|end_id|table_name|backup_manifest_id|runtime_pin/i`. Runtime: poisoned-config fixture with `@ts-expect-error` directives fails tsc on injection of any of those fields. Mirrors ADR-0018 F-84.
+- **F-98 (TestStore split — IntegrityStore vs TestIntegrityStore).** `.test-d.ts` assertion: `keyof IntegrityStore` does NOT include any string starting with `__debug`. `TestIntegrityStore extends IntegrityStore` adds them. `apps/web/src/lib/audit-integrity/index.ts` re-exports do NOT include `MemoryIntegrityStore`, `TestIntegrityStore`, `__debug*` hooks. Mirrors ADR-0018 F-85.
+- **F-99 (row-cap + capped-state pattern — F-60 mirror).** With 20001 seeded fixture rows and zero mismatches, `runIntegrityCheck` returns `status: 'capped'`, `rows_walked: 20000`, `resume_after_id: <id of row 20000>`. The `audit.integrity_check.ran` row's `meta.status === 'capped'`, `meta.resume_after_id` present. A subsequent run with no resume parameter (library does not accept one — the next pass naturally picks up from the next un-walked row in production T18.1; library mirror is implementation-defined) walks the remaining rows.
+- **F-100 (no PII in errors — G-T11-29 / G-T16-PRIV-3 / G-T17 F-81 mirror).** Force each of the four error_codes: `run_start_failed`, `runtime_pin_mismatch`, `chain_walk_failed`, `audit_emit_failed`. Assert each returns `{status: 'errored', run_id, error_code: <closed literal>}` only — no `row_id`, no `event_type`, no `actor_pseudonym`, no hex > 64 chars, no UUID other than `run_id` (which itself uses the `ic_` prefix to break 32-hex word boundary per G-T16-PRIV-3 rejection-sample).
+
+**RA-2 control #3 LOAD-BEARING preservation assertion (test-writer must convert):** the test fixture pre-snapshot of RA-2 trigger #3 firing: seed → backup-fixture → tamper row older than 1h → run integrity check. Assert `would_fire_alert: 'A-AUDIT-001'` with `meta.detected_via: 'backup_diff'`. This is the post-T18 operational test of RA-2 compensating control #3. **Any future change to T18 that breaks this test re-opens RA-2 by construction.**
+
+## Reversibility
+
+- **Easy:** all library-internal constants (`INTEGRITY_CHAIN_WALK_BATCH_SIZE`, `INTEGRITY_MAX_ROWS_PER_PASS`, `INTEGRITY_DEFAULT_LEASE_WINDOW_MS`), the daily schedule (T18.1 pg_cron), the alarm thresholds (T18.1 + observability sinks).
+- **Medium:** the `IntegrityStore` interface shape (a change requires both `MemoryIntegrityStore` and the future `SupabaseIntegrityStore` to update; CI drift); the reconciliation rule (Option G — pinned by F-92; a change requires re-opening RA-2 trigger #3 reasoning).
+- **Hard:** the prev_hash-linear chain shape (a Merkle migration invalidates ADR-0018's `audit_log_head` triple AND requires re-hashing the entire chain in a single migration); the three new audit-log enum values (extension dance ratified at T18.1; renaming requires four-mirror coordination); the load-bearing assertion that A-AUDIT-001 fires on FIRST occurrence (RA-2 trigger #3 re-evaluation requires architect + security-reviewer).
+
+## Consequences
+
+- T18 ships pure-TS library code + `MemoryIntegrityStore`. No new physical tables in T18.
+- T18.1 ships `SupabaseIntegrityStore` + `integrity_check_runs` migration + (optional) `audit_chain_anchors` migration + pg_cron 04:30 ET + Edge Function trigger surface (`post_rotation` + `post_export`) + ADR-0016 schedule rows + §PI inventory amendments + pgTAP integration tests + cross-mirror SQL drift test + A-AUDIT-001 / A-INTEGRITY-001 / A-INTEGRITY-002 alert wiring + `pg_advisory_xact_lock` coordination with backup pass + off-app weekly anchor delivery to co-chair email. **HG-15 fires on T18.1** when the new physical tables land.
+- RA-2 compensating control #3 transitions from "in plan" to "operational." RA-2 STRENGTHENS (does NOT re-open) as a consequence of T18 + T18.1 shipping.
+- A2 (A5 with `audit_writer_role` credentials) is now detectable in two surfaces: (i) in-place chain mutation via chain-walk + 5-min triggered cadence; (ii) pivot-rewrite via backup-diff + 24h scheduled cadence. The signature-deferred posture remains (RA-2 v1) but the detection-floor is now operational.
+- T17 + T16 are unchanged by T18. **T16 sweep MUST NOT introduce a backup-completion dependency; T17 backup MUST NOT introduce a sweep-completion dependency; T18 MUST NOT introduce a sweep- or backup-completion dependency in either** (the dependency direction is unidirectional: T18 consumes from T16 + T17 outputs; never the reverse). ADR-0017 §G (T16 independence) and ADR-0018 §G (T17 independence) are preserved verbatim.
+- Audit-row-emission rate increases modestly: one `audit.integrity_check.ran` per scheduled + per triggered run (~3-5/day at MVP scale; ~2000/year); one `audit.integrity_check.mismatch` per detected mismatch (target: zero/year in normal operation; an A-AUDIT-001 fire is by design a rare event); one `audit.chain_anchor.weekly` per week (52/year). Total: ~2050 new audit rows/year at MVP scale — negligible against the 7y retention envelope.
+- The library's `MemoryIntegrityStore` deep-import surface gives test-writers fast deterministic test fixtures without a Supabase local stack; T18.1's `SupabaseIntegrityStore` is the production wire-up.
+
+## Compliance check
+
+- **PIPEDA Principle 4.7 (Safeguards):** the chain-integrity job is the structural verification that tamper-evidence claims hold operationally. T18 makes the claim operationally testable. RA-2 acceptable while compensating controls hold; T18 STRENGTHENS control #3.
+- **PIPEDA Principle 4.5 (Limiting Retention):** the three new audit-log event types carry recommended retentions (24mo for ran, 7y for mismatch + weekly anchor); T18.1 lands the `RETENTION_SCHEDULE` rows. The sweep (T16) handles deletion per ADR-0015. No new retention-class surface is introduced.
+- **ADR-0001 (`ca-central-1` pin):** T18 reads `audit_log` + `retention_sweep_runs` + `backup_manifests` — all Supabase Postgres in `ca-central-1`. No new cross-border egress. The weekly anchor's off-app email is the worker co-chair's email-of-record (chosen by the co-chair; not stored in the app); the choice of email provider is the co-chair's, not the platform's.
+- **ADR-0010 (single-subprocessor posture):** no new subprocessor. The off-app email delivery is operator-mediated, not platform-mediated.
+- **ADR-0003 Amendment A (audit-log enum):** three new enum values extend via the standard six-mirror dance covered by ADR-0018 Option H / G-T08-9 / G-T13-14 / G-T14-7. HG-9 does NOT re-fire.
+- **HG-15:** fires on T18.1 (new physical `integrity_check_runs` table). NOT on T18.
+- **HG-10:** explicitly does NOT fire — operator-facing alerts only; zero user copy.
+
+## Validation pass (architect self-check)
+
+- **RA-2 NOT re-opened.** T18 STRENGTHENS compensating control #3 by making it operational. The library's reconciliation rule (Option G) explicitly distinguishes attributed vs unattributable divergence — RA-2 trigger #3 fires only on the latter. The signature-deferred posture (RA-2 v1) is preserved; T18 does NOT introduce an external signer.
+- **HG-15 fires on T18.1** (new physical tables) — NOT on T18. Confirmed against Amendment H + ADR-0018 §J.
+- **HG-10 explicitly does NOT fire** — operator-facing alerts only; zero user copy. Confirmed.
+- **HG-9 does NOT re-fire** — three new enum values ride the standard ADR-0003 Amendment A extension dance. Confirmed against ADR-0018 Option H lineage.
+- **All carry-forward IDs the design closes are listed:** G-T16-8 (integrity-job join over audit_log + retention_sweep_runs + backup_manifest), G-T17-PRIV-7 (structural-fields-only join; no pseudonyms surfaced), G-T17-9 (zero-event-count convention — absent = zero in reconciliation arithmetic), G-T17-RA2-ANCHOR-CONSUMER (T18 reads the three snapshot-pinned manifest fields).
+- **No T16/T17 sweep / backup-completion dependency reverse-introduced.** T18 consumes from T16 + T17 outputs; never the reverse. The library's `IntegrityStore.readLatestCommittedBackupManifest()` returns `null` cleanly when no manifest exists (Phase-0 / cold-start); the chain-walk surface proceeds independently. The library's `IntegrityStore.listRetentionSweepRunsThrough()` returns `[]` cleanly when no sweep has run.
+- **No new third-party services touching PI.** Off-app weekly anchor email is operator-mediated (worker co-chair's email-of-record); no platform subprocessor added.
+- **Cost within budget.** ~2050 new audit rows/year at MVP — negligible (<$0.01/mo storage at Supabase rates). No new compute footprint until T18.1 pg_cron.
+
+## Task breakdown (ordered; each task ≤ 1 file of work)
+
+The implementer picks these up in order. Each task is ≤1 file or 1 closed PR unit. Risk is L / M / H; estimate is S / M / L (hours / days).
+
+1. **T18-1 (S, L) — `apps/web/src/lib/audit-integrity/types.ts`.** Closed `IntegrityCheckTrigger` union; `IntegrityRunResult` discriminated union; `INTEGRITY_*` constants. Acceptance: tsc passes; no caller-supplied field names per F-97 type test.
+2. **T18-2 (S, L) — `apps/web/src/lib/audit-integrity/integrity-event-types.ts`.** Frozen `INTEGRITY_CHECK_EVENT_TYPES` const + drift-check helpers (F-86). Acceptance: drift test passes; const is `Object.isFrozen`.
+3. **T18-3 (S, L) — `apps/web/src/lib/audit-integrity/integrity-store.ts`.** `IntegrityStore` interface (production); `TestIntegrityStore` extension; supporting types (`AuditChainRowMaterialized`, `BackupManifestSnapshot`, `RetentionSweepRunSnapshot`, `IntegrityCheckRunRow`, `IntegrityCheckMismatchRow`, `IntegrityCheckRanAuditRow`, `ChainAnchorWeeklyAuditRow`). Acceptance: F-98 `.test-d.ts` passes; production interface has zero `__` props.
+4. **T18-4 (M, M) — `apps/web/src/lib/audit-integrity/memory-integrity-store.ts`.** `MemoryIntegrityStore` implements `TestIntegrityStore` with all `__debug*` hooks. Acceptance: store seeds + queries match the SQL semantics the production store will satisfy; `actor_pseudonym` HMAC consistent across calls; F-66 monotonic `nowMs()`.
+5. **T18-5 (M, M) — `apps/web/src/lib/audit-integrity/chain-walk.ts`.** `walkChainOnce(opts)` — id-ordered prev_hash/hash recompute + sequential-id gap detection. Pure function: `(rows: AuditChainRowMaterialized[]) → ChainWalkMismatch[]`. Acceptance: F-89 + F-90 pass against MemoryIntegrityStore fixtures.
+6. **T18-6 (M, M) — `apps/web/src/lib/audit-integrity/reconciliation.ts`.** `attributeDivergence(divergence, sweepRuns)` — Option G binding rule. Pure function: `(absent_rows, sweep_runs) → {attributed: Row[], unattributable: Row[]}`. Acceptance: F-92 both directions pass.
+7. **T18-7 (M, M) — `apps/web/src/lib/audit-integrity/backup-diff.ts`.** `reconcileAgainstBackupManifest(opts)` — live-vs-dump head pointer walk + sweep attribution call into reconciliation.ts. Acceptance: F-91 passes; no false-positive on rows newer than `committed_at_ms - 1h`.
+8. **T18-8 (M, M) — `apps/web/src/lib/audit-integrity/audit-emission.ts`.** `buildIntegrityCheckRanRow` + `buildIntegrityCheckMismatchRow` + `buildChainAnchorWeeklyRow`. Acceptance: F-94 (no PII in rows); rows match Decision §8/§9/§10 layouts exactly.
+9. **T18-9 (L, H) — `apps/web/src/lib/audit-integrity/integrity-core.ts`.** `runIntegrityCheck(opts)` orchestration per Decision §5 algorithm; `runWeeklyChainAnchor(opts)` per Decision §7. Composes chain-walk + backup-diff + reconciliation + audit-emission. Acceptance: F-87 + F-88 + F-93 + F-95 + F-96 + F-99 + F-100 all pass.
+10. **T18-10 (S, L) — `apps/web/src/lib/audit-integrity/index.ts`.** Public barrel; deliberately omits `MemoryIntegrityStore`, `TestIntegrityStore`, `__debug*`, `runIntegrityEventTypesDriftCheck` (deep-import only). Acceptance: F-98 index-surface test passes; barrel re-exports only `runIntegrityCheck`, `runWeeklyChainAnchor`, `IntegrityStore`, `INTEGRITY_CHECK_EVENT_TYPES`, `INTEGRITY_*` constants, type aliases.
+11. **T18-11 (S, L) — `apps/web/.eslintrc.cjs` (no-restricted-imports addition; T18 sliver only).** Cover all three path shapes per Option J. Acceptance: a production module attempting to import from `**/memory-integrity-store` fails CI.
+12. **T18-12 (S, L) — Existing test scaffold rename.** Rename `apps/web/test/T18/audit-integrity.test.ts` to `apps/web/test/T18/audit-integrity.t18-1-deferred.test.ts` (consistent with T16/T17 lineage; mixes T18 library and T18.1 SQL scope; A-KEY-ROT-001 30s window conflicts with F-50 5-min). Test-writer writes T18-scope tests against MemoryIntegrityStore per the architect spec in subsequent task.
+
+## Sibling task spec — T18.1 scope
+
+**Library-only T18 is the parent task; T18.1 is the production wire-up sibling per ADR-0002 Amendment H.** T18.1 ships in a SEPARATE PR; this section is the architect spec the T18.1 implementer + threat-modeler + security-reviewer + test-writer consume.
+
+1. **`apps/web/src/lib/audit-integrity/supabase-integrity-store.ts`.** `SupabaseIntegrityStore implements IntegrityStore` only (NOT `TestIntegrityStore`). Acquires `pg_advisory_xact_lock('hashtext("audit_chain_global")')` SHARED for snapshot reads. `readNodeRuntimePin()` returns `{node_version: process.versions.node, openssl_version: process.versions.openssl}` from the SECURITY DEFINER function context. `nowMs()` reads `xact_start()` (G-T08-14 / G-T13-9 / G-T16-9). `systemActorPseudonym()` HMAC over `'system:integrity-check'` with `HMAC_PSEUDONYM_KEY` (ADR-0016 standard).
+2. **SQL migration: `integrity_check_runs` table.** Columns: `run_id uuid PK`, `trigger text NOT NULL CHECK (trigger IN ('scheduled','post_rotation','post_export'))`, `started_at_ms bigint NOT NULL`, `completed_at_ms bigint`, `status text NOT NULL CHECK (status IN ('running','completed','capped','errored'))`, `rows_walked int`, `mismatches_count int`, `attributable_count int`, `unattributable_count int`, `backup_diff_performed boolean`, `backup_manifest_run_id uuid`, `resume_after_id bigint`, `node_runtime_pin jsonb NOT NULL`, `schedule_hash text`. RLS: SELECT to authenticated + `is_active_member()`; INSERT/UPDATE only via `integrity_check_role` (new non-login role; HG-15 trigger). DELETE only via `retention_service_role` on aged rows (24mo per recommended retention class).
+3. **(Optional) SQL migration: `audit_chain_anchors` table.** Implementer choice: either a dedicated table OR `audit.chain_anchor.weekly` rows alone serve. Recommended: dedicated table for the off-app email Edge Function to read cleanly. Columns: `anchor_at_ms bigint PK`, `head_id bigint NOT NULL`, `head_ts_ms bigint NOT NULL`, `head_hash bytea NOT NULL`, `delivered_off_app_at_ms bigint`.
+4. **ADR-0003 Amendment A extension — six-mirror dance for three new event types** (`audit.integrity_check.ran`, `audit.integrity_check.mismatch`, `audit.chain_anchor.weekly`):
+    a. TS const — already reserved in T18 (`INTEGRITY_CHECK_EVENT_TYPES`).
+    b. SQL CHECK constraint widening on `audit_log.event_type` (migration).
+    c. `RETENTION_SCHEDULE` entries (TS const — T18.1 amends).
+    d. `audit_log_retention_schedule` SQL rows (T18.1 migration).
+    e. `audit-log.md §1` enum table update.
+    f. `scripts/check-audit-enum-coverage.sh` update.
+5. **pg_cron schedule.** Daily 04:30 ET cron entry calling the `SECURITY DEFINER` wrapper around `runIntegrityCheck({trigger: 'scheduled'})`. Weekly Mon 00:00 ET cron entry calling `runWeeklyChainAnchor()`.
+6. **Edge Function trigger surface.** Two endpoints: `post_rotation` (called from the `committee_data_key.rotation.completed` emit path with the 5-min upper-bound contract per F-50) + `post_export` (called from the `export.generated` emit path). Each calls `runIntegrityCheck({trigger: <discriminator>})` via the SECURITY DEFINER wrapper.
+7. **`pg_advisory_xact_lock` coordination.** Backup pass + integrity-check pass take SHARED lock; restore pass takes EXCLUSIVE. Key: `hashtext('audit_chain_global')`. Documented in T18.1 + cross-referenced in ADR-0018.
+8. **A-AUDIT-001 / A-INTEGRITY-001 / A-INTEGRITY-002 alert wiring.** T18.1 + observability-setup next pass. Alert routing: operator-facing (worker co-chair + admin); zero user copy (HG-10 NOT firing preserved).
+9. **Off-app weekly anchor delivery.** Edge Function reads `audit.chain_anchor.weekly` rows (or `audit_chain_anchors` table if option (3) chosen); sends email to worker co-chair's email-of-record. Email body: `(id, ts, hash)` triple in plaintext (the hash is structurally non-PII). Delivery failure does NOT fire any alert (manual backstop; absence does NOT re-open RA-2 per §4298).
+10. **ADR-0016 schedule rows** for `integrity_check_runs` (and `audit_chain_anchors` if added): `kind: 'fixed_months', months: 24` for the runs table (operational telemetry); `kind: 'fixed_years', years: 7` for the anchors table (load-bearing forensic).
+11. **§PI inventory amendments.** `integrity_check_runs`: no PI (counts + structural ids only; mirrors `retention_sweep_runs`). `audit_chain_anchors` (if added): no PI (head pointer triple only). Both rows added to §PI inventory at T18.1 PR submission.
+12. **pgTAP integration tests.** SQL-half mirrors of F-86..F-100 + the audit-log.md §5 obligations (UPDATE revocation; DELETE revocation except `retention_service_role`; CHECK constraint rejection of non-allowlisted event_type; meta-shape assertion trigger; server-side hash computation; key-rotation enum-gap A-KEY-ROT-001 alert).
+13. **Cross-mirror SQL drift test.** Asserts TS `INTEGRITY_CHECK_EVENT_TYPES` const ⊆ SQL `audit_log.event_type` CHECK constraint values; asserts the three new strings are in BOTH the TS const AND the SQL CHECK constraint widening.
+14. **HG-15 re-ratification at PR submission.** New physical `integrity_check_runs` table + optional `audit_chain_anchors` table trigger HG-15.
+
+---
+
 ## ADR-0018 — T17 backup object-lock library + MemoryBackupStore
 
 **Status:** Accepted
