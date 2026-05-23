@@ -63,10 +63,7 @@ export class MemoryAuthStore implements AuthStore {
    * rainbow-friendly without a key. The 24h ADR-0016 retention sweep
    * (T16) cleans rows by `consumed_at`.
    */
-  private consumedTotpCodes = new Map<
-    string,
-    Array<{ code_hmac: Buffer; consumed_at: number }>
-  >();
+  private consumedTotpCodes = new Map<string, Array<{ code_hmac: Buffer; consumed_at: number }>>();
   private credentials = new Map<string, PasskeyCredential>();
   private sessions = new Map<string, AuthSession>();
   private auditRows: AuditRow[] = [];
@@ -319,8 +316,7 @@ export class MemoryAuthStore implements AuthStore {
     // request_id we generate one here so every audit row carries a
     // correlation handle. `null` is reserved for cases where the caller
     // explicitly disclaims correlation (e.g. system-internal sweeps).
-    const request_id =
-      event.request_id === undefined ? randomUUID() : event.request_id;
+    const request_id = event.request_id === undefined ? randomUUID() : event.request_id;
     this.auditRows.push({
       id: this.auditSeq,
       ts: new Date(this.nowProvider()).toISOString(),

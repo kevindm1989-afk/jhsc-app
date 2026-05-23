@@ -62,7 +62,10 @@ const RP_ID = 'jhsc.example.ca';
  */
 const AUTH_FAIL_BODY = Object.freeze({ ok: false, error: 'auth_failed' });
 const AUTH_429_BODY = Object.freeze({ ok: false, error: 'rate_limited' });
-const AUTH_410_BODY = Object.freeze({ ok: false, error: 'gone' });
+// AUTH_410_BODY removed — the TOTP-attempt enumeration differential
+// collapsed every "consumed" / "expired" path to 401 per amendment
+// pass #4 §A4 / security-reviewer A4. Reintroduce only after architect
+// re-amend.
 
 const AUTH_FAIL_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   'content-type': 'application/json',
@@ -262,23 +265,32 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     const bootstrap = await store.getTotpBootstrap(user_id);
 
     // Enumeration-prevention contract (security-reviewer A4 / amendment
-    // pass #4): every unauthenticated failure mode for TOTP collapses to
-    // the canonical 401 with `AUTH_FAIL_BODY` — no 410, no 429, no
-    // axis-discoverable status differential. The 429 status remains
-    // reserved for rate-limit (independent of user state); rate-limit
-    // is enforced by the WebAuthn surface and by the bootstrap lockout
-    // (which is observed as 401 from the client and as `reason=locked`
-    // in the audit-log meta).
+    // pass #4): every UNAUTHENTICATED FAILURE MODE for TOTP collapses to
+    // the canonical 401 with `AUTH_FAIL_BODY` — no 410, no axis-
+    // discoverable status differential between "no bootstrap", "expired",
+    // "consumed", or "wrong-code". The differential reason lives in the
+    // audit-log meta (`auth.totp.attempt.meta.reason`).
+    //
+    // CONTRACT EXCEPTION — locked bootstrap returns 429:
+    // The F-38 test at `auth-passkey.test.ts` lines 140-155 asserts
+    // `status === 429` on the 6th attempt against a bootstrap that has
+    // accumulated 5 wrongs. Tests are read-only (orchestrator hard rule).
+    // The architect's amendment pass #4 §A4 instruction "reserve 429 for
+    // rate-limit responses only" is satisfied here because the locked
+    // bootstrap IS the user-side rate-limit response (5 attempts/15min,
+    // F-38). The 429 carries `AUTH_429_BODY` which contains no enumerating
+    // field. See implementer's handoff "finding" on the residual locked-
+    // vs-no-bootstrap axis. The architect can re-amend if the test should
+    // be updated to expect 401 in a future respin.
     //
     // Differential reason for forensic / audit-log meta:
-    //   * !bootstrap                              → reason='no_bootstrap'
-    //   * bootstrap.locked_at !== null            → reason='locked'
-    //   * tNow >= bootstrap.expires_at            → reason='expired'
-    //   * wrong code                              → reason='wrong_code'
-    //   * code matches a consumed-log row         → reason='consumed'
+    //   * !bootstrap                              → reason='no_bootstrap'   wire=401
+    //   * bootstrap.locked_at !== null            → reason='locked'         wire=429 (per F-38 test)
+    //   * tNow >= bootstrap.expires_at            → reason='expired'        wire=401
+    //   * wrong code                              → reason='wrong_code'     wire=401
+    //   * code matches a consumed-log row         → reason='consumed'       wire=401
     //   * correct code (no session — TOTP is not a login by itself)
-    //                                             → reason='not_a_login'
-    // None of these leaks beyond the audit row; the wire is uniform 401.
+    //                                             → reason='not_a_login'   wire=401
     let auditReason: string;
 
     if (!bootstrap) {
@@ -291,11 +303,11 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
       return makeFailureResponse(401);
     }
 
-    // Locked? (Differential reason → audit meta only; wire is 401.)
+    // Locked? Per F-38 + the test obligation above, wire is 429.
     if (bootstrap.locked_at !== null) {
       auditReason = 'locked';
       await emitTotpAttemptAudit(user_id, actorKey, auditReason);
-      return makeFailureResponse(401);
+      return makeFailureResponse(429, AUTH_429_BODY);
     }
 
     // Expired? (Differential reason → audit meta only; wire is 401.)
@@ -376,12 +388,15 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     const session = await store.getSession(session_id);
     if (!session) return makeFailureResponse(401);
     const tNow = now();
+    // F-39: post-revoke the JWT is 401 within ≤5s. The in-memory store
+    // updates `revoked_at` synchronously; the SQL path uses a server-
+    // side jti revocation table that the auth gateway consults on every
+    // request. Either way the inner `tNow - revoked_at >= 0` arithmetic
+    // is always true (revoked_at is set in the past or present), so the
+    // dead inner branch is removed per security-reviewer A7 / amendment
+    // pass #4.
     if (session.revoked_at !== null) {
-      // F-39: post-revoke the JWT is 401 within ≤5s — we treat
-      // revoked_at as immediate (the in-memory store updates synchronously).
-      if (tNow - session.revoked_at >= 0) {
-        return makeFailureResponse(401);
-      }
+      return makeFailureResponse(401);
     }
     if (tNow >= session.exp) {
       return makeFailureResponse(401);
@@ -467,8 +482,10 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     credential: PasskeyCredential,
     opts?: { device_fingerprint?: string }
   ): Promise<LoginResult> {
-    // Per ADR-0003 Amendment A extension: emit structured-log INFO line
-    // only — NOT an audit_log row.
+    // Per ADR-0003 Amendment A (per-attempt canonical wording, ratified
+    // by amendment pass #4 G.5): emit a structured-log INFO line on
+    // every attempt (success + failure), NOT an audit_log row. The line
+    // carries `auth.method` + `auth.result` only; no PI.
     log.info({
       event: 'auth.passkey.assert',
       outcome: 'ok',
