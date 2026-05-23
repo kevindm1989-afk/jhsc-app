@@ -945,6 +945,118 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope (T18 design):** integrity-job query projects only the structural fields; pseudonyms remain in audit_log.
 **Blocker for:** T18 privacy review approval.
 
+## T17 — Backup object-lock
+
+> Library-only T17 (ADR-0002 Amendment H) closes library halves of G-T16-8 (T18 data source), G-T16-PRIV-7 (manifest pseudonym-free), G-T16-RECONCILE-CEILING (per-event attribution preserved). The 16 G-T17-* entries below come from the T17 reviewer pass + threat-model §3.10 carry-forwards.
+
+### G-T17-1 — SupabaseBackupStore + Storage bucket policy (T17.1)
+**Source:** ADR-0018 §sibling task spec; threat-model §3.10.
+**Finding:** T17 ships MemoryBackupStore only. T17.1 ships SupabaseBackupStore + `backups-ca-central-1` Supabase Storage bucket with S3-compatible object-lock (governance mode, 42-day retention) + `backup_writer_role` non-login SECURITY DEFINER role.
+**Resolution scope (T17.1):** SQL migration `00000000000008_backup.sql` + Storage bucket config + Edge Function trigger + lifecycle policy backstop.
+**Blocker for:** first production deploy.
+
+### G-T17-2 — backup_manifests SQL migration + ADR-0016 schedule rows (T17.1)
+**Source:** ADR-0018 §15.
+**Finding:** new physical table `backup_manifests` with EXACTLY the BackupManifest field-name shape (F-83 rename-detection mirror) + ADR-0016 schedule rows for the new table + bucket.
+**Resolution scope (T17.1):** SQL migration + ADR-0016 schedule rows + HG-15 re-ratification (G-T17-PRIV-5).
+**Blocker for:** T17.1 PR submission.
+
+### G-T17-3 — A-BACKUP-001/002/003 alert wiring (observability-setup)
+**Source:** threat-model §3.10 + privacy-review-t17.md G-T17-PRIV-2.
+**Finding:** library returns `would_fire_alert: 'A-BACKUP-001'` symbol; production needs alert sinks for (a) past-window still-locked manifests (PIPEDA s.10.1 breach-window), (b) missed monthly restore drill, (c) storage quota approaching cap.
+**Resolution scope (T17.1 → observability pass):** define A-BACKUP-001/002/003 with runbooks.
+**Blocker for:** RA-2 compensating control #4 monitoring posture.
+
+### G-T17-4 — Cross-mirror SQL drift assertion (TS BACKUP_TABLES ↔ SQL backup_writer_role GRANT footprint)
+**Source:** ADR-0018 §sibling task spec; mirrors G-T16-4.
+**Finding:** library has `runBackupTablesDriftCheck` over TS const; T17.1 must add pgTAP test enumerating the 19 tables from (a) TS const, (b) SQL `backup_writer_role` GRANT SELECT footprint; assert set-equality.
+**Resolution scope (T17.1):** pgTAP test.
+**Blocker for:** T17.1 PR submission.
+
+### G-T17-5 — Restore runbook + restore drill cadence (T17.1)
+**Source:** ADR-0018 §sibling task spec.
+**Finding:** restore-as-superuser bypasses RLS (Hard Rule #2). Runbook must forbid restore-into-prod outside approved incident; default = restore-to-staging in ca-central-1. Restore drill cadence (proposed: monthly) needs ratification + failure-of-drill alert.
+**Resolution scope (T17.1):** runbook doc + drill schedule + A-BACKUP-002 sink.
+**Blocker for:** PIPEDA 4.7 (Safeguards) operational completeness.
+
+### G-T17-6 — `backup.hard_deleted` audit-event enum extension (T17.1)
+**Source:** ADR-0018 §9 Layer 2; second-opinion CF-10.
+**Finding:** ADR §9 names `backup.hard_deleted` audit-event but library does NOT emit it (BackupStore has no `emitBackupHardDeleted` method). Asymmetry with `backup.manifest_written` which IS library-emitted. T17.1 owns the emission + ADR-0003 Amendment A extension dance (mirrors G-T08-9 / G-T13-14 / G-T14-7).
+**Resolution scope (T17.1):** add method to BackupStore + emit on hardDeleteManifestRow success + extend audit-event enum + update scripts/check-audit-enum-coverage.sh.
+**Blocker for:** PIPEDA 4.10 audit-trail-of-deletes completeness.
+
+### G-T17-7 — No-coupling CI test (`apps/web/test/T17/no-retention-on-backup-coupling.test.ts`)
+**Source:** ADR-0018 §13; privacy-review-t17.md G-T17-PRIV-4.
+**Finding:** ADR §13 mandates a CI test parsing imports under `src/lib/retention/` and asserting no `backup/` path appears. Test file does not exist. Today the property is true by inspection (verified by privacy reviewer); the ADR wanted it CI-enforced.
+**Resolution scope (T17.1 OR next library pass):** add the import-graph test OR an ESLint rule banning `lib/backup/**` imports from within `lib/retention/**`.
+**Blocker for:** none. Structural seal.
+
+### G-T17-8 — `no-spread-into-backup-tables` ESLint rule (T17.1)
+**Source:** ADR-0018 §task #8; second-opinion CF-6.
+**Finding:** ADR named a custom ESLint rule mirroring T11/T12/T16 spread bans. Not in eslint.config.js. Object.freeze on BACKUP_TABLES closes the runtime attack; this is defense-in-depth.
+**Resolution scope (T17.1):** custom ESLint rule.
+**Blocker for:** none. Belt-and-braces.
+
+### G-T17-9 — Zero-event-count convention pinning
+**Source:** second-opinion CF-7.
+**Finding:** `countAuditRowsByEventType` omits event types with zero rows (convention: "absent = zero"). T18's reconciliation join will need to know this. Currently pinned only by inspection.
+**Resolution scope (T17.1 OR next test pass):** branded type with doc-comment OR explicit test asserting a known event type IS NOT in the map when its row-count would be zero.
+**Blocker for:** T18 reconciliation correctness.
+
+### G-T17-10 — ADR-0018 §5 step-ordering wording clarification
+**Source:** second-opinion CF-8.
+**Finding:** ADR §5 says head extracted FIRST then kid; implementation does kid before head. Functionally equivalent (both pre-dump). Worth aligning to spec text or adding a clarifying ADR comment.
+**Resolution scope (next ADR pass):** ADR-0018 §5 clarifying note.
+**Blocker for:** none. Documentation.
+
+### G-T17-11 — `deriveObjectRef` parameter naming
+**Source:** second-opinion CF-9.
+**Finding:** parameter named `committedAtMs` but called with `startedAtMs`. Functionally correct (date should not flip mid-pass); parameter name lies.
+**Resolution scope (next library pass):** rename to `dateAnchorMs` or document the convention.
+**Blocker for:** none. Naming hygiene.
+
+### G-T17-12 — F-85 type-level test redesign
+**Source:** second-opinion CF-3; implementer-acknowledged limitation.
+**Finding:** F-85 inner-narrowing test at backup-pass.test.ts:1163-1177 uses `BackupStore & Record<string, unknown>` intersection that makes ANY string-key access type-check, defeating the `@ts-expect-error` directives. Runtime barrel test at 1199-1217 provides actual structural enforcement.
+**Resolution scope (next test pass):** drop the `Record<string, unknown>` intersection; use `@ts-expect-error` on bare `BackupStore` reference (pattern that already works at line 1192). Test-writer scope, not implementer.
+**Blocker for:** none. Runtime test catches real risk.
+
+### G-T17-PRIV-1 — `backup_manifests` row 7y vs blob 42d retention asymmetry (documentation)
+**Source:** privacy-review-t17.md Q4 ADVISORY.
+**Finding:** `hardDeleteManifestRow` flips manifest status to `'hard_deleted'` but retains the metadata row — per ADR-0018 §7 the manifest is the audit anchor and carries no PI; PI (dump bytes) IS hard-deleted. Recorded for privacy-officer transparency.
+**Resolution scope (none required):** documentation only. Manifest row has NO PI; blob retention is 42d hard-delete per PIPEDA 4.5.
+**Blocker for:** none.
+
+### G-T17-PRIV-3 — Operator-side structured Error logging (BLOCKING-IN-T17.1)
+**Source:** privacy-review-t17.md Q7 ADVISORY; mirrors G-T16-PRIV-3.
+**Finding:** library swallows thrown Errors completely in 4-5 catch paths (now wrapped in try/catch with closed-literal error_codes; underlying Error.message discarded). Correct for client-facing payloads but degrades operator observability for diagnosing the underlying failure.
+**Resolution scope (T17.1):** route swallowed Error to server-side structured-log sink with PI scrubbing.
+**Blocker for:** PIPEDA 4.10 operator reconstructability.
+
+### G-T17-PRIV-5 — HG-15 re-ratification at T17.1
+**Source:** privacy-review-t17.md HG-15.
+**Finding:** T17.1 introduces TWO new surfaces: `backup_manifests` physical table + `backups-ca-central-1` Supabase Storage bucket with object-lock policy + new `backup_writer_role`.
+**Resolution scope (T17.1):** prepare HG-15 packet; user ratifies before SQL migration + bucket policy land.
+**Blocker for:** T17.1 PR submission.
+
+### G-T17-PRIV-6 — §PI inventory amendments + training_records PI class verification (T17.1)
+**Source:** privacy-review-t17.md HG-15 + architect flag.
+**Finding:** §PI inventory amendments needed for new `backup_manifests` row (NO PI — structural metadata only). Architect flagged `training_records` PI class verification as deferred to T17.1 architect.
+**Resolution scope (T17.1):** add row(s) to §PI inventory; verify training_records PI class.
+**Blocker for:** T17.1 PR submission.
+
+### G-T17-PRIV-7 — `xact_start()` over `Date.now()` for production lock arithmetic
+**Source:** privacy-review-t17.md G-T17-PRIV-7; mirrors G-T08-14 / G-T13-9 / G-T16-9 lineage.
+**Finding:** `MemoryBackupStore.effectiveLockNowMs()` uses raw `Date.now()` for lock-window arithmetic. In frozen-clock tests this works; production `SupabaseBackupStore` must source from `xact_start()`. Privacy-relevance is indirect (clock skew could cause stale lock-expiry decision).
+**Resolution scope (T17.1):** SupabaseBackupStore reads `xact_start()` for the lock window.
+**Blocker for:** none. Hygiene.
+
+### G-T17-PRIV-8 — pgTAP column-name pin (T17.1 RA-2 anchor preservation)
+**Source:** privacy-review-t17.md G-T17-PRIV-8.
+**Finding:** library has F-83 snapshot-pin on `audit_log_head`, `per_event_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`, `node_runtime_pin` field names. T17.1's SQL `backup_manifests` columns must mirror EXACTLY — pgTAP test enforces.
+**Resolution scope (T17.1):** pgTAP column-name assertion.
+**Blocker for:** PIPEDA 4.10 reconstructability + RA-2 reconciliation join.
+
 ---
 
 ## How to use this file
@@ -958,5 +1070,6 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 - When working on T14.1 / production wire-up: search for `G-T14-*` and resolve them in a single pass.
 - When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.
 - When working on T16.1 / production wire-up: search for `G-T16-*` and resolve them in a single pass.
+- When working on T17.1 / production wire-up: search for `G-T17-*` and resolve them in a single pass.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.
