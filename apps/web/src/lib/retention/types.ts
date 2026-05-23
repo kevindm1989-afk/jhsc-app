@@ -135,11 +135,17 @@ export type RetentionPassResult =
   | {
       readonly status: 'errored';
       readonly run_id: string;
-      readonly error_code: 'audit_emit_failed';
+      readonly error_code: 'audit_emit_failed' | 'delete_failed';
     }
   | {
       readonly status: 'skipped';
       readonly reason: 'pass_already_in_window';
+    }
+  | {
+      readonly status: 'dry_run';
+      readonly run_id: string;
+      readonly alarm_fired: boolean;
+      readonly would_delete_total: number;
     };
 
 /** Default values pulled out so neither magic numbers nor inline literals

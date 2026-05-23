@@ -92,7 +92,17 @@ export default [
                 '**/lib/retention/schedule',
                 '**/lib/retention/retention-core',
                 '**/lib/retention/retention-store',
-                '**/lib/retention/types'
+                '**/lib/retention/types',
+                '**/retention/memory-retention-store',
+                '**/retention/schedule',
+                '**/retention/retention-core',
+                '**/retention/retention-store',
+                '**/retention/types',
+                '$lib/retention/memory-retention-store',
+                '$lib/retention/schedule',
+                '$lib/retention/retention-core',
+                '$lib/retention/retention-store',
+                '$lib/retention/types'
               ],
               message:
                 'Use the public retention barrel `lib/retention`. Deep-import surfaces (MemoryRetentionStore, __setScheduleOverrideForTest, __debug*) are test-only.'

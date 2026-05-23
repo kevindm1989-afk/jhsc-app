@@ -138,6 +138,7 @@ export async function runRetentionPass(opts: RunRetentionPassOpts): Promise<Rete
   const max_total = config.max_total_rows_per_pass ?? DEFAULT_MAX_TOTAL_ROWS_PER_PASS;
   const lease_window_ms = config.lease_window_ms ?? DEFAULT_LEASE_WINDOW_MS;
   const confirmOverDelete = config.confirmOverDeleteThreshold === true;
+  const dry_run = config.dry_run === true;
 
   // Step 1 — lease check (F-59).
   const startedAtMs = store.nowMs();
@@ -187,6 +188,27 @@ export async function runRetentionPass(opts: RunRetentionPassOpts): Promise<Rete
       status: 'aborted_over_delete_threshold',
       run_id: generateRunId(),
       alarm_fired: true,
+      would_delete_total
+    };
+  }
+
+  // Dry-run short-circuit (G-T16-PRIV-4 / second-opinion CF-2). Counts the
+  // candidates from steps 4–5 but neither deletes nor emits a summary; no
+  // sweep_run row is registered. Caller (T16.1's Edge Function) uses this
+  // to probe the next pass's impact without touching production state.
+  if (dry_run) {
+    let would_delete_total = 0;
+    for (const et of listRetentionEventTypes()) {
+      would_delete_total += perEventCounts[et] ?? 0;
+    }
+    for (const t of Object.keys(perTableCounts)) {
+      would_delete_total += perTableCounts[t] ?? 0;
+    }
+    would_delete_total += ceilingCount;
+    return {
+      status: 'dry_run',
+      run_id: generateRunId(),
+      alarm_fired,
       would_delete_total
     };
   }
@@ -250,11 +272,14 @@ export async function runRetentionPass(opts: RunRetentionPassOpts): Promise<Rete
       if (r.deleted_count < wanted) truncated = true;
     }
   } catch {
+    // F-58: a delete batch threw mid-flight → roll back ALL in-flight
+    // deletes. Distinct from the summary-emit catch below so a forensic
+    // reader can tell the failure category from the audit row's error_code.
     store.restore(snapshotToken);
     return {
       status: 'errored',
       run_id: generateRunId(),
-      error_code: 'audit_emit_failed'
+      error_code: 'delete_failed'
     };
   }
 
