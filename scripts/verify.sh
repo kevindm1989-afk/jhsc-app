@@ -140,6 +140,11 @@ fi
 run_gate_shell "audit-log enum coverage"           "bash scripts/check-audit-enum-coverage.sh"
 run_gate_shell "no third-party JS in bundle"       "bash scripts/verify-no-third-party-js.sh"
 run_gate_shell "supabase region pin (config note)" "bash scripts/check-supabase-region.sh"
+# Privacy T07-A3 (Amendment pass #5) — widened static lint over both
+# recovery-surface directories (src/lib/onboarding/recovery/ AND
+# src/lib/recovery/). The test at apps/web/test/T07/e2ee-key-core.test.ts
+# greps only the first path; this gate widens to the controller location.
+run_gate_shell "recovery-surface exfil-channel lint" "bash scripts/check-recovery-surface-lint.sh"
 
 # Sentry-scrub / canary-PII test fixture is part of the Vitest gate below
 # (apps/web/test/T02/sentry-scrub.test.ts); listed here so the verify.sh

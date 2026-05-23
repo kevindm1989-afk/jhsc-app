@@ -215,24 +215,31 @@ export async function unwrapForSession(
 /**
  * In-process advisory lock. F-04: concurrent rotation calls serialise.
  * The SQL function uses `pg_try_advisory_xact_lock`; the in-memory
- * store uses this Promise-chained mutex — the second concurrent caller
- * observes the lock as already held and returns 409.
+ * store uses a per-`KeyStore` boolean flag exposed via `getRotationLock` /
+ * `setRotationLock`. The second concurrent caller observes the lock as
+ * already held and returns 409.
+ *
+ * Per Amendment pass #5 Decision 3 (`.context/decisions.md`, 2026-05-23)
+ * the lock MUST NOT be module-level: a module-level lock couples unrelated
+ * `KeyStore` instances across the JS process (test parallelism + multi-
+ * tenant in-process Edge runtimes break under that coupling). Production
+ * `SupabaseKeyStore` (T07.1) uses `pg_try_advisory_xact_lock` as the real
+ * source of truth; the in-memory boolean is a redundant test-only
+ * mechanism.
  */
-let rotationLockBusy = false;
-
 export async function rotateCommitteeDataKey(
   store: KeyStore,
   actor_user_id: string,
   trigger: 'scheduled' | 'member_removal' | 'incident'
 ): Promise<RotateCommitteeKeyResult> {
-  if (rotationLockBusy) {
+  const acquired = await store.tryAcquireRotationLock();
+  if (!acquired) {
     return { status: 409 };
   }
-  rotationLockBusy = true;
   try {
     return await doRotateCommitteeDataKey(store, actor_user_id, trigger);
   } finally {
-    rotationLockBusy = false;
+    await store.releaseRotationLock();
   }
 }
 
@@ -242,7 +249,7 @@ async function doRotateCommitteeDataKey(
   trigger: 'scheduled' | 'member_removal' | 'incident'
 ): Promise<RotateCommitteeKeyResult> {
   const prev = await store.getCurrentCommitteeKeyMetadata();
-  const rotation_id = generateRotationId();
+  const rotation_id = await generateRotationId();
   const now = Date.now();
 
   // Emit .started before mutation.
@@ -367,13 +374,40 @@ export async function revokeMember(
   return { status: 'ok', rotation_id: rotation.rotation_id };
 }
 
-function generateRotationId(): string {
-  // libsodium's randombytes is fine, but `randomUUID` is cleaner for ids.
-  // We avoid importing crypto inside the wasm-bound module at top level by
-  // dynamic-resolving via globalThis.crypto when available, else falling
-  // back to a base32 random string from libsodium.
-  const g = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (g?.randomUUID) return g.randomUUID();
-  // Fallback: 16 random bytes formatted UUID-ish.
-  return `rot-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
+/**
+ * Generate a rotation id (canonical UUIDv4 string) from libsodium's CSPRNG.
+ *
+ * Per Amendment pass #5 Decision 4 (`.context/decisions.md`, 2026-05-23)
+ * and direct enforcement of ADR-0003 Invariant 4 (libsodium-only
+ * primitives), the previous `Math.random()` fallback path is removed —
+ * `Math.random()` is not a CSPRNG and a non-deterministic mix of CSPRNG /
+ * non-CSPRNG rotation ids breaks the audit-row pairing contract on hosts
+ * lacking `globalThis.crypto.randomUUID`. We now pull 16 bytes from
+ * libsodium's `randombytes_buf` unconditionally and format them as a
+ * canonical UUIDv4 string (version + variant bits patched per RFC 4122
+ * §4.4).
+ */
+async function generateRotationId(): Promise<string> {
+  const s = await ready();
+  const bytes = s.randombytes_buf(16);
+  // Per RFC 4122 §4.4 — patch the version (high nibble of byte 6 → 0b0100)
+  // and the variant (top two bits of byte 8 → 0b10) so the resulting
+  // string is recognisable as UUIDv4 to downstream tooling that validates
+  // the shape (this is the same patching `crypto.randomUUID()` performs).
+  // `randombytes_buf(16)` always returns 16 bytes; the `?? 0` guards keep
+  // TS `noUncheckedIndexedAccess` happy without changing behaviour.
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = s.to_hex(bytes);
+  return (
+    hex.slice(0, 8) +
+    '-' +
+    hex.slice(8, 12) +
+    '-' +
+    hex.slice(12, 16) +
+    '-' +
+    hex.slice(16, 20) +
+    '-' +
+    hex.slice(20, 32)
+  );
 }

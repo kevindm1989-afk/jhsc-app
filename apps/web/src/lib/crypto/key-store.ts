@@ -188,4 +188,24 @@ export interface KeyStore {
 
   // -------- Helpers --------
   pseudonymOf(uid: string): string;
+
+  // -------- Rotation lock (F-04) --------
+  /**
+   * Per-`KeyStore` rotation lock. The in-memory store uses an atomic
+   * compare-and-swap on a boolean flag; production (`SupabaseKeyStore`,
+   * T07.1) uses `pg_try_advisory_xact_lock` as the source of truth and
+   * treats this in-memory mechanism as a redundant test-only mechanism.
+   *
+   * Per Amendment pass #5 Decision 3 (`.context/decisions.md`) the lock
+   * MUST NOT be module-level — that would couple unrelated KeyStore
+   * instances across the same JS process (vitest's process-level test
+   * isolation cannot guarantee sequencing between parallel test files
+   * mutating the lock). F-04 also requires the acquire-check be atomic
+   * with the set-busy step so two concurrent callers cannot both observe
+   * the lock as free; the interface uses `tryAcquireRotationLock` for
+   * that reason rather than a get/set pair (a get/set pair would race
+   * across the `await` boundary).
+   */
+  tryAcquireRotationLock(): Promise<boolean>;
+  releaseRotationLock(): Promise<void>;
 }

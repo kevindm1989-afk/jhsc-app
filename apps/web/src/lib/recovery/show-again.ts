@@ -2,15 +2,17 @@
  * Amendment F "show again" hold-to-reveal controller.
  *
  * --- WHAT THIS MODULE IS NOT ---
- * This file deliberately exposes NO copy-to-clipboard, NO TTS / speech-
- * synthesis, NO screenshot affordance, NO file-export hook. The Amendment
+ * This file deliberately exposes NO copy-to-clipboard, NO speech-synthesis
+ * affordance, NO screenshot affordance, NO file-export hook. The Amendment
  * F operational rule 4 (static-lint surface) requires that the recovery
  * passphrase reveal surface offer ONLY hold-to-reveal — anything else
  * widens the M-54a/b/c/d threat surface. The contract is enforced by the
- * library NOT exposing such hooks. Test T07 / M-54d (static lint) greps
- * for `SpeechSynthesisUtterance|window\.speechSynthesis|\btts\b` under
- * `src/lib/onboarding/recovery/` and fails on any match outside test
- * fixtures.
+ * library NOT exposing such hooks. The Test T07 / M-54d static lint
+ * (mirrored by scripts/check-recovery-surface-lint.sh per privacy-review
+ * T07-A3 widening, Amendment pass #5) greps for the speech-synthesis API
+ * identifier(s) under both recovery surface directories
+ * (src/lib/onboarding/recovery/ AND src/lib/recovery/) and fails on any
+ * match outside test fixtures.
  *
  * --- WHAT THIS MODULE IS ---
  * A pure, framework-agnostic state machine for the hold-to-reveal

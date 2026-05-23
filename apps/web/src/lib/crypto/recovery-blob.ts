@@ -6,6 +6,10 @@
  *   - F-08 — Argon2id floor (ops ≥ 4, mem ≥ 512 MiB).
  *   - F-12 — single-POST endpoint; second POST 409 unless co-chair reset.
  *   - Invariant 1 — server only ever sees the ciphertext.
+ *   - ADR-0003 Amendment G (amendment pass #5, 2026-05-23) — fail-closed
+ *     when libsodium's Argon2id primitive is unavailable. No silent
+ *     BLAKE2b substitution. See `.context/decisions.md` "Amendment pass #5
+ *     Decision 2" and ADR-0003 Amendment G.
  */
 
 import { ready } from './sodium';
@@ -23,10 +27,55 @@ export const KDF_PARAMS: KdfParams = {
 };
 
 /**
+ * Canonical fail-closed error message per ADR-0003 Amendment G. Any caller
+ * who catches and inspects must match on this string verbatim.
+ */
+export const ARGON2_UNAVAILABLE_ERROR = 'argon2id_unavailable_libsodium_wrappers_sumo_required';
+
+/**
+ * Test-harness override flag — see ADR-0003 Amendment G "test-harness
+ * override flag with production guard". The standard `libsodium-wrappers`
+ * build (the dep this repo ships in T07) excludes `crypto_pwhash`; only the
+ * `-sumo` variant carries it. T07.1 swaps the dep to `-sumo` (per known-gap
+ * G-T07-12); until then, the test harness explicitly opts into a
+ * BLAKE2b-keyed-hash KDF substitute so the round-trip-correctness tests
+ * can run. Production code paths (where this flag is left null) fail-
+ * closed as Amendment G mandates.
+ *
+ * The flag is a NULL-by-default getter so the bundle has no hard-coded
+ * "true" path; setting it from non-test code is a contract violation that
+ * the lockfile-lint / boot-time assertion in T07.1 will catch.
+ *
+ * Usage from the test harness:
+ *   __setTestOverrideUseBlake2bFallback(() => true);
+ *
+ * The function form (rather than a boolean) keeps the override one-step-
+ * removed from any constant-folding the bundler might apply.
+ */
+let __testOverrideUseBlake2bFallback: (() => boolean) | null = null;
+export function __setTestOverrideUseBlake2bFallback(fn: (() => boolean) | null): void {
+  __testOverrideUseBlake2bFallback = fn;
+}
+
+function isBlake2bFallbackOverrideActive(): boolean {
+  if (__testOverrideUseBlake2bFallback === null) return false;
+  try {
+    return __testOverrideUseBlake2bFallback() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Derive a symmetric key from a passphrase + salt via Argon2id.
  *
- * NOTE: libsodium's `MEMLIMIT_*` constants vary by build. We pin the
- * floor in bytes from `KDF_PARAMS.mem_bytes` and pass it to `crypto_pwhash`
+ * Per ADR-0003 Amendment G this function fails-closed when libsodium's
+ * `crypto_pwhash` is unavailable at the call site. No silent substitution
+ * with a different KDF. The only path to BLAKE2b is when the test-harness
+ * override flag is explicitly set (see `__setTestOverrideUseBlake2bFallback`).
+ *
+ * libsodium's `MEMLIMIT_*` constants vary by build. We pin the floor in
+ * bytes from `KDF_PARAMS.mem_bytes` and pass it to `crypto_pwhash`
  * directly. In test environments where the WASM build refuses the full
  * 512 MiB allocation, we fall back to MEMLIMIT_MIN to keep the test suite
  * portable BUT the embedded `kdf_params` we serialise always advertises
@@ -40,24 +89,25 @@ async function deriveKey(
   params: KdfParams
 ): Promise<Uint8Array> {
   const s = await ready();
-  // The standard `libsodium-wrappers` build excludes the Argon2id pwhash
-  // primitive (it's only in the `-sumo` build, which we cannot add as a
-  // dep per the T07 brief). When the primitive is unavailable we
-  // synthesize a deterministic key via BLAKE2b keyed-hash: hash the
-  // passphrase with the salt as key and stretch to crypto_secretbox_KEYBYTES.
-  // This is NOT Argon2id and offers NO memory-hardness — but it preserves
-  // the round-trip correctness for the test suite. The production
-  // deploy MUST use `libsodium-wrappers-sumo` so the F-08 KDF strength is
-  // real; the embedded `kdf_params` written to the blob already advertises
-  // the production-floor values so the restore path will run Argon2id on
-  // a real device.
   if (typeof s.crypto_pwhash !== 'function') {
-    const passBytes =
-      typeof passphrase === 'string' ? new Uint8Array(Buffer.from(passphrase, 'utf8')) : passphrase;
-    const seedInput = new Uint8Array(passBytes.length + salt.length);
-    seedInput.set(passBytes, 0);
-    seedInput.set(salt, passBytes.length);
-    return s.crypto_generichash(s.crypto_secretbox_KEYBYTES, seedInput);
+    if (isBlake2bFallbackOverrideActive()) {
+      // Test-harness-only path. NEVER used in production. The KDF strength
+      // advertised in `kdf_params.alg === 'argon2id13'` is a label of what
+      // a production restore on a `-sumo` build WILL use; the test build
+      // substitutes BLAKE2b-keyed-hash for round-trip-correctness only.
+      const passBytes =
+        typeof passphrase === 'string'
+          ? new Uint8Array(Buffer.from(passphrase, 'utf8'))
+          : passphrase;
+      const seedInput = new Uint8Array(passBytes.length + salt.length);
+      seedInput.set(passBytes, 0);
+      seedInput.set(salt, passBytes.length);
+      return s.crypto_generichash(s.crypto_secretbox_KEYBYTES, seedInput);
+    }
+    // Fail-closed per ADR-0003 Amendment G. Throwing BEFORE any key
+    // derivation attempt is the contract; the error message is the
+    // canonical token the boot-time assertion in T07.1 will match on.
+    throw new Error(ARGON2_UNAVAILABLE_ERROR);
   }
   const opslimit = Math.max(params.ops, s.crypto_pwhash_OPSLIMIT_MIN);
   let memlimit = params.mem_bytes;
@@ -77,12 +127,23 @@ async function deriveKey(
 /**
  * Encrypt an identity private key under a passphrase. Produces the
  * ciphertext-on-server shape; the caller persists the result.
+ *
+ * Per ADR-0003 Amendment G this function throws
+ * `argon2id_unavailable_libsodium_wrappers_sumo_required` BEFORE any
+ * derivation attempt when `crypto_pwhash` is unavailable and the test
+ * override flag is not active.
  */
 export async function encryptRecoveryBlob(
   privateKey: Uint8Array,
   passphrase: string
 ): Promise<RecoveryBlobShape> {
   const s = await ready();
+  // Fail-closed fast-path (ADR-0003 Amendment G): refuse to even allocate a
+  // salt / nonce when the deployment cannot honestly label the resulting
+  // blob as argon2id13.
+  if (typeof s.crypto_pwhash !== 'function' && !isBlake2bFallbackOverrideActive()) {
+    throw new Error(ARGON2_UNAVAILABLE_ERROR);
+  }
   // Argon2id salt size is canonically 16 bytes (libsodium
   // crypto_pwhash_SALTBYTES). In the standard libsodium-wrappers build
   // the constant is not exposed; we pin the value here directly. The
@@ -102,6 +163,16 @@ export async function encryptRecoveryBlob(
 
 /**
  * Decrypt the recovery blob back into an identity private key.
+ *
+ * Per ADR-0003 Amendment G this function fails-closed on
+ * alg-vs-runtime mismatch: if the embedded `blob.kdf_params.alg ===
+ * 'argon2id13'` but `crypto_pwhash` is not callable at runtime (and the
+ * test override is not active), the function throws the same canonical
+ * `argon2id_unavailable_libsodium_wrappers_sumo_required` error rather
+ * than silently substituting a different KDF (which would produce a
+ * "wrong passphrase" verdict that is forensically incoherent — the user
+ * typed the correct passphrase; the deployment cannot honour the alg
+ * label on the blob).
  */
 export async function decryptRecoveryBlob(
   blob: RecoveryBlobShape,
@@ -109,6 +180,14 @@ export async function decryptRecoveryBlob(
   public_key_for_pairing?: Uint8Array
 ): Promise<IdentityKeypair | null> {
   const s = await ready();
+  // Alg-mismatch fail-closed per ADR-0003 Amendment G.
+  if (
+    blob.kdf_params.alg === 'argon2id13' &&
+    typeof s.crypto_pwhash !== 'function' &&
+    !isBlake2bFallbackOverrideActive()
+  ) {
+    throw new Error(ARGON2_UNAVAILABLE_ERROR);
+  }
   try {
     const key = await deriveKey(passphrase, blob.salt, blob.kdf_params);
     const privateKey = s.crypto_secretbox_open_easy(blob.ciphertext, blob.nonce, key);
@@ -119,7 +198,14 @@ export async function decryptRecoveryBlob(
     // for callers that already hold the pubkey (e.g., test harness).
     const public_key = public_key_for_pairing ?? s.crypto_scalarmult_base(privateKey);
     return { private_key: privateKey, public_key };
-  } catch {
+  } catch (e) {
+    // Surface the Amendment G fail-closed error to callers (so the F-08
+    // test harness + the future T07.1 boot-time assertion can distinguish
+    // "alg unavailable" from "wrong passphrase"). All other failures
+    // collapse to null per the pre-Amendment-G return contract.
+    if (e instanceof Error && e.message === ARGON2_UNAVAILABLE_ERROR) {
+      throw e;
+    }
     return null;
   }
 }

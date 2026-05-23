@@ -61,6 +61,15 @@ export class MemoryKeyStore implements KeyStore {
   private auditRows: AuditRow[] = [];
   private auditSeq = 0;
 
+  /**
+   * Per-instance F-04 rotation lock. Per Amendment pass #5 Decision 3
+   * (`.context/decisions.md`) the lock MUST be scoped to a single
+   * `KeyStore` instance — a module-level lock couples unrelated stores
+   * across the JS process. SQL-side `pg_try_advisory_xact_lock` is the
+   * production source of truth (lands in T07.1).
+   */
+  private rotationLockBusy = false;
+
   private hmacKey: Buffer;
   private nowProvider: () => number;
 
@@ -249,6 +258,27 @@ export class MemoryKeyStore implements KeyStore {
 
   async isActiveMember(user_id: string): Promise<boolean> {
     return this.activeMembers.has(user_id);
+  }
+
+  // -------------------------------------------------------------------
+  // Rotation lock (F-04) — per Amendment pass #5 Decision 3
+  // -------------------------------------------------------------------
+  /**
+   * Atomic check-and-set on the in-memory rotation lock. The two reads /
+   * writes are sequenced on the JS event loop with no interleaving await
+   * boundary, so two concurrent invocations cannot both return true.
+   * Production `SupabaseKeyStore` (T07.1) implements this via
+   * `pg_try_advisory_xact_lock` which provides the same contract at the
+   * database layer.
+   */
+  async tryAcquireRotationLock(): Promise<boolean> {
+    if (this.rotationLockBusy) return false;
+    this.rotationLockBusy = true;
+    return true;
+  }
+
+  async releaseRotationLock(): Promise<void> {
+    this.rotationLockBusy = false;
   }
 
   // -------------------------------------------------------------------
