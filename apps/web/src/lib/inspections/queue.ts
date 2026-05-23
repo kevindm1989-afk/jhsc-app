@@ -421,11 +421,30 @@ export async function createInspectionSession(opts: {
   session.goOnline = async () => {
     // Flush pending audits to the server-side audit sink. Each row is
     // posted exactly once; the test asserts `count = 1` after goOnline.
-    const drained = session.pending_audits.splice(0, session.pending_audits.length);
-    if (session.__onAudit) {
-      for (const a of drained) {
-        await session.__onAudit(a);
+    //
+    // Per second-opinion-reviewer T10 Concern 3: process entries one at
+    // a time and remove from `pending_audits` ONLY after `__onAudit`
+    // resolves successfully. If the sink rejects, the row stays in
+    // `pending_audits` for the next flush attempt. Without this, a
+    // failed audit POST silently destroys the very signal we need —
+    // the `queue.integrity_fail` audit row that proves tampering was
+    // detected.
+    if (!session.__onAudit) {
+      // No sink wired; leave rows in place for later goOnline.
+      return;
+    }
+    while (session.pending_audits.length > 0) {
+      const next = session.pending_audits[0]!;
+      try {
+        await session.__onAudit(next);
+      } catch {
+        // Sink rejected; stop draining. Row stays at the head of the
+        // queue for the next goOnline. Production wire-up (T10.1)
+        // should additionally emit a structured-log WARN line so the
+        // on-call surface flags "audit drain is stuck."
+        return;
       }
+      session.pending_audits.shift();
     }
   };
   session.end = async () => {

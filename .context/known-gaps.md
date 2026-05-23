@@ -291,6 +291,126 @@ All eight are ratified under ADR-0002 Amendment H + ADR-0007 + the T08 four-revi
 
 ---
 
+## T10 carry-forwards (2026-05-23)
+
+T10 ships library-only per ADR-0002 Amendment H. Concerns 1 (non-JPEG silent-destroy → fail-closed throw) and 3 (`goOnline()` recursive failure → drain-then-shift) from second-opinion-reviewer were fixed in code BEFORE merge (see commit message). Concern 2 (real canvas re-encode) stays as the carve-out G-T10-1 below per the second-opinion-offered MERGE-WITH-ADVISORIES path.
+
+### G-T10-1 — Real canvas re-encode for photo sanitize (ADR-0011 amendment rule 3)
+**Source:** second-opinion-reviewer T10 Concern 2; privacy T10-D1; security advisory.
+**Finding:** `apps/web/src/lib/photo/sanitize.ts:181-186` `canvasReencode()` is a pass-through stub. ADR-0011 amendment rule 3 mandates real `OffscreenCanvas.convertToBlob` decode-and-re-encode as defense-in-depth against EXIF-strip-library blind spots. Marker-strip is sufficient for the JPEG threat model today, but the canvas path closes coverage on exotic markers (e.g., MPF/MPO multi-picture, trailing JFXX thumbnails after EOI). jsdom cannot faithfully simulate the API; needs a real browser environment.
+**Resolution scope (T10.1):** wire `createImageBitmap → OffscreenCanvas.getContext('2d').drawImage → canvas.convertToBlob('image/jpeg', q)` behind a feature-detect; smoke-test in T19 PWA install / real-browser Playwright test; differential validation against an independent library (e.g., `exifr`).
+**Blocker for:** T10.1 PR submission AND first production deploy with real photo data.
+
+### G-T10-2 — Raw user_id leaked into `inspection.synced.meta.inspection_id`
+**Source:** privacy T10-A1; touches second-opinion review.
+**Finding:** `queue.ts:212` composes `entry.id = entry-<seq>-<user_id>` with the raw UUID. The harness flows this into `inspection.synced.meta.inspection_id` at `supabase-test.ts:1521`. Breaks ADR-0016 §Decision 1 HMAC-pseudonymization parity for audit-log meta. Already C1 in §PI inventory but not a clean disclosure surface.
+**Resolution scope (T10.1):** server-side `inspections` PK is server-generated UUID; audit emits the server-side handle. Client `entry.id` becomes IDB-local only.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-3 — HEIC/PNG/WebP support: real canvas decode or explicit user-facing rejection
+**Source:** second-opinion-reviewer T10 Concerns 1+9; privacy T10-A2; security A4.
+**Finding:** T10 now fail-closes (throws `PhotoUnsupportedFormatError`) on non-JPEG input — better than silent destroy, but still rejects iOS-default HEIC + Android-default PNG screenshots at the library layer. The capture-surface UX must surface this to the user with a clear banner + audit row (`photo.sanitize.unsupported_format`). The full fix is the real canvas decode-and-re-encode (G-T10-1) that handles non-JPEG → re-encode-to-JPEG transparently. Until then, the capture surface MUST catch the throw and surface a clear "please convert to JPEG and re-attach" message.
+**Resolution scope (T10.1):** (a) capture-surface error boundary that catches `PhotoUnsupportedFormatError` and shows the user a clear instruction; (b) audit row `photo.sanitize.unsupported_format` on the catch path; (c) real canvas decode for HEIC/PNG/WebP per G-T10-1.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-4 — SQL migration deferred to T10.1
+**Source:** implementer handoff + ADR-0002 Amendment H pattern.
+**Finding:** `inspections.client_integrity_tag BYTEA NOT NULL` column + `rejected_queue_entries` audit indexes per ADR-0014 are deferred to T10.1.
+**Resolution scope (T10.1):** ship the migration with pgTAP integration tests.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-5 — Production wire-up of IndexedDBInspectionStore
+**Source:** implementer handoff + ADR-0002 Amendment H pattern.
+**Finding:** T10 uses in-memory `entries: []` in `InspectionSession`. Production needs an IndexedDB-backed store with the byte-for-byte same shape (no plaintext debug columns).
+**Resolution scope (T10.1):** wire the real IDB store + integration tests.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-6 — Real Supabase integration tests for inspection POST + audit-row paths
+**Source:** implementer handoff + privacy review obligations.
+**Finding:** T10 tests use in-memory harness only. T10.1 must ship pgTAP / real-Supabase tests for the inspection-sync Edge Function and the audit-emit paths.
+**Resolution scope (T10.1):** Edge Function verifies `client_integrity_tag` non-null at write time; audit-emit-before-INSERT ordering.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-7 — ADR-0016 schedule rows for T10 operational tables
+**Source:** privacy T10 cross-cutting; HG-15.
+**Finding:** Six new fields/tables need ADR-0016 schedule rows + §PI inventory amendments: `inspections.client_integrity_tag`, `inspections.sequence_number`, `inspections.actor_id`, IDB `inspection_queue` store, IDB `rejected_queue_entries` store. Plus a companion ADR-0013 note on IDB lifecycle (X-Data-Class rules apply to persistent IDB).
+**Resolution scope (T10.1):** architect amendment; HG-15 user re-ratification.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-8 — flushOfflineAudit() route contract
+**Source:** privacy T10 cross-cutting B; second-opinion concern about recursive audit failure (now half-fixed in code; full route lands in T10.1).
+**Finding:** Today's harness writes audit rows directly via `store.emitAudit`. Production POSTs to `/api/audit/queue`. The route MUST: (a) be in the SW non-cacheable list (already enforced by `/api/**` early-reject); (b) set `actor_pseudonym` server-side from JWT (not client-supplied — prevent forgery); (c) be rate-limited (since SW-side cache violations can be high-volume).
+**Resolution scope (T10.1):** ship `/api/audit/queue/+server.ts` with the contract above.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-9 — Real ServiceWorker module
+**Source:** implementer handoff; second-opinion concern 8.
+**Finding:** `apps/web/src/lib/sw/index.ts` is library-only. Production needs a real `service-worker.js` SvelteKit/Vite entry consuming the lib; install/activate/fetch handlers wired to `caches` + `clients.matchAll`. Snapshot test runs against real Cache Storage in a Playwright environment.
+**Resolution scope (T10.1):** real SW entry + Playwright integration test.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-10 — PhotoCaptureSurface.svelte full UI
+**Source:** implementer handoff; privacy T10 cross-cutting A.
+**Finding:** Current scaffold is 49 lines. Full UX (capture → preview → sanitize → encrypt → enqueue) lands in T10.1 with design tokens, interactive states, reduced-motion, dark-mode. Must re-confirm: no EXIF preview, no `navigator.geolocation`, always route through `sanitizePhoto()` before `encryptPayload()`.
+**Resolution scope (T10.1):** designer/implementer collab; closes T10-A1/T10-D1/G-T10-3 user-facing pieces.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-11 — Pinned hex KAT for queue HMAC
+**Source:** second-opinion-reviewer T10 Concern 6.
+**Finding:** `apps/web/test/T10/offline-queue-hmac.test.ts:151-164` asserts `tag === tag2` (idempotency), not a pinned hex KAT. A libsodium-wrappers regression or subtle byte-order bug would produce two consistent-but-wrong tags; test still passes.
+**Resolution scope:** add `expect(Buffer.from(tag).toString('hex')).toBe('<pinned-hex>')` with fixed inputs (e.g., idPriv = 32×0x42, user_id = SYNTHETIC_USER_A bytes, seq=1, ciphertext = "deadbeefcafe").
+**Blocker for:** none directly; defense-in-depth.
+
+### G-T10-12 — HKDF device_id missing from queue-hmac KDF info
+**Source:** security-reviewer T10 Advisory 1.
+**Finding:** ADR-0014 specifies `K_hmac = crypto_generichash(key=identity_privkey, msg=user_id || device_id, personalisation='jhsc.queue.hmac.v1')`. Implementation omits `device_id_bytes` (`queue-hmac.ts:48-62`). In-MAC `user_id` binding provides cross-device replay defense, but ADR-0014 verbatim has device_id.
+**Resolution scope:** either (a) include `device_id_bytes` in the KDF info to match ADR-0014, OR (b) update ADR-0014 to record that `device_id` was dropped intentionally with rationale (the in-MAC `user_id` is load-bearing).
+**Blocker for:** architect adjudication; T10.1 closure.
+
+### G-T10-13 — Test-mutator SessionIdbControl exposed unconditionally
+**Source:** security-reviewer T10 Advisory 2.
+**Finding:** `apps/web/src/lib/inspections/queue.ts:420` (`session.idb = makeIdbControl(session)`) attaches mutators on every session object regardless of build/env. Benign in library context; in production a UI/extension/devtools surface could call them.
+**Resolution scope:** gate behind `import.meta.env.MODE === 'test'` OR split into `queue.testing.ts` that production never imports.
+**Blocker for:** T10.1 production deploy.
+
+### G-T10-14 — Sequence-gap contiguity false-positive on re-enqueue-after-empty
+**Source:** security-reviewer T10 Advisory 3.
+**Finding:** After a successful drain `session.entries = []` but `next_seq` advances. Subsequent enqueue/drain has only seq=N; the gap-check loop walks 1..N-1 and rejects missing predecessors (now-empty queue). Tests don't exercise enqueue-after-drain. Fail-closed (over-rejects), but functionally broken post-drain.
+**Resolution scope:** track `drained_seq` watermark; start gap-check at `drained_seq+1` (the implementer comment at `:249-254` already anticipates this).
+**Blocker for:** T10.1 production deploy.
+
+### G-T10-15 — Server-side `auth.uid() === shipment.user_id` cross-check
+**Source:** security-reviewer T10 Advisory 5.
+**Finding:** Server-side `inspection.synced` audit row carries `actor_pseudonym`. The implementer should verify the JWT-bound user_id equals the shipment's `user_id` field before emit. Today the harness writes blindly.
+**Resolution scope (T10.1):** server-side handler MUST cross-check `auth.uid() === shipment.user_id`; reject mismatch with 403 + audit row `inspection.user_id_mismatch`.
+**Blocker for:** T10.1 PR submission.
+
+### G-T10-16 — Module-level `pendingViolations` singleton
+**Source:** second-opinion-reviewer T10 Concern 7.
+**Finding:** `apps/web/src/lib/sw/index.ts:158` is a module-level array shared across process. Real SW is per-origin singleton, so non-issue in production, but the harness lacks isolation (relies on `tearDown` ordering).
+**Resolution scope:** bind to `CachesLike` instance OR document the intentional module-scoped behaviour.
+**Blocker for:** none. Cleanup.
+
+### G-T10-17 — `enqueueInspection` return-code conflation
+**Source:** second-opinion-reviewer T10 Concern 4.
+**Finding:** When `k_hmac === null` AND queue is not full, enqueue returns `{ status: 'rejected_queue_full' }` — semantically wrong. Caller cannot distinguish "queue full" from "no session key."
+**Resolution scope:** add `rejected_no_session_key` status; update tests.
+**Blocker for:** none. Polish.
+
+### G-T10-18 — Aggregation policy for A-QUEUE-001 alert
+**Source:** implementer handoff.
+**Finding:** A-QUEUE-001 fires per-row in the harness. Production wire should aggregate (e.g., >5 in 10min) to avoid alert storms.
+**Resolution scope:** observability-setup amendment; alerts.md update.
+**Blocker for:** none. Operational polish.
+
+### G-T10-19 — `inspect_quarantine()` user-visible UI
+**Source:** implementer handoff.
+**Finding:** Today returns `[]`. T10.1 wires an IDB quarantine store with a "View failed entries" link in the offline.partial banner.
+**Resolution scope (T10.1):** IDB quarantine store + UI surface.
+**Blocker for:** T10.1 PR submission.
+
+---
+
 ## How to use this file
 
 - When working on T05.1 / production wire-up: search for `G-T05-*` and resolve them in a single pass.

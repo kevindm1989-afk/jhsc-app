@@ -37,6 +37,7 @@
 
   import { flushSync } from 'svelte';
   import { t } from '../i18n';
+  import { tokens } from '../tokens';
 
   /**
    * F-17 anonymous default-lock — the toggle starts ON every render.
@@ -130,6 +131,8 @@
   aria-labelledby="concern-intake-heading"
   data-testid="concern-intake-form"
   aria-busy={state === 'submitting' ? 'true' : 'false'}
+  style:--color-focus-inner={tokens.focus.inner}
+  style:--color-focus-outer={tokens.focus.outer}
 >
   <h1 id="concern-intake-heading">{t('concern.intake.heading')}</h1>
   <p class="concern-intake-subheading">{t('concern.intake.subheading')}</p>
@@ -382,18 +385,15 @@
     outline: none;
     /*
       Two-layer focus ring per design-tokens.json shadow.focus_ring.
-      Inner line is the WCAG 1.4.11 load-bearing layer (#16181d at 2px);
-      outer halo is the accent yellow (#fbbf24 at 5px).
-
-      Fallback values are inline because no global stylesheet currently
-      emits `--shadow-focus-ring` / `--color-border-focus` as CSS custom
-      properties from the token file. When the design-system pass lands
-      that emitter, the var() will resolve and these fallbacks become
-      defense-in-depth.
+      CSS variables are bound on the root <section> via `style:` directives
+      that read from $lib/tokens (token-audit-allowlisted accessor over
+      design-tokens.json). The form is the single canonical consumer until
+      the global token-emitter lands.
     */
     box-shadow:
-      var(--shadow-focus-ring, 0 0 0 2px #16181d, 0 0 0 5px #fbbf24);
-    border-color: var(--color-border-focus, #16181d);
+      0 0 0 2px var(--color-focus-inner),
+      0 0 0 5px var(--color-focus-outer);
+    border-color: var(--color-focus-inner);
   }
 
   button[role='switch'] {

@@ -25,12 +25,21 @@ interface RawTokens {
       success?: string;
       info?: string;
     };
+    light?: {
+      foreground?: { primary?: string };
+      focus_ring?: { outer?: string; inner?: string };
+    };
   };
 }
 
 /**
  * Typed token surface for scaffold consumers. Designer regenerates this
  * accessor in lock-step with design-tokens.json.
+ *
+ * Components must read CSS-variable bindings via Svelte's `style:` directive
+ * referencing `tokens.focus.*` and `tokens.color.foreground.primary`, not
+ * hard-code the hex values. This file is on the token-audit allowlist
+ * (verify-tokens.sh excludes `tokens.ts`).
  */
 export const tokens = {
   color: {
@@ -39,7 +48,14 @@ export const tokens = {
       warning: raw.color?.state?.warning ?? '',
       success: raw.color?.state?.success ?? '',
       info: raw.color?.state?.info ?? ''
+    },
+    foreground: {
+      primary: raw.color?.light?.foreground?.primary ?? ''
     }
+  },
+  focus: {
+    outer: raw.color?.light?.focus_ring?.outer ?? '',
+    inner: raw.color?.light?.focus_ring?.inner ?? ''
   }
 } as const;
 

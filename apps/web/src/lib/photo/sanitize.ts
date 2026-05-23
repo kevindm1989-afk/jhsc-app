@@ -63,16 +63,36 @@ export interface SanitizePipelineDescription {
  *
  * Deterministic: identical input bytes produce identical output bytes.
  */
+/**
+ * Error thrown by sanitize when the input bytes are not a recognisable
+ * JPEG (no SOI signature). T10 ships JPEG-only metadata strip; HEIC,
+ * PNG, WebP must be either (a) handled by the real canvas re-encode
+ * path in T10.1 / G-T10-5, or (b) explicitly rejected at the capture
+ * surface. Returning a 4-byte sentinel here would silently destroy
+ * the worker's evidence — that is worse than a fail-closed reject.
+ *
+ * Per second-opinion-reviewer T10 Concern 1: this is the production-
+ * critical defense. The capture surface MUST surface this error to
+ * the user with a clear banner and emit an audit row.
+ */
+export class PhotoUnsupportedFormatError extends Error {
+  readonly bannerKey: string;
+  constructor(bannerKey: string = 'photo.error.unsupported_format') {
+    super('unsupported_photo_format');
+    this.name = 'PhotoUnsupportedFormatError';
+    this.bannerKey = bannerKey;
+  }
+}
+
 function stripJpegMetadata(input: Uint8Array): Uint8Array {
   const out: number[] = [];
   let i = 0;
-  // Tolerate non-JPEGs: if the SOI signature is absent we still try to
-  // pass the input through unchanged (the upstream caller decides).
+  // Fail-closed for non-JPEG inputs (HEIC, PNG, WebP). Silent destroy
+  // would be a production-critical bug — see PhotoUnsupportedFormatError
+  // above. T10.1 / G-T10-5 wires the real canvas decode-and-re-encode
+  // path for non-JPEG inputs; until then, reject explicitly.
   if (input.length < 2 || input[0] !== MARK || input[1] !== M_SOI) {
-    // Synthetic test fixtures may emit a header that doesn't start with
-    // SOI. Wrap them in a minimal SOI/EOI envelope so the downstream
-    // assertion (no `Exif\0\0`, no IPTC byline) holds.
-    return Uint8Array.from([MARK, M_SOI, MARK, M_EOI]);
+    throw new PhotoUnsupportedFormatError();
   }
   out.push(MARK, M_SOI);
   i = 2;
