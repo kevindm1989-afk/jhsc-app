@@ -81,9 +81,88 @@ Each entry: source review → finding → resolution scope → blocker for.
 
 ---
 
+## T07 carry-forwards (2026-05-23)
+
+All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amendment pass #5 (architect pass on `.context/decisions.md`). T07 ships as TS library only; T07.1 ships the SQL + production wire-up. Source: T07 four-reviewer pass (security, second-opinion, privacy, verifier) summarized in commit `31f80d3`.
+
+### G-T07-1 — SQL migration deferred to T07.1
+**Source:** second-opinion 2, security findings 1+3, privacy T07-1/2/3.
+**Finding:** `supabase/migrations/00000000000002_identity.sql` was shipped without integration tests (the test harness was a parallel in-memory implementation; SQL functions had zero test call-sites). The migration is dropped from T07.
+**Resolution scope (T07.1):** ship the migration with pgTAP / real-Supabase integration tests covering every SECURITY DEFINER function.
+**Blocker for:** first production deploy carrying real PI.
+
+### G-T07-2 — SupabaseKeyStore production wire-up
+**Source:** ADR-0002 Amendment H (canonical sibling-task pattern; mirrors G-T05-1).
+**Finding:** Only `MemoryKeyStore implements KeyStore`. No Edge Function call, no RPC binding to T07's SQL functions, no JWT-validating committee membership checks.
+**Resolution scope (T07.1):** wire SupabaseKeyStore + Edge Functions for the wrap/unwrap/rotate paths.
+**Blocker for:** production deploy with real PI.
+
+### G-T07-3 — Real Supabase integration tests for T07 SQL functions
+**Source:** second-opinion 2.
+**Finding:** every adminQuery in the T07 test file resolves through `apps/web/test/_helpers/supabase-test.ts`'s in-memory mini-parser. The 11 SQL SECURITY DEFINER functions in the deferred migration have zero automated test coverage.
+**Resolution scope (T07.1):** pgTAP suite covering `enroll_identity_keypair`, `store_recovery_blob`, `record_recovery_blob_restored`, `record_recovery_blob_viewed`, `issue_recovery_blob_reset`, `init_committee_data_key`, `wrap_committee_data_key_for_member`, `record_committee_data_key_unwrap`, `rotate_committee_data_key`, `finalize_committee_data_key_rotation`, `revoke_committee_member`.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-4 — ADR-0016 schedule rows for 6 tables
+**Source:** privacy T07-1.
+**Finding:** `identity_keys`, `recovery_blobs`, `recovery_blob_resets`, `committee_data_keys`, `committee_key_wraps`, `committee_key_wraps_history` need ADR-0016 operational-table schedule rows before the migration lands in `main`.
+**Resolution scope (T07.1):** architect amendment adds 6 schedule rows; HG-15 user re-ratification.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-5 — §PI inventory amendments for 6 tables
+**Source:** privacy T07-1.
+**Finding:** ~20 new PI inventory rows + 2 row annotations (lines 3257 + 3258 — `users.identity_pubkey` and `users.identity_privkey_recovery_blob` relocation notes per ADR-0002 Amendment G.3 pattern).
+**Resolution scope (T07.1):** folded into the T07.1 architect amendment that adds the ADR-0016 rows.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-6 — `view_count` decision (preferred removal at design time)
+**Source:** privacy T07-2.
+**Finding:** `recovery_blobs.view_count` is over-collected per PIPEDA Principle 4.4 — duplicates audit-log data derivable from `SELECT count(*) FROM audit_log WHERE event_type='identity_privkey.recovery_blob.viewed' AND target_id=$1`. Privacy reviewer's preferred fix: remove the column; derive at read-time.
+**Resolution scope (T07.1):** when the migration lands, do NOT include the `view_count` column. The per-session reveal counter is in the controller; the cross-session counter is derived from audit log.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-7 — Server-side cap-of-3 enforcement
+**Source:** second-opinion 5.
+**Finding:** `record_recovery_blob_viewed` (in the deferred migration at lines 386-391) explicitly trusted client-supplied `reveal_count_in_session`. M-54c exists because the client is not trusted in F-54 threat model. The SQL must enforce the cap server-side.
+**Resolution scope (T07.1):** server-side counter (column on `recovery_blobs` keyed on `enrollment_session_id` OR derived count from `audit_log`); reject INSERT if cap reached.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-8 — `issue_recovery_blob_reset` authz + audit emission
+**Source:** security F3, second-opinion 3, privacy T07-A2.
+**Finding:** the deferred SQL function had no co-chair role check on `p_issued_by` and emitted no audit_log row. F-12's mitigation requires "co-chair-issued, audit-logged."
+**Resolution scope (T07.1):** add `SELECT 1 FROM users WHERE id = p_issued_by AND role = 'worker_co_chair' AND active = true` precondition; emit interim audit row via closest existing enum until T06's `recovery_reset.issued` enum lands.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-9 — Server-issued nonce for F-02 self-test
+**Source:** security F6.
+**Finding:** F-02's mitigation says "server returns a nonce sealed to the just-posted ident_pub; client must unseal and return; if unseal fails, enrollment is rolled back." The current `selfTestKeypair` runs entirely on the client. A hostile client cannot be caught.
+**Resolution scope (T07.1):** Edge Function emits a sealed-to-pubkey nonce on enroll; client unseals; server verifies before committing the row.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-10 — KeyStore interface split (read API must not surface private_key)
+**Source:** security F5.
+**Finding:** `apps/web/src/lib/crypto/key-store.ts:98-104` accepts `{public_key, private_key}` on `storeIdentityKeys`. Documentary contract only; a future implementer could persist the private half. Type system does not enforce Invariant 1.
+**Resolution scope (T07.1):** split into `persistIdentityPublicKey(user_id, public_key)` server-bound + `LocalIdentityStore` device-local interface. SupabaseKeyStore implements only the server-bound side.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-11 — `identity_pubkey` relocation documentation
+**Source:** privacy Cross-cutting A.
+**Finding:** the migration places identity public key on `public.identity_keys` (1:1 row), not as a `users.identity_pubkey` column as the §PI inventory anticipated. ADR-0002 Amendment G.3 pattern (for `committee_membership` → `users` relocation) should be mirrored for this relocation in reverse.
+**Resolution scope (T07.1):** ADR-0002 Amendment G.3 addendum (or new amendment letter) documenting the `users.identity_pubkey` → `identity_keys.public_key` relocation; update ADR-0003 Amendment A CI grep target.
+**Blocker for:** T07.1 PR submission.
+
+### G-T07-12 — `libsodium-wrappers-sumo` dep swap + boot-time assertion + lockfile-lint
+**Source:** security F1, privacy T07-A4.
+**Finding:** standard `libsodium-wrappers` lacks `crypto_pwhash`. Production deploy needs the `-sumo` build for Argon2id. ADR-0003 Amendment G makes `encryptRecoveryBlob` fail-closed when `crypto_pwhash` absent, so the data-integrity bomb is prevented in code — but production usability requires the dep swap.
+**Resolution scope (T07.1):** swap `libsodium-wrappers` → `libsodium-wrappers-sumo` in `apps/web/package.json`; boot-time assertion in `apps/web/src/lib/crypto/recovery-blob.ts` that throws if `crypto_pwhash` is missing and `NODE_ENV !== 'test'`; pnpm `lockfile-lint` rule asserting `libsodium-wrappers-sumo` is the resolved dep in production builds.
+**Blocker for:** production deploy with real PI.
+
+---
+
 ## How to use this file
 
 - When working on T05.1 / production wire-up: search for `G-T05-*` and resolve them in a single pass.
-- When working on T16: search for `G-T05-6` and `G-T05-7`.
+- When working on T07.1 / production wire-up: search for `G-T07-*` and resolve them in a single pass.
+- When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.
