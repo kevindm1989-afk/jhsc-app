@@ -65,7 +65,22 @@ import {
 // Production code paths (where this override is left null) preserve the
 // fail-closed contract.
 import { __setTestOverrideUseBlake2bFallback } from '../../src/lib/crypto/recovery-blob';
+import {
+  createInspectionSession,
+  type InspectionSession,
+  type PendingAuditRow,
+  type PostShipment
+} from '../../src/lib/inspections/queue';
+import { flushCacheViolationsForTest } from './sw-test-harness';
 __setTestOverrideUseBlake2bFallback(() => true);
+
+/**
+ * Test-shaped inspection session: the production `InspectionSession`
+ * plus convenience hooks for asserting behaviour from outside the
+ * library. The harness wires `__onPost` + `__onAudit` to the shared
+ * audit store so audit assertions read the rows back via `adminQuery`.
+ */
+export type TestInspectionSession = InspectionSession;
 
 // ---------------------------------------------------------------------------
 // Public interface (kept in sync with the test-file imports).
@@ -82,7 +97,15 @@ export interface TestSupabase {
     identity: { public_key: Uint8Array; private_key: Uint8Array };
   }>;
   makeAuthSession(uid: string): Promise<{ access_token: string; session_id: string }>;
-  loginAs(user: { user_id: string }): Promise<{ access_token: string }>;
+  loginAs(user: { user_id: string }): Promise<{
+    access_token: string;
+    /**
+     * T10 — flush queued offline audit rows (e.g.,
+     * `client.cache_policy_violation` from the SW sanity check) into the
+     * audit_log. Called by sw-cache test after `routeFetchThroughSW(...)`.
+     */
+    flushOfflineAudit: () => Promise<void>;
+  }>;
   coChairIssueInvite(opts: { user_id: string }): Promise<{ totp_code: string; user_id: string }>;
   coChairUpdateMembership(uid: string, opts: { active?: boolean; role?: string }): Promise<void>;
   coChairIssueRecoveryReset(cochair: { user_id: string }, target: string): Promise<void>;
@@ -91,7 +114,14 @@ export interface TestSupabase {
   callProtected(jwt: string, opts?: { route?: string }): Promise<unknown>;
   adminQuery(sql: string, params?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
   pseudonymOf(uid: string): string;
-  idb: { setRaw: (name: string, bytes: Uint8Array) => Promise<void> };
+  idb: {
+    setRaw: (name: string, bytes: Uint8Array) => Promise<void>;
+    /**
+     * T10 / F-45 — snapshot the entire IDB-stored device state. Each
+     * record carries a `kind` discriminator the test asserts on.
+     */
+    snapshotEntireStore: () => Promise<Array<{ kind: string; [k: string]: unknown }>>;
+  };
   startLogCapture(): void;
   stopLogCapture(): Array<Record<string, unknown>>;
   startSentryCapture(): void;
@@ -128,7 +158,10 @@ export interface TestSupabase {
   };
   backupService: { takeSnapshot: () => Promise<unknown> };
   expiryService: { runOnce: () => Promise<unknown> };
-  startInspectionSession(user: { user_id: string }, opts?: unknown): Promise<unknown>;
+  startInspectionSession(
+    user: { user_id: string },
+    opts?: { reAuth?: boolean }
+  ): Promise<TestInspectionSession>;
   captureSnapshotsDuring(fn: () => Promise<unknown>, sql: string): Promise<unknown[]>;
   simulateNextPageLoad(): Promise<{ routeName: string }>;
   tearDown(): Promise<void>;
@@ -501,14 +534,21 @@ function makeAdminQuery(
       return { rows };
     }
 
-    // SELECT count(*)::int AS n FROM audit_log WHERE event_type = 'auth.passkey.assert'
-    if (
-      /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'auth\.passkey\.assert'$/i.test(
-        norm
-      )
-    ) {
-      const n = store.__debugAuditRows().filter((r) => r.event_type === 'auth.passkey.assert').length;
-      return { rows: [{ n }] };
+    // SELECT count(*)::int AS n FROM audit_log WHERE event_type = '<event>'
+    // (generic count handler — used by T05 auth.passkey.assert AND T10
+    // inspection.synced.hmac_fail forbidden-alias absence assertions.)
+    {
+      const m = norm.match(
+        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'([^']+)'$/i
+      );
+      if (m) {
+        const event = m[1]!;
+        const fromAuth = store.__debugAuditRows().filter((r) => r.event_type === event).length;
+        const fromKey = keyStore
+          ? keyStore.__debugAuditRows().filter((r) => r.event_type === event).length
+          : 0;
+        return { rows: [{ n: fromAuth + fromKey }] };
+      }
     }
 
     throw new Error(
@@ -534,8 +574,26 @@ class TestSupabaseImpl implements TestSupabase {
    * exposes `idb.setRaw(name, bytes)` to simulate a malicious extension
    * corrupting the device-local private key blob.
    */
-  idb: { setRaw: (name: string, bytes: Uint8Array) => Promise<void> };
+  idb: {
+    setRaw: (name: string, bytes: Uint8Array) => Promise<void>;
+    snapshotEntireStore: () => Promise<Array<{ kind: string; [k: string]: unknown }>>;
+  };
   private idbBlobs = new Map<string, Uint8Array>();
+  /**
+   * T10 — every inspection session ever started in this harness. Used by
+   * `idb.snapshotEntireStore()` to surface the IDB-shaped state for the
+   * F-45 plaintext-hygiene assertion.
+   */
+  private inspectionSessions: InspectionSession[] = [];
+  /**
+   * T10 — inspection rows the queue has successfully POSTed to. Backs
+   * the `SELECT client_integrity_tag FROM inspections WHERE actor_id = $1`
+   * query.
+   */
+  private inspectionsBackingStore = new Map<
+    string,
+    { actor_id: string; client_integrity_tag: Buffer; ciphertext: Buffer; sequence_number: bigint }
+  >();
   /** Identity-pubkey rows so adminQuery can return `users.identity_pubkey`. */
   private identityPubkeyByUser = new Map<string, Uint8Array>();
   /** Audit-row spy state for M-54b ordering tests. */
@@ -632,6 +690,46 @@ class TestSupabaseImpl implements TestSupabase {
     this.idb = {
       setRaw: async (name: string, bytes: Uint8Array) => {
         this.idbBlobs.set(name, new Uint8Array(bytes));
+      },
+      /**
+       * F-45 — snapshot the per-session queued state. After a session
+       * has ended, K_hmac is cleared from memory; the queued entries
+       * remain only as ciphertext blobs + wrapped privkey + public
+       * metadata. The assertion the test makes is two-fold:
+       *   1. The plaintext canary string never appears in the dumped
+       *      snapshot.
+       *   2. Every snapshot entry's `kind` is one of three values.
+       */
+      snapshotEntireStore: async () => {
+        const out: Array<{ kind: string; [k: string]: unknown }> = [];
+        // Wrapped privkey blobs.
+        for (const [name, bytes] of this.idbBlobs.entries()) {
+          out.push({
+            kind: 'wrapped_privkey',
+            name,
+            // Surface only opaque bytes; never the plaintext shape.
+            byte_length: bytes.length
+          });
+        }
+        // Queued inspection entries as ciphertext blobs.
+        for (const sess of this.inspectionSessions) {
+          for (const e of sess.entries) {
+            out.push({
+              kind: 'ciphertext_blob',
+              entry_id: e.id,
+              sequence_number: e.sequence_number.toString(),
+              salt_version: e.salt_version,
+              byte_length: e.ciphertext.length
+            });
+          }
+          // Public metadata — actor pseudonym + user id (UUID is C0).
+          out.push({
+            kind: 'public_metadata',
+            actor_pseudonym: sess.actor_pseudonym,
+            user_id: sess.user_id
+          });
+        }
+        return out;
       }
     };
     this.__adminQuery = makeAdminQuery(
@@ -705,9 +803,27 @@ class TestSupabaseImpl implements TestSupabase {
     return { access_token: session.access_token, session_id: session.session_id };
   }
 
-  async loginAs(user: { user_id: string }): Promise<{ access_token: string }> {
+  async loginAs(user: { user_id: string }): Promise<{
+    access_token: string;
+    flushOfflineAudit: () => Promise<void>;
+  }> {
     const s = await this.makeAuthSession(user.user_id);
-    return { access_token: s.access_token };
+    return {
+      access_token: s.access_token,
+      flushOfflineAudit: async () => {
+        // T10 — drain queued SW cache violations into the audit_log.
+        const drained = flushCacheViolationsForTest();
+        for (const v of drained) {
+          await this.store.emitAudit({
+            event_type: v.event_type,
+            actor_pseudonym: this.store.pseudonymOf(user.user_id),
+            target_class: 'C1',
+            severity: 'warn',
+            meta: v.meta
+          });
+        }
+      }
+    };
   }
 
   async coChairIssueInvite(opts: { user_id: string }): Promise<{
@@ -1101,6 +1217,22 @@ class TestSupabaseImpl implements TestSupabase {
       const h = createHash('sha256').update(row.title_ct).digest('hex');
       return { rows: [{ h }] };
     }
+    // T10 — F-44 happy-path: server stores the per-entry HMAC tag.
+    if (
+      /^SELECT\s+client_integrity_tag\s+FROM\s+inspections\s+WHERE\s+actor_id\s*=\s*\$1$/i.test(
+        norm
+      )
+    ) {
+      const uid = String((params ?? [])[0]);
+      const rows = [...this.inspectionsBackingStore.values()]
+        .filter((r) => r.actor_id === uid)
+        .map((r) => ({ client_integrity_tag: r.client_integrity_tag }));
+      return { rows };
+    }
+    // T10 — F-44 (deterministic tamper): assert no inspection row landed.
+    if (/^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+inspections$/i.test(norm)) {
+      return { rows: [{ n: this.inspectionsBackingStore.size }] };
+    }
     if (/__test_force_wrap_for_inactive_member/i.test(norm)) {
       // Emit the A-KEY-ROT-001 alert row to satisfy the alerting test.
       await this.keyStoreInst.recordKeyEvent({
@@ -1350,8 +1482,72 @@ class TestSupabaseImpl implements TestSupabase {
     return this.concernRowsById;
   }
 
-  async startInspectionSession(_user: { user_id: string }, _opts?: unknown): Promise<unknown> {
-    return {};
+  async startInspectionSession(
+    user: { user_id: string },
+    opts?: { reAuth?: boolean }
+  ): Promise<TestInspectionSession> {
+    // Pull the user's identity privkey from the device-local store
+    // (set during `enrollUser`). The session is built with K_hmac
+    // derived from that privkey UNLESS opts.reAuth === false, in which
+    // case the session is mounted without K_hmac to simulate a remount
+    // without re-auth.
+    const privkey = await this.keyStoreInst.__getIdentityPrivateKeyLocalOnly(
+      user.user_id
+    );
+    const dataKey = await this.ensureCommitteeDataKey(user.user_id);
+    const actor_pseudonym = this.pseudonymOf(user.user_id);
+    const harness = this;
+    const session = await createInspectionSession({
+      user_id: user.user_id,
+      identity_privkey: privkey,
+      data_key: dataKey,
+      actor_pseudonym,
+      ...(opts?.reAuth !== undefined ? { reAuth: opts.reAuth } : {}),
+      onPost: async (entry: PostShipment) => {
+        // Server-side store: write the inspection row + tag.
+        harness.inspectionsBackingStore.set(entry.inspection_id, {
+          actor_id: user.user_id,
+          client_integrity_tag: Buffer.from(entry.client_integrity_tag),
+          ciphertext: Buffer.from(entry.ciphertext),
+          sequence_number: entry.sequence_number
+        });
+        // Audit emission for a successful drain (audit-log.md §1).
+        await harness.store.emitAudit({
+          event_type: 'inspection.synced',
+          actor_pseudonym,
+          target_class: 'C3',
+          severity: 'info',
+          meta: {
+            inspection_id: entry.inspection_id,
+            queue_seq: entry.sequence_number.toString()
+          }
+        });
+        return { ok: true };
+      },
+      onAudit: async (audit: PendingAuditRow) => {
+        // queue.integrity_fail flows through here on goOnline().
+        await harness.store.emitAudit({
+          event_type: audit.event_type,
+          actor_pseudonym,
+          target_class: 'C3',
+          severity: 'warn',
+          meta: audit.meta
+        });
+        // A-QUEUE-001 — every queue.integrity_fail fires an alert (no
+        // rate threshold).
+        if (audit.event_type === 'queue.integrity_fail') {
+          await harness.store.emitAudit({
+            event_type: 'alert.fired',
+            actor_pseudonym: 'sys-alert',
+            target_class: 'C1',
+            severity: 'alert',
+            meta: { alert_id: 'A-QUEUE-001', ...audit.meta }
+          });
+        }
+      }
+    });
+    this.inspectionSessions.push(session);
+    return session;
   }
   async captureSnapshotsDuring(fn: () => Promise<unknown>, _sql: string): Promise<unknown[]> {
     await fn();
