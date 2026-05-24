@@ -8,7 +8,7 @@
 </script>
 
 <section role="status" data-testid="completion-summary">
-  <h2>{t('onboarding.completion_d7.heading')}</h2>
+  <h1 id="onboarding-current-heading" tabindex="-1">{t('onboarding.completion_d7.heading')}</h1>
   <svg data-icon="check-circle" width="24" height="24" aria-hidden="true">
     <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
     <path d="M7 12l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" />

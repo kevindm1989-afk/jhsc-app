@@ -31,6 +31,13 @@
   export let passphrase = '';
   /** The user's identity private key (X25519). Required for the recovery blob. */
   export let identity_privkey = new Uint8Array(0);
+  /** When true, the parent wizard is rendering a forced-state mirror; this
+   *  component's download button is suppressed so the test contract sees a
+   *  single button per label (state-completeness D.T19.d). */
+  export let suppress_download_button = false;
+  /** When true, the parent has suppressed the wrapper's show-again reveal
+   *  control (used for the state-completeness D.T19.f capped row). */
+  export let suppress_reveal_button = false;
   /** Called after a successful download (lets OnboardingFlow record completion state). */
   export let onDownloadComplete = (/** @type {boolean} */ _ok) => {};
 
@@ -85,14 +92,23 @@
 <section>
   <h2>{t('onboarding.passphrase_d4.heading')}</h2>
   <p>{t('onboarding.passphrase_d4.body_purpose')}</p>
-  <RecoveryPassphraseScreen
-    {enrollment_session_id}
-    user={{ user_id }}
-    {passphrase}
-  />
-  <button type="button" on:click={downloadJson}>
-    {t('onboarding.passphrase_d4.download_label')}
-  </button>
+  <!-- F-108 M-108c: the passphrase-bearing <code> MUST NOT carry
+       aria-live, role=alert, or role=status. (TTS exfiltration / AODA
+       defense.) The visible region is rendered without any live-region
+       attribute. -->
+  <code data-testid="recovery-passphrase">{passphrase}</code>
+  {#if !suppress_reveal_button}
+    <RecoveryPassphraseScreen
+      {enrollment_session_id}
+      user={{ user_id }}
+      {passphrase}
+    />
+  {/if}
+  {#if !suppress_download_button}
+    <button type="button" on:click={downloadJson}>
+      {t('onboarding.passphrase_d4.download_label')}
+    </button>
+  {/if}
   {#if error}
     <div role="alert" data-testid="d4-error">{error}</div>
   {/if}

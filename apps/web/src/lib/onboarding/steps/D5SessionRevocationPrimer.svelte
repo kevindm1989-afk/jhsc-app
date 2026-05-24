@@ -18,6 +18,11 @@
    */
   import { t } from '../../i18n';
   import { revokeAllSessions } from '../../auth/session';
+  import { flushSync } from 'svelte';
+
+  function syncFlush() {
+    try { flushSync(); } catch { /* outside effect ctx */ }
+  }
 
   /** Production auth client (lib/auth/types.AuthClient). Optional in test. */
   export let auth = undefined;
@@ -32,14 +37,22 @@
   export let __test_revoke_error = undefined;
   /** Called when the user advances away from D.5 (Skip OR after success). */
   export let onAdvance = () => {};
+  /** Bound state lets the parent surface aria-busy on the wizard body. */
+  export let in_progress = false;
 
   let state = 'idle';
   let errorKey = null;
+
+  // Reactive: in_progress flag mirrors `state === 'in_progress'` so the
+  // parent's bound prop reflects D.5's loading window for the wizard body
+  // aria-busy surface (state-completeness D.T19.a / loading row).
+  $: in_progress = state === 'in_progress';
 
   async function onRevokeOtherSessions() {
     if (session_count <= 1) return;
     if (state === 'in_progress') return;
     state = 'in_progress';
+    syncFlush();
     const delay = __test_revoke_delay_ms ?? 0;
     if (delay > 0) {
       await new Promise((r) => setTimeout(r, delay));

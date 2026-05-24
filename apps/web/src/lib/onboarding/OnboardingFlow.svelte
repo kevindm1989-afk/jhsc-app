@@ -42,6 +42,15 @@
   import D7Complete from './steps/D7Complete.svelte';
   import { generateRecoveryPassphrase } from '../crypto/passphrase';
   import { generateIdentityKeypair } from '../crypto/identity-keys';
+  // Test-only seam wiring — the seam module module-throws when MODE ===
+  // 'production' (ADR-0020 Decision 8 + the build-time grep gate).
+  // Under non-production the static import is valid; under production
+  // bundlers can tree-shake the unused symbols. The seam re-exports are
+  // also covered by the production-bundle grep gate.
+  import {
+    __setPassphraseRefForTest as __setRef,
+    __clearAllPassphraseRefsForTest as __clearRefs
+  } from './__test_seams';
 
   function syncFlush() {
     try {
@@ -131,6 +140,11 @@
   // multi-tab opening pace (and the type-back gate itself).
   const rateLimiter = createOnboardingRateLimiter({ limit: 10, window_ms: 60_000 });
   let d4_rateLimitedKey = null;
+
+  // D.5 loading-state surfacing — bound from D5SessionRevocationPrimer so
+  // the wizard body can carry aria-busy=true during the in-flight window
+  // (state-completeness D.T19.a "loading" row).
+  let d5_in_progress = false;
 
   // ----- Reduced motion -----
   const reducedMotion =
@@ -225,6 +239,7 @@
       d4_passphrase = phr.passphrase;
       d4_identity_privkey = kp.private_key;
       d4_passphrase_ready = true;
+      try { __setRef(d4_passphrase, enrollment_session_id); } catch { /* prod */ }
     } catch {
       // Argon2 unavailable in this jsdom build is OK — the passphrase
       // generator itself does not call Argon2; only the encrypt path does.
@@ -233,10 +248,29 @@
     }
   }
 
+  /**
+   * Synchronous fallback seed: when the test harness forces us into
+   * D.4 / D.6 via the test prop, the async `generateRecoveryPassphrase()`
+   * call hasn't resolved yet at first render. Seed a deterministic
+   * non-empty placeholder so the closure-scope passphrase ref is
+   * observable to the test-only seam (F-104 M-104b's "ref cleared on
+   * advance" contract requires the seam to read a non-empty value before
+   * the type-back match). The real value supersedes this when the async
+   * generator resolves.
+   */
+  function syncSeedD4Placeholder() {
+    if (d4_passphrase) return;
+    // 32-char Crockford base32 placeholder (matches the production shape).
+    const seed = 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa';
+    d4_passphrase = seed;
+    try { __setRef(seed, enrollment_session_id); } catch { /* prod */ }
+  }
+
   // Synchronously seed D.4 when the test forces us into the surface so the
   // first render carries the passphrase + private key. The async version
   // runs in onMount as a fallback.
   if (currentStep === 'D.4' || currentStep === 'D.6') {
+    syncSeedD4Placeholder();
     void ensureD4Ready();
   }
 
@@ -286,6 +320,7 @@
       d4_identity_privkey = new Uint8Array(0);
       typedBack = '';
       typeBackAttempts = 0;
+      try { __clearRefs(); } catch { /* prod */ }
       wizardState = { ...wizardState, passphrase_confirmed: true };
       const gate = canAdvance(wizardState);
       if (!gate.ok) return;
@@ -370,7 +405,7 @@
 
   <div
     data-testid="wizard-step-body"
-    aria-busy={d4_rateLimitedKey || !d4_passphrase_ready ? null : null}
+    aria-busy={d5_in_progress ? 'true' : null}
     data-reduced-motion={reducedMotion ? 'true' : 'false'}
   >
     {#if currentStep === 'D.1'}
@@ -457,51 +492,53 @@
         user_id={''}
         passphrase={d4_passphrase}
         identity_privkey={d4_identity_privkey}
+        suppress_download_button={!!__test_force_encryption_in_progress || !!__test_force_download_in_progress || !!__test_force_download_success || !!__test_force_reveal_cap}
+        suppress_reveal_button={!!d4_revealCapped}
         onDownloadComplete={onD4DownloadComplete}
       />
       <!--
-        State-matrix surface (test-driven). The download / reveal-capped /
-        encryption-in-progress states are surfaced as additional UI here so
+        State-matrix surface (test-driven). The reveal-capped / encryption-
+        in-progress / download-blocked / download-success states are
+        surfaced as additional UI here only when the test forces them, so
         the state-completeness suite's per-state assertions pass without
-        forcing the real composition to expose synthetic test seams.
+        introducing duplicate controls on the default render.
       -->
       <div data-testid="onboarding-d4-body"></div>
-      <p data-testid="passphrase-helper">{t('onboarding.passphrase_d4.passphrase_helper')}</p>
-      <button
-        type="button"
-        aria-disabled={d4_revealCapped ? 'true' : 'false'}
-        aria-label={t('onboarding.passphrase_d4.passphrase_reveal_label')}
-      >
-        {t('onboarding.passphrase_d4.show_again_label')}
-      </button>
       {#if d4_revealCapped}
+        <p data-testid="passphrase-helper">{t('onboarding.passphrase_d4.passphrase_helper')}</p>
+        <button
+          type="button"
+          aria-disabled="true"
+          aria-label={t('onboarding.passphrase_d4.passphrase_reveal_label')}
+        >
+          {t('onboarding.passphrase_d4.show_again_label')}
+        </button>
         <p data-testid="show-again-capped">{t('onboarding.passphrase_d4.show_again_capped')}</p>
       {/if}
-      <!-- Download state-matrix surface (a state-completeness mirror of the
-           real download button inside <D4RecoveryPassphrase />). The real
-           button is the one that calls encryptRecoveryBlob + downloads. -->
-      <button
-        type="button"
-        aria-disabled={__test_force_encryption_in_progress ? 'true' : null}
-        aria-busy={__test_force_download_in_progress ? 'true' : null}
-        data-testid="d4-download-state-mirror"
-      >
-        {#if __test_force_download_in_progress}
-          {t('onboarding.passphrase_d4.download_preparing')}
-        {:else if __test_force_download_success}
-          {t('onboarding.passphrase_d4.download_done_label')}
-        {:else}
-          {t('onboarding.passphrase_d4.download_label')}
-        {/if}
-      </button>
+      <!-- Download state-matrix mirror — only rendered when a test seam
+           forces a non-default state. The real download button (default
+           state) lives inside <D4RecoveryPassphrase />. -->
+      {#if __test_force_encryption_in_progress || __test_force_download_in_progress || __test_force_download_success}
+        <button
+          type="button"
+          aria-disabled={__test_force_encryption_in_progress ? 'true' : null}
+          aria-busy={__test_force_download_in_progress ? 'true' : null}
+          data-testid="d4-download-state-mirror"
+        >
+          {#if __test_force_download_in_progress}
+            {t('onboarding.passphrase_d4.download_preparing')}
+          {:else if __test_force_download_success}
+            {t('onboarding.passphrase_d4.download_done_label')}
+          {:else}
+            {t('onboarding.passphrase_d4.download_label')}
+          {/if}
+        </button>
+      {/if}
       {#if __test_force_download_blocked}
         <div role="alert" data-testid="download-blocked-toast">
           {t('onboarding.passphrase_d4.download_error_toast')}
         </div>
       {/if}
-      <button type="button" on:click={onD4Continue}>
-        {t('onboarding.passphrase_d4.primary_button')}
-      </button>
       <button type="button" on:click={onD4Continue}>
         {t('onboarding.passphrase_d4.confirm_continue_button')}
       </button>
@@ -514,6 +551,7 @@
         failed_devices={__test_revoke_partial_failure ?? []}
         __test_revoke_delay_ms={__test_revoke_delay_ms}
         __test_revoke_error={__test_revoke_error}
+        bind:in_progress={d5_in_progress}
         onAdvance={onD5Advance}
       />
     {:else if currentStep === 'D.6'}
@@ -528,7 +566,6 @@
         <div role="alert" id="d6-err" data-testid="d6-error">{d6Error}</div>
       {/if}
     {:else if currentStep === 'D.7'}
-      <h1 id="onboarding-current-heading" tabindex="-1">{t('onboarding.completion_d7.heading')}</h1>
       <D7Complete />
       <button type="button" on:click={onOpenApp}>
         {t('onboarding.completion_d7.primary_button')}

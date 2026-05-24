@@ -461,8 +461,11 @@ describe('T19 / F-112 M-112a — client-side rate-limit on D.4 → D.6 attempts'
 describe('T19 / Decision 2.b — in-memory wizard state: hard refresh restarts at D.1', () => {
   it('unmounting and remounting OnboardingFlow returns the user to D.1 (no sessionStorage / localStorage persistence)', async () => {
     const first = render(OnboardingFlow, { props: { __test_step: 'D.4' } });
-    // Confirm we are at D.4.
-    expect(screen.queryByText(/recovery passphrase/i)).toBeDefined();
+    // Confirm we are at D.4 — the D.4 heading is "Your recovery passphrase".
+    // (Note: queryByText cannot be used here because the D.4 body text
+    // legitimately contains "recovery passphrase" multiple times; we
+    // check the heading role instead.)
+    expect(screen.getAllByRole('heading', { name: /your recovery passphrase/i }).length).toBeGreaterThan(0);
     first.unmount();
     // After unmount: nothing in sessionStorage / localStorage should retain
     // the passphrase or the step.
@@ -498,9 +501,14 @@ describe('T19 / F-104 M-104b — passphrase ref cleared on successful D.6 type-b
     expect(initial.length).toBeGreaterThan(0);
     // Advance the wizard to D.5 by completing the type-back via a harness
     // hook on the OnboardingFlow component instance.
-    // (The implementer ships __test_advance_through_type_back as a test-only API.)
-    const harness = (mod as { __test_advance_through_type_back?: () => Promise<void> })
-      .__test_advance_through_type_back;
+    // (The implementer ships __test_advance_through_type_back as a test-only API
+    // via the sibling .ts seam re-export module.)
+    const harness =
+      (mod as { __test_advance_through_type_back?: () => Promise<void> })
+        .__test_advance_through_type_back ??
+      (
+        await import('../../src/lib/onboarding/steps/D4RecoveryPassphrase')
+      ).__test_advance_through_type_back;
     if (typeof harness === 'function') {
       await harness();
     }
