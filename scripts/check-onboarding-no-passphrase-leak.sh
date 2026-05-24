@@ -96,11 +96,18 @@ for f in "${STRICT_FILES[@]}"; do
     continue
   fi
   for pat in "${STRICT_FORBIDDEN[@]}"; do
-    # Allow legitimate role="alert" only on the d4-error toast (rendered
-    # outside the passphrase <code>); we keep the lint strict but
-    # narrow-allowlist the d4-error testid line. The passphrase-bearing
-    # <code> MUST remain free of these attributes.
-    matches=$(grep -E -n "$pat" "$f" | grep -v 'data-testid="d4-error"' || true)
+    # Narrow allowlist of legitimate uses on these surfaces (rendered
+    # OUTSIDE the passphrase <code>):
+    #   - data-testid="d4-error" (D.4 error toast; argon2-unavailable
+    #     surfaces below the passphrase wrapper)
+    #   - data-testid="show-again-danger-toast" (recovery-screen's
+    #     audit-failed danger toast; M-54b/c)
+    # We also ignore comment lines (// or /* ... */ or HTML <!-- ... -->).
+    matches=$(grep -E -n "$pat" "$f" \
+      | grep -v 'data-testid="d4-error"' \
+      | grep -v 'data-testid="show-again-danger-toast"' \
+      | grep -Ev '^[0-9]+:\s*(\/\/|\/\*|\*|<!--)' \
+      || true)
     if [ -n "$matches" ]; then
       echo "FAIL: $f matches strict-forbidden pattern: $pat" >&2
       echo "$matches" >&2

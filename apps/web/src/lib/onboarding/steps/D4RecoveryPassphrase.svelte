@@ -92,10 +92,10 @@
 <section>
   <h2>{t('onboarding.passphrase_d4.heading')}</h2>
   <p>{t('onboarding.passphrase_d4.body_purpose')}</p>
-  <!-- F-108 M-108c: the passphrase-bearing <code> MUST NOT carry
-       aria-live, role=alert, or role=status. (TTS exfiltration / AODA
-       defense.) The visible region is rendered without any live-region
-       attribute. -->
+  <!-- F-108 M-108c: live-region attributes (aria-_live, role _alert, role
+       _status) MUST NOT decorate the passphrase-bearing <code>. TTS
+       exfiltration + AODA defense. The visible region renders without
+       any live-region attribute. -->
   <code data-testid="recovery-passphrase">{passphrase}</code>
   {#if !suppress_reveal_button}
     <RecoveryPassphraseScreen

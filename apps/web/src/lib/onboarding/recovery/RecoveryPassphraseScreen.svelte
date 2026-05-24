@@ -157,10 +157,10 @@
   <!-- SR-only state announcers for the reveal lifecycle. The aria-pressed
        attribute already carries the binary state; these spans add the
        longer-form catalog copy so screen readers can read the full
-       sentence on transition (M-54c). F-108 M-108c: no aria-live on
-       these spans — the surrounding aria-pressed transition carries
-       the state-change cue; live regions on a passphrase-bearing
-       surface are forbidden. -->
+       sentence on transition (M-54c). F-108 M-108c: no live-region
+       attribute on these spans — the surrounding aria-pressed
+       transition carries the state-change cue; live regions on a
+       passphrase-bearing surface are forbidden. -->
   {#if revealed && !capReached}
     <span class="visually-hidden" data-testid="reveal-in-progress-sr">
       {t('a11y.onboarding.reveal_in_progress_announcement')}
