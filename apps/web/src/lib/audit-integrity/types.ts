@@ -210,7 +210,8 @@ export type IntegrityErrorCode =
   | 'chain_walk_failed'
   | 'backup_diff_failed'
   | 'audit_emit_failed'
-  | 'head_read_failed';
+  | 'head_read_failed'
+  | 'lease_check_failed';
 
 /**
  * Closed literal union of error_codes for the weekly anchor. Disjoint from
@@ -256,6 +257,17 @@ export type IntegrityRunResult =
       readonly backup_diff_performed: boolean;
       readonly truncated_to_row_cap: true;
       readonly resume_after_id: string;
+      readonly would_fire_alert?: IntegrityAlertSymbol | readonly IntegrityAlertSymbol[];
+    }
+  | {
+      readonly status: 'dry_run';
+      readonly run_id: string;
+      readonly trigger: IntegrityCheckTrigger;
+      readonly rows_walked: number;
+      readonly mismatches_count: number;
+      readonly attributable_count: number;
+      readonly unattributable_count: number;
+      readonly backup_diff_performed: boolean;
       readonly would_fire_alert?: IntegrityAlertSymbol | readonly IntegrityAlertSymbol[];
     }
   | {

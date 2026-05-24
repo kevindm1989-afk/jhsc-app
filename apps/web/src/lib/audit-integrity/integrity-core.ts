@@ -297,9 +297,11 @@ function diffAgainstManifest(opts: {
       continue;
     }
 
-    // Pivot-rewrite detection (F-91 LOAD-BEARING): live hash differs from
-    // dump hash for a row old enough to be in the diff window.
-    if (live.hash !== dumpRow.hash) {
+    // Pivot-rewrite detection (F-91 LOAD-BEARING): live row differs from
+    // dump for a row old enough to be in the diff window. Per ADR-0019 §5
+    // step 8, EITHER hash OR prev_hash divergence triggers — catches the
+    // prev_hash-only mutation attack (security Finding 3 in-cycle).
+    if (live.hash !== dumpRow.hash || live.prev_hash !== dumpRow.prev_hash) {
       out.push({
         detected_via: 'backup_diff',
         row_id: dumpRow.id,
@@ -396,10 +398,20 @@ export async function runIntegrityCheck(
   const { store, config } = opts;
   const trigger = assertValidTrigger(config.trigger);
   const lease_window_ms = config.lease_window_ms ?? INTEGRITY_DEFAULT_LEASE_WINDOW_MS;
+  const dry_run = config.dry_run === true;
 
-  // Step 1 — lease check.
+  // Step 1 — lease check. Wrap in try/catch so a transport error (DB
+  // connection failure, advisory-lock timeout in T18.1) surfaces via the
+  // closed-literal error_code contract instead of escaping as a raw throw
+  // (T17 Finding 1 / G-T18-PRIV-3 lineage).
   const startedAtMs = store.nowMs();
-  if (await store.hasOpenIntegrityRunWithinWindow(startedAtMs, lease_window_ms)) {
+  let leaseOpen: boolean;
+  try {
+    leaseOpen = await store.hasOpenIntegrityRunWithinWindow(startedAtMs, lease_window_ms);
+  } catch {
+    return { status: 'errored', run_id: generateRunId(), error_code: 'lease_check_failed' };
+  }
+  if (leaseOpen) {
     return { status: 'skipped', reason: 'pass_already_in_window' };
   }
 
@@ -492,6 +504,42 @@ export async function runIntegrityCheck(
   const alerts: IntegrityAlertSymbol[] = [];
   if (allMismatches.length > 0) alerts.push('A-AUDIT-001');
   if (backupDiffOutcome.unattributable_count > 0) alerts.push('A-INTEGRITY-002');
+
+  // Dry-run short-circuit (G-T16-PRIV-4 / T17 Finding 2 lineage in-cycle):
+  // computed the walk + reconciliation; skip every emit/transition; restore
+  // snapshot so the run row written at step 5 is reverted.
+  if (dry_run) {
+    store.restore(snapshotToken);
+    const dryAlerts: IntegrityAlertSymbol | readonly IntegrityAlertSymbol[] | undefined =
+      alerts.length === 0
+        ? undefined
+        : alerts.length === 1
+          ? alerts[0]
+          : (alerts.slice() as readonly IntegrityAlertSymbol[]);
+    if (dryAlerts === undefined) {
+      return {
+        status: 'dry_run',
+        run_id,
+        trigger,
+        rows_walked: chainWalkOutcome.rows_walked,
+        mismatches_count: allMismatches.length,
+        attributable_count: backupDiffOutcome.attributable_count,
+        unattributable_count: backupDiffOutcome.unattributable_count,
+        backup_diff_performed
+      };
+    }
+    return {
+      status: 'dry_run',
+      run_id,
+      trigger,
+      rows_walked: chainWalkOutcome.rows_walked,
+      mismatches_count: allMismatches.length,
+      attributable_count: backupDiffOutcome.attributable_count,
+      unattributable_count: backupDiffOutcome.unattributable_count,
+      backup_diff_performed,
+      would_fire_alert: dryAlerts
+    };
+  }
 
   // Step 10 — compose mismatch rows + ran row; emit.
   const completedAtMs = store.nowMs();

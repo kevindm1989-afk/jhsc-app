@@ -74,6 +74,7 @@
  * expected pre-implementation posture for a four-way reviewer pass.
  */
 
+import { createHmac } from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
 import { FROZEN_NOW_MS } from '../_helpers/fixtures';
@@ -152,14 +153,17 @@ function seedChain(
   for (let i = 1; i <= count; i++) {
     const ts_ms = FROZEN_NOW_MS - (count - i + 1) * HOUR_MS;
     const id = String(i);
-    const hash = i.toString(16).padStart(64, '0');
+    // BLAKE2b-256 production hashes are uniformly random hex; this seed mirrors
+    // that entropy shape with HMAC-SHA-256(test-fixed-key, id) so digit-only
+    // fixtures don't trip PHONE_SHAPE (G-T18-PRIV-11 in-cycle fix).
+    const hash = createHmac('sha256', 'seedChain-fixed-key').update(id).digest('hex');
     const event_type = opts.event_type ?? 'concern.created';
     store.__debugInsertChainRow({
       id,
       ts_ms,
       hash,
       event_type,
-      prev_hash: i === 1 ? '0'.repeat(64) : (i - 1).toString(16).padStart(64, '0'),
+      prev_hash: i === 1 ? '0'.repeat(64) : createHmac('sha256', 'seedChain-fixed-key').update(String(i - 1)).digest('hex'),
       actor_pseudonym: '0'.repeat(32),
       target_id: null,
       target_class: 'C1',
@@ -1392,9 +1396,9 @@ describe('T18 / F-99 — row-cap + capped state', () => {
       store.__debugInsertChainRow({
         id: String(i),
         ts_ms: FROZEN_NOW_MS - (20001 - i + 1) * 1000, // 1s apart to keep total span manageable
-        hash: i.toString(16).padStart(64, '0'),
+        hash: createHmac('sha256', 'seedChain-fixed-key').update(String(i)).digest('hex'),
         event_type: 'concern.created',
-        prev_hash: i === 1 ? '0'.repeat(64) : (i - 1).toString(16).padStart(64, '0'),
+        prev_hash: i === 1 ? '0'.repeat(64) : createHmac('sha256', 'seedChain-fixed-key').update(String(i - 1)).digest('hex'),
         actor_pseudonym: '0'.repeat(32),
         target_id: null,
         target_class: 'C1',
@@ -1422,9 +1426,9 @@ describe('T18 / F-99 — row-cap + capped state', () => {
       store.__debugInsertChainRow({
         id: String(i),
         ts_ms: FROZEN_NOW_MS - (20001 - i + 1) * 1000,
-        hash: i.toString(16).padStart(64, '0'),
+        hash: createHmac('sha256', 'seedChain-fixed-key').update(String(i)).digest('hex'),
         event_type: 'concern.created',
-        prev_hash: i === 1 ? '0'.repeat(64) : (i - 1).toString(16).padStart(64, '0'),
+        prev_hash: i === 1 ? '0'.repeat(64) : createHmac('sha256', 'seedChain-fixed-key').update(String(i - 1)).digest('hex'),
         actor_pseudonym: '0'.repeat(32),
         target_id: null,
         target_class: 'C1',
