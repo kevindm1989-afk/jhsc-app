@@ -152,6 +152,45 @@ export default [
     }
   },
   {
+    // T18 / ADR-0019 mirror — production code (outside the audit-integrity
+    // library itself) must NEVER deep-import the integrity test-only override
+    // hooks. Tests reach these via deep-import; production consumes only the
+    // public barrel `lib/audit-integrity`. All three path shapes covered from
+    // the start (Finding 1 lesson from T16 reviewer pass; Option J pattern).
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: ['src/lib/audit-integrity/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/lib/audit-integrity/memory-integrity-store',
+                '**/lib/audit-integrity/integrity-event-types',
+                '**/lib/audit-integrity/integrity-core',
+                '**/lib/audit-integrity/integrity-store',
+                '**/lib/audit-integrity/types',
+                '**/audit-integrity/memory-integrity-store',
+                '**/audit-integrity/integrity-event-types',
+                '**/audit-integrity/integrity-core',
+                '**/audit-integrity/integrity-store',
+                '**/audit-integrity/types',
+                '$lib/audit-integrity/memory-integrity-store',
+                '$lib/audit-integrity/integrity-event-types',
+                '$lib/audit-integrity/integrity-core',
+                '$lib/audit-integrity/integrity-store',
+                '$lib/audit-integrity/types'
+              ],
+              message:
+                'Use the public audit-integrity barrel `lib/audit-integrity`. Deep-import surfaces (MemoryIntegrityStore, runIntegrityEventTypesDriftCheck, __debug*) are test-only.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     ignores: [
       'node_modules/',
       '.svelte-kit/',
