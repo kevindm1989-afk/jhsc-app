@@ -1,0 +1,259 @@
+{
+  "_meta": {
+    "task": "T19 — identity-recovery onboarding (D.1 → D.7) + panic-wipe + recovery-blob affordances",
+    "locale": "en-CA",
+    "audience": "Ontario JHSC worker reps, worker co-chair, certified members. Personal Android phones and personal laptops. Includes workers with disabilities (AODA WCAG 2.0 AA). First-time users with no prior exposure to passkeys or recovery passphrases.",
+    "voice": "Plain, declarative, never coy. Names the literal action ('wipe this device's data', 'recovery passphrase', 'sign out other devices'). No marketing, no euphemism, no exclamation marks. Reading-level target: grade 8 per AODA cognitive-accessibility expectation.",
+    "scope": "User-facing strings only for T19's D.1→D.7 wizard + PanicWipeModal + recovery-blob download + browser-baseline badge + completion summary + a11y announcements. Does NOT include the print stylesheet copy (already in /home/user/agent-os/i18n/en-CA.json `print.recovery.*`) — referenced but not redefined here.",
+    "constraints": [
+      "PIPEDA Principle 4.3.4 informed-of-purpose: D.1, D.4, D.5, D.6 each state the purpose of the PI being touched in their `body` or `body_purpose` string.",
+      "No PII in any string: no {{user_name}}, {{email}}, {{workplace}}, {{ip}}, or any other personal-information interpolation. The two placeholder interpolations used ({n}, {m}, {attempts_left}, {other_count}, {failed_systems}) are non-PII operational counters.",
+      "No false promises: panic-wipe copy describes local-only behaviour honestly per ADR-0020 Decision 5 / Q4 / threat-model §8.T19 residual block.",
+      "In-memory wizard state: D.1 + D.4 copy state that refreshing the page restarts onboarding from the beginning. No 'we'll save your progress'.",
+      "Plain language: no legalese ('hereby', 'pursuant to'). No Latin abbreviations ('i.e.', 'e.g.'). Per scaffold assertion at apps/web/test/T19/onboarding.test.ts line 56.",
+      "All strings externalized: this catalog is the source of truth for the wizard + panic-wipe surfaces.",
+      "Localization-ready: keys are semantic (purpose-named, not English-shaped); fr-CA can drop in 1:1 per G-T19-1.",
+      "Scaffold regex satisfaction (apps/web/test/T19/onboarding.test.ts): /personal device/i (D.1 heading); /personal device.*continue/i (D.1 primary); /stop.*switch.*personal/i (D.1 secondary); /encrypted|scrambled/i AND /Canada|ca-central|Canadian/i (D.2 body); /browser is too old/i (D.3 baseline fail); /set up passkey/i (D.3 primary); /wipe/i (panic-wipe trigger + literal-phrase value); /irreversible|cannot be undone/i AND /server|committee/i AND /recovery passphrase|recovery sheet/i AND /co-chair|invite/i (panic-wipe body, per F-115 / M-115).",
+      "Type-back literal-phrase value is `WIPE` (single word, uppercase, language-neutral so fr-CA can reuse without translation; per ADR-0020 Decision 7 panic-wipe copy clause + design-system §3.5 destructive-confirm canonical pattern + design-system §4 Surface G existing copy + scaffold lines 157, 175-179).",
+      "D.5 canonical labelling per Designer's pass (ADR-0020 §A): heading 'Sign out other devices?', primary 'Revoke other sessions', tertiary \"Skip — I'll do this later\". FIXED — tech-writer does not invent."
+    ],
+    "review_status": "AWAITING HG-10 LABOUR-LAWYER RATIFICATION before merge per ADR-0020 §Decision 7 + task #2"
+  },
+
+  "onboarding": {
+    "step_indicator": {
+      "pending": "Not started",
+      "active": "Current step",
+      "complete": "Completed",
+      "step_n_of_m": "Step {n} of {m}"
+    },
+
+    "advisory_d1": {
+      "heading": "Use a personal device only",
+      "body": "Set up the JHSC App on a personal phone or laptop — one your employer does not own, pay for, or manage. If you use a work device, your employer may be able to read what you do here. The app cannot detect this for you. You have to choose.\n\nThis device will store the key that signs you in. Once you finish setup, this device is the way you reach your account until you set up another personal device. If you do not have a personal smartphone, stop now and talk to your worker co-chair before you continue.\n\nIf you refresh or close the page during setup, you start over from this screen.",
+      "checkbox_label": "I confirm this is a personal device that my employer does not own, pay for, or manage.",
+      "primary_button": "This is a personal device — continue",
+      "secondary_button": "Stop — I'll switch to a personal device",
+      "fingerprint_label": "This is what your browser tells the page. Nothing here is sent to the server.",
+      "stop_confirm_heading": "OK to close",
+      "stop_confirm_body": "Close this tab and come back on a personal device when you're ready. Your invite code is still good.",
+      "show_again_label": "Show this advisory next time too"
+    },
+
+    "browser_baseline_d2": {
+      "heading": "Where your data lives",
+      "body_pass": "Your committee's data is stored on Supabase, a company based in the United States that runs the servers in Canada (ca-central-1). Two things to know:\n\n(1) Worker-side content — concerns, reprisal entries, minutes drafts — is encrypted on this device before it leaves. Supabase only ever sees scrambled bytes.\n\n(2) US legal process could in principle reach the company, but what they would get back is the same scrambled bytes. The key that unscrambles them lives only on devices belonging to you and your committee.\n\nWe need to confirm your browser can handle the encryption before you set up your passkey. The check below runs on this device only.",
+      "body_fail": "Your browser cannot run the encryption this app needs. Setup cannot continue here. Switch to a supported browser on this device and reload, or open the app on a different personal device.",
+      "badge": {
+        "webcrypto": {
+          "checking": "Checking encryption support…",
+          "pass": "Encryption support: ready",
+          "fail": "Encryption support: missing"
+        },
+        "indexeddb": {
+          "checking": "Checking local storage…",
+          "pass": "Local storage: ready",
+          "fail": "Local storage: missing"
+        },
+        "service_worker": {
+          "checking": "Checking offline support…",
+          "pass": "Offline support: ready",
+          "fail": "Offline support: missing"
+        },
+        "sab": {
+          "checking": "Checking memory support…",
+          "pass": "Memory support: ready",
+          "fail": "Memory support: missing"
+        },
+        "locks": {
+          "checking": "Checking sync support…",
+          "pass": "Sync support: ready",
+          "fail": "Sync support: missing"
+        },
+        "passkey": {
+          "checking": "Checking passkey support…",
+          "pass": "Passkey support: ready",
+          "fail": "Passkey support: missing"
+        },
+        "argon2id": {
+          "checking": "Checking key-derivation support…",
+          "pass": "Key-derivation support: ready",
+          "fail": "Key-derivation support: missing"
+        }
+      },
+      "unsupported_heading": "Your browser is too old",
+      "primary_button_pass": "Got it — continue",
+      "primary_button_fail": "Reload after switching browsers",
+      "secondary_button_fail": "See the list of supported browsers",
+      "supported_browsers_heading": "Browsers that work",
+      "supported_browsers_body": "Chrome 109 or newer, Edge 109 or newer, Firefox 122 or newer, Safari 16 or newer. Update your browser or install one of these on this device, then reload.",
+      "privacy_policy_link": "Read the full privacy policy",
+      "error": {
+        "webcrypto": {
+          "unavailable": "This browser does not provide the encryption tools the app needs. Use a current version of Chrome, Edge, Firefox, or Safari and try again."
+        },
+        "indexeddb": {
+          "unavailable": "This browser cannot store data on the device the way the app needs. Private or incognito mode often blocks this — close that window and open the app in a normal browser window."
+        },
+        "service_worker": {
+          "unavailable": "This browser cannot run the offline support the app needs. Some private-mode or enterprise-locked browsers block this. Use a normal browser window on a personal device."
+        }
+      }
+    },
+
+    "passkey_d3": {
+      "heading": "Set up your passkey",
+      "body": "A passkey is how you sign in without a password. It lives on this device and uses your fingerprint, face, or device PIN to confirm it's you. There is no password to leak or guess.\n\nWhen you press the button below, your device will ask you to confirm. That confirmation creates the passkey. The passkey never leaves this device.\n\nYou will also need the one-time code your worker co-chair gave you on the invite slip.",
+      "totp_label": "One-time code from your invite slip",
+      "totp_helper": "Six digits. Spaces and dashes are fine.",
+      "primary_button": "Set up passkey now",
+      "waiting_label": "Waiting for your device…",
+      "done_label": "Passkey set on this device",
+      "continue_button": "Next: your recovery sheet",
+      "error": {
+        "totp_invalid": "That code didn't match. Check the invite slip and try again.",
+        "totp_rate_limited": "Too many wrong codes. Wait a few minutes, then try again. If this keeps happening, your invite is locked — ask your worker co-chair to send a new one.",
+        "totp_locked": "Too many wrong codes. This invite is locked. Ask your worker co-chair to send a new one.",
+        "passkey_ceremony_failed": "Your device did not finish setting up the passkey. Try again. If this keeps happening, use a different personal device or contact your worker co-chair.",
+        "passkey_unavailable": "This device cannot create passkeys. Use a different personal device or contact your worker co-chair.",
+        "rp_mismatch": "Something is wrong with how the app is set up on this page. Do not continue. Close this tab and contact your worker co-chair.",
+        "enrollment_failed_generic": "We couldn't finish setting up the passkey. Try again. If this keeps happening, contact your worker co-chair."
+      }
+    },
+
+    "passphrase_d4": {
+      "heading": "Your recovery passphrase",
+      "body_purpose": "Your recovery passphrase is the only way back into your account if you lose this device AND your passkey. There is no admin who can reset it. We do not store it. We cannot see it.\n\nWrite the passphrase down on paper, or print the recovery sheet. Store it somewhere safe — and not at work. A passphrase saved only on this device is not a backup.\n\nIf you refresh or close the page now, a new passphrase is generated and you start over.",
+      "passphrase_label": "Recovery passphrase",
+      "passphrase_helper": "Hold the button below to show the passphrase. Release to hide it. You can do this up to three times during setup.",
+      "passphrase_reveal_label": "Press and hold to show the passphrase",
+      "passphrase_conceal_label": "Release to hide",
+      "confirm_label": "Type the passphrase to confirm you have it",
+      "confirm_helper": "Type the words exactly as shown, separated by single spaces.",
+      "primary_button": "Print recovery sheet",
+      "back_button": "Back",
+      "skip_print_button": "I'll save it another way",
+      "error": {
+        "mismatch": "The passphrase you typed didn't match. Check what you wrote down and try again.",
+        "too_short": "The passphrase looks incomplete. Make sure you've typed every word.",
+        "too_common": "The passphrase you typed looks wrong — it should be the words shown above, not a phrase you made up.",
+        "argon2id_failed": "We couldn't prepare your recovery passphrase. This usually means the app needs an update. Reload the page and try again. If this keeps happening, contact your worker co-chair.",
+        "argon2_unavailable": "This browser cannot finish preparing your recovery passphrase. Update your browser or use a different personal device, then try again.",
+        "rate_limited": "Too many tries in a short time. Wait a moment and try again."
+      },
+      "print_link": "Print the recovery sheet",
+      "print_modal_heading": "About to print",
+      "print_modal_body": "The recovery sheet will show your passphrase in plain text. Make sure no one can see your screen or the printer right now. Anyone who reads this sheet can take over your account on another device.",
+      "print_modal_confirm": "Open the print dialog",
+      "print_modal_cancel": "Not now",
+      "show_again_label": "Show the passphrase again",
+      "show_again_helper": "You have {attempts_left} more chances to see the passphrase during setup.",
+      "show_again_capped": "You've used all three chances to see the passphrase. To see it again, start setup over from the beginning.",
+      "download_label": "Download the encrypted backup file",
+      "download_helper": "This file is the encrypted backup of your account key. It is NOT the passphrase — the passphrase is what unlocks it. Save the file to a USB key or a password manager you trust. Store it apart from the printed passphrase.",
+      "download_preparing": "Preparing the file…",
+      "download_done_label": "Downloaded — download again",
+      "download_error_toast": "Your browser blocked the download. The encrypted backup is still saved on this device. You can try the download again or skip it for now."
+    },
+
+    "sessions_d5": {
+      "heading": "Sign out other devices?",
+      "body": "If you've ever signed in to this account on another phone or laptop, you can sign those sessions out now. This is optional. You can do it any time later from Settings.\n\nSign-outs happen on the server. Your committee can still see everything you've contributed.",
+      "helper": "{other_count} other session(s) will be signed out.",
+      "helper_only_this_device": "Only this device is signed in. There is nothing to sign out.",
+      "revoke_other": {
+        "label": "Revoke other sessions"
+      },
+      "skip": {
+        "label": "Skip — I'll do this later"
+      },
+      "state": {
+        "ready_delay": "Preparing…",
+        "in_progress": "Signing out other devices…",
+        "partial_failure": "Some sessions couldn't be signed out. The ones that did sign out are gone. You can try the rest again from Settings.",
+        "success": "Other sessions signed out."
+      },
+      "error": {
+        "rate_limited": "Too many requests in a short time. Wait a moment and try again, or skip this step and do it later from Settings.",
+        "server_unreachable": "We couldn't reach the server. Check your internet connection and try again, or skip this step and do it later from Settings.",
+        "partial": "Some sessions couldn't be signed out: {failed_systems}. You can try again from Settings → Sessions."
+      },
+      "row": {
+        "this_device_label": "This device",
+        "last_seen_label": "Last seen {when}"
+      }
+    },
+
+    "panic_wipe_d6": {
+      "trigger_button": "Wipe this device's data",
+      "modal_heading": "Wipe this device's data",
+      "modal_body_what_happens": "This removes from THIS device: the encrypted local store, your current sign-in, cached settings, and any queued entries that have not synced yet. It happens immediately and cannot be undone on this device.",
+      "modal_body_what_doesnt": "This does NOT sign you out on the server or on other devices. Your committee can still see prior contributions. If you also want to sign out other devices, use Revoke other sessions in Settings → Sessions when you reach a safe network — that is a separate action from this wipe.",
+      "modal_residual_risk_callout": "If you are being coerced or watched right now and you cannot reach a safe network, this wipe still clears this device. As soon as you safely can, sign in on a different personal device and use Settings → Sessions to revoke any other sessions that may still be active. A session signed in before this wipe can stay valid on the server for up to 15 minutes.",
+      "modal_recovery_reminder": "If you have your recovery passphrase printed or saved off this device, you can sign in again on another personal device. If you do NOT have it, ask your worker co-chair to send a new invite — they cannot recover the old passphrase, and neither can we.",
+      "type_back_label": "Type WIPE to confirm",
+      "type_back_value": "WIPE",
+      "type_back_helper": "Type the word WIPE in capital letters to enable the wipe button.",
+      "type_back_placeholder": "WIPE",
+      "primary_button_destructive": "Wipe this device's data",
+      "cancel_button": "Cancel",
+      "state": {
+        "confirming": "Preparing…",
+        "wiping": "Wiping local data — do not close this tab",
+        "complete": "Local data wiped"
+      },
+      "error": {
+        "type_back_mismatch": "Type WIPE in capital letters to enable the wipe button.",
+        "audit_emit_failed": "We couldn't record this wipe before starting it, so we did not wipe anything. Check your internet connection and try again. If you need to leave the app right now, close this tab — nothing on this device has been deleted yet.",
+        "partial_wipe": "Some parts of the local store could not be cleared: {failed_systems}. Close this tab, then uninstall the app from your home screen and install it again. If you can, contact your worker co-chair.",
+        "already_wiped": "This device's local data is already wiped. There is nothing left to remove here."
+      },
+      "completion_heading": "Local data wiped",
+      "completion_body": "Everything this app stored on this device is gone. Your committee's records on the server are untouched.",
+      "completion_next_steps": "Next steps:\n\n• If you have your recovery passphrase off this device, sign in again on a personal device to keep working.\n\n• If you want to make sure other sessions are signed out on the server, sign in on a different personal device and open Settings → Sessions.\n\n• Or close this tab and leave the app."
+    },
+
+    "completion_d7": {
+      "heading": "You're set up",
+      "body": "You can start using the JHSC App now. The summary below is what we did during setup.",
+      "checklist": {
+        "passkey": "Passkey set on this device",
+        "recovery_blob_downloaded": "Recovery backup file downloaded",
+        "recovery_blob_printed": "Recovery sheet printed and confirmed",
+        "sessions_reviewed": "Other sessions reviewed"
+      },
+      "next_steps_heading": "Where to find things later",
+      "next_steps_body": "You can sign out other devices any time from Settings → Sessions. You can wipe this device's data from Settings → Wipe this device. Your recovery passphrase is the only way back into your account if you lose this device and your passkey — the printed sheet or downloaded backup are your record of it.",
+      "primary_button": "Open the app"
+    },
+
+    "show_again": {
+      "remind_me_next_time_label": "Show this again next time",
+      "dont_show_again_label": "Don't show this again on this device"
+    }
+  },
+
+  "a11y": {
+    "onboarding": {
+      "step_change": "Step {n} of {m}: {step_name}",
+      "wizard_landmark": "Account setup wizard",
+      "passphrase_field_announcement": "Recovery passphrase. The passphrase is hidden until you press and hold the show button.",
+      "reveal_button_announcement": "Show passphrase button. Press and hold to reveal the passphrase. Release to hide.",
+      "reveal_in_progress_announcement": "Passphrase is now visible.",
+      "reveal_hidden_announcement": "Passphrase is hidden.",
+      "reveal_capped_announcement": "You've used all three chances to show the passphrase during this setup.",
+      "modal_open_announcement": "{modal_name} dialog open.",
+      "modal_close_announcement": "Dialog closed.",
+      "destructive_confirm_announcement": "Destructive action dialog. Read the message before confirming. Press Escape will not close this dialog — use the Cancel button.",
+      "panic_wipe_in_progress_announcement": "Wiping local data. Do not close this tab.",
+      "panic_wipe_complete_announcement": "Local data wiped.",
+      "panic_wipe_partial_failure_announcement": "Wipe partly completed. Some parts could not be cleared.",
+      "session_revoked_announcement": "Other sessions signed out.",
+      "browser_baseline_pass_announcement": "Browser check passed. You can continue.",
+      "browser_baseline_fail_announcement": "Browser check failed. Setup cannot continue on this browser.",
+      "step_loading_announcement": "{step_name} is in progress. Please wait.",
+      "step_error_announcement": "{step_name} could not finish. See the error message below.",
+      "device_fingerprint_announcement": "Browser information. This is what your browser tells the page. Nothing here is sent to the server."
+    }
+  }
+}
