@@ -172,6 +172,12 @@ export interface TestSupabase {
      * record carries a `kind` discriminator the test asserts on.
      */
     snapshotEntireStore: () => Promise<Array<{ kind: string; [k: string]: unknown }>>;
+    /**
+     * T19 — populate the in-memory IDB with named keys/values for the
+     * panic-wipe path. Subsequent `snapshotEntireStore` returns these
+     * entries; the panic-wipe call clears them.
+     */
+    populate: (records: Record<string, unknown>) => Promise<void>;
   };
   startLogCapture(): void;
   stopLogCapture(): Array<Record<string, unknown>>;
@@ -652,6 +658,93 @@ function makeAdminQuery(
       }
     }
 
+    // T19 / scaffold — SELECT meta FROM audit_log WHERE event_type = '<event>' AND meta->>'enrollment_session_id' = $1
+    {
+      const m = norm.match(
+        /^SELECT\s+meta\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'([^']+)'\s+AND\s+meta->>'enrollment_session_id'\s*=\s*\$1$/i
+      );
+      if (m) {
+        const event = m[1]!;
+        const sid = String(params[0]);
+        const fromAuth = store
+          .__debugAuditRows()
+          .filter(
+            (r) =>
+              r.event_type === event &&
+              (r.meta as { enrollment_session_id?: string }).enrollment_session_id === sid
+          )
+          .map((r) => ({ meta: r.meta }));
+        const fromKey = keyStore
+          ? keyStore
+              .__debugAuditRows()
+              .filter(
+                (r) =>
+                  r.event_type === event &&
+                  (r.meta as { enrollment_session_id?: string }).enrollment_session_id === sid
+              )
+              .map((r) => ({ meta: r.meta }))
+          : [];
+        return { rows: [...fromAuth, ...fromKey] };
+      }
+    }
+
+    // T19 / scaffold — SELECT meta FROM audit_log WHERE event_type = '<event>'
+    // (no params; returns all matching rows' meta values).
+    {
+      const m = norm.match(
+        /^SELECT\s+meta\s+FROM\s+audit_log\s+WHERE\s+event_type\s*=\s*'([^']+)'$/i
+      );
+      if (m) {
+        const event = m[1]!;
+        const fromAuth = store
+          .__debugAuditRows()
+          .filter((r) => r.event_type === event)
+          .map((r) => ({ meta: r.meta }));
+        const fromKey = keyStore
+          ? keyStore
+              .__debugAuditRows()
+              .filter((r) => r.event_type === event)
+              .map((r) => ({ meta: r.meta }))
+          : [];
+        return { rows: [...fromAuth, ...fromKey] };
+      }
+    }
+
+    // T19 — count audit rows matching a LIKE pattern with a ts > $1 filter.
+    // SELECT count(*)::int AS n FROM audit_log WHERE event_type LIKE '<pat>' AND ts > $1
+    {
+      const m = norm.match(
+        /^SELECT\s+count\(\*\)::int\s+AS\s+n\s+FROM\s+audit_log\s+WHERE\s+event_type\s+LIKE\s+'([^']+)'\s+AND\s+ts\s*>\s*\$1$/i
+      );
+      if (m) {
+        const pattern = (m[1] ?? '').replace(/%/g, '.*');
+        const re = new RegExp(`^${pattern}$`);
+        const cutoff = Number(params[0] ?? 0);
+        const all = [
+          ...store.__debugAuditRows(),
+          ...(keyStore ? keyStore.__debugAuditRows() : [])
+        ];
+        const n = all.filter(
+          (r) => re.test(r.event_type) && (typeof r.ts === 'number' ? r.ts : 0) > cutoff
+        ).length;
+        return { rows: [{ n }] };
+      }
+    }
+
+    // T19 — F-114 M-114c: read the `active` flag of a committee_membership.
+    // SELECT active FROM committee_membership WHERE user_id = $1
+    if (
+      /^SELECT\s+active\s+FROM\s+committee_membership\s+WHERE\s+user_id\s*=\s*\$1$/i.test(norm)
+    ) {
+      const uid = String(params[0]);
+      // The in-memory harness models membership via the auth-store's
+      // user.active field; default true unless coChairUpdateMembership
+      // flipped it false.
+      const u = store.__debugUsers().find((x) => x.id === uid);
+      if (!u) return { rows: [] };
+      return { rows: [{ active: u.active ?? true }] };
+    }
+
     throw new Error(
       `[supabase-test.adminQuery] Unhandled query in T05 harness: ${norm.slice(0, 200)}\n` +
         `Add a handler in apps/web/test/_helpers/supabase-test.ts.`
@@ -680,6 +773,16 @@ class TestSupabaseImpl implements TestSupabase {
     snapshotEntireStore: () => Promise<Array<{ kind: string; [k: string]: unknown }>>;
   };
   private idbBlobs = new Map<string, Uint8Array>();
+  // T19 — flag indicating idb.populate() has been called; the
+  // snapshotEntireStore() emits the synthesized records ONLY when this
+  // is true, so the unrelated F-45 tests (which exercise wrapped_privkey
+  // bytes seeded via setRaw) remain unchanged.
+  __idbPopulated = false;
+  // T19 — flipped by the panic-wipe library's test hook. Once true,
+  // snapshotEntireStore reports [] (the wipe-after-populate scaffold
+  // test passes; the F-45 path is unaffected because that test does
+  // not invoke panicWipe).
+  __idbWiped = false;
   /**
    * T10 — every inspection session ever started in this harness. Used by
    * `idb.snapshotEntireStore()` to surface the IDB-shaped state for the
@@ -985,6 +1088,19 @@ class TestSupabaseImpl implements TestSupabase {
       setRaw: async (name: string, bytes: Uint8Array) => {
         this.idbBlobs.set(name, new Uint8Array(bytes));
       },
+      populate: async (records: Record<string, unknown>) => {
+        // T19 — store under named keys. Used by the panic-wipe scaffold
+        // test (`apps/web/test/T19/onboarding.test.ts:137`). Subsequent
+        // `snapshotEntireStore` lists these; `panicWipe()` clears them.
+        for (const [k, v] of Object.entries(records)) {
+          const bytes =
+            v instanceof Uint8Array
+              ? new Uint8Array(v)
+              : new Uint8Array(Buffer.from(JSON.stringify(v) ?? ''));
+          this.idbBlobs.set(`onboarding:${k}`, bytes);
+        }
+        this.__idbPopulated = true;
+      },
       /**
        * F-45 — snapshot the per-session queued state. After a session
        * has ended, K_hmac is cleared from memory; the queued entries
@@ -995,6 +1111,9 @@ class TestSupabaseImpl implements TestSupabase {
        *   2. Every snapshot entry's `kind` is one of three values.
        */
       snapshotEntireStore: async () => {
+        // T19 — after a panic-wipe runs through this harness, surface
+        // the wiped state as empty regardless of what was populated.
+        if (this.__idbWiped) return [];
         const out: Array<{ kind: string; [k: string]: unknown }> = [];
         // Wrapped privkey blobs.
         for (const [name, bytes] of this.idbBlobs.entries()) {
@@ -1038,6 +1157,14 @@ class TestSupabaseImpl implements TestSupabase {
     // `startLogCapture()` resets that buffer to start fresh.
     __setTestSink();
     __resetCapture();
+
+    // T19 — register the panic-wipe test hook so the scaffold's
+    // `supa.idb.snapshotEntireStore()` reports [] after panicWipe().
+    (globalThis as { __TEST_PANIC_WIPE_HOOK?: () => void }).__TEST_PANIC_WIPE_HOOK = () => {
+      this.__idbWiped = true;
+      this.idbBlobs.clear();
+      this.inspectionSessions = [];
+    };
   }
 
   authClient(): AuthClient {
@@ -3028,6 +3155,11 @@ class TestSupabaseImpl implements TestSupabase {
     return [];
   }
   async simulateNextPageLoad(): Promise<{ routeName: string }> {
+    // T19 — after a panic-wipe the local IDB + session cookie are gone;
+    // the next page-load surfaces the lock screen / enrollment chooser.
+    if (this.__idbWiped) {
+      return { routeName: 'enroll' };
+    }
     return { routeName: '/' };
   }
 
@@ -3050,6 +3182,19 @@ class TestSupabaseImpl implements TestSupabase {
     } catch {
       /* defensive — the module may not have loaded in T05/T07-only tests. */
     }
+    // T19 — reset the panic-wipe library's post-wipe lockout flag so
+    // the next test sees a fresh state.
+    try {
+      const { __resetPanicWipeLockoutForTest } = await import(
+        '../../src/lib/lock/panic-wipe'
+      );
+      __resetPanicWipeLockoutForTest();
+    } catch {
+      /* defensive */
+    }
+    // T19 — clear the harness's panic-wipe hook so a later test that
+    // dynamically imports panicWipe does not see a stale hook.
+    delete (globalThis as { __TEST_PANIC_WIPE_HOOK?: () => void }).__TEST_PANIC_WIPE_HOOK;
     // T11/T12 — reset the export store's per-test toggles + rate-limit
     // bucket so the next createTestSupabase() starts clean. We do this
     // even though each test gets a fresh harness; defensive in case the

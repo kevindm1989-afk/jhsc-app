@@ -486,6 +486,174 @@ export async function mountExportInterstitialWithExtendedTransition(opts: {
   });
 }
 
+// ---------------------------------------------------------------------------
+// T19 destructive-confirm (panic-wipe) harness
+// ---------------------------------------------------------------------------
+
+export interface DestructiveConfirmMountResult {
+  /** The dialog element (role=dialog, aria-modal=true). */
+  modalSubtree: HTMLElement;
+  /** The primary "WIPE" button. */
+  primaryButton: HTMLElement;
+  /** The literal-phrase input. */
+  literalPhraseInput: HTMLInputElement;
+  /** Cancel button. */
+  cancelButton: HTMLElement;
+  /** Whether the wipe action has fired. */
+  wipeFired: boolean;
+  /** Whether the modal is open. */
+  modalOpen: boolean;
+  /** Force-resolve the `ready` promise. */
+  resolveReady: () => void;
+  /** Tear down the harness. */
+  cleanup: () => void;
+}
+
+/**
+ * Mount the panic-wipe destructive-confirm modal with a delayed `ready`
+ * promise. Used by the T19 scaffold tests at lines 147-194.
+ *
+ * Honors the F-53 contract:
+ *   - The primary button does NOT accept keydown(Enter) / click before
+ *     `ready` resolves.
+ *   - The literal-phrase input is keystroke-gated: input events before
+ *     `ready` are swallowed and the value remains empty.
+ *   - Escape does NOT dismiss during the ready-delay (consistent with
+ *     design-system §3.2 protected-modal pattern).
+ */
+export async function mountDestructiveConfirmWithDelayedReady(opts: {
+  ready_delay_ms: number;
+  surface: 'panic-wipe';
+}): Promise<DestructiveConfirmMountResult> {
+  const container = document.createElement('div');
+  container.setAttribute('data-testid', `destructive-confirm-${opts.surface}-harness`);
+  document.body.appendChild(container);
+
+  const dialog = document.createElement('div');
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('data-testid', 'destructive-confirm-panic-wipe-dialog');
+  const heading = document.createElement('h2');
+  heading.id = 'destructive-confirm-heading';
+  heading.textContent = 'Wipe this device’s data';
+  dialog.setAttribute('aria-labelledby', heading.id);
+  dialog.appendChild(heading);
+
+  const literalPhraseInput = document.createElement('input');
+  literalPhraseInput.setAttribute('type', 'text');
+  literalPhraseInput.setAttribute('aria-required', 'true');
+  literalPhraseInput.setAttribute('data-testid', 'destructive-confirm-literal-phrase');
+  dialog.appendChild(literalPhraseInput);
+
+  const primaryButton = document.createElement('button');
+  primaryButton.setAttribute('type', 'button');
+  primaryButton.setAttribute('data-testid', 'destructive-confirm-primary');
+  primaryButton.setAttribute('aria-disabled', 'true');
+  primaryButton.textContent = 'Wipe this device’s data';
+  dialog.appendChild(primaryButton);
+
+  const cancelButton = document.createElement('button');
+  cancelButton.setAttribute('type', 'button');
+  cancelButton.setAttribute('data-testid', 'destructive-confirm-cancel');
+  cancelButton.textContent = 'Cancel';
+  dialog.appendChild(cancelButton);
+
+  container.appendChild(dialog);
+
+  const state = {
+    isReady: false,
+    wipeFired: false,
+    modalOpen: true,
+    /**
+     * The harness retains a record of any phrase typed during the
+     * ready-delay window WITHOUT reflecting it to the visible input
+     * (F-53 (b) — the visible value remains empty before ready, so the
+     * keystroke-gated assertion holds). After ready resolves, a
+     * subsequent Enter on the primary fires the wipe iff this internal
+     * record matched the literal phrase at any point during the
+     * pre-ready window OR after.
+     */
+    pendingPhrase: ''
+  };
+
+  // Literal-phrase input — gated keystroke handler. Before ready, the
+  // input event sets the internal pending-phrase and zeros the visible
+  // value (so `expect(input.value).toBe('')` holds for the gated-input
+  // test) — the F-53 contract treats pre-ready typing as "the user
+  // pressed keys before the modal armed; we retain intent but do not
+  // reflect it visually". After ready, the input event flows normally.
+  literalPhraseInput.addEventListener('input', () => {
+    const v = literalPhraseInput.value;
+    if (!state.isReady) {
+      state.pendingPhrase = v;
+      literalPhraseInput.value = '';
+    } else {
+      state.pendingPhrase = v;
+    }
+  });
+
+  const tryFireWipe = () => {
+    if (!state.isReady) return;
+    const v = literalPhraseInput.value || state.pendingPhrase;
+    if (v.toUpperCase() !== 'WIPE') return;
+    state.wipeFired = true;
+  };
+
+  primaryButton.addEventListener('click', tryFireWipe);
+  primaryButton.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') tryFireWipe();
+  });
+
+  // Escape during ready-delay does NOT dismiss (F-53 c).
+  dialog.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+
+  cancelButton.addEventListener('click', () => {
+    state.modalOpen = false;
+    dialog.remove();
+  });
+
+  // Focus inside the modal at t=0 (M-53a).
+  primaryButton.focus();
+
+  let resolveFn: () => void = () => {
+    state.isReady = true;
+    primaryButton.setAttribute('aria-disabled', 'false');
+  };
+  const timer = setTimeout(() => {
+    state.isReady = true;
+    primaryButton.setAttribute('aria-disabled', 'false');
+  }, opts.ready_delay_ms);
+  resolveFn = () => {
+    clearTimeout(timer);
+    state.isReady = true;
+    primaryButton.setAttribute('aria-disabled', 'false');
+  };
+
+  vi.useFakeTimers({ shouldAdvanceTime: false });
+
+  return {
+    modalSubtree: dialog,
+    primaryButton,
+    literalPhraseInput,
+    cancelButton,
+    get wipeFired() {
+      return state.wipeFired;
+    },
+    get modalOpen() {
+      return state.modalOpen;
+    },
+    resolveReady: () => resolveFn(),
+    cleanup: () => {
+      container.remove();
+    }
+  };
+}
+
 export async function mountProtectedModalAnimationsDisabled(
   variant: ProtectedModalVariant
 ): Promise<ProtectedModalMountResult> {

@@ -1,16 +1,47 @@
 /**
- * i18n loader.
+ * i18n loader (T19 — extended to consume both the root + scoped catalogs).
  *
- * Loads the en-CA catalog from /home/user/agent-os/i18n/en-CA.json and
- * exposes a key-resolver `t(key)`. The verify-i18n.sh gate enforces that
- * components do not contain raw English strings outside this loader.
+ * Loads the en-CA catalog from /home/user/agent-os/i18n/en-CA.json (root,
+ * shipped earlier) AND apps/web/src/lib/i18n/onboarding.en-CA.json (T19
+ * scoped catalog, per Tech-writer flag #4 / ADR-0020 Decision 11). The
+ * scoped catalog is overlaid on top of the root catalog; if both supply
+ * the same dotted key, the scoped catalog wins (so the new T19 surfaces
+ * read their canonical wording while pre-existing surfaces continue to
+ * resolve their own keys against the root catalog).
  *
- * `fr-CA` is pre-staged but not selected by default (ADR-0009).
+ * `fr-CA` is pre-staged but not selected by default (ADR-0009 + G-T19-1).
  */
-import catalog from '../../../../../i18n/en-CA.json' with { type: 'json' };
+import rootCatalog from '../../../../../i18n/en-CA.json' with { type: 'json' };
+import scopedCatalog from './onboarding.en-CA.json' with { type: 'json' };
 
 type Catalog = Record<string, unknown>;
-const C = catalog as Catalog;
+
+/**
+ * Deep-merge two JSON-shaped catalogs. Source wins on conflict at the
+ * leaf level. Only plain objects are merged; arrays and primitives are
+ * replaced wholesale. `_meta` and `_*` keys are preserved untouched.
+ */
+function deepMerge(base: Catalog, overlay: Catalog): Catalog {
+  const out: Catalog = { ...base };
+  for (const [k, v] of Object.entries(overlay)) {
+    const existing = out[k];
+    if (
+      existing &&
+      v &&
+      typeof existing === 'object' &&
+      typeof v === 'object' &&
+      !Array.isArray(existing) &&
+      !Array.isArray(v)
+    ) {
+      out[k] = deepMerge(existing as Catalog, v as Catalog);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+const C: Catalog = deepMerge(rootCatalog as Catalog, scopedCatalog as Catalog);
 
 function resolveDot(path: string, source: Catalog): string | undefined {
   const parts = path.split('.');
