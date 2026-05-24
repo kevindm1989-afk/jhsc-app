@@ -997,6 +997,62 @@ The implementer's task #6 (per ADR-0020) is unblocked on test-writer's side; the
 
 ---
 
+## Accessibility-specialist's post-implementation pass (2026-05-24)
+
+> **Status:** FAIL — BLOCKING findings present. **Merge blocked.** ADR-0020 task 7 must re-run after the implementer addresses the listed findings.
+> **Authoring agent:** accessibility-specialist
+> **Inputs consumed:** ADR-0020 in full (Decisions 1–11 + Designer's pass §A–§I + Threat-modeler's pass §F-101–F-115 + Tech-writer's pass catalog at `apps/web/src/lib/i18n/onboarding.en-CA.json` + Test-writer's pass `state-completeness.test.ts`); design-system §3.1 / §3.2 / §3.5 / §4 Surface D / Surface D.T19 (8 sub-surfaces × 9 states) / Surface G amended / Surface H amended; design-tokens.json `color.{light|dark}.onboarding.*` (25 keys × 2 modes) + 22 new contrast-audit pairs; the implementer's diff `e0f5d8b..4e9d1a0` across `apps/web/src/lib/{lock,onboarding,i18n}/`; the test scaffold + state-completeness test + the axe-check helper at `apps/web/test/_helpers/axe-check.ts`.
+
+### Verdict: FAIL
+
+**Severity counts:** BLOCKING = 7, ADVISORY = 5, NIT = 3 (16 findings total).
+
+### Most consequential findings (full list in the review document)
+
+- **A11Y-T19-5 (BLOCKING)** — the axe-check helper at `apps/web/test/_helpers/axe-check.ts` is a hand-rolled 95-line STUB that checks 3 structural rules (button name, input label, image alt). It does NOT load axe-core; it does NOT enforce WCAG 2.0 AA. Every assertion `r.violations === []` in `onboarding.test.ts:62-64` is passing against this stub. ADR-0020 task 7 acceptance "axeCheck violations === []" is structurally not satisfied. **MUST replace with real axe-core before re-passing.**
+- **A11Y-T19-1 (BLOCKING)** — step-advance handlers in `OnboardingFlow.svelte:141-149,159,190-192,217-218,258-261` mutate `currentStep` but do not move focus to the new step's heading or first interactive element. Keyboard-only users lose their place; SR users hear the polite step-change announcement but their focus is on `<body>`. WCAG 2.4.3.
+- **A11Y-T19-2 (BLOCKING)** — `PanicWipeModal.svelte:108-168` declares `role="dialog"` + `aria-modal="true"` but implements NO focus trap, NO initial-focus shift to the type-back input on open, NO focus restoration on close. Tab escapes to the background. Designer §3.1 + the pre-impl ADVISORY both required this. WCAG 2.1.1 + 2.4.3.
+- **A11Y-T19-7 (BLOCKING)** — components do not bind to the 25-key × 2-mode `color.{mode}.onboarding.*` tokens that Designer's pass authored + contrast-audited. The render is browser-default (white bg, blue links, default button heights). The 22 contrast pairs Designer verified at ≥AA / AAA are not what the user sees. WCAG 1.4.3 cannot be verified against tokens that are not bound.
+- **A11Y-T19-8 (BLOCKING)** — the inverted two-layer focus ring on the panic-overlay (the "single most non-standard a11y artifact in the T19 design" per Designer's §G handoff) is recorded as `data-focus-ring-inner-token="color.light.onboarding.panic_overlay_fg"` on `PanicWipeModal.svelte:121` but no CSS renders it. The standard inner ring at `border.focus` (#16181d) is invisible (1.0:1) on the near-black overlay. WCAG 2.4.7.
+
+### Designer reconciliation
+
+5 of 9 explicit Designer concerns delivered (color-blind icon+text, autocomplete/spellcheck/autocapitalize/autocorrect on D.6 textarea, F-53 destructive_confirm contract, SR step_change interpolation, reduced-motion partial); 1 partial (reduced-motion data-attr set but no CSS uses it); 3 fail (contrast tokens not bound A11Y-T19-7, inverted focus ring A11Y-T19-8, touch-target sizing unverified due to no CSS). Plus 3 implicit standard-modal-pattern items fail (focus trap, focus restore, aria-describedby).
+
+### Screen-reader announcement consumption
+
+**3 of 18** `a11y.onboarding.*` catalog keys are actually consumed in components:
+- `step_change` at `OnboardingFlow.svelte:313`
+- `device_fingerprint_announcement` at `OnboardingFlow.svelte:334`
+- `panic_wipe_in_progress_announcement` at `PanicWipeModal.svelte:124`
+
+The remaining 15 keys exist in catalog AND `copy-keys.ts` closed-allowlist (so the CI key-coverage gate is satisfied) but are not wired at their semantic locations. Filed as A11Y-T19-11 (ADVISORY — visible text covers the surface; SR-only nuance is missing).
+
+### Reduced-motion verdict
+
+PARTIAL — `OnboardingFlow.svelte:323` sets `data-reduced-motion="true"` on the body region when `matchMedia('(prefers-reduced-motion: reduce)').matches`, but no component CSS consumes the attribute. `RecoveryPassphraseScreen.svelte:178-181` is the only file with an actual `@media (prefers-reduced-motion: reduce)` rule. The wizard step-transition CSS does not exist (the chrome has no transition to suppress), so reduced-motion is trivially honoured at the chrome level. Verdict is "trivially honoured at chrome; partial at component level."
+
+### axe-check integration verdict
+
+**STUB.** See A11Y-T19-5 above. This single finding undermines the entire 236/236-test-green claim from an accessibility-coverage standpoint. The full axe-core suite has not been run against any T19 surface.
+
+### Finding location
+
+Full review with all 16 findings (BLOCKING / ADVISORY / NIT), per-state designer reconciliation table, per-key SR consumption audit, and recommended fix sequence at:
+
+`/home/user/agent-os/accessibility-review-t19-post-impl.md`
+
+### Re-pass requirement
+
+ADR-0020 task 7 is **NOT closed.** The implementer must address A11Y-T19-1 through A11Y-T19-9 (the 9 BLOCKING / load-bearing items), then re-submit. The verifier's pass (task 12) MUST NOT close until this accessibility-specialist's pass has been re-run and lands a PASS or PASS-WITH-ADVISORIES verdict.
+
+### Files modified by this pass
+
+- `/home/user/agent-os/accessibility-review-t19-post-impl.md` — new file; full findings report.
+- `/home/user/agent-os/.context/decisions.md` — this Accessibility-specialist's post-implementation pass subsection appended to ADR-0020.
+
+---
+
 ## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore
 
 **Status:** Accepted
