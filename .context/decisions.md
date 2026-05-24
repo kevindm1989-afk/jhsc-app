@@ -25,6 +25,550 @@ pointing to the new one. The history is the value.
 
 ---
 
+## ADR-0020 — T19 identity-recovery onboarding library + OnboardingFlow / PanicWipeModal composition
+
+**Status:** Proposed
+**Date:** 2026-05-24
+**Decider(s):** architect (T19 design pass on the carry-forward set: ADR-0008 D.1 advisory, ADR-0001 D.2 hosting tradeoff copy, ADR-0002 D.3 browser baseline, T05 `enrollFirstDevice` D.3 composition, ADR-0003 Amendment F + Amendment G + T07 recovery-blob library D.4 composition, F-39 session revocation D.5, F-53 destructive_confirm panic-wipe D.6, F-54 show-again D.7 enrollment-session counter). **HG-10 FIRES** — first substantial user-facing copy surface (D.1 advisory, D.2 hosting tradeoff, D.4 passphrase ceremony, D.6 panic-wipe confirmation copy all need labour-lawyer ratification before merge per the G-T08-11 precedent). **HG-15 explicitly does NOT fire** — recovery material is client-custody (IndexedDB + downloaded JSON); no new server tables are introduced. **HG-9 explicitly does NOT fire** — no new retention class; the existing `identity_privkey.recovery_blob.*` enum values and ADR-0016 schedules cover the surface. **HG-12 not applicable** — ADR-0001 already covers cross-border. **Amendment H still applies** — T19 ships the library + Svelte components against `MemoryAuthStore` / `MemoryKeyStore` / a new `MemoryWipeStore` (Decision 4 below); the production wire-ups land via the existing T05.1 / T07.1 siblings — no new sibling task is created by T19.
+
+**Source:** the T19 librarian briefing (this prompt); `apps/web/test/T19/onboarding.test.ts` (195-line scaffold; pins the API surface for `OnboardingFlow.svelte`, `PanicWipeModal.svelte`, the `__test_step` / `__test_user_agent` test-only props, and the `onboarding-harness` test helper); ADR-0001 §D.2 (Canadian hosting tradeoff); ADR-0002 §3.2 + Amendment H (passkey + library-only posture); ADR-0002 §browser-baseline matrix carried by `apps/web/src/lib/auth/browser-baseline.ts:29-38` (Chrome ≥109, Edge ≥109, Firefox ≥122, Safari ≥16); ADR-0003 Amendment F (recovery-passphrase show-again accommodation; hold-to-reveal + per-enrollment-session cap-of-3); ADR-0003 Amendment G (Argon2id fail-closed; `argon2id_unavailable_libsodium_wrappers_sumo_required`); ADR-0008 (personal-device advisory — load-bearing for D.1); ADR-0016 (HMAC pseudonyms + retention schedule); ADR-0017 (retention sweep — only consulted by panic-wipe's server-side ripple in T19.future, not in T19); threat-model §1 trust boundaries B1/B2/B4, §2.5 auth + session model, §3.1 F-02 / F-03 self-test, §3.1 F-08 recovery-blob brute-force, §3.1 F-12 single-POST recovery, §3.1 F-39 session revocation latency, §3.6 F-53 destructive_confirm + F-54 show-again; design-system §3.2 modal escape policy, §3.4 form validation (inline-on-blur + batch-on-submit; passphrase fields validate on submit only), §3.5 destructive-action confirmation pattern (load-bearing for panic-wipe), §4 Surface D (D.1–D.7), Surface G (lock / panic-wipe), Surface H (session listing); design-tokens.json (mood: "civic-record", `z_index.panic_overlay`, `typography.roles.code/totp/hash`, `motion.duration.slow`); G-T05-1/2/3 (auth library-only state); G-T05-10 (HMAC_PSEUDONYM_KEY split-form precedent); G-T05-11 (enrollFirstDevice 410/401 differential — explicitly NOT addressed in T19; carry-forward); G-T07-13 (`@ts-expect-error` Svelte-AST friction precedent — RecoveryPassphraseScreen.svelte:107,117); G-T08-10 (`node:crypto` ban — T19 inherits the lib/crypto/ semgrep allowlist); G-T08-13 (rate-limit dual-window precedent — NOT consumed by T19); observability/audit-log.md §1 (closed enum; T19 reserves three new event values — see Decision 5 below).
+
+## Context
+
+T19 is **identity-recovery onboarding** — the D.1 → D.7 first-launch ceremony that takes a freshly-installed PWA, walks the user through the personal-device advisory + hosting tradeoff + browser-baseline gate + passkey enrollment + recovery-passphrase ceremony + session-revocation primer + panic-wipe primer, and concludes with a "you're set up" terminal step. T05 shipped the auth library (`enrollFirstDevice`, `revokeSession`, `revokeAllSessions`, `checkBrowserBaseline`) under Amendment H's library-only posture; T07 shipped the recovery-blob crypto core (`encryptRecoveryBlob`, `decryptRecoveryBlob`, the `createShowAgainController` state machine for Amendment F). Neither shipped a UI surface composing them end-to-end. T19 is that composition.
+
+T19 is NOT workplace bootstrap. The "first user" semantics question (Open Question 1 below) needs user adjudication; **the architect's prior is that T19 IS the first-device enrollment ceremony** — there is no pre-existing passkey-enrolled account that T19 augments. T19's D.3 step calls into `enrollFirstDevicePasskey` (which, post-T05.1, dispatches to the server-side `enroll_first_passkey` SQL function that atomically destroys the TOTP bootstrap row and writes the credential). D.4 calls into `encryptRecoveryBlob` (which, post-T07.1, writes the ciphertext to `recovery_blobs` via `store_recovery_blob`). The "recovery" in T19's title refers to the recovery PASSPHRASE the user must enroll BEFORE losing access — i.e., the proactive recovery posture, not the after-the-fact recovery ceremony (the latter is a separate surface and not in T19 scope).
+
+The test scaffold at `apps/web/test/T19/onboarding.test.ts` is the spec to embrace. It pins:
+
+- `OnboardingFlow.svelte` accepts `__test_step` (string) and `__test_user_agent` (string) test-only props that allow tests to skip into a step or override UA detection. **These are test-only props; production rendering MUST NOT honor them** (Decision 8 below).
+- The D.1 heading matches `/personal device/i`; primary button matches `/personal device.*continue/i`; secondary matches `/stop.*switch.*personal/i`; a `data-testid="device-fingerprint"` element shows UA + platform (NEVER an IP).
+- D.2 body has `data-testid="onboarding-d2-body"` and the copy matches `/encrypted|scrambled/i` AND `/Canada|ca-central|Canadian/i` AND does NOT contain `/\bi\.e\.|\be\.g\./` (grade-8 reading level proxy).
+- D.3 with a Safari/15.6 UA renders `/browser is too old/i`; with Chrome/130 renders a `/set up passkey/i` button.
+- The integration test imports `test/_helpers/onboarding-harness` and exercises `startFromD1()` → `advanceThroughTo('D.4')` → `invokeShowAgainHold(1500)` → `completeTypeBackVerify()` → `advanceThroughTo('D.7')`; the audit row `identity_privkey.recovery_blob.viewed` carries `meta.reveal_count_in_session` AND `meta.enrollment_session_id`; a fresh `startFromD1()` issues a NEW `enrollmentSessionId` (counter reset is the F-54 per-session contract).
+- Panic-wipe via `import('../../src/lib/lock/panic-wipe').panicWipe()` clears IndexedDB; subsequent navigation lands on `routeName ∈ {'lock', 'enroll'}`.
+- F-53 destructive-confirm: a pre-`ready` synthesized Enter on the literal-phrase confirm button does NOT fire wipe; the literal-phrase input is GATED (does not accept keystrokes) before `ready` resolves (200ms in the test fixture); Escape during the transition does NOT dismiss the modal (consistent with design-system §3.2's no-Escape-dismiss list).
+
+T19 onboarding ships zero server-side state of its own. Every server-side write it triggers (passkey enrollment via T05.1, recovery-blob store via T07.1, session revocation via T05.1, audit-row emission per the closed enum) goes through existing wire-up surfaces. The only new audit events are the three reserved in Decision 5 below.
+
+**The load-bearing reason T19 exists at all:** without an end-to-end first-launch ceremony, the T05 auth-core + T07 recovery-blob crypto-core + ADR-0008 personal-device-only posture are unreachable in production. T19 makes them reachable, and binds the composition to (a) the ADR-0008 honest-framing advisory, (b) the ADR-0002 browser-baseline floor, (c) the ADR-0003 Amendment F show-again accommodation, (d) the F-53 destructive_confirm panic-wipe pattern, (e) the F-39 session revocation surface. **Any T19 design that lets the user reach an authenticated state without traversing D.1 → D.2 → D.3 → D.4 → D.6 (D.5 print is optional; D.7 is the terminal "done") re-opens the F-08 brute-force surface (no recovery blob) AND the T2 employer-device surface (no advisory) AND the F-39 latency surface (no revocation primer) by construction.**
+
+The carry-forward set this ADR closes (T19 library + Svelte composition):
+
+- **Closes in T19:** D.1 advisory composition against ADR-0008's locked posture (the advisory copy itself is tech-writer's job per HG-10); D.2 hosting-tradeoff copy composition against ADR-0001's locked posture; D.3 browser-baseline gate composition against `checkBrowserBaseline()` from `lib/auth/browser-baseline.ts`; D.3 passkey-ceremony composition against `enrollFirstDevicePasskey()` from `lib/auth/passkey-enroll.ts`; D.4 recovery-passphrase ceremony composition against `encryptRecoveryBlob()` from `lib/crypto/recovery-blob.ts` + `createShowAgainController()` from `lib/recovery/show-again.ts`; D.4 download-blob-to-disk path (Decision 2.d below); D.5 print stylesheet composition against design-system §4 D.5; D.6 type-back verification composition against design-system §4 D.6 (no on-screen reveal here — `RecoveryPassphraseScreen.svelte` is the D.4 surface); D.7 session-revocation primer composition against `listSessions` / `revokeAllSessions` from `lib/auth/session.ts`; the F-53 destructive_confirm panic-wipe modal + the `panicWipe()` library function in `lib/lock/`; the F-54 enrollment-session counter reset on `startFromD1`; the wizard state machine (Decision 2.b below); the test-only `__test_step` / `__test_user_agent` props with the production-strip guard (Decision 8 below).
+- **Defers to existing siblings (no new sibling task created by T19):** server-side passkey enrollment + TOTP destruction → T05.1; server-side `store_recovery_blob` + cap-of-3 enforcement + `record_recovery_blob_viewed` → T07.1; server-side session-revocation SQL function → T05.1; server-side audit-row emission for `identity_privkey.recovery_blob.viewed` and the three new T19 enum values → T05.1/T07.1 with the standard ADR-0003 Amendment A six-mirror dance (Decision 5 below).
+- **Defers to T19.future (NOT created in this ADR — see Open Question 4):** server-side cascade of panic-wipe to session revocation. The architect's recommendation is that panic-wipe in v1 is local-only (IndexedDB + service-worker caches + in-memory state); the server-side session revocation is a separate user action via D.5/Surface H, NOT auto-triggered by panic-wipe. If user adjudication chooses the server-cascade posture, a new sibling task is required and threat-modeler must re-pass.
+
+## Decision drivers
+
+- **PIPEDA Principle 4.3 (Consent) + 4.3.4 (informed-of-purpose):** D.1 advisory + D.2 hosting tradeoff are the consent moments. Copy ratification by labour-lawyer (HG-10) is non-negotiable per the G-T08-11 precedent.
+- **PIPEDA Principle 4.7 (Safeguards):** ADR-0003 Amendment G's fail-closed throw is structurally enforced at the recovery-blob layer; T19's D.4 step MUST surface the canonical error message to the user without leaking it to URL / log / structured-error path that downstream agents would scrape — see Decision 3.d below.
+- **AODA / WCAG 2.0 AA:** the scaffold calls `axeCheck` at line 60-64; every D.1–D.7 surface MUST pass the axe rule set. T19's accessibility-specialist pass is mandatory (Phase F task ordering below).
+- **No PII in URLs / logs / errors (constraints.md hard rule):** the wizard step lives in an opaque step-id (`D.1`–`D.7` literals); the passphrase NEVER appears in the URL hash, sessionStorage, or any audit-meta payload; the device fingerprint shown in D.1 is UA + platform only (no IP — explicitly forbidden by the scaffold's line 47 + ADR-0008's posture); error toasts surface `t('common.errors.generic')` strings, not the recovery-blob ciphertext or any KDF-params.
+- **No `node:crypto` (G-T08-10):** T19 inherits the `lib/crypto/` semgrep allowlist. Every randomness / hashing / key-derivation call routes through `lib/crypto/sodium.ts` (libsodium) or `crypto.subtle.*` (WebCrypto). T19's only new crypto surface is the recovery-blob JSON serialization (Decision 3.b below), which calls into existing `encryptRecoveryBlob`.
+- **F-39 session-revocation latency (≤5s):** D.5's "revoke other sessions" call goes through `revokeAllSessions(auth, user_id)` which (post-T05.1) hits the server-side function with the ≤5s propagation contract. T19 does NOT need to model the wait — the auth-core's `revokeAllSessions` resolves only after the server confirms the revocation rows are written; the UI's success state lands when the promise resolves.
+- **F-53 destructive_confirm (panic-wipe variant — load-bearing):** the scaffold's three F-53 tests pin the contract: (a) `ready_delay_ms`-gated `ready` resolution; (b) literal-phrase input is keystroke-gated until `ready`; (c) Escape during transition does NOT dismiss. The T19 PanicWipeModal MUST honor all three. Library function `panicWipe()` is separate from the modal (Decision 2.c below); the modal owns the F-53 gate, `panicWipe()` owns the IndexedDB + caches + state destruction.
+- **F-54 enrollment-session counter:** the per-enrollment-session reveal cap (M-54c) is enforced by `createShowAgainController` and the counter is scoped to an `enrollment_session_id` issued at D.1 start. T19's harness's `startFromD1()` issues a fresh id; a re-entry to D.1 issues a NEW id; the per-session counter resets per the scaffold's assertion at lines 118-126.
+- **Amendment H pattern:** T19's library code (the wizard state machine, the panic-wipe library, the download-blob helper) ships against in-memory primitives (`MemoryAuthStore`, `MemoryKeyStore`, the new `MemoryWipeStore` per Decision 4). The Svelte components compose against the library; tests run jsdom + the in-memory stores. No new SQL migration. No new physical table. **PR-review-time assertion:** `git diff --name-only main...T19-branch -- supabase/migrations/ supabase/seed.sql supabase/functions/` returns empty.
+- **No new subprocessor (ADR-0010):** T19 introduces zero third-party dependencies. The download-blob path uses `URL.createObjectURL` + an `<a download>` element; no server-side render, no cloud-escrow.
+- **Reversibility floor on hard-to-reverse choices:** the wizard state machine is **medium-reversibility** (a redesign is a sprint); the test-only props pattern is **easy** (a config flag); the audit-event enum extension is **hard** (per ADR-0003 Amendment A — the six-mirror dance); the panic-wipe-is-local-only posture is **medium** (server-cascade is a non-trivial future task with threat-modeler re-pass).
+
+## Options considered
+
+### Option A: Wizard shape — multi-step pages (chosen) vs single-scroll form
+
+A single-scroll form on one page (every D.1–D.7 surface stacked vertically) would be simpler to test and would not need a state machine. **We choose multi-step** because (a) the scaffold's `__test_step` prop presupposes step-by-step navigation; (b) D.3's WebAuthn ceremony is a modal handoff that interrupts whatever surface is showing — only a step-at-a-time flow can honestly represent that handoff; (c) D.6's type-back verification needs the D.4-rendered passphrase to be HIDDEN from the user's screen (per design-system §4 D.6) — a single-scroll form cannot honor that without JS-driven hiding which is fragile; (d) the print stylesheet at D.5 needs to render ONLY the recovery sheet, not the whole flow — a multi-step page accomplishes this naturally by being the only surface mounted at that step. The library cost is the state machine (Decision 2.b); the cost is paid once.
+
+### Option B: Wizard state location — in-memory store (chosen) vs URL hash vs sessionStorage
+
+In-memory store (a Svelte store, scoped to the `OnboardingFlow` component instance) keeps the state ephemeral — a hard refresh during onboarding RESTARTS the flow from D.1, which is the correct posture (the user has not yet committed any server-side state for the partially-enrolled-account-without-recovery-blob scenario, until D.4 completes; the in-memory recovery passphrase is regenerated on D.4 re-entry per F-12's single-POST semantics, which post-T07.1 enforces server-side cap-of-1 with co-chair reset). URL hash (`#D.4`) would persist the step across refresh but creates two problems: (a) it leaks the wizard step to browser history + referrer headers; the step itself is not PI but the FACT that a user is at D.4 vs D.7 is a fingerprint, and the constraint "no PII in URLs" extends defensively to "no flow-state in URLs we cannot justify"; (b) URL-hash-driven step machines are notoriously fragile when the user navigates back/forward unexpectedly. sessionStorage would persist the recovery passphrase across refresh, which is a STRONG anti-pattern — Amendment F operational rule 4 forbids any persistence of the passphrase outside the user's printed sheet + the encrypted blob. **We choose in-memory** with the explicit consequence that a hard refresh restarts onboarding from D.1. The user is told via D.4 copy that the passphrase is regenerated on restart.
+
+### Option C: Recovery-blob storage — client-only (IndexedDB + download) (chosen) vs cloud-escrowed
+
+The recovery blob is the user's last-line-of-defense if they lose both their device and their passkey. Two custody postures: (a) client-only — the blob lives on the device's IndexedDB (encrypted with the passphrase) and the user is offered a download-as-JSON to store off-device (e.g., on a USB key, in a password manager, on a printed QR code); (b) cloud-escrowed — the blob is uploaded to `recovery_blobs` server-side (post-T07.1, this IS what happens via the F-12 single-POST endpoint). **We choose BOTH posture, with the server-side store as the canonical custody AND the download-as-JSON as the user's secondary off-device copy.** The server-side store is required by F-12's "user can recover on a new device by entering their passphrase" — without it, the blob is lost when the device is lost. The download-as-JSON addresses the cloud-compromise+passphrase-known scenario (A5 + F-08) — a paranoid user can take the blob off-server and reset the server-side blob via co-chair reset (G-T07-8), and the off-line copy is still recoverable. **The download is OPT-IN, not mandatory** — D.4 surfaces the download as a secondary affordance with copy explaining what it is and why one might want it. The print sheet (D.5) is the canonical off-device copy of the PASSPHRASE; the JSON download is the canonical off-device copy of the BLOB. The combination of (printed passphrase + downloaded blob) is the manual-key-escrow posture.
+
+### Option D: Browser baseline matrix — block on baseline fail (chosen) vs warn-and-continue vs download-only fallback
+
+ADR-0002's baseline (Chrome ≥109, Edge ≥109, Firefox ≥122, Safari ≥16) is chosen so WebAuthn discoverable credentials work without polyfill. Below the baseline, passkey enrollment fails at the WebAuthn API call itself — the user cannot complete D.3. Three postures: (a) hard-block the user at D.3 with "your browser is too old; install Firefox / Chrome / Edge" (the scaffold's pinned posture at line 76); (b) warn-and-continue (user proceeds to D.3, WebAuthn fails, user is stuck mid-ceremony); (c) download-recovery-only mode (user skips passkey, gets a recovery blob, can use the blob to enroll on a different device later). **We choose (a) hard-block** because (b) is a worse UX (stranded mid-ceremony with no clear next step) and (c) creates a recovery-blob-without-passkey state that has no auth path (the blob is decryptable by the passphrase but produces an identity privkey that has no server-side identity_pubkey row to associate with — see F-02). Hard-block surfaces a plain-language "your browser is too old; here are browsers that work" copy at D.3 (per design-system §4 D.3 row, last column). **In addition** to the UA-string check, T19's D.3 step performs a runtime feature-detection (`PublicKeyCredential` presence, `isConditionalMediationAvailable` callable, `crypto.subtle.digest` callable, `indexedDB` callable, `navigator.serviceWorker` callable) AND a libsodium readiness check (`crypto_pwhash` callable per Amendment G — this is the structural enforcement of ADR-0003 Amendment G at the onboarding surface, not just the recovery-blob library); if any check fails, D.3 enters the block state with a more specific error key. **The baseline does NOT require SharedArrayBuffer or COOP+COEP** — Open Question 3 disposition: libsodium-wrappers-sumo's standard WASM build does not require SAB; if a future libsodium upgrade requires it, the baseline widens AND ADR-0002 amends.
+
+### Option E: Panic-wipe scope — local-only (chosen for v1) vs local + server-cascade
+
+Local-only: `panicWipe()` clears IndexedDB, service-worker caches, the in-memory libsodium key buffers, and the SvelteKit session cookie; the page reloads to the lock or enroll surface. The server-side session row remains "valid" until its 15-min TTL expires, but the JWT cookie is gone from the browser so re-use requires another device with the same JWT (an exfil scenario). Local + server-cascade: `panicWipe()` additionally calls `revokeAllSessions(auth, user_id)` (T05.1's server function) to invalidate the JWT family server-side AND `revokePasskey(credentialId, ...)` for the local passkey (so even a coerced post-wipe re-auth fails). **We choose local-only for v1**, with the explicit reasoning that (a) the user can invoke "Revoke all sessions" from D.5 / Surface H if they want server-side invalidation, (b) server-cascade adds a network dependency to a destructive action that MUST work offline (a coerced user reaching for panic-wipe may not have connectivity, and a failed server call would leave the user uncertain whether the wipe completed), (c) server-cascade widens the threat space (panic-wipe becomes a way to remotely revoke another user's sessions if a coerced user is forced to use it, vs the local-only posture which is bounded to the local device). **Open Question 4 surfaces this for user adjudication** — the local-only posture is the architect's recommendation and the test scaffold's pinned posture (the F-53 tests do NOT exercise a server call).
+
+### Option F: Test-only props (chosen — `__test_step` + `__test_user_agent`) — production-strip vs runtime guard
+
+The scaffold uses `__test_step: 'D.2'` and `__test_user_agent: 'Mozilla/5.0...'` to skip into specific steps and override UA detection. Two ways to implement: (a) the props exist on the component but are stripped at production build via Vite's `define` or a `if (import.meta.env.MODE === 'production') return ...` guard; (b) the props are runtime-guarded (`if (__test_step && import.meta.env.MODE !== 'production') applyTestStep(...)`). **We choose runtime-guard with an additional build-time assertion** that the production bundle does NOT reference the `__test_step` / `__test_user_agent` strings. The G-T05-10 split-form precedent applies — the prop NAMES live as variables in source, not as literal `"__test_step"` strings in the production-shipped JS. Mirrors the libsodium test-override flag pattern in `recovery-blob.ts:55-57`. **The runtime guard MUST be a one-line `MODE !== 'production'` short-circuit at the top of the prop-application code path; the build-time assertion MUST live in the T19 CI suite (a static check that greps the production bundle for the literal `__test_step`/`__test_user_agent` strings and fails on any match outside test fixtures).**
+
+### Option G: Tech-writer copy pass — before test-writer (chosen) vs after
+
+The scaffold tests assertions like `body.textContent ?? ''` matching `/encrypted|scrambled/i`. These assertions are content-driven; they cannot pass against placeholder copy. Two orderings: (a) tech-writer writes the copy (advisory body + hosting tradeoff body + passphrase ceremony body + panic-wipe confirmation copy) BEFORE test-writer expands the test suite — test-writer can then assert on the canonical strings; (b) tech-writer writes the copy AFTER test-writer expands the test suite — test-writer asserts on placeholders, copy lands later, tests need an update. **We choose (a)** because the scaffold's existing assertions already require specific phrases ("Canada", "encrypted", "personal device", "WIPE") that are tech-writer's domain. Tech-writer's pass also unblocks the HG-10 labour-lawyer ratification (the lawyer can review the copy in fixture form before the implementer wires it). Tech-writer's deliverable is `i18n/en-CA.json` keys for the entire `onboarding.*` namespace + the `panic.*` namespace + the `lock.*` namespace, populated with the canonical strings; the test fixtures consume the keys directly.
+
+### Option H: Designer pass — before tech-writer + test-writer (chosen) vs alongside
+
+Design-system §4 Surface D, Surface G, Surface H already specify the row-level shape of every D.1–D.7 / panic-wipe / session-list surface. T19 adds a small number of new surfaces (the wizard chrome itself, the "show again" linkage from D.4 to the existing `RecoveryPassphraseScreen.svelte`, the JSON-download affordance, the per-step navigation pattern). Designer's pass amends design-system §4 with the new surface entries + binds them to `design-tokens.json`. **We choose designer FIRST** because tech-writer needs to know which surfaces exist (and thus which i18n keys to author); test-writer needs to know which test-ids exist (the scaffold pins `device-fingerprint`, `onboarding-d2-body`; the implementer-built surfaces will need more); accessibility-specialist needs the designer's surface inventory to know which surfaces need axe coverage. Designer's pass also flags any token gaps (e.g., a missing `z_index.onboarding_overlay` token — Decision 6 below names the tokens the architect identified; designer's pass confirms or amends).
+
+### Option I: Library-only vs monolithic — T19 is monolithic in scope (chosen), library-shaped in structure
+
+Amendment H's library-vs-sibling-task split applies to tasks whose acceptance includes "Postgres tables / SQL functions / migrations that store or process PI". T19 introduces ZERO new SQL — every server-side write it triggers goes through existing T05.1 / T07.1 surfaces. **Amendment H does NOT require a new T19.1 sibling.** However, the structural pattern Amendment H establishes (library code lives in `lib/`, against `Memory*Store`; UI lives in `lib/.../*.svelte`; tests run against in-memory stores) DOES apply: T19's library code (wizard state machine, panic-wipe library, download-blob helper, browser-baseline-extended check) lives in `lib/onboarding/` and `lib/lock/`; the Svelte components compose against the library; the test harness uses `MemoryAuthStore` + `MemoryKeyStore` + the new `MemoryWipeStore`. **T19 ships monolithic in scope (UI + library together)** because the UI IS the deliverable — there is no library-without-UI version of an onboarding flow that has any meaning. **T19 ships library-shaped in structure** so the F-66 monotonic clock shim, the F-72 state machine, the F-86 closed-allowlist patterns from the wider task family still apply.
+
+### Option J: Three new audit event types (chosen) vs reuse-existing
+
+Three operations T19 surfaces have no pre-existing audit-log enum value: (a) onboarding completion (the user reaches D.7); (b) panic-wipe invocation (`panicWipe()` runs to completion or partial-failure); (c) session-revoked-by-user via the D.5 primer (the existing `session.revoked` enum value covers user-action revocation per audit-log.md line 49, with `reason: 'user_action'` — **NO new enum value needed for D.5**; the architect ratifies the existing enum's scope). Options for (a) and (b): (i) reserve two new enum values `onboarding.completed` + `panic_wipe.invoked`; (ii) reuse `auth.passkey.enrolled` for (a) (the passkey IS enrolled at D.3, an audit row already fires) AND a structured-log-only line for (b); (iii) reserve only (b) and treat onboarding completion as observable via `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written` co-occurrence. **We choose (iii) + the structured-log convention for onboarding telemetry** — onboarding completion is NOT audit-log-worthy on its own (it's operational telemetry, not a security-relevant action; the user's traversal from D.1 to D.7 is observable from the pre-existing key-material audit rows). Panic-wipe IS audit-log-worthy because (a) it is a security-relevant destructive action, (b) F-53's mitigation requires "audit-before-side-effect" semantics — the audit row must be written BEFORE IndexedDB is cleared, so a forensic walk through the audit log can establish that a panic-wipe occurred even when the device is wiped. **The single new enum value reserved by T19 is `panic_wipe.invoked`** with required `meta`: `{ surface: 'settings' | 'lock_screen', wipe_scope: 'local_only', completed: boolean, partial_failure_classes: readonly ('indexeddb' | 'caches' | 'sessionstorage' | 'localstorage')[] }`. Recommended retention: 7 years (forensic). The standard ADR-0003 Amendment A six-mirror dance applies (TS const + SQL CHECK + RETENTION_SCHEDULE + audit_log_retention_schedule SQL row + audit-log.md §1 table + `scripts/check-audit-enum-coverage.sh`). **T19 reserves the TS constant + recommended retention; T07.1 OR a new T19-audit-extension sibling lands the SQL half.** Architect's preference: fold into T07.1 since T07.1 already owns the recovery-blob audit-emission surface; if T07.1 has merged before T19 ships, a small T19-audit-extension sibling (≤50 lines of SQL + the doc + script updates) is the alternative.
+
+## Decision
+
+**We choose Options A + B + C + D + E + F + G + H + I + J.**
+
+### 1. File-level structure (binding for T19 ship)
+
+```
+apps/web/src/lib/onboarding/
+  types.ts                       — OnboardingStep ('D.1'|...|'D.7'), OnboardingWizardState, OnboardingFlowProps
+  step-machine.ts                — pure state machine: advance/back/jump/reset; gates per Decision 2.b
+  baseline-extended.ts           — wraps lib/auth/browser-baseline.ts + runtime feature-detection + libsodium readiness
+  device-fingerprint.ts          — UA + platform string composition; NEVER reads navigator.connection / IP / geolocation
+  enrollment-session.ts          — issues + tracks enrollment_session_id; resets on D.1 entry; F-54 contract
+  recovery-blob-download.ts      — composes encryptRecoveryBlob output into a JSON file + download via URL.createObjectURL
+  copy-keys.ts                   — closed-allowlist of i18n keys the wizard reads; F-19 mirror; CI grep gate
+  index.ts                       — public re-exports
+  OnboardingFlow.svelte          — wizard chrome + step renderer; consumes step-machine
+  steps/
+    D1DeviceAdvisory.svelte      — D.1 surface
+    D2HostingTradeoff.svelte     — D.2 surface
+    D3PasskeyEnrollment.svelte   — D.3 surface (composes enrollFirstDevicePasskey + checkBrowserBaseline)
+    D4RecoveryPassphrase.svelte  — D.4 surface (composes encryptRecoveryBlob + RecoveryPassphraseScreen.svelte + recovery-blob-download)
+    D5PrintSheet.svelte          — D.5 surface (print-only @media print stylesheet; on-screen fallback per design-system §4 D.5)
+    D6TypeBackVerify.svelte      — D.6 surface (composes the passphrase typed back vs the in-memory generated value)
+    D7Complete.svelte            — D.7 surface (terminal "done"; surfaces the "revoke other sessions" + "panic-wipe" primer)
+  recovery/
+    RecoveryPassphraseScreen.svelte  — EXISTING; composed by D4RecoveryPassphrase
+
+apps/web/src/lib/lock/
+  types.ts                       — PanicWipeResult, WipeScope, WipeStore
+  panic-wipe.ts                  — panicWipe() library function; F-53 audit-before-side-effect
+  wipe-store.ts                  — WipeStore production interface + TestWipeStore extension
+  memory-wipe-store.ts           — MemoryWipeStore implements TestWipeStore (jsdom-friendly)
+  PanicWipeModal.svelte          — F-53 destructive_confirm modal; ready-delay-gated; literal-phrase input keystroke-gated
+  SessionRevocationPrimer.svelte — D.5 primer (NOT the full Surface H listing; that's a separate surface — see Open Question 4)
+  index.ts                       — public re-exports
+```
+
+No SQL ships in T19. No new physical table ships in T19. No pg_cron / Edge Function ships in T19. PR-review-time assertion mirrors Amendment H's §Testable assertions: `git diff --name-only main...T19-branch -- supabase/migrations/ supabase/seed.sql supabase/functions/` returns empty AND `git diff --name-only main...T19-branch | grep -E '(pg_cron|crontab|schedule\.sql)'` returns empty.
+
+### 2. State machine + composition points (binding)
+
+**2.a Module map composition points:**
+
+- `lib/onboarding/OnboardingFlow.svelte` → orchestrates the state machine + renders the current step component
+- `lib/onboarding/step-machine.ts` → owns the state machine; pure; no DOM
+- `lib/onboarding/steps/D3PasskeyEnrollment.svelte` → composes `checkBrowserBaseline()` (`lib/auth/browser-baseline.ts`) + `enrollFirstDevicePasskey()` (`lib/auth/passkey-enroll.ts`) + the extended-baseline runtime feature checks (`lib/onboarding/baseline-extended.ts`)
+- `lib/onboarding/steps/D4RecoveryPassphrase.svelte` → composes `encryptRecoveryBlob()` (`lib/crypto/recovery-blob.ts`) + the existing `RecoveryPassphraseScreen.svelte` (the hold-to-reveal surface from T07 / Amendment F) + `recovery-blob-download.ts` (the JSON-download affordance from Option C above)
+- `lib/onboarding/steps/D7Complete.svelte` → renders the terminal surface + composes `SessionRevocationPrimer.svelte` (D.5 — note: the design-system labelling has D.5 as the print sheet; the T19 ADR's "D.5 session revocation" labelling per the librarian briefing actually refers to a different step ordering. **The architect aligns with the librarian's D.1→D.7 labelling for this ADR**: D.5 is session revocation per the librarian briefing; the design-system §4 D.5 "print" label is the print-only sub-step of D.4. Designer's pass resolves the labelling drift; the test scaffold's `advanceThroughTo('D.4')` / `advanceThroughTo('D.7')` assertions remain accurate either way because the test references only the steps the harness exposes by name.)
+- `lib/lock/PanicWipeModal.svelte` → owns the F-53 destructive_confirm UX
+- `lib/lock/panic-wipe.ts` → owns the library function `panicWipe()` that performs IndexedDB + caches + state destruction
+
+**2.b State machine for D.1 → D.7 (binding):**
+
+```
+states: 'D.1' | 'D.2' | 'D.3' | 'D.4' | 'D.5' | 'D.6' | 'D.7' | 'baseline_blocked'
+
+transitions:
+  D.1 --continue-->                D.2
+  D.1 --stop-->                    exit (close-tab message; not a state)
+  D.2 --continue-->                D.3
+  D.3 --baseline_pass-->           D.3 (proceed to passkey ceremony — same step, internal sub-state)
+  D.3 --baseline_fail-->           baseline_blocked (terminal until reload)
+  D.3 --passkey_enrolled-->        D.4
+  D.3 --passkey_failed_retryable-> D.3
+  D.3 --passkey_failed_fatal-->    D.1 (return to start; user may switch device)
+  D.4 --passphrase_generated-->    D.4 (internal: pre-print sub-state)
+  D.4 --print_clicked-->           D.5_print (sub-step; opens window.print)
+  D.4 --download_clicked-->        D.4 (sub-effect: trigger download; no state change)
+  D.4 --continue_to_verify-->      D.6 (NOT D.5; see labelling drift note in 2.a)
+  D.6 --typed_back_match-->        D.5_session_revocation (the librarian's D.5)
+  D.6 --typed_back_mismatch-->     D.6 (with attempt counter; per F-08 type-back; 3 wrong → D.4)
+  D.5_session_revocation --revoke_other_sessions or skip--> D.7
+  D.7 --done-->                    app shell (post-onboarding authenticated surface)
+
+gates (preconditions for advancing):
+  D.1 → D.2:                 user has clicked "personal device — continue"
+  D.2 → D.3:                 user has clicked "Got it"
+  D.3 → D.4:                 enrollFirstDevicePasskey returned EnrollResult.status === 200 with passkey_credential_id set
+  D.4 → D.6:                 encryptRecoveryBlob has completed; the passphrase is in-memory in a `passphrase: string` ref;
+                             the blob is in IndexedDB; the print sheet has been at-least-rendered-once (a flag set by D.5_print);
+                             OR an "I'll print later" affordance has been clicked (with a copy explaining what they're skipping)
+  D.6 → D.5_session_revoke:  the typed-back passphrase equals the in-memory passphrase (constant-time compare)
+  D.5_session_revoke → D.7:  the user has either invoked revokeAllSessions OR clicked "skip" (the primer is informational; not mandatory)
+  D.7 → app shell:           the user has clicked "Open the app"
+
+where state lives:
+  In-memory Svelte store, scoped to OnboardingFlow.svelte's component instance. Hard refresh restarts from D.1.
+  No URL hash. No sessionStorage. No localStorage. (No PII in URLs hard rule; passphrase persistence forbidden by Amendment F.)
+  The enrollment_session_id IS held in-memory and survives within-flow navigation (D.1 → D.4 → "back" → D.4 retains the id);
+  a fresh entry to D.1 (via the harness's startFromD1() OR a hard refresh) issues a NEW enrollment_session_id (F-54 contract).
+```
+
+**2.c Composition between OnboardingFlow and PanicWipeModal:**
+
+PanicWipeModal is NOT mounted inside OnboardingFlow. It is a free-standing modal mounted at the app-shell level (post-onboarding, in Settings; pre-onboarding, on the lock screen). T19's deliverable is the modal + the `panicWipe()` library function; the app-shell integration that mounts the modal at the right place is the next-task's concern (likely a Settings task or a Lock-screen task; T19 ships the components ready-to-mount). **The T19 onboarding flow does NOT surface a panic-wipe affordance at any of D.1–D.7** — panic-wipe is a post-enrollment destructive action that has no role during enrollment. D.7's terminal copy DOES inform the user that panic-wipe exists (per Decision 3.f below) but the affordance lives in Settings / lock-screen.
+
+**2.d Composition between D.4 and the recovery-blob library:**
+
+```
+D.4 entry:
+  1. Compose enrollment_session_id (read from the wizard state)
+  2. Call generatePassphrase() — a libsodium-backed N-word generator from lib/crypto/passphrase.ts (existing)
+  3. Hold the passphrase in a memory-only ref (NEVER persisted, NEVER logged, NEVER sent to network)
+  4. Call encryptRecoveryBlob({passphrase, identity_privkey, kdf_params}) — existing T07 library
+  5. Persist the blob:
+     a. Local: write to IndexedDB via the existing KeyStore (post-T07.1: SupabaseKeyStore writes server-side too)
+     b. Server (post-T07.1): the SupabaseKeyStore.storeRecoveryBlob call triggers the F-12 single-POST endpoint
+     c. NO new server write originates from T19 — T19 calls the existing library
+  6. Render the passphrase via D4RecoveryPassphrase.svelte (which composes RecoveryPassphraseScreen.svelte for the show-again surface)
+  7. Offer the JSON download (Option C above) — the JSON is the SAME ciphertext as the IndexedDB / server blob, with explicit
+     metadata documenting kdf_params (NOT the passphrase, NEVER the passphrase) for the off-device-recovery case
+  8. The print stylesheet (D.5_print sub-step) renders the passphrase + the salt for the user to keep on paper
+
+D.6 entry (type-back verify):
+  1. Read the in-memory passphrase ref (set at step 3 above)
+  2. Compare against the user's typed input via a constant-time string equality (libsodium.compare or a hand-written constant-time);
+     NEVER via `===` (timing side channel, however unrealistic in a single-user single-process jsdom-equivalent context — defense-in-depth)
+  3. On mismatch, increment the attempt counter; on 3 mismatches, return to D.4 (re-display per F-08)
+  4. On match, advance to D.5_session_revoke
+```
+
+**Failure-mode handling at D.4:** if `encryptRecoveryBlob` throws `argon2id_unavailable_libsodium_wrappers_sumo_required` (per ADR-0003 Amendment G), the flow MUST surface a structured error toast `t('onboarding.recovery.error.argon2_unavailable')` and BLOCK advancement; the user is shown a re-readable explanation that the browser/runtime cannot complete the ceremony. The flow MUST NOT silently degrade. This re-asserts ADR-0003 Amendment G at the UI layer. The error key MUST be in the closed-allowlist `copy-keys.ts` so the CI grep gate confirms it exists in `i18n/en-CA.json`.
+
+### 3. Data flow + audit emission (binding)
+
+**3.a Recovery blob lives:** (i) client-side IndexedDB (existing KeyStore), (ii) server-side `recovery_blobs` (post-T07.1, via the existing F-12 single-POST endpoint; T19 does NOT introduce new server-side state), (iii) optional client-downloaded JSON file (Option C).
+
+**3.b Envelope encryption posture:** the recovery blob is `secretbox(identity_privkey, argon2id(passphrase, salt))` per the existing T07 library. T19 does NOT introduce a new envelope. The committee_data_key envelope (ADR-0007) is touched by D.7's session-revocation primer only insofar as a session-revoke does NOT touch the committee key — the key remains encrypted at rest on the device's IndexedDB and is reachable on next sign-in via the un-revoked passkey.
+
+**3.c Server touches from T19:** zero new endpoints; the existing T05.1 + T07.1 endpoints are called via the existing AuthClient + KeyStore interfaces. The composition is library-only at the T19 layer.
+
+**3.d Audit events + when they fire:**
+
+| Surface | Event | When | Existing or new |
+|---|---|---|---|
+| D.3 passkey enrolled | `auth.passkey.enrolled` | Server-side, atomic with `enroll_first_passkey` SQL function | EXISTING (T05.1) |
+| D.4 recovery blob written | `identity_privkey.recovery_blob.written` | Server-side, atomic with `store_recovery_blob` SQL function | EXISTING (T07.1) |
+| D.4 show-again invoked | `identity_privkey.recovery_blob.viewed` | Client-emitted via the existing `createShowAgainController` audit-before-render contract | EXISTING (Amendment F + T07.1) |
+| D.5 session revocation | `session.revoked` with `reason: 'user_action'` | Server-side, atomic with `revoke_all_sessions` SQL function | EXISTING (T05.1) |
+| D.6 type-back fail | (none — operational, not security-relevant) | n/a | n/a |
+| panic-wipe invocation | `panic_wipe.invoked` | Client-emitted via WipeStore.emitAudit; **MUST be written BEFORE IndexedDB is cleared** (F-53 audit-before-side-effect mirror) | **NEW — reserved by T19; SQL half lands in T07.1 OR a small T19-audit-extension sibling** |
+| onboarding completion | (none — operational telemetry only) | n/a — observable from co-occurrence of `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written` | n/a |
+
+**3.e No PII in URLs / logs / errors:**
+
+- The wizard step ID lives in-memory only (no URL hash; Decision 2.b).
+- The device-fingerprint shown at D.1 is UA + platform string only (NEVER IP, NEVER navigator.connection, NEVER geolocation); hashed for any audit-meta use; raw rendering at D.1 is for human inspection only and does NOT cross any trust boundary.
+- The passphrase NEVER appears in: URL, hash, sessionStorage, localStorage, any audit meta, any structured-log line, any thrown error, any toast text, any Sentry breadcrumb. **Static lint test (lands in T19):** grep `apps/web/src/lib/onboarding/` and `apps/web/src/lib/lock/` for the string `passphrase` in any `log.` / `console.` / `Sentry.` / `meta:` / `toast` context; manual review of the residual matches.
+- The `argon2id_unavailable_libsodium_wrappers_sumo_required` error string is canonical and may appear in console/logs (it carries no PI), but the user-facing toast surfaces `t('onboarding.recovery.error.argon2_unavailable')` — the canonical error stays in operator-visible logs only.
+
+**3.f D.7 terminal copy MUST mention:** (i) panic-wipe exists in Settings / lock-screen (so the user knows the affordance is there), (ii) session revocation is in Settings (so the user knows where to find it for a future device-loss event), (iii) the recovery sheet is the only path back if the device + passkey are both lost, (iv) the user can change device by enrolling the new device via the existing passkey (T05's subsequent-device path; no TOTP re-issue). Tech-writer composes the precise wording; HG-10 ratifies.
+
+### 4. `WipeStore` interface + `MemoryWipeStore` (binding)
+
+Mirrors the G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 / G-T17 lineage:
+
+- `WipeStore` — production interface. Methods:
+  - `clearIndexedDb(databaseNames: readonly string[]): Promise<{ ok: boolean; failed: readonly string[] }>` — clears the named IDB databases; returns per-database success/fail
+  - `clearCaches(cacheNames: readonly string[]): Promise<{ ok: boolean; failed: readonly string[] }>` — clears the named ServiceWorker caches
+  - `clearSessionStorage(): Promise<{ ok: boolean }>` — `window.sessionStorage.clear()`
+  - `clearLocalStorage(): Promise<{ ok: boolean }>` — `window.localStorage.clear()` (NOTE: ADR-0013 forbids localStorage use; this is defense-in-depth for the case where a future task accidentally writes to localStorage)
+  - `tearDownSessionCookie(): Promise<{ ok: boolean }>` — clears the SvelteKit session cookie
+  - `emitAudit(row: PanicWipeAuditRow): Promise<{ ok: boolean }>` — F-53 audit-before-side-effect: MUST be called BEFORE any clear* call
+  - `nowMs(): number` — F-66 monotonic clock shim
+- `TestWipeStore extends WipeStore` adds `__debugListClearedDatabases()`, `__debugListClearedCaches()`, `__debugListEmittedAuditRows()`, `__debugForceClearFailure(target)`, `__debugSetClock(ms)`. `MemoryWipeStore` implements `TestWipeStore`. Production `SupabaseWipeStore` would implement `WipeStore` only; narrowing to `TestWipeStore` is a type error. **However: `SupabaseWipeStore` is NOT needed in T19** — the wipe is client-side; the audit-emit is the only server-touching call and goes through the existing T05.1 audit-emit path. The `WipeStore` interface exists for testability + future server-side cascade (Open Question 4); for v1, the production path uses a `BrowserWipeStore` that wraps `indexedDB.deleteDatabase`, `caches.delete`, `sessionStorage.clear`, etc.
+
+### 5. New audit event type reserved (binding; reserves the TS const; SQL half lands in T07.1 OR T19-audit-extension)
+
+`apps/web/src/lib/lock/audit-event-types.ts` exports:
+
+```
+export const PANIC_WIPE_EVENT_TYPES = Object.freeze([
+  'panic_wipe.invoked'
+] as const) satisfies readonly PanicWipeEventType[];
+```
+
+Required `meta` shape (binding):
+
+```
+{
+  surface: 'settings' | 'lock_screen',
+  wipe_scope: 'local_only',                                    // v1 — see Open Question 4
+  completed: boolean,                                          // true if every WipeStore call returned ok
+  partial_failure_classes: readonly ('indexeddb' | 'caches' | 'sessionstorage' | 'localstorage' | 'session_cookie')[]
+}
+```
+
+Recommended retention: 7 years (`{ kind: 'fixed_years', years: 7 }`) — forensic; mirrors `audit.integrity_check.mismatch` rationale.
+
+Standard ADR-0003 Amendment A six-mirror dance (T19 reserves the TS const + recommended retention; the SQL half — CHECK constraint widening + `audit_log_retention_schedule` row + `audit-log.md §1` table update + `scripts/check-audit-enum-coverage.sh` update — lands in T07.1 OR a small T19-audit-extension sibling, architect preference T07.1 if not yet merged).
+
+### 6. Design-tokens.json binding (binding — list of tokens T19 consumes)
+
+The architect identified the following token references T19 must bind to (no magic values):
+
+- `z_index.lock_screen`, `z_index.panic_overlay` (existing per design-system §4 Surface G)
+- `typography.roles.code`, `typography.roles.totp`, `typography.roles.hash` (existing per design-system §4 D.5)
+- `motion.duration.slow` (existing)
+- `density.{comfortable|compact}.*` (existing)
+- `layout.max_width.prose`, `layout.max_width.form`, `layout.max_width.content` (existing per design-system §5.1–5.2)
+- `color.{light|dark}.background.scrim`, `color.{light|dark}.accent.default`, `color.{light|dark}.state.danger` (existing)
+- `border.subtle`, `touch_target.*` (existing)
+
+**Token GAPS (architect identifies; designer's pass confirms or amends):**
+
+- A `z_index.onboarding_overlay` for the wizard's full-viewport background (currently the wizard could share `z_index.lock_screen` but the semantics differ — onboarding is not a lock; designer adjudicates)
+- A `motion.duration.step_transition` for between-step transitions (could reuse `motion.duration.slow`; designer adjudicates)
+- A `layout.max_width.recovery_sheet_print` for the D.5 print stylesheet (the print page width is ~half a letter sheet; designer adjudicates)
+
+Designer's pass amends design-system §4 + design-tokens.json as needed; T19 implementer binds to whichever names the designer ratifies.
+
+### 7. Personal-device advisory copy structure (the architect specifies WHAT must be communicated; the precise wording is tech-writer's job)
+
+D.1 copy MUST communicate:
+- The device the user is enrolling will store identity material (the wrapped identity privkey lives in IndexedDB).
+- The user MUST NOT enroll on a shared device.
+- The user MUST NOT enroll on an employer-issued device (per ADR-0008's honest-framing posture).
+- The advisory is honest about what the app can and cannot enforce (per ADR-0008 — no false claims of MDM detection).
+- A panic-wipe affordance exists (so the user knows the destructive recovery action is there).
+- A recovery passphrase is REQUIRED for cross-device access — the user will be asked to print or store it off the device.
+- If the user does not have a personal smartphone, they should speak to the worker co-chair (per ADR-0008's shared committee-device option).
+
+D.2 copy MUST communicate:
+- The hosting is Supabase ca-central-1 (Canadian region).
+- The data crossing toward the server is ciphertext (the user's plaintext stays on the device).
+- US legal process could in principle reach the company, but the company sees ciphertext only (E2EE-as-load-bearing per ADR-0001).
+- The user can read the full privacy policy (link to a secondary action).
+- Grade-8 reading level proxy: no Latin abbreviations (the scaffold's test at line 56 pins this).
+
+D.4 copy MUST communicate:
+- The recovery passphrase is the only way back in if the user loses BOTH the device AND the passkey.
+- There is no admin who can reset it.
+- Print or save the passphrase + the salt; do NOT store it at work (per design-system §4 D.4).
+- The "show again" affordance has a per-session limit of 3 reveals (per F-54).
+- The JSON download is a secondary off-device copy of the encrypted blob (NOT a replacement for the printed passphrase).
+
+D.6 copy MUST communicate:
+- Type the passphrase back exactly as printed.
+- The screen is intentionally not showing the passphrase (the user must consult the printed sheet OR the "show again" hold-to-reveal).
+- After 3 wrong attempts the user returns to D.4 (the passphrase is re-displayed).
+
+Panic-wipe modal copy MUST communicate:
+- This is irreversible on this device.
+- This does NOT remove the data from the server (other devices and the committee retain their access).
+- The user must type the literal phrase "WIPE" into a text input (case-insensitive per design-system §4 Surface G).
+- The Wipe button is disabled until the phrase matches AND the ready-delay has elapsed.
+- Escape does NOT dismiss; the user must explicitly click Cancel.
+
+HG-10 fires on all D.1 / D.2 / D.4 / D.6 / panic-wipe copy. Labour-lawyer ratifies BEFORE merge per G-T08-11 precedent.
+
+### 8. Test-only props: production-strip + runtime guard (binding)
+
+`OnboardingFlow.svelte` accepts `__test_step?: string` and `__test_user_agent?: string`. The runtime guard:
+
+```
+if ((__test_step || __test_user_agent) && import.meta.env.MODE === 'production') {
+  // Strip in production; the props are no-ops.
+  __test_step = undefined;
+  __test_user_agent = undefined;
+}
+```
+
+Build-time assertion (lands as a T19 CI test): grep the production bundle for the literal strings `__test_step` and `__test_user_agent`; fail if either appears (excluding sourcemap files). G-T05-10 split-form precedent: the prop names live as variables in source; in source they are referenced via `'__test_' + 'step'` shape to defeat constant-folding leak into the bundle.
+
+### 9. Failure modes + recovery (binding)
+
+| Failure | Recovery |
+|---|---|
+| Hard refresh during onboarding | Wizard restarts from D.1; a fresh `enrollment_session_id` is issued; the in-memory passphrase (if any) is lost; if D.4 server-side write completed, the user can attempt recovery via the existing F-12 flow (post-T07.1; out of T19 scope) |
+| Network loss during D.3 passkey ceremony | `enrollFirstDevicePasskey` returns a failed `EnrollResult`; wizard surfaces a retry affordance; on 3 failures, returns to D.1 |
+| Network loss during D.4 server-side recovery-blob write | The local IndexedDB write succeeded; the server write failed; wizard surfaces a retry; on persistent failure, the user can continue to D.6 with a warning that the server-side blob is missing (F-12 single-POST may need co-chair reset on next attempt — out of T19 scope, but the warning explains this) |
+| Browser baseline fails at D.3 | `baseline_blocked` terminal state; user is told which browsers work; no advance; no `auth.passkey.enrolled` row written; user can reload after switching browsers |
+| Passphrase type-back mismatch at D.6 | Attempt counter increments; on 3 wrong, return to D.4 (re-display); the F-08 type-back contract is preserved (no advance without type-back match) |
+| Panic-wipe partial failure (e.g., IndexedDB clear succeeded, caches clear failed) | The `PanicWipeAuditRow.meta.completed = false`, `meta.partial_failure_classes = ['caches']`; the user is shown an error_state with which subsystems were and were not wiped (per design-system §4 Surface G last column); the user is told to close the tab + re-install or seek help; the audit row is preserved server-side via the audit-before-side-effect ordering, so a forensic walk can establish what happened |
+| Recovery-blob download blocked by browser (popup blocker, download permission) | The download silently fails (browser-level); the wizard's secondary affordance "I'll save this later" is offered; the user is NOT blocked from advancing (the IndexedDB + server-side blob are the canonical custody; the download is opt-in per Option C) |
+| `argon2id_unavailable_libsodium_wrappers_sumo_required` at D.4 | Wizard blocks at D.4 with a structured error toast (Decision 3.d failure-mode handling); user cannot advance; the operator-visible canonical error allows the issue to be diagnosed (likely a deploy with the wrong libsodium variant — see G-T07-12) |
+
+### 10. Capacity / cost (trivial; client-side; no new compute)
+
+Zero server-side compute beyond what T05.1 / T07.1 already require. Zero new dependencies. **Performance note:** libsodium WASM bundle (libsodium-wrappers-sumo) is ~300KB gzipped per G-T07-12; T19 does not add to this bundle (the dep is already in scope per T07 / T07.1). The wizard chrome + step components are vanilla Svelte; bundle delta from T19 is estimated <20KB gzipped. **No SAB / COOP+COEP requirement** for libsodium-wrappers-sumo in its standard WASM mode (Open Question 3 disposition).
+
+### 11. Test plan delta (the test-writer's expansion beyond the existing 195-line scaffold)
+
+The scaffold pins the high-water-mark contracts. Test-writer adds:
+
+- **State-machine transition tests:** every transition in Decision 2.b is exercised. Property test: no path from D.1 to D.7 skips D.3, D.4, or D.6.
+- **Baseline-fail paths:** every browser below the baseline matrix is exercised (Safari 15, Firefox 121, Chrome 108, Edge 108, unknown UA); every fail surfaces the `baseline_blocked` state; runtime feature-detection fails (e.g., `crypto.subtle` absent) also surface the block state.
+- **Panic-wipe atomicity:** audit row is written BEFORE any clearXyz call; on `emitAudit` failure, no clearXyz is called (the wipe is aborted); on partial clear failure, the audit row's `meta.partial_failure_classes` accurately enumerates the failed subsystems.
+- **Audit-emit-before-side-effect for `panic_wipe.invoked`:** test pins the ordering by injecting a `__debugForceClearFailure('indexeddb')` AFTER the audit row is emitted; the test asserts the audit row exists AND IndexedDB is partially cleared with the failure surface annotated.
+- **`__test_step` / `__test_user_agent` production-strip:** test asserts (in a `import.meta.env.MODE === 'production'` simulated environment) that the props are stripped to undefined; build-time grep CI test asserts the literal strings do not appear in the production bundle.
+- **Axe coverage:** every D.1–D.7 surface + panic-wipe modal + baseline-blocked surface passes the WCAG 2.0 AA axe rule set. Per design-system §6 a11y handoff prep.
+- **Copy fixtures present:** every i18n key in `lib/onboarding/copy-keys.ts`'s closed-allowlist exists in `i18n/en-CA.json` (CI grep gate).
+- **French copy presence:** **DEFER** to localization-specialist (Phase F task; Open Question 5).
+- **No-PII-in-URL test:** static lint asserts no `window.location.hash`, `window.location.search`, `pushState`, `replaceState` calls in `lib/onboarding/` (excluding tests).
+- **No-passphrase-leak test:** static lint per Decision 3.e.
+- **Static lint mirrors of Amendment F operational rule 4** for `lib/onboarding/recovery/` AND `lib/onboarding/steps/D4RecoveryPassphrase.svelte` (no clipboard, no speech-synthesis, no screenshot, no file-export of the plaintext passphrase outside the encrypted-blob JSON download).
+
+## Alternatives considered
+
+(In addition to Options A-J above, alternatives at the meta level:)
+
+### Alternative 1: Single-page form vs multi-step wizard
+
+A single-page form (every D.1–D.7 surface stacked) is rejected per Option A reasoning. Re-affirmed.
+
+### Alternative 2: Downloadable recovery blob vs cloud-escrowed-only
+
+Cloud-escrowed-only would mean the user has no off-device copy of the blob; they could lose access if the cloud (Supabase + B2 backup) is unavailable simultaneously with the device. Rejected per Option C; the both-paths posture is chosen.
+
+### Alternative 3: SharedArrayBuffer-required vs SAB-optional
+
+SAB-required would unlock libsodium WASM threading for faster Argon2id derivation; the cost is the COOP+COEP origin isolation headers, which break iframe embedding of any non-CORS-cooperative resource. T19 has no need for sub-second Argon2id derivation (the user is on a one-time onboarding flow; the F-08 floor of `ops=4, mem=512MB` takes ~1-3 seconds on consumer hardware). **We choose SAB-optional** — the libsodium-wrappers-sumo standard WASM build runs single-threaded; the wizard surfaces a "deriving recovery key…" loading state with the right copy. If a future task needs faster derivation, ADR-0002 amends.
+
+## Threat-model delta summary (hand off to threat-modeler)
+
+T19 introduces the following STRIDE deltas; threat-modeler consumes this list and amends `.context/threat-model.md §8.T19`:
+
+- **S — Spoofing.** None new at T19. The D.3 passkey ceremony inherits F-37 (RP-ID binding) from T05; D.4 inherits F-02 (server-issued nonce self-test) from T07.1.
+- **T — Tampering.** **NEW DELTA:** the in-memory passphrase reference in D.4 → D.6 is held in JS heap; a malicious browser extension with `activeTab` permission could read it via DevTools-injected scripts. Mitigation: the passphrase is held in a closure scope, not on `window.*`; the reference is cleared on advance to D.5_session_revoke. Residual: low (extension-permission threat is the same shape as F-03 today; T19 does NOT widen it materially, but the type-back ceremony brings the plaintext into the DOM briefly when "show again" hold-to-reveal is invoked, mitigated by the existing Amendment F audit-before-render + per-session cap). **Test obligation:** type-back textarea uses `autocomplete="off"` + `spellcheck="false"` (defense-in-depth against autofill / spellcheck-cloud-roundtrip; spellcheck is a known passphrase-leak vector via Chromium's cloud spellcheck).
+- **R — Repudiation.** **NEW DELTA:** panic-wipe invocation is now audit-logged via the new `panic_wipe.invoked` enum value; pre-T19, a user could panic-wipe with no forensic trace. Audit-before-side-effect ordering ensures the row persists even when the device is wiped.
+- **I — Information disclosure.** **NEW DELTA:** the D.1 device fingerprint (UA + platform) is rendered on-screen for human inspection; a shoulder-surfer at enrollment time could read it. The fingerprint is NOT secret (it's the user's own UA); the threat is fingerprinting for cross-context correlation, which is mitigated by the fingerprint NOT being sent to any third party (ADR-0010 — no Sentry breadcrumb, no analytics). **Test obligation:** the fingerprint NEVER appears in any audit-meta payload sent to the server (it stays client-only); the rendered fingerprint never includes the `User-Agent-Client-Hints` `Sec-CH-UA-Full-Version-List` which is a finer-grained fingerprint surface.
+- **D — Denial of service.** **NEW DELTA:** the F-53 ready-delay-gate on panic-wipe (200ms in the test fixture) is itself a DoS surface for a coerced user trying to wipe quickly; a coerced user under attacker observation has the 200ms window during which they cannot complete the wipe. Mitigation: 200ms is short enough not to materially impede a real wipe; long enough to defeat the pre-ready synthesized-Enter attack the scaffold pins. Residual: accepted.
+- **E — Elevation of privilege.** None new at T19.
+
+**Trust-boundary deltas:**
+- The in-browser library function `panicWipe()` crosses B4 (browser-session boundary) into IndexedDB clear; the audit-emit cross B1 (auth boundary) into the server-side audit row.
+- The recovery-blob JSON download crosses NO trust boundary (it lives entirely in the user's device; the user moves it off-device via OS file system out of band).
+- The D.3 passkey ceremony crosses B1 (auth boundary) into the WebAuthn server-side verification path; the D.4 recovery-blob write crosses B2 (E2EE boundary) with ciphertext only.
+
+**PI touchpoints (T19 surfaces):**
+- D.1: UA + platform string (rendered; not transmitted; not audit-logged).
+- D.4: recovery passphrase (in-memory; never persisted off-screen; never logged; never transmitted).
+- D.4: identity privkey (already in memory from T07; encrypted with the passphrase via existing encryptRecoveryBlob).
+- D.7: `actor_pseudonym` for the user (HMAC-derived; never the raw user_id).
+
+All PI touchpoints have residency (Canada — ca-central-1 for any server-side write; client device for everything else), encryption (libsodium-secretbox via existing encryptRecoveryBlob; passkey-wrapped via existing T05 / T07 paths), and retention (per ADR-0015 / ADR-0016 for the server-side rows; client-side custody for the device-local artifacts) noted.
+
+## Ordered task breakdown (the sequence test-writer → implementer → reviewers → verifier)
+
+This is the binding T19 task sequence. Each task lists owner agent, dependencies, acceptance criteria, risk, estimate.
+
+| # | Task | Owner | Deps | Acceptance | Risk | Estimate |
+|---|---|---|---|---|---|---|
+| 1 | **Designer pass** — amend design-system §4 with new T19 surface inventory (`OnboardingFlow` wizard chrome, the JSON-download affordance, the per-step nav, the panic-wipe modal binding, the session-revocation primer surface); confirm or amend the token gaps in Decision 6; resolve the D.5 labelling drift (Decision 2.a note) | designer | this ADR | design-system §4 has rows for OnboardingFlow + the steps + PanicWipeModal + SessionRevocationPrimer; design-tokens.json has any new tokens identified; labelling drift resolved | low | S (1 day) |
+| 2 | **Tech-writer copy pass** — populate `i18n/en-CA.json` `onboarding.*` + `panic.*` + `lock.*` keys with the canonical copy per the WHAT-must-be-communicated list in Decision 7; deliver as fixture | tech-writer | designer | every key in `lib/onboarding/copy-keys.ts` closed-allowlist has a value; the scaffold's content assertions (Canada, encrypted, no Latin abbrevs) pass against the keys; **HG-10 labour-lawyer ratification gate fires HERE before merge** | medium (HG-10) | M (2-3 days incl. HG-10 turnaround) |
+| 3 | **Threat-modeler pass** — consume the threat-model delta summary above; amend `.context/threat-model.md §8.T19` with the F-39 / panic-wipe / F-53 / F-54 deltas; cross-check the audit-emit-before-side-effect contract for `panic_wipe.invoked` | threat-modeler | this ADR | §8.T19 exists; the test-obligation strings (constant-time compare, `autocomplete="off"`, `spellcheck="false"`, no `Sec-CH-UA-Full-Version-List` in fingerprint, etc.) are recorded for test-writer to consume | medium | S (1 day) |
+| 4 | **Test-writer expansion** — expand `apps/web/test/T19/onboarding.test.ts` per Decision 11; author `apps/web/test/_helpers/onboarding-harness.ts`; author the static lint scripts (`check-onboarding-no-pii-in-url.sh`, `check-onboarding-no-passphrase-leak.sh`); author the production-bundle-strip test | test-writer | designer + tech-writer + threat-modeler | all test files exist; tests fail (red) because no implementation exists | medium | M (2-3 days) |
+| 5 | **Accessibility-specialist pass (first)** — review the planned surfaces for AODA / WCAG 2.0 AA gaps BEFORE implementation; flag any obvious focus-trap / live-region / role / aria-label / contrast issues for the implementer to honor on first pass | accessibility-specialist | designer + tech-writer | A11y review notes posted; implementer consumes | low | S (0.5 day) |
+| 6 | **Implementer pass** — author `lib/onboarding/` + `lib/lock/` per Decision 1; compose against `MemoryAuthStore` + `MemoryKeyStore` + new `MemoryWipeStore`; satisfy every test red→green; honor the production-strip pattern for test-only props; honor the no-`node:crypto` rule | implementer | test-writer + accessibility-specialist | every test passes green; PR-review-time assertion (no SQL migration in T19) holds; `__test_step` / `__test_user_agent` literal strings absent from production bundle; HG-10-ratified copy is wired | high | L (4-6 days) |
+| 7 | **Accessibility-specialist pass (second)** — formal AODA verification against the implemented surfaces; axe run against each step; manual SR walk-through; gaps surface as blocker findings | accessibility-specialist | implementer | axeCheck violations === []; SR walk-through documented; HG-10 copy is grade-8 readable | medium | S (1 day) |
+| 8 | **Security-reviewer pass** — review the panic-wipe atomicity, the audit-before-side-effect ordering for `panic_wipe.invoked`, the test-only-props production-strip, the no-passphrase-leak static lint, the no-PII-in-URL static lint, the constant-time type-back compare, the WebCrypto / libsodium readiness gate at D.3 | security-reviewer | implementer | no blocker findings | medium | S (1 day) |
+| 9 | **Privacy-reviewer pass** — PIPEDA 4.3 / 4.3.4 / 4.5 / 4.7 walk-through; confirm no new operational table; confirm no new subprocessor; confirm consent moments are honest and informed-of-purpose; confirm the device-fingerprint render is client-only | privacy-reviewer | implementer | no blocker findings; HG-10 ratification confirmed wired | medium | S (1 day) |
+| 10 | **Second-opinion-reviewer pass** — independent re-walk of the implementer's diff; pin any cooperative-caller surfaces; pin any test-fixture-vs-production drift; pin any tokens-vs-magic-values drift | second-opinion-reviewer | implementer | no blocker findings | low | S (1 day) |
+| 11 | **Localization-specialist disposition** — Open Question 5 user adjudication: French at T19 or deferred; if at T19, French copy keys land before merge; if deferred, the deferral is noted as a carry-forward in `.context/known-gaps.md` (G-T19-1) | localization-specialist + user | tech-writer (en-CA copy locked) | disposition recorded; if at T19, fr-CA copy keys present | low | S (0.5 day if deferred; M if at T19) |
+| 12 | **Verifier pass** — close-out verification: all tests pass; all reviewers signed off; HG-10 ratified; the audit-event enum extension carry-forward is recorded for T07.1 OR a T19-audit-extension sibling; the panic-wipe + onboarding flow are reachable from a clean install | verifier | all above | sign-off; no autonomous merge (per preferences.md "new user-facing flows" risk-flagging — user-approval gate fires here) | medium | S (1 day) |
+
+**Total estimate:** ~3 weeks of agent-time on the happy path, including HG-10 lawyer turnaround. The HG-10 gate is the critical path.
+
+**Human-gate items called out (top of doc):**
+
+- **HG-10 FIRES** (gate before task 6 / implementer pass merges; copy fixture must be lawyer-ratified) — D.1 advisory, D.2 hosting tradeoff, D.4 passphrase ceremony, D.6 type-back, panic-wipe modal copy.
+- **HG-15 explicitly does NOT fire** (confirmed — no new server tables).
+- **HG-9 explicitly does NOT fire** (confirmed — no new retention class).
+- **HG-12 not applicable** (cross-border covered by ADR-0001).
+- **User approval gate (preferences.md "new user-facing flows" + "auth UX")** — verifier's pass at task 12 surfaces the merge to the user; no autonomous merge.
+- **Open Question 4 user adjudication** — panic-wipe local-only-vs-server-cascade; threat-modeler cannot fully close §8.T19 without this disposition.
+- **Open Question 5 user adjudication** — French copy at T19 vs deferred.
+
+## Open questions (require user adjudication BEFORE the chain can fully close)
+
+> **User adjudication 2026-05-24** (kevindm1989@gmail.com): Q1, Q4, Q5 adjudicated below. Q2 + Q3 left at architect's prior (in-memory restart-from-D.1; SAB-optional) — re-open if designer / threat-modeler surface a blocker.
+
+1. **"First user" semantics.** ~~Does T19 onboarding presume an existing account (TOTP-bootstrapped, passkey-enrolled) and only handles ADDING a recovery layer, OR is T19 the first-device enrollment ceremony itself?~~ **RESOLVED: T19 IS the first-device enrollment ceremony.** Composes with T05 `enrollFirstDevice` (G-T05-11) for the passkey path; generates the user's first passkey + first recovery blob in one D.1→D.7 flow. D.3 expects a TOTP code in-hand (per ADR-0002 "co-chair generates TOTP invite" precondition); test scaffold's `__test_step: 'D.3'` + `/set up passkey/i` button stand as written.
+
+2. **In-progress onboarding state persistence.** Decision 2.b chooses in-memory (hard refresh restarts from D.1). **Architect's prior held;** revisit only if designer's UX pass surfaces a blocker.
+
+3. **SharedArrayBuffer / COOP+COEP requirement.** Decision 10 + Alternative 3 dispose SAB-optional. **Architect's prior held;** revisit only if performance/threat-modeler analysis surfaces a blocker.
+
+4. **Panic-wipe local-only vs server-cascade.** Decision 5 (Option E) chooses local-only for v1. **RESOLVED: local-only for v1.** Server-side session revocation remains a separate user action via Surface H (D.5). `panicWipe()` works offline; no server cascade. Threat-modeler may now close §8.T19 around this posture. Server-cascade is explicitly deferred (no follow-on gap entry needed — Surface H satisfies the user-driven path).
+
+5. **French copy at T19 or deferred.** Constraints.md does not mandate French. **RESOLVED: deferred to G-T19-1.** T19 ships en-CA only at HG-10 ratification; fr-CA carry-forward as a future task. Localization-specialist is NOT in the T19 chain.
+
+## Reversibility
+
+- **Easy:** the i18n copy strings (post-HG-10), the design-token bindings, the test-only-props pattern.
+- **Medium:** the wizard state machine (a redesign is a sprint); the local-only panic-wipe posture (server-cascade is a follow-up task); the JSON-download affordance (could be removed without breaking the canonical custody).
+- **Hard:** the new `panic_wipe.invoked` audit event enum value (per ADR-0003 Amendment A — the six-mirror dance is irreversible without a migration); the audit-before-side-effect ordering contract for panic-wipe (reversal re-opens F-53); the in-memory-only wizard state choice (reversal to URL-hash / sessionStorage requires a no-PII-in-URLs re-review).
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.3 (Consent) — D.1 + D.2 are the consent moments; copy is informed-of-purpose per HG-10 ratification.
+- [x] PIPEDA Principle 4.3.4 (Informed of purpose) — D.4 copy states the purpose of the recovery passphrase (cross-device access); D.6 states the purpose of the type-back (verification).
+- [x] PIPEDA Principle 4.5 (Limiting retention) — no new operational table; existing schedules apply.
+- [x] PIPEDA Principle 4.7 (Safeguards) — Argon2id fail-closed surfaces at the UI; constant-time type-back; no-passphrase-leak static lint; audit-before-side-effect for panic-wipe.
+- [x] AODA / WCAG 2.0 AA — mandatory accessibility-specialist pass (task 5 + task 7); axeCheck per scaffold.
+- [x] No PII in URLs / logs / errors — in-memory state; no URL hash; static lints.
+- [x] No new subprocessor — zero new dependencies; no third-party service touching PI.
+- [x] No cross-border flow — server-side writes go to existing ca-central-1 paths via T05.1 / T07.1.
+- [x] No `node:crypto` — T19 inherits the `lib/crypto/` semgrep allowlist; no new crypto primitives.
+- [x] Amendment H — no SQL migration in T19; PR-review-time assertion holds.
+- [x] HG-10 fires; HG-15 / HG-9 do not; HG-12 not applicable.
+
+## Cross-references
+
+- **ADR-0001** — Canadian hosting + E2EE-as-load-bearing; D.2 copy is the user-facing surfacing.
+- **ADR-0002** — passkeys + browser baseline; D.3 composes both. **Amendment H** — the library-only posture T19 inherits.
+- **ADR-0003 Amendment A** — closed audit-event enum; T19 reserves `panic_wipe.invoked`.
+- **ADR-0003 Amendment F** — show-again hold-to-reveal; D.4 composes `RecoveryPassphraseScreen.svelte` + `createShowAgainController`.
+- **ADR-0003 Amendment G** — Argon2id fail-closed; D.4 surfaces the canonical error at the UI layer.
+- **ADR-0007** — committee_data_key envelope; NOT modified by T19; D.7 surfaces the un-revoked-passkey path that preserves committee-key access.
+- **ADR-0008** — personal-device-only advisory; D.1 is the user-facing surfacing.
+- **ADR-0010** — Sentry-only subprocessor; T19 does not add to this.
+- **ADR-0013** — service-worker plaintext-cache allowlist; panic-wipe clears the caches per ADR-0013's bounded set.
+- **ADR-0016** — operational-table retention; recommended retention for `panic_wipe.invoked` is 7 years.
+- **observability/audit-log.md §1** — closed enum; T19 reserves one new value.
+- **design-system §3.2 + §3.4 + §3.5 + §4 Surface D + Surface G + Surface H** — the surface-level shape T19 implements.
+- **design-tokens.json** — every visual binding flows through tokens; designer's pass amends as needed.
+- **G-T05-1/2/3** — auth library-only state; T19 inherits; T05.1 production wire-up is the path T19's D.3 + D.5 calls flow through.
+- **G-T05-10** — split-form env-var precedent; T19 mirrors for `__test_step` / `__test_user_agent`.
+- **G-T05-11** — enrollFirstDevice 410/401 differential; T19 does NOT address (carry-forward).
+- **G-T07-12** — libsodium-wrappers-sumo production dep; D.4 surfaces the canonical error if the dep is wrong.
+- **G-T07-13** — `@ts-expect-error` Svelte AST precedent; T19's new Svelte components may inherit (acceptable per the carry-forward).
+- **G-T08-10** — `node:crypto` ban; T19 inherits.
+- **G-T08-11** — labour-lawyer copy ratification precedent; T19 mirrors at HG-10.
+
+## Follow-ups
+
+- [ ] **Tech-writer pass** — `i18n/en-CA.json` `onboarding.*` + `panic.*` + `lock.*` keys; HG-10 ratification (task 2).
+- [ ] **HG-10 user ratification** — labour-lawyer review of the en-CA copy fixture; gate before task 6 merges.
+- [ ] **Designer pass** — design-system §4 amendments + design-tokens.json gap resolution (task 1).
+- [ ] **Threat-modeler pass** — `.context/threat-model.md §8.T19` amendment (task 3).
+- [ ] **Open Question 1-5 user adjudication** — before threat-modeler can fully close §8.T19.
+- [ ] **`panic_wipe.invoked` SQL half** — fold into T07.1 if not yet merged; else a small T19-audit-extension sibling (≤50 lines SQL + the doc + script updates).
+- [ ] **Localization-specialist disposition** — Open Question 5 (task 11); if French is required at T19, fr-CA copy lands before merge; if deferred, G-T19-1 carry-forward recorded.
+- [ ] **G-T19-1 (provisional carry-forward)** — French copy disposition; sourced from Open Question 5.
+- [ ] **G-T19-2 (provisional carry-forward)** — D.5 labelling drift between design-system (D.5 = print) and librarian briefing (D.5 = session revocation); designer's pass at task 1 resolves; the resolution is recorded here.
+- [ ] **G-T19-3 (provisional carry-forward)** — the panic-wipe-local-only-vs-server-cascade disposition (Open Question 4); if server-cascade is chosen, this becomes a new sibling task scope.
+- [ ] **G-T19-4 (provisional carry-forward)** — onboarding-resume vs restart-from-D.1 (Open Question 2); if resume is chosen, the sub-state persistence scope lands here.
+
+## Explicit handoffs
+
+- **To threat-modeler:** consume the "Threat-model delta summary" section above + the trust-boundary deltas + the PI touchpoints. Amend `.context/threat-model.md §8.T19`. **You cannot fully close until Open Questions 1, 4 are user-adjudicated.** (Open Q 2, 3, 5 do not block your pass; they affect follow-up scope.)
+- **To designer:** consume Decision 1 (file structure), Decision 2.a (composition points), Decision 6 (token bindings + token gaps), Decision 7 (copy WHAT-must-be-communicated). Amend design-system §4 with rows for OnboardingFlow + every step + PanicWipeModal + SessionRevocationPrimer. Resolve the D.5 labelling drift. Confirm or amend the token gaps. The audience is JHSC worker reps + worker co-chair; the primary task is first-device enrollment with confidence the device + recovery are honestly explained; the content shape is wizard-multi-step + destructive_confirm modal; density is comfortable-by-default per design-tokens.json `_meta.density_default`.
+- **To observability-setup:** consume Decision 5 (new audit event `panic_wipe.invoked`). The required `meta` shape is binding. Recommended retention is 7 years. The SQL half (CHECK widening + `audit_log_retention_schedule` row + `audit-log.md §1` table update + `scripts/check-audit-enum-coverage.sh` update) lands in T07.1 OR a small T19-audit-extension sibling. **You do not need to wire alerts for `panic_wipe.invoked` — it is forensic, not alertable.** No new structured-log emissions are required; the wizard's INFO lines (per G-T05-4 carry-forward) ride the existing logger. **You can defer your pass until after the SQL half lands.**
+- **To tech-writer:** consume Decision 7 (WHAT-must-be-communicated). Author `i18n/en-CA.json` `onboarding.*` + `panic.*` + `lock.*` keys. Grade-8 reading level proxy: no Latin abbreviations (the scaffold's test line 56 pins this). The keys MUST exist in the closed-allowlist `lib/onboarding/copy-keys.ts` for the CI grep gate. **HG-10 lawyer ratification gate fires on your deliverable before implementer merges.**
+- **To accessibility-specialist:** consume Decision 1 (surfaces) + Decision 6 (tokens). Two passes (task 5 pre-implementation, task 7 post-implementation). AODA / WCAG 2.0 AA is mandatory.
+- **To localization-specialist:** consume Open Question 5. User adjudicates whether French is at T19 or deferred (G-T19-1).
+- **To test-writer:** consume Decision 11 (test plan delta) + Decision 4 (WipeStore + MemoryWipeStore). Expand the existing 195-line scaffold; author `apps/web/test/_helpers/onboarding-harness.ts`; author the static lint scripts. **Do NOT modify the existing 195-line scaffold's assertions** (they are pinned spec); ADD new tests.
+- **To implementer:** consume the entire ADR. Compose against `MemoryAuthStore` + `MemoryKeyStore` + new `MemoryWipeStore`. No `node:crypto`. No SQL migration. Honor the production-strip for test-only props. Honor the no-passphrase-leak static lint. Wire HG-10-ratified copy from the i18n fixture.
+- **To security-reviewer + second-opinion-reviewer + privacy-reviewer + verifier:** the standard four-way pass per Amendment H precedent; tasks 8-10, 12.
+
+---
+
 ## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore
 
 **Status:** Accepted

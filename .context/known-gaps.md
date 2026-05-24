@@ -1171,6 +1171,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope (next library pass):** move or remove.
 **Blocker for:** none. Code organization.
 
+## T19 — identity-recovery onboarding (Phase 3, in flight)
+
+> Library + UI ship in T19 (Amendment H adjudication: monolithic because UI IS the deliverable). HG-10 ratification gates merge.
+
+### G-T19-1 — French (fr-CA) copy for D.1→D.7 deferred
+**Source:** ADR-0020 Open Question 5; user adjudication 2026-05-24.
+**Finding:** T19 ships en-CA copy only at HG-10 ratification. fr-CA copy for the personal-device advisory (D.1), browser-baseline gates (D.2), passphrase ceremony (D.4), panic-wipe confirmation (D.6), and completion screen (D.7) deferred to a future task. Constraints.md does not mandate French; AODA is English+accommodations; Quebec Law 25 out of scope.
+**Resolution scope:** localization-specialist pass authoring fr-CA copy, alongside a second HG-10 (labour-lawyer) ratification on the translated copy. Tooling: i18n string-table seeded en-CA-only in T19; fr-CA bundle added in the follow-on.
+**Blocker for:** none for T19 ship. Required before any fr-CA workplace rollout.
+
 ---
 
 ## How to use this file
@@ -1186,5 +1196,6 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 - When working on T16.1 / production wire-up: search for `G-T16-*` and resolve them in a single pass.
 - When working on T17.1 / production wire-up: search for `G-T17-*` and resolve them in a single pass.
 - When working on T18.1 / production wire-up: search for `G-T18-*` and resolve them in a single pass.
+- When working on T19 follow-on (fr-CA localization): search for `G-T19-*` and resolve them in a single pass.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.
