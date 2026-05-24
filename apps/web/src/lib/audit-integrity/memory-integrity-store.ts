@@ -34,7 +34,6 @@ import {
   INTEGRITY_NOW_MS_MIN_INCREMENT,
   type AuditChainRowMaterialized,
   type BackupManifestSnapshot,
-  type IntegrityCheckRunRow,
   type IntegrityNodeRuntimePin,
   type RetentionSweepRunSnapshot
 } from './types';
