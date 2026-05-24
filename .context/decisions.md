@@ -876,6 +876,127 @@ The catalog satisfies every copy-touching mitigation from §8.T19 (F-101 M-101a 
 
 ---
 
+## Test-writer's pass (2026-05-24)
+
+> **Status:** Complete. **Tests fail on the current main**, as required pre-implementation per ADR-0020 task 4.
+> **Authoring agent:** test-writer
+> **Inputs consumed:** ADR-0020 in full (Decisions 1, 2.b, 2.d, 3.d, 3.e, 4, 5, 7, 8, 9, 11); Designer's pass (canonical D.1→D.7 labelling §A; new §4 Surface D.T19 8 sub-surfaces; design-tokens.json T19 token families; inverted focus-ring on panic-overlay; D.5 FIXED labels "Sign out other devices?" / "Revoke other sessions" / "Skip — I'll do this later"); Threat-modeler's pass (§8.T19 F-101 → F-115; test-writer must-cover table); Tech-writer's pass (scoped catalog at `apps/web/src/lib/i18n/onboarding.en-CA.json`, 152 entries); the 195-line scaffold at `apps/web/test/T19/onboarding.test.ts` (LEFT UNCHANGED per binding handoff); existing helpers `_helpers/clock.ts`, `_helpers/fixtures.ts`, `_helpers/protected-modal-harness.ts`, `_helpers/supabase-test.ts`; existing test conventions surveyed at T16, T17, T18.
+
+### Test file count + total test count
+
+9 new test files added under `/home/user/agent-os/apps/web/test/T19/`. The existing 195-line scaffold at `apps/web/test/T19/onboarding.test.ts` is unmodified.
+
+| File | `it()` blocks | Coverage focus |
+|---|---|---|
+| `d1-personal-device-advisory.test.ts` | 21 | F-101 M-101a/b/c + D.T19.b step indicator at D.1 |
+| `d2-browser-baseline.test.ts` | 11 | F-102 M-102a/b + Decision 8 production-strip + G-T19-5 + Surface D.T19.e |
+| `d3-passkey-enrollment.test.ts` | 11 | F-103 M-103a/b/c + F-110 M-110a TOTP-canary + D.3 input attrs |
+| `d4-recovery-passphrase.test.ts` | 23 | F-104 M-104a/b/c/d + F-105 M-105a/b/c + F-108 M-108a/b/c + F-110 M-110a passphrase-canary + F-111 M-111a/b + F-112 M-112a + in-memory-state contract |
+| `d5-session-revocation-primer.test.ts` | 15 | Designer §A FIXED labels + D.5 state matrix + F-39 ≤5s propagation |
+| `d6-panic-wipe.test.ts` | 24 | F-106 M-106a/b/c (audit-BEFORE-side-effect, closed allowlist meta, partial-failure double-row) + F-109 M-109a + G-T19-8 + F-113 M-113a + F-115 M-115 + Surface G state matrix + INVERTED focus-ring |
+| `d7-completion-and-elevation.test.ts` | 10 | F-114 M-114a/b/c (integration; PR-review-time `git diff` deferred to security-reviewer) + Surface D.T19.h |
+| `state-completeness.test.ts` | 22 | Designer §4 Surface D.T19 8 sub-surfaces × full state matrix; reduced-motion |
+| `i18n-catalog-coverage.test.ts` | 7 explicit + 88 dynamically-generated `requiredKeys` `it()` | Closed-allowlist contract: every catalog key reachable from at least one source; every source `t()` reference exists in catalog; Designer §A FIXED-label values; no PII placeholders |
+
+**Total: 144 explicit `it()` blocks + 88 generated = 232 distinct test cases across the 9 new files.**
+
+### F-XXX → test file/line coverage map
+
+| Finding | Mitigation(s) | Covered by |
+|---|---|---|
+| F-101 | M-101a, M-101b, M-101c | `d1-personal-device-advisory.test.ts:33-217` (all 21 tests in this file) |
+| F-102 | M-102a, M-102b, M-102c | `d2-browser-baseline.test.ts:97-150` (D.3 source origin-check + production-bundle strip + G-T19-5 grep gate) |
+| F-103 | M-103a, M-103b, M-103c | `d3-passkey-enrollment.test.ts:48-126` (TOTP rate-limit copy + no-`===` near totp + collapsed 410/401 user surface) |
+| F-104 | M-104a, M-104b, M-104c, M-104d | `d4-recovery-passphrase.test.ts:66-128, 484-510` (no `window.passphrase`; ref clear on advance; D.6 input attrs autocomplete/spellcheck/autocapitalize/autocorrect; no `===` near passphrase/typed) |
+| F-105 | M-105a, M-105b, M-105c | `d4-recovery-passphrase.test.ts:135-228` (closed-allowlist JSON keys, no PI, version=1, blob_id UUID, header-comment lint) |
+| F-106 | M-106a, M-106b, M-106c | `d6-panic-wipe.test.ts:46-178` (TestWipeStore.__debugForceAuditFailure aborts every clearXxx; meta closed allowlist; partial-failure double-row via __debugForceClearFailure('caches')) |
+| F-107 | M-107 (accepted; no test required) | Documented in this pass; no test obligation |
+| F-108 | M-108a, M-108b, M-108c, M-108d | `d4-recovery-passphrase.test.ts:243-319` (no copy-passphrase; no TTS in onboarding/lock; G-T19-6 lint script ref; <code> has no aria-live / role=alert / role=status) |
+| F-109 | M-109a | `d6-panic-wipe.test.ts:184-225` (dynamic `caches.keys()`; no hard-coded cache array; G-T19-8) |
+| F-110 | M-110a, M-110b, M-110c | `d4-recovery-passphrase.test.ts:325-364` (passphrase canary absent from toasts; Argon2 canonical symbol absent from rendered surfaces) + `d2-browser-baseline.test.ts:117-130` (UA canary absent from baseline-fail toasts) + `d3-passkey-enrollment.test.ts:149-179` (TOTP canary absent from D.3 error surfaces) |
+| F-111 | M-111a, M-111b, M-111c | `d4-recovery-passphrase.test.ts:370-432` (static lint on `lib/onboarding/` for hash/search/pushState/sessionStorage/localStorage + route-inventory scan) |
+| F-112 | M-112a | `d4-recovery-passphrase.test.ts:438-477` (createOnboardingRateLimiter: 10 attempts in 60s pass; 11th fails; window expiry resets) |
+| F-113 | M-113a | `d6-panic-wipe.test.ts:230-249` (post-wipe lockout: second panicWipe → no_op, no second audit row) |
+| F-114 | M-114a, M-114b, M-114c | `d7-completion-and-elevation.test.ts:99-194` (header invariant comment; static lint for committee_membership/role: absence; integration test for zero role.% audit rows + pre-seeded inactive membership unchanged) |
+| F-115 | M-115 | `d6-panic-wipe.test.ts:254-322` (catalog four-regex contract + rendered modal text four-regex contract) |
+
+### Designer §4 Surface D.T19 → test file/line coverage map
+
+| Sub-surface | States covered | Test file location |
+|---|---|---|
+| **D.T19.a OnboardingFlow chrome** | default, focus-visible, loading (aria-busy), error (per-step), success, baseline_blocked, reduced-motion | `state-completeness.test.ts:51-112` |
+| **D.T19.b Step indicator** | pending (aria-disabled), active (aria-current), complete (check icon REQUIRED + "completed" aria-label), error (x-circle), focus-visible | `d1-personal-device-advisory.test.ts:198-237` + `state-completeness.test.ts:118-167` |
+| **D.T19.c Device-fingerprint card** | default (read-only render; no interactive sub-states) | `d1-personal-device-advisory.test.ts:139-180` + `state-completeness.test.ts:173-194` |
+| **D.T19.d Recovery-blob download** | default, disabled (during encryption), loading (aria-busy), error (toast; doesn't block advance), success (label transient swap) | `state-completeness.test.ts:200-241` |
+| **D.T19.e Browser-baseline badge** | pass (role=status), fail (role=alert + sub-check enumeration with per-li aria-label) | `d2-browser-baseline.test.ts:67-95` + `state-completeness.test.ts:247-261` |
+| **D.T19.f Recovery-passphrase reveal pair** | default (concealed; passphrase NOT in DOM), capped (aria-disabled=true + helper swap to capped variant), no aria-live on `<code>` | `d4-recovery-passphrase.test.ts:301-319` + `state-completeness.test.ts:267-279` |
+| **D.T19.g Session-revocation primer** | ready (FIXED labels), in_progress (aria-busy), success (role=status), empty (only-this-device, primary aria-disabled), partial_failure (role=alert + failed_systems enumeration), error (rate_limited; Skip remains) | `d5-session-revocation-primer.test.ts:32-203` (full state matrix) |
+| **D.T19.h Completion summary** | default (role=status + next-step pointer role=region + check-circle icon REQUIRED) | `d7-completion-and-elevation.test.ts:67-97` + `state-completeness.test.ts:286-298` |
+| **Surface G PanicWipeModal** | ready-delay-pending (literal-phrase input keystroke-gated; primary aria-disabled), ready (input accepts; primary enables on phrase match), in-progress overlay (aria-busy + reduced-motion fallback), partial-failure (role=alert + failed-class enumeration), complete (role=status toast), INVERTED focus-ring (inner bound to panic_overlay_fg, NOT border.focus), Escape does NOT dismiss | `d6-panic-wipe.test.ts:328-410` + `state-completeness.test.ts:303-329` |
+
+### Tests intentionally exercising threat-modeler `__debug*` seams
+
+These tests are the load-bearing ordering / attribution / no-PI assertions; they require the implementer to ship the corresponding seams on `MemoryWipeStore` (per ADR-0020 Decision 4):
+
+- `TestWipeStore.__debugForceAuditFailure()` → `d6-panic-wipe.test.ts:51-83` (proves audit-BEFORE-side-effect ordering: forced audit-emit failure aborts every `clearXxx`).
+- `TestWipeStore.__debugForceClearFailure('caches')` → `d6-panic-wipe.test.ts:152-180` (proves partial-failure double-row attribution: a SECOND audit row carrying `meta.completed = false` and `meta.partial_failure_classes = ['caches']`).
+- `TestWipeStore.__debugListEmittedAuditRows()` / `__debugListClearedDatabases()` / `__debugListClearedCaches()` / `__debugSessionStorageCleared()` / `__debugLocalStorageCleared()` / `__debugSessionCookieTornDown()` → `d6-panic-wipe.test.ts` throughout.
+- `D4RecoveryPassphrase.svelte.__test_only_get_passphrase_ref()` + `__test_advance_through_type_back()` → `d4-recovery-passphrase.test.ts:484-510` (proves M-104b ref-clear-on-advance contract).
+- `recovery-blob.__setEncryptOverrideForTest()` → `d4-recovery-passphrase.test.ts:325-364` (proves F-110 M-110b: Argon2 canonical symbol does NOT leak into user-visible toast).
+- `OnboardingFlow.svelte` test-only props `__test_step` / `__test_user_agent` / `__test_session_count` / `__test_revoke_delay_ms` / `__test_revoke_partial_failure` / `__test_revoke_error` / `__test_force_encryption_in_progress` / `__test_force_download_in_progress` / `__test_force_download_blocked` / `__test_force_download_success` / `__test_force_reveal_cap` → throughout `d4`, `d5`, `state-completeness`. All MUST be runtime-stripped when `MODE === 'production'` (Decision 8).
+- `PanicWipeModal.svelte` test-only props `__test_ready_delay_ms` / `__test_force_wipe_in_progress` / `__test_force_clear_failure` / `__test_auto_submit` / `__test_force_complete` → `d6-panic-wipe.test.ts` + `state-completeness.test.ts`. All MUST be runtime-stripped.
+- The G-T19-5 production-bundle grep script — referenced at `d2-browser-baseline.test.ts:137-150`. The implementer ships the script; this test asserts it exists and bans all three literals.
+- The G-T19-6 `check-onboarding-no-passphrase-leak.sh` static-lint script — referenced at `d4-recovery-passphrase.test.ts:285-300`. The implementer ships the script; this test asserts it exists and covers D4RecoveryPassphrase, D6TypeBackVerify, and `lib/onboarding/recovery/*`.
+
+### Tests the test-writer could NOT write (and to whom they pick up)
+
+1. **PR-review-time `git diff` assertion for F-114 M-114a** (`git diff --name-only main...T19-branch -- src/lib/committee/` empty). → **security-reviewer scope** at PR time. The INTEGRATION half (D.1→D.7 produces zero role.% audit rows; pre-seeded inactive membership unchanged) IS covered at `d7-completion-and-elevation.test.ts:158-193`.
+2. **Real Sentry breadcrumb scrubber coverage for `lib/onboarding/*` paths (F-110 M-110c)** — requires the live Sentry transport capture from T02's PI-canary harness. → **observability-setup scope** under G-T19-7. The canary-text-absent-from-DOM half IS covered in `d4-recovery-passphrase.test.ts`.
+3. **Per-state axe-zero-violations across all 9 designer states per sub-surface** — requires an `axeCheck` helper at `_helpers/axe-check`. The helper does NOT exist at test-writer time (the scaffold imports it at line 60 but the implementer ships it). The structural state rendering IS covered in `state-completeness.test.ts`; the axe-zero-violations layer is owned by the **accessibility-specialist's Phase F passes** (ADR-0020 tasks #5 + #7).
+4. **Cross-mirror SQL CHECK widening for `panic_wipe.invoked`** — this is the audit-event-enum extension's SQL half (T07.1 OR T19-audit-extension sibling task per ADR-0020 Decision 5). The library half (the TS const + the `MemoryWipeStore` emission contract) IS exercised by `d6-panic-wipe.test.ts`. → **T07.1 OR T19-audit-extension implementer**.
+5. **fr-CA copy regex / catalog parity for F-101, F-103, F-110, F-115** — Q5 deferred (G-T19-1). → **localization-specialist** if/when fr-CA lands.
+6. **Real WebAuthn ceremony exercising F-37 RP-ID binding through the D.3 composition path** — jsdom does not implement `PublicKeyCredential`. The static lint that `window.location.origin` is the source IS covered (`d2-browser-baseline.test.ts:101-115`); the live origin-binding test is F-37's responsibility in the T05 suite. → **T05 / T05.1 cross-reference (M-102c)**.
+
+### Failing-test count confirmation
+
+On first run against current `main` (no T19 implementation):
+
+```
+$ cd /home/user/agent-os/apps/web && npx vitest run test/T19/
+ Test Files  10 failed (10)
+      Tests  1 failed | 88 passed (89)
+```
+
+**Interpretation:**
+
+- 9 of the 10 test files fail at the **module-resolution layer** with "Failed to resolve import" pointing to the precise missing path (e.g., `OnboardingFlow.svelte`, `PanicWipeModal.svelte`, `lib/lock/panic-wipe.ts`, `lib/lock/memory-wipe-store.ts`, `lib/onboarding/recovery-blob-download.ts`, `lib/onboarding/step-machine.ts`, `lib/onboarding/steps/D3PasskeyEnrollment.svelte`, `lib/onboarding/steps/D4RecoveryPassphrase.svelte`, `lib/onboarding/steps/D6TypeBackVerify.svelte`, `lib/onboarding/steps/D7Complete.svelte`, `_helpers/onboarding-harness`). The diagnostic surface is the file path the implementer must create — this is the intended failure mode.
+- The 10th file (`i18n-catalog-coverage.test.ts`) does NOT import any not-yet-existing module (it reads `onboarding.en-CA.json` + scans source files via `node:fs`). 88 of its 89 generated tests PASS because the tech-writer already shipped every required catalog key. The 1 failing test is the **no-orphans** assertion — every catalog key MUST be referenced from at least one Svelte / TS source under `lib/onboarding/` or `lib/lock/`. Since the implementer hasn't shipped the components yet, every catalog key currently has zero source references; this test will pass green when the implementer wires every key into a component.
+- The second-run-determinism check confirms identical results (10 failed file suites, 1 failed + 88 passed test cases). No flakiness.
+
+When the implementer ships the production code, every test transitions from "Cannot find module" to a structural assertion that pins the F-XXX / state contract; failure messages will name the missing affordance (e.g., "expected element with data-testid='device-fingerprint' to be present" or "audit row meta has unexpected keys").
+
+### Files modified by this pass
+
+- `/home/user/agent-os/apps/web/test/T19/d1-personal-device-advisory.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/d2-browser-baseline.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/d3-passkey-enrollment.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/d4-recovery-passphrase.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/d5-session-revocation-primer.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/d6-panic-wipe.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/d7-completion-and-elevation.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/state-completeness.test.ts` — NEW
+- `/home/user/agent-os/apps/web/test/T19/i18n-catalog-coverage.test.ts` — NEW
+- `/home/user/agent-os/.context/decisions.md` — this Test-writer's pass subsection appended to ADR-0020.
+- `/home/user/agent-os/apps/web/test/T19/onboarding.test.ts` — UNCHANGED (binding scaffold per ADR-0020 handoff).
+
+### Verdict: READY-FOR-IMPLEMENTER
+
+Every F-XXX from §8.T19's test-writer must-cover table has at least one failing test, and the failure surface names exactly which module / data-testid / catalog key / static-lint condition the implementer needs to satisfy. Designer §4 Surface D.T19 state-completeness is covered across all 8 sub-surfaces. The `__debug*` seams the threat-modeler named are wired through `MemoryWipeStore`'s test-only API. The 6 items the test-writer could NOT write are explicitly handed off to security-reviewer / observability-setup / accessibility-specialist / T05 cross-reference / T07.1 (or T19-audit-extension) / localization-specialist with the rationale recorded.
+
+The implementer's task #6 (per ADR-0020) is unblocked on test-writer's side; the HG-10 lawyer ratification gate (task #2 + Tech-writer's pass) remains the merge-blocking gate per ADR-0020.
+
+---
+
 ## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore
 
 **Status:** Accepted
