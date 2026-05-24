@@ -701,6 +701,95 @@ The accessibility-specialist's pre-implementation review was conducted against t
 
 ---
 
+## Threat-modeler's pass (2026-05-24)
+
+> **Status:** PASS — no BLOCKERS surfaced in the architect's ADR-0020 design.
+> **Authoring agent:** threat-modeler
+> **Inputs consumed:** ADR-0020 in full (especially the §Threat-model delta summary, Decisions 2.b, 2.d, 3.d, 3.e, 4, 5, 7, 8, 11); §8.T19 of `.context/threat-model.md` (appended in this pass — F-101 through F-115); Designer's pass (above) for the canonical D.1–D.7 labelling and the contrast / token bindings; user adjudication on Q1 (T19 IS first-device enrollment), Q4 (panic-wipe local-only for v1), Q5 (fr-CA deferred to G-T19-1); the 195-line test scaffold at `apps/web/test/T19/onboarding.test.ts`; `apps/web/src/lib/auth/{passkey-enroll,passkey-assert,session,totp-bootstrap,rate-limit,auth-core,index,types}.ts`; `apps/web/src/lib/onboarding/recovery/RecoveryPassphraseScreen.svelte`; `.context/known-gaps.md` G-T05-11 / G-T08-10 / G-T08-13 / G-T19-1 precedent patterns.
+
+### F-range reserved: F-101 through F-115
+
+Continues from F-100 at the end of `.context/threat-model.md` §3.11. No collision with existing §3.x findings. No renumbering of prior findings. §8.T19 is the new home section.
+
+**Findings summary (F-101…F-115):**
+
+- **S:** F-101 coerced enrollment on attacker device (M-101a/b/c — advisory copy clauses, explicit-click gate, fingerprint = UA+platform only); F-102 wrong-origin passkey composition (M-102a/b/c — origin source = `window.location.origin`, production-strip, F-37 cross-ref); F-103 TOTP phishing at D.3 (M-103a/b/c — dual-window rate-limit per G-T08-13 lineage, constant-time compare, collapsed 410/401 user surface; G-T05-11 remains open at the network layer).
+- **T:** F-104 in-memory passphrase exfil via extension/DevTools (M-104a/b/c/d — closure scope, clear-on-advance, `autocomplete='off'` + `spellcheck='false'` + `autocapitalize='none'` + `autocorrect='off'` on D.6 input, constant-time type-back compare); F-105 JSON-download tamper (M-105a/b/c — AEAD-wrapped via secretbox MAC, no-PII closed allowlist, re-import header contract).
+- **R:** F-106 panic-wipe forensic-trace loss (M-106a/b/c — audit-BEFORE-side-effect ordering, closed-allowlist meta shape, partial-failure double-row attribution); F-107 onboarding-completion gap analysis (architect's design verdict held — no new `onboarding.completed` enum needed; `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written` co-occurrence is the structural anchor).
+- **I:** F-108 passphrase via clipboard/TTS/aria-live (M-108a/b/c/d); F-109 panic-wipe misses future SW-cache additions (M-109a — dynamic `caches.keys()` enumeration); F-110 error-message PI leak (M-110a/b/c — closed-allowlist error keys + canary tests + Sentry breadcrumb scrubber coverage); F-111 wizard state in URL/sessionStorage/localStorage (M-111a/b/c — static lints already named in Decision 11, route-inventory test, Invariant 5 cross-ref).
+- **D:** F-112 Argon2id D.4 retry exhaustion (M-112a — client-side dual-window rate-limit + F-12 server-side cross-ref); F-113 panic-wipe spam (M-113a — post-wipe `no_op` lockout + F-53 200ms gate cross-ref).
+- **E:** F-114 first-user-implicit-admin guard (M-114a/b/c — git-diff PR-review-time assertion, D.7 header invariant lint, integration test for zero role-confer audit rows post-D.7); F-115 coerced panic-wipe lockout (M-115 — documented invariant in modal copy; this is the intended posture per Q4).
+
+**Trust-boundary deltas registered in §8.T19:** `panicWipe()` crosses B4 for local destruction; the audit-emit crosses B1 audit-BEFORE-side-effect; the JSON download crosses NO app boundary (user-mediated OS-level move); D.3 + D.4 reuse existing B1/B2 surfaces — no new attack surface beyond the composition.
+
+### Residual risk for panic-wipe local-only (Q4 user-adjudicated; accepted-with-mitigations)
+
+Local-only panic-wipe in v1 leaves three exposure surfaces the wipe does NOT close: **(1)** un-revoked server-side session rows survive until 15-min TTL — JWT replay is possible if exfiltrated pre-wipe (e.g., via the malicious extension scenario in F-104); **(2)** the browser's HTTP cache (separate from SW cache) is not clearable by app code, mitigated by `Cache-Control: no-store` on `/api/*` + F-10 cache-routing policy; **(3)** off-device JSON blob (Option C download) remains exfiltrable as ciphertext-of-secret if the attacker has filesystem access, mitigated by the M-105a AEAD wrap + the F-41 passphrase-coercion envelope (attacker also needs the passphrase). **Mitigations:** Surface H (D.5 session-revocation primer + post-onboarding Sessions list) is the user-driven path for server-side session revocation; PanicWipeModal copy MUST direct the user there when on a safe network (HG-10 tech-writer scope per M-115); recommended future work is server-side anomaly detection for sessions whose owning device has invoked panic-wipe but whose JWT continues to ping (`A-SESSION-001` for operator review) — tracked as G-T19-3, requires its own threat-modeler re-pass. The threat-modeler concurs with Q4: the local-only posture is appropriate for v1 given (a) the network-dependency objection (a coerced user reaching for panic-wipe may not have connectivity), (b) the widened threat space if server-cascade is used as a remote-revocation weapon, (c) the recovery-blob restore path remains intact on another device. **§7 O-19** in `.context/threat-model.md` records the accepted-with-mitigations status.
+
+### Test-writer must-cover items beyond the existing 195-line scaffold
+
+The scaffold pins the high-water-mark contracts (D.1 advisory, D.2 copy, D.3 baseline gate, D.4 → D.7 with show-again audit row, F-53 destructive_confirm + literal-phrase gate + Escape no-dismiss, panic-wipe IndexedDB clear). The threat-modeler's §8.T19 adds:
+
+- **F-101 → M-101a/b/c**: D.1 advisory text content (the 4 clauses, post-HG-10), explicit-click gate (no auto-advance / no `?step=D.2` skip), device-fingerprint composition test + no-IP shape assertion.
+- **F-102 → M-102a/b/c**: D.3 origin = `window.location.origin` call-site snapshot; production-bundle grep extends to `__test_origin` (defensively added); F-37 RP-ID origin test cross-referenced.
+- **F-103 → M-103a/b/c**: D.3 TOTP-locked copy assertion (single key `t('onboarding.totp.locked')`); static lint against `===` near `totp`; collapsed-user-surface text equivalence for `expired` vs `consumed` reasons.
+- **F-104 → M-104a/b/c/d**: static lint against `window.passphrase` / `globalThis.passphrase` / module-level `let passphrase`; post-match ref-clear assertion via a test-only debug seam (production-stripped); D.6 input attribute snapshot (`autocomplete='off'` + `spellcheck='false'` + `autocapitalize='none'` + `autocorrect='off'`); static lint against `===` near `passphrase`/`typed`.
+- **F-105 → M-105a/b/c**: JSON-download closed-allowlist snapshot (`ciphertext`, `kdf_params`, `version`, `blob_id` ONLY); tampered-byte decrypt-throw test; header-comment lint on `recovery-blob-download.ts`.
+- **F-106 → M-106a/b/c**: TestWipeStore.__debugForceAuditFailure aborts wipe AND emits no `clearXxx`; meta-shape closed-allowlist snapshot; TestWipeStore.__debugForceClearFailure('caches') produces a SECOND audit row carrying `meta.partial_failure_classes = ['caches']`.
+- **F-108 → M-108a/b/c**: no `data-testid='copy-passphrase'` on D.4; no-TTS static lint extended to D4RecoveryPassphrase / D6TypeBackVerify / recovery/*; passphrase `<code>` has no `aria-live`, no `role='alert'`, no `role='status'`.
+- **F-109 → M-109a**: `BrowserWipeStore.clearCaches` enumerates via `caches.keys()` dynamic call; no hard-coded cache name array in `lib/lock/panic-wipe.ts`.
+- **F-110 → M-110a/b/c**: per-error-path canary test (passphrase canary, TOTP canary, UA canary all absent from rendered toasts); Argon2id `argon2id_unavailable_libsodium_wrappers_sumo_required` symbol present in structured logs but absent from user-visible toast; Sentry breadcrumb scrubber test extends to `lib/onboarding/*` paths.
+- **F-111 → M-111a/b**: `check-onboarding-no-pii-in-url.sh` script (already named in Decision 11) reaffirmed binding; route-inventory test asserts no `/onboarding/*` route consumes `$page.url.searchParams` for wizard-step state.
+- **F-112 → M-112a**: client-side rate-limit unit test (11 D.4 → D.6 attempts in 60s; 11th rejected without calling `encryptRecoveryBlob`).
+- **F-113 → M-113a**: two-in-a-row `panicWipe()` produces exactly one `panic_wipe.invoked` audit row, second call returns `{status: 'no_op', reason: 'already_wiped'}`.
+- **F-114 → M-114a/b/c**: PR-review-time `git diff` assertion for `committee_membership` absence in T19 diff; D.7 header comment lint (invariant statement present); integration test exercises D.1 → D.7 and asserts zero `role.%` audit rows post-D.7 AND a pre-seeded inactive membership row is unchanged.
+- **F-115 → M-115**: panic-wipe modal copy regex match — text matches `/irreversible|cannot be undone/i` AND `/server|committee/i` AND `/recovery passphrase|recovery sheet/i` AND `/co-chair|invite/i`.
+
+**The existing 195-line scaffold tests REMAIN unchanged** per ADR-0020's binding handoff to test-writer ("Do NOT modify the existing 195-line scaffold's assertions"). Test-writer ADDS the above.
+
+### New carry-forwards to land in `.context/known-gaps.md`
+
+- **G-T19-3** — Server-cascade panic-wipe deferred (Q4 + §8.T19 residual mitigation #3). Recommended future work: server-side anomaly detection for sessions whose owning device has invoked panic-wipe but whose JWT continues to ping. NOT a v1 blocker.
+- **G-T19-5 (NEW)** — `__test_origin` defensively added to the production-bundle-strip grep allowlist (F-102 M-102b). Implementer scope; T19 CI suite.
+- **G-T19-6 (NEW)** — Static lint script `check-onboarding-no-passphrase-leak.sh` MUST cover `D4RecoveryPassphrase.svelte`, `D6TypeBackVerify.svelte`, and `lib/onboarding/recovery/*.svelte` (F-108 M-108b extends Amendment F operational rule 4 surface). Implementer scope; T19 CI suite.
+- **G-T19-7 (NEW)** — Sentry breadcrumb scrubber `beforeSend` allowlist extends to `lib/onboarding/*` paths (F-110 M-110c). Observability-setup scope; folds into the ADR-0010 / T02 carry-forward thread.
+- **G-T19-8 (NEW)** — `BrowserWipeStore.clearCaches` enumerates via `caches.keys()` (F-109 M-109a) rather than a hard-coded list. Implementer scope; `lib/lock/panic-wipe.ts` production wire-up.
+
+### Re-open triggers for §8.T19
+
+Any of the following re-passes the section:
+
+1. Q4 disposition reversed (server-cascade panic-wipe added) → F-106, F-109, F-113, F-115 re-score; new findings around server-cascade race conditions.
+2. fr-CA copy lands (G-T19-1) → F-101, F-103, F-110, F-115 mitigations re-test against translated strings (HG-10 second ratification).
+3. `__test_step` / `__test_user_agent` / `__test_origin` production-strip regression → F-102 + F-110 re-open.
+4. Onboarding-resume-vs-restart-from-D.1 (Q2) reversed → F-104, F-111 re-open (passphrase persistence widens).
+5. The future re-import path for the downloaded JSON ships → F-105 re-passes against the actual re-import contract.
+6. `localStorage` write lands anywhere under `lib/onboarding/` or `lib/lock/` → F-111 re-opens.
+7. The `panic_wipe.invoked` enum's SQL half (T07.1 or T19-audit-extension) is deferred indefinitely → F-106 M-106a/b/c become aspirational pending the SQL CHECK widening.
+
+### Compliance check (§8.T19 mapping)
+
+PIPEDA Principles 4.1 / 4.2 / 4.3 / 4.4 / 4.5 / 4.7 / 4.8 / 4.9 are all covered with named mitigations (per the §8.T19 compliance table). AODA/WCAG 2.0 AA: covered via accessibility-specialist Phase F passes (ADR-0020 tasks 5 + 7) + Designer's pass contrast bindings. Quebec Law 25: out of scope (Q5 → en-CA only for v1; G-T19-1 carry-forward). PHIPA / PCI DSS / FIPPA / MFIPPA: not engaged. **Cross-border transfers introduced by T19: NONE** (Q4 + ADR-0001 confirm — all server-side writes go to ca-central-1; the JSON download is user-mediated and crosses no app boundary; the Sentry EU breadcrumb path is preserved with the F-110 M-110c scrubber pass).
+
+### Top 5 prioritized risks
+
+1. **F-103 (S, Medium-high)** — TOTP phishing at D.3 precondition. Mitigated by M-103a/b/c; G-T05-11 differential remains open at the network layer.
+2. **F-110 (I, Medium-high)** — Error messages leak passphrase/TOTP/UA into toasts/Sentry/console. Mitigated by M-110a/b/c.
+3. **F-108 (I, Medium-high)** — Passphrase exposed via clipboard/TTS/aria-live beyond hold-to-reveal. Mitigated by M-108a/b/c/d.
+4. **F-106 (R, Medium-high)** — Panic-wipe forensic-trace loss if audit row written after wipe. Mitigated by M-106a/b/c (audit-BEFORE-side-effect contract is load-bearing).
+5. **F-101 (S, Medium)** — Coerced enrollment on attacker-controlled device. Mitigated by M-101a/b/c.
+
+### Files modified by this pass
+
+- `/home/user/agent-os/.context/threat-model.md` — appended §8.T19 (F-101 through F-115; STRIDE-per-category; PI touchpoints table; compliance mapping; trust-boundary deltas; panic-wipe residual block; test-writer must-cover table; handoff packets); appended O-19 row to §7 Open Threats / Accepted Risks.
+- `/home/user/agent-os/.context/decisions.md` — this Threat-modeler's pass subsection appended to ADR-0020.
+
+### Verdict: PASS
+
+No BLOCKERS in the architect's design. T19 ships as library + Svelte composition with F-101 through F-115 as testable obligations the test-writer picks up. The Q4 residual is documented and accepted; the Q5 fr-CA deferral is recorded as G-T19-1; the Q1 first-device-enrollment scope is internalized in F-101 and F-114.
+
+---
+
 ## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore
 
 **Status:** Accepted

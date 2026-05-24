@@ -1181,6 +1181,36 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope:** localization-specialist pass authoring fr-CA copy, alongside a second HG-10 (labour-lawyer) ratification on the translated copy. Tooling: i18n string-table seeded en-CA-only in T19; fr-CA bundle added in the follow-on.
 **Blocker for:** none for T19 ship. Required before any fr-CA workplace rollout.
 
+### G-T19-3 — Server-cascade panic-wipe deferred
+**Source:** ADR-0020 Open Question 4 (user adjudication 2026-05-24: local-only for v1); threat-model.md §8.T19 panic-wipe residual block + §7 O-19; ADR-0020 Threat-modeler's pass §Residual.
+**Finding:** Local-only panic-wipe in v1 leaves three exposure surfaces the wipe does NOT close: (1) un-revoked server-side session rows survive until 15-min TTL — JWT replay is possible if exfiltrated pre-wipe; (2) browser HTTP cache (separate from SW cache) not clearable by app code (mitigated by `Cache-Control: no-store` on `/api/*` + F-10); (3) off-device JSON blob remains exfiltrable as ciphertext-of-secret if attacker has filesystem access (mitigated by M-105a AEAD wrap). Surface H (D.5 session-revocation primer) is the user-driven server-revocation path; PanicWipeModal copy directs users there when on a safe network (HG-10 tech-writer scope per M-115).
+**Resolution scope:** future task — server-side anomaly detection for sessions whose owning device has invoked panic-wipe but whose JWT continues to ping (`A-SESSION-001` for operator review). Requires its own threat-modeler re-pass + observability-setup. Re-opens F-106, F-109, F-113, F-115 in §8.T19 per re-open trigger #1.
+**Blocker for:** none for T19 ship (Q4 accepted-with-mitigations).
+
+### G-T19-5 — `__test_origin` defensively added to production-bundle-strip grep allowlist
+**Source:** threat-model.md §8.T19 F-102 M-102b; ADR-0020 Threat-modeler's pass §Test-writer must-cover.
+**Finding:** D.3 uses `window.location.origin` as the passkey ceremony's RP-origin source. The test scaffold's `__test_origin` prop (mirroring `__test_step` / `__test_user_agent` precedent G-T05-10) MUST be added to the existing production-bundle grep-strip allowlist to prevent test-only props leaking into production. Defensive — no current leak observed; this is preventive coverage.
+**Resolution scope:** T19 implementer extends `scripts/check-no-test-props-in-bundle.sh` (or equivalent — confirm script name at T19 implementer turn) to include `__test_origin` alongside existing `__test_step` + `__test_user_agent` regex.
+**Blocker for:** T19 CI suite (test-writer assertion in F-102 M-102b).
+
+### G-T19-6 — `check-onboarding-no-passphrase-leak.sh` static lint surface extension
+**Source:** threat-model.md §8.T19 F-108 M-108b; ADR-0020 Threat-modeler's pass §Test-writer must-cover; Amendment F operational rule 4 lineage.
+**Finding:** The no-TTS / no-clipboard / no-aria-live static lint already named for `RecoveryPassphraseScreen.svelte` (Amendment F operational rule 4) MUST extend to cover the T19 surfaces `D4RecoveryPassphrase.svelte` (the new T19 D.4 surface), `D6TypeBackVerify.svelte` (the new T19 panic-wipe type-back), and the broader `lib/onboarding/recovery/*.svelte` glob. Without this extension, F-108 (passphrase via clipboard/TTS/aria-live) is testable only at unit-test level, not enforced at build time.
+**Resolution scope:** T19 implementer creates `scripts/check-onboarding-no-passphrase-leak.sh` (or extends existing Amendment F script) with the expanded glob. Verifier consumes via lint gate.
+**Blocker for:** T19 CI suite (security-reviewer pass).
+
+### G-T19-7 — Sentry breadcrumb scrubber `beforeSend` allowlist extends to `lib/onboarding/*`
+**Source:** threat-model.md §8.T19 F-110 M-110c; ADR-0020 Threat-modeler's pass; ADR-0010 subprocessor posture.
+**Finding:** Sentry breadcrumb scrubber's `beforeSend` PI-stripping allowlist currently covers `lib/auth/*` paths (per ADR-0010 + T02 hook). T19 introduces `lib/onboarding/*` and `lib/lock/*` surfaces that emit breadcrumbs which may contain passphrase / TOTP / UA fragments. The scrubber's path-allowlist MUST extend to cover these.
+**Resolution scope:** observability-setup pass extends `scripts/sentry-beforesend.ts` (or equivalent — confirm at observability-setup turn) path-allowlist + adds canary test (F-110 M-110c) asserting passphrase / TOTP canaries are stripped from breadcrumbs originating in `lib/onboarding/*` / `lib/lock/*`. Folds into the ADR-0010 / T02 carry-forward thread.
+**Blocker for:** none for T19 library ship (Sentry not yet wired at library boundary); blocks T19 production wire-up.
+
+### G-T19-8 — `BrowserWipeStore.clearCaches` enumerates dynamically via `caches.keys()`
+**Source:** threat-model.md §8.T19 F-109 M-109a; ADR-0020 Threat-modeler's pass §Test-writer must-cover.
+**Finding:** Hard-coded cache-name arrays in panic-wipe break F-109 (panic-wipe misses future SW-cache additions). When new ADR-0013 allowlist entries land (e.g., for new offline-supported routes), a hard-coded `clearCaches(['cache-a', 'cache-b'])` silently leaves them un-wiped. The production-side `BrowserWipeStore.clearCaches` implementation MUST iterate via `await caches.keys()` and `await Promise.all(keys.map(k => caches.delete(k)))` to capture all caches present at wipe time. Library `TestWipeStore` mirrors this contract via injected key set.
+**Resolution scope:** T19 implementer (or T19.1 production wire-up if Amendment H splits) implements `BrowserWipeStore.clearCaches` with the dynamic enumeration; security-reviewer asserts no string-literal cache names appear in `lib/lock/panic-wipe.ts`'s clearCaches path.
+**Blocker for:** `lib/lock/panic-wipe.ts` production wire-up (T19 monolithic OR T19.1 sibling depending on Amendment H adjudication in architect's design).
+
 ---
 
 ## How to use this file
@@ -1196,6 +1226,6 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 - When working on T16.1 / production wire-up: search for `G-T16-*` and resolve them in a single pass.
 - When working on T17.1 / production wire-up: search for `G-T17-*` and resolve them in a single pass.
 - When working on T18.1 / production wire-up: search for `G-T18-*` and resolve them in a single pass.
-- When working on T19 follow-on (fr-CA localization): search for `G-T19-*` and resolve them in a single pass.
+- When working on T19 (implementer / observability-setup / production wire-up): search for `G-T19-*` and resolve them by scope (implementer: G-T19-5/6/8; observability: G-T19-7; future-task: G-T19-1 fr-CA + G-T19-3 server-cascade).
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.
