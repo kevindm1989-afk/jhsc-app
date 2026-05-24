@@ -152,8 +152,12 @@
   <p data-testid="show-again-helper">{helperText}</p>
 
   {#if revealed && !capReached}
-    <div data-testid="recovery-passphrase-onscreen" role="region" aria-live="polite">
-      <code>{passphrase}</code>
+    <!-- F-108 M-108c: NO aria-live / role=alert / role=status on the
+         passphrase-bearing element or any ancestor. The reveal button
+         carries the aria-pressed transition; no live-region echoes the
+         passphrase value (TTS exfil / AODA failure). -->
+    <div data-testid="recovery-passphrase-onscreen">
+      <code data-testid="passphrase-reveal">{passphrase}</code>
     </div>
   {/if}
 

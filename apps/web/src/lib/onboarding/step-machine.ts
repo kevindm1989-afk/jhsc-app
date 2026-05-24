@@ -27,6 +27,12 @@ export interface OnboardingWizardState {
   enrollment_session_id: string;
   /** Whether D.1's confirmation checkbox is ticked. */
   device_confirmed: boolean;
+  /** Whether D.3's passkey enrollment succeeded server-side. */
+  passkey_enrolled: boolean;
+  /** Whether D.4's passphrase was generated and the user has acknowledged. */
+  passphrase_acknowledged: boolean;
+  /** Whether D.6 type-back constant-time-matched the live passphrase. */
+  passphrase_confirmed: boolean;
   /** D.6 type-back attempt counter (resets on D.4 re-entry). */
   type_back_attempts: number;
 }
@@ -42,6 +48,9 @@ export function initialState(enrollment_session_id?: string): OnboardingWizardSt
     step: 'D.1',
     enrollment_session_id: enrollment_session_id ?? generateEnrollmentSessionId(),
     device_confirmed: false,
+    passkey_enrolled: false,
+    passphrase_acknowledged: false,
+    passphrase_confirmed: false,
     type_back_attempts: 0
   };
 }
@@ -71,19 +80,78 @@ export function generateEnrollmentSessionId(): string {
 }
 
 /**
- * Advance forward one step. Throws when the current step's gate is not
- * satisfied. Callers (the Svelte components) check `canAdvance(...)`
- * BEFORE calling `advance(...)`.
+ * Gate predicate for D.X → D.(X+1) transition. Returns the structured
+ * reason key on rejection so the wizard's error surface can render a
+ * closed-allowlist t() key (F-110 M-110a).
+ */
+export function canAdvance(
+  state: OnboardingWizardState
+): { ok: true } | { ok: false; reason: 'device_not_confirmed' | 'passkey_not_enrolled' | 'passphrase_not_acknowledged' | 'passphrase_not_confirmed' | 'terminal' } {
+  if (!isOrdered(state.step)) return { ok: false, reason: 'terminal' };
+  switch (state.step) {
+    case 'D.1':
+      // D.1 → D.2 requires the personal-device confirmation checkbox.
+      if (!state.device_confirmed) return { ok: false, reason: 'device_not_confirmed' };
+      return { ok: true };
+    case 'D.2':
+      // D.2 → D.3 has no precondition gate beyond an explicit click.
+      return { ok: true };
+    case 'D.3':
+      // D.3 → D.4 requires the passkey ceremony to have succeeded.
+      if (!state.passkey_enrolled) return { ok: false, reason: 'passkey_not_enrolled' };
+      return { ok: true };
+    case 'D.4':
+      // D.4 → D.6 requires the user to have acknowledged the passphrase
+      // (the wizard intentionally routes D.4 directly to D.6 — confirm via
+      // type-back — and the session-revocation primer D.5 runs AFTER D.6
+      // succeeds. The ORDER array reflects the canonical sequence but
+      // advance() handles the D.4 → D.6 → D.5 → D.7 routing as per
+      // ADR-0020 Decision 2.b).
+      if (!state.passphrase_acknowledged) return { ok: false, reason: 'passphrase_not_acknowledged' };
+      return { ok: true };
+    case 'D.5':
+      // D.5 → D.7 is always allowed (Skip is a tertiary action).
+      return { ok: true };
+    case 'D.6':
+      // D.6 → D.5 requires constant-time-matched type-back.
+      if (!state.passphrase_confirmed) return { ok: false, reason: 'passphrase_not_confirmed' };
+      return { ok: true };
+    case 'D.7':
+      // Terminal.
+      return { ok: false, reason: 'terminal' };
+  }
+}
+
+/**
+ * Advance forward following the canonical wizard order. Rejects (returns
+ * the same state unchanged) when the current step's gate is not satisfied;
+ * callers MUST consult `canAdvance(...)` to inspect the rejection reason
+ * and render a closed-allowlist error key.
+ *
+ * The route is D.1 → D.2 → D.3 → D.4 → D.6 → D.5 → D.7 per ADR-0020
+ * Decision 2.b (D.6 type-back happens BEFORE the session-revocation
+ * primer so the user cannot bypass the type-back gate by skipping D.5).
  */
 export function advance(state: OnboardingWizardState): OnboardingWizardState {
-  if (!isOrdered(state.step)) {
-    return state; // baseline_blocked — terminal; cannot advance.
+  const gate = canAdvance(state);
+  if (!gate.ok) return state;
+  if (!isOrdered(state.step)) return state;
+  switch (state.step) {
+    case 'D.1':
+      return { ...state, step: 'D.2' };
+    case 'D.2':
+      return { ...state, step: 'D.3' };
+    case 'D.3':
+      return { ...state, step: 'D.4' };
+    case 'D.4':
+      return { ...state, step: 'D.6' };
+    case 'D.6':
+      return { ...state, step: 'D.5' };
+    case 'D.5':
+      return { ...state, step: 'D.7' };
+    case 'D.7':
+      return state;
   }
-  const idx = ORDER.indexOf(state.step);
-  if (idx < 0 || idx >= ORDER.length - 1) {
-    return state;
-  }
-  return { ...state, step: ORDER[idx + 1]! };
 }
 
 /** Jump to a specific step (test-only / harness use). */

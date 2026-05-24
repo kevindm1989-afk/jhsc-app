@@ -8,9 +8,13 @@
  * surface; do not skip MAC verify on re-import.
  *
  * Per F-105 M-105a/b/c:
- *   - JSON shape is EXACTLY `{ ciphertext, kdf_params, version, blob_id }` —
+ *   - JSON shape is EXACTLY `{ ciphertext, nonce, kdf_params, version, blob_id }` —
  *     closed allowlist; no PI fields. Tampered ciphertext fails secretbox_open
- *     MAC check at re-import time.
+ *     MAC check at re-import time. The `nonce` is the libsodium secretbox
+ *     nonce required to decrypt; it is NOT PI (random per-encryption value)
+ *     and adding it to the allowlist is structurally required for the
+ *     downloaded file to be decryptable. The privacy reviewer's F-105
+ *     closed-allowlist holds — no user_id / email / display_name leaks.
  *   - No `user_id`, `email`, `display_name`, `actor_pseudonym`, `passphrase`,
  *     `privkey`, `priv`, `secret`, `seed`. The closed allowlist is the
  *     defense-in-depth surface; the per-field absence test pins it.
@@ -22,10 +26,11 @@
  * @see ADR-0020 §Decision 2.d step 7
  */
 
-import { generateEnrollmentSessionId } from './state-machine';
+import { generateEnrollmentSessionId } from './step-machine';
 
 export interface RecoveryBlobJsonInput {
   ciphertext: Uint8Array;
+  nonce: Uint8Array;
   kdf_params: {
     ops: number;
     mem: number;
@@ -35,6 +40,7 @@ export interface RecoveryBlobJsonInput {
 
 export interface RecoveryBlobJson {
   ciphertext: string;
+  nonce: string;
   kdf_params: { ops: number; mem: number; salt: string };
   version: 1;
   blob_id: string;
@@ -58,6 +64,7 @@ function bytesToBase64(b: Uint8Array): string {
 export function serializeRecoveryBlobJson(input: RecoveryBlobJsonInput): RecoveryBlobJson {
   return {
     ciphertext: bytesToBase64(input.ciphertext),
+    nonce: bytesToBase64(input.nonce),
     kdf_params: {
       ops: input.kdf_params.ops,
       mem: input.kdf_params.mem,

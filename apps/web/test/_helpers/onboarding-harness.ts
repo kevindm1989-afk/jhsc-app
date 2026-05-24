@@ -10,9 +10,9 @@
  */
 
 import { vi } from 'vitest';
-import { generateEnrollmentSessionId } from '../../src/lib/onboarding/state-machine';
+import { generateEnrollmentSessionId } from '../../src/lib/onboarding/step-machine';
 import { createShowAgainController } from '../../src/lib/recovery/show-again';
-import type { OnboardingStep } from '../../src/lib/onboarding/state-machine';
+import type { OnboardingStep } from '../../src/lib/onboarding/step-machine';
 import { SYNTHETIC_USER_A } from './fixtures';
 
 export interface OnboardingHarnessCtx {

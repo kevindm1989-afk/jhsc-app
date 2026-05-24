@@ -25,7 +25,16 @@
       "pending": "Not started",
       "active": "Current step",
       "complete": "Completed",
-      "step_n_of_m": "Step {n} of {m}"
+      "step_n_of_m": "Step {n} of {m}",
+      "label": {
+        "d1": "Personal device",
+        "d2": "Where your data lives",
+        "d3": "Passkey",
+        "d4": "Recovery passphrase",
+        "d5": "Sessions",
+        "d6": "Confirm phrase",
+        "d7": "Done"
+      }
     },
 
     "advisory_d1": {
@@ -82,6 +91,7 @@
         }
       },
       "unsupported_heading": "Your browser is too old",
+      "ua_baseline_below_supported": "Browser version below the supported baseline",
       "primary_button_pass": "Got it — continue",
       "primary_button_fail": "Reload after switching browsers",
       "secondary_button_fail": "See the list of supported browsers",
@@ -129,6 +139,8 @@
       "passphrase_reveal_label": "Press and hold to show the passphrase",
       "passphrase_conceal_label": "Release to hide",
       "confirm_label": "Type the passphrase to confirm you have it",
+      "confirm_aria_label": "Type the passphrase to confirm",
+      "confirm_continue_button": "Next: confirm passphrase",
       "confirm_helper": "Type the words exactly as shown, separated by single spaces.",
       "primary_button": "Print recovery sheet",
       "back_button": "Back",
@@ -192,6 +204,7 @@
       "modal_residual_risk_callout": "If you are being coerced or watched right now and you cannot reach a safe network, this wipe still clears this device. As soon as you safely can, sign in on a different personal device and use Settings → Sessions to revoke any other sessions that may still be active. A session signed in before this wipe can stay valid on the server for up to 15 minutes.",
       "modal_recovery_reminder": "If you have your recovery passphrase printed or saved off this device, you can sign in again on another personal device. If you do NOT have it, ask your worker co-chair to send a new invite — they cannot recover the old passphrase, and neither can we.",
       "type_back_label": "Type WIPE to confirm",
+      "type_back_aria_label": "Type WIPE to confirm",
       "type_back_value": "WIPE",
       "type_back_helper": "Type the word WIPE in capital letters to enable the wipe button.",
       "type_back_placeholder": "WIPE",

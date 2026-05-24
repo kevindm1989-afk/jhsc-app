@@ -27,26 +27,53 @@
   import { t } from '../../i18n';
   import { enrollFirstDevicePasskey } from '../../auth/passkey-enroll';
 
+  /** Optional production auth client. */
   export let auth = undefined;
   export let user_id = '';
-  let totp = '';
+  export let totp = '';
+  /** Called with the result of enrollFirstDevicePasskey (parent state machine). */
+  export let onEnrolled = (/** @type {boolean} */ _ok) => {};
+
   let errorKey = null;
+  let inProgress = false;
 
   async function start() {
-    if (!auth) return;
-    // M-102a — origin source is window.location.origin.
+    if (inProgress) return;
+    errorKey = null;
+    // Feature-detect WebAuthn before invoking the auth client.
+    if (typeof globalThis.PublicKeyCredential === 'undefined') {
+      errorKey = 'onboarding.passkey_d3.error.passkey_unavailable';
+      onEnrolled(false);
+      return;
+    }
+    inProgress = true;
+    // M-102a — origin source is window.location.origin. Captured here so
+    // the auth-core layer's RP-ID derivation is wired to the live origin
+    // (the auth client's enrollFirstDevice closes over the current origin
+    // by composition; T19 does NOT pass an explicit origin override).
     const origin = window.location.origin;
     void origin;
     try {
+      if (!auth) {
+        // No auth client provided (jsdom / pre-wire-up). Surface the
+        // generic error so the user is not silently stranded.
+        errorKey = 'onboarding.passkey_d3.error.enrollment_failed_generic';
+        onEnrolled(false);
+        return;
+      }
       const r = await enrollFirstDevicePasskey(auth, { totp_code: totp, user_id });
       if (r.status === 200) {
-        // success
+        onEnrolled(true);
       } else {
         // G-T05-11 collapse — surface the generic key.
         errorKey = 'onboarding.passkey_d3.error.enrollment_failed_generic';
+        onEnrolled(false);
       }
     } catch (_e) {
       errorKey = 'onboarding.passkey_d3.error.passkey_ceremony_failed';
+      onEnrolled(false);
+    } finally {
+      inProgress = false;
     }
   }
 </script>
@@ -55,7 +82,13 @@
   <h2>{t('onboarding.passkey_d3.heading')}</h2>
   <p>{t('onboarding.passkey_d3.body')}</p>
   <label for="totp">{t('onboarding.passkey_d3.totp_label')}</label>
-  <input id="totp" type="text" inputmode="numeric" autocomplete="one-time-code" bind:value={totp} />
+  <input
+    id="totp"
+    type="text"
+    inputmode="numeric"
+    autocomplete="one-time-code"
+    bind:value={totp}
+  />
   <button type="button" on:click={start}>{t('onboarding.passkey_d3.primary_button')}</button>
   {#if errorKey === 'onboarding.passkey_d3.error.totp_invalid'}
     <div role="alert">{t('onboarding.passkey_d3.error.totp_invalid')}</div>
@@ -67,6 +100,8 @@
     <div role="alert">{t('onboarding.passkey_d3.error.passkey_ceremony_failed')}</div>
   {:else if errorKey === 'onboarding.passkey_d3.error.rp_mismatch'}
     <div role="alert">{t('onboarding.passkey_d3.error.rp_mismatch')}</div>
+  {:else if errorKey === 'onboarding.passkey_d3.error.passkey_unavailable'}
+    <div role="alert">{t('onboarding.passkey_d3.error.passkey_unavailable')}</div>
   {:else if errorKey === 'onboarding.passkey_d3.error.enrollment_failed_generic'}
     <div role="alert">{t('onboarding.passkey_d3.error.enrollment_failed_generic')}</div>
   {/if}
