@@ -97,6 +97,40 @@
         "_comment": "Two-layer ring: outer high-contrast halo + inner foreground line. Visible against any background per AODA 2.4.7. Never replaced by outline:none.",
         "outer": "#fbbf24",
         "inner": "#16181d"
+      },
+      "onboarding": {
+        "_comment": "T19 / ADR-0020 — wizard chrome, step-indicator states, recovery-passphrase reveal pair, browser-baseline badges, panic-wipe overlay. All pairs verified in _contrast_audit. Step-indicator states: pending (not yet reached), active (current), complete (already traversed). 'complete' deliberately re-uses state.success (positive affordance, color-blind safe via accompanying checkmark icon — see design-system §4.D.T19).",
+        "wizard_chrome_bg": "#ffffff",
+        "wizard_chrome_border": "#c9c9c4",
+        "step_indicator_pending_bg": "#f3f3f1",
+        "step_indicator_pending_fg": "#5b6270",
+        "step_indicator_pending_border": "#c9c9c4",
+        "step_indicator_active_bg": "#2d3a8c",
+        "step_indicator_active_fg": "#ffffff",
+        "step_indicator_active_border": "#1a235a",
+        "step_indicator_complete_bg": "#e1f3e7",
+        "step_indicator_complete_fg": "#0f6a3a",
+        "step_indicator_complete_border": "#2c7a4f",
+        "passphrase_reveal_fg": "#16181d",
+        "passphrase_reveal_bg": "#fbfbfa",
+        "passphrase_reveal_border": "#16181d",
+        "passphrase_chunk_separator": "#5b6270",
+        "browser_baseline_pass_bg": "#e1f3e7",
+        "browser_baseline_pass_fg": "#0f6a3a",
+        "browser_baseline_pass_border": "#2c7a4f",
+        "browser_baseline_fail_bg": "#fbe4e1",
+        "browser_baseline_fail_fg": "#a8261c",
+        "browser_baseline_fail_border": "#a8261c",
+        "device_fingerprint_bg": "#f3f3f1",
+        "device_fingerprint_fg": "#3a3f48",
+        "device_fingerprint_border": "#c9c9c4",
+        "completion_success_bg": "#e1f3e7",
+        "completion_success_fg": "#0f6a3a",
+        "completion_success_border": "#2c7a4f",
+        "panic_overlay_bg": "rgba(22,24,29,0.92)",
+        "panic_overlay_fg": "#fbfbfa",
+        "download_affordance_fg": "#2d3a8c",
+        "download_affordance_border": "#c9c9c4"
       }
     },
 
@@ -168,6 +202,40 @@
       "focus_ring": {
         "outer": "#fbbf24",
         "inner": "#f3f4f6"
+      },
+      "onboarding": {
+        "_comment": "T19 / ADR-0020 — dark-mode equivalents. Same semantic naming as light.onboarding. The panic overlay in dark mode uses near-black with high opacity to drop residual UI behind a clear visual lock during the wipe.",
+        "wizard_chrome_bg": "#161a22",
+        "wizard_chrome_border": "#3a414f",
+        "step_indicator_pending_bg": "#1f2530",
+        "step_indicator_pending_fg": "#a3aab6",
+        "step_indicator_pending_border": "#3a414f",
+        "step_indicator_active_bg": "#a9b3f0",
+        "step_indicator_active_fg": "#0f1116",
+        "step_indicator_active_border": "#d2d6f8",
+        "step_indicator_complete_bg": "#0f2a1d",
+        "step_indicator_complete_fg": "#7fd4a4",
+        "step_indicator_complete_border": "#7fd4a4",
+        "passphrase_reveal_fg": "#f3f4f6",
+        "passphrase_reveal_bg": "#0f1116",
+        "passphrase_reveal_border": "#f3f4f6",
+        "passphrase_chunk_separator": "#a3aab6",
+        "browser_baseline_pass_bg": "#0f2a1d",
+        "browser_baseline_pass_fg": "#7fd4a4",
+        "browser_baseline_pass_border": "#7fd4a4",
+        "browser_baseline_fail_bg": "#3b1715",
+        "browser_baseline_fail_fg": "#f49a93",
+        "browser_baseline_fail_border": "#f49a93",
+        "device_fingerprint_bg": "#1f2530",
+        "device_fingerprint_fg": "#cbd0d8",
+        "device_fingerprint_border": "#3a414f",
+        "completion_success_bg": "#0f2a1d",
+        "completion_success_fg": "#7fd4a4",
+        "completion_success_border": "#7fd4a4",
+        "panic_overlay_bg": "rgba(0,0,0,0.94)",
+        "panic_overlay_fg": "#f3f4f6",
+        "download_affordance_fg": "#a9b3f0",
+        "download_affordance_border": "#3a414f"
       }
     },
 
@@ -200,7 +268,19 @@
         "focus_ring.outer on state.success_bg": "1.6:1 — outer alone insufficient; visibility carried by inner #16181d at ~14.2:1 against success bg (two-layer mandatory)",
         "focus_ring.outer on state.info_bg": "1.5:1 — outer alone insufficient; visibility carried by inner #16181d at ~14.6:1 against info bg (two-layer mandatory)",
         "focus_ring.inner on sensitivity.c4_bg": "15.4:1 AAA — load-bearing layer for WCAG 1.4.11 on C4 surfaces",
-        "focus_ring.inner on sensitivity.c3_bg": "14.9:1 AAA — load-bearing layer for WCAG 1.4.11 on C3 surfaces"
+        "focus_ring.inner on sensitivity.c3_bg": "14.9:1 AAA — load-bearing layer for WCAG 1.4.11 on C3 surfaces",
+        "onboarding.step_indicator_pending_fg on step_indicator_pending_bg": "6.0:1 AAA (large) / AA (small) — pending step labels are typography.roles.caption (UI text, ≥3:1 floor satisfied; 4.5:1 floor for text satisfied)",
+        "onboarding.step_indicator_active_fg on step_indicator_active_bg": "8.6:1 AAA — current-step pill (accent.default ground); matches button primary pair",
+        "onboarding.step_indicator_complete_fg on step_indicator_complete_bg": "5.7:1 AA — completed-step pill (state.success ground); never color-only — always paired with checkmark icon per design-system §4.D.T19",
+        "onboarding.passphrase_reveal_fg on passphrase_reveal_bg": "16.1:1 AAA — load-bearing for the recovery-passphrase ceremony (D.4 reveal); ADR-0003 Amendment F §Operational rule 5 'largest typography token + highest-contrast pairing'",
+        "onboarding.browser_baseline_pass_fg on browser_baseline_pass_bg": "5.7:1 AA — pass-state badge; paired with check icon + 'Supported' text",
+        "onboarding.browser_baseline_fail_fg on browser_baseline_fail_bg": "6.6:1 AA — fail-state badge; paired with X icon + 'Too old' text",
+        "onboarding.device_fingerprint_fg on device_fingerprint_bg": "9.6:1 AAA — D.1 UA+platform render is human-inspection text in typography.roles.code",
+        "onboarding.completion_success_fg on completion_success_bg": "5.7:1 AA — D.7 'You're set up' affirmative banner; paired with checkmark icon",
+        "onboarding.panic_overlay_fg on panic_overlay_bg": "15.3:1 AAA — panic-wipe in-progress overlay; on near-opaque black; loading text MUST remain legible while every other UI element drops behind",
+        "onboarding.download_affordance_fg on background.primary": "9.2:1 AAA — D.4 'Download encrypted recovery blob' secondary-affordance label (accent.default ground)",
+        "focus_ring.inner on onboarding.passphrase_reveal_bg": "16.1:1 AAA — focus ring inner line on the reveal surface (load-bearing for keyboard-only ceremony)",
+        "focus_ring.inner on onboarding.panic_overlay_bg": "1.0:1 — inner #16181d is invisible on near-black overlay; on this surface the outer #fbbf24 carries visibility at 13.1:1 (inversion of the standard two-layer rule). Implementer MUST render the inner ring layer at color.foreground.primary (i.e., #fbbf24 INVERTED to white on dark overlay) — see design-system §4.D.T19 panic-overlay-focus-ring rule"
       },
       "dark": {
         "foreground.primary on background.primary": "15.2:1 AAA",
@@ -229,7 +309,18 @@
         "focus_ring.outer on state.success_bg": "9.2:1 AAA — outer alone sufficient; inner layer mandatory for consistency",
         "focus_ring.outer on state.info_bg": "9.0:1 AAA — outer alone sufficient; inner layer mandatory for consistency",
         "focus_ring.inner on sensitivity.c4_bg": "10.8:1 AAA — load-bearing layer for WCAG 1.4.11 on C4 surfaces in dark mode",
-        "focus_ring.inner on sensitivity.c3_bg": "10.5:1 AAA — load-bearing layer for WCAG 1.4.11 on C3 surfaces in dark mode"
+        "focus_ring.inner on sensitivity.c3_bg": "10.5:1 AAA — load-bearing layer for WCAG 1.4.11 on C3 surfaces in dark mode",
+        "onboarding.step_indicator_pending_fg on step_indicator_pending_bg": "6.7:1 AAA (large) / AA (small)",
+        "onboarding.step_indicator_active_fg on step_indicator_active_bg": "10.1:1 AAA — current-step pill (dark accent.default ground)",
+        "onboarding.step_indicator_complete_fg on step_indicator_complete_bg": "9.6:1 AAA — completed-step pill (dark state.success ground); paired with checkmark icon",
+        "onboarding.passphrase_reveal_fg on passphrase_reveal_bg": "15.2:1 AAA — load-bearing for the recovery-passphrase ceremony in dark mode",
+        "onboarding.browser_baseline_pass_fg on browser_baseline_pass_bg": "9.6:1 AAA",
+        "onboarding.browser_baseline_fail_fg on browser_baseline_fail_bg": "7.1:1 AAA",
+        "onboarding.device_fingerprint_fg on device_fingerprint_bg": "10.4:1 AAA",
+        "onboarding.completion_success_fg on completion_success_bg": "9.6:1 AAA",
+        "onboarding.panic_overlay_fg on panic_overlay_bg": "15.2:1 AAA — dark-mode panic overlay near-black ground; loading text legibility load-bearing",
+        "onboarding.download_affordance_fg on background.primary": "9.4:1 AAA",
+        "focus_ring.inner on onboarding.passphrase_reveal_bg": "15.2:1 AAA"
       },
       "verified_on": "2026-05-22 — designer self-audit + accessibility-specialist re-verification on B-1/B-2 fixes."
     }
@@ -322,7 +413,13 @@
       "form": "560px",
       "content": "960px",
       "wide": "1200px",
-      "full": "100%"
+      "full": "100%",
+      "recovery_sheet_print": "5.5in",
+      "wizard_chrome": "640px"
+    },
+    "_max_width_notes": {
+      "recovery_sheet_print": "T19 / design-system §4.D D.4.print — half a US-letter sheet (5.5in × 8.5in landscape OR 5.5in column on letter). Sized so a single sheet of paper holds the passphrase + salt + warning at typography.roles.totp scale without forcing line-wrap on the word-chunks. Print stylesheet ONLY; on-screen fallback uses layout.max_width.form.",
+      "wizard_chrome": "T19 — wizard chrome max width. Wider than form (560px) because the step indicator + body + sticky action footer share the same gutter. Falls back to 100% below breakpoint.md per layout pattern 5.4 (interstitial layout)."
     },
     "gutter": {
       "mobile": "1rem",
@@ -382,8 +479,14 @@
     "hairline": "1px",
     "default": "1px",
     "thick": "2px",
+    "c4_stripe": "4px",
+    "step_indicator": "2px",
     "focus_inner": "2px",
-    "focus_outer": "3px"
+    "focus_outer": "3px",
+    "_notes": {
+      "c4_stripe": "C4 sensitivity left-border + reprisal/concern card stripe; resolves G-T08-17 carry-forward (was raw '4px' in ConcernIntakeForm.svelte:446).",
+      "step_indicator": "T19 wizard step-indicator pill border; active/complete/pending all use the same width."
+    }
   },
 
   "shadow": {
@@ -404,7 +507,12 @@
       "micro": "100ms",
       "fast": "160ms",
       "normal": "220ms",
-      "slow": "320ms"
+      "slow": "320ms",
+      "step_transition": "320ms"
+    },
+    "_duration_aliases": {
+      "_comment": "Semantic aliases over duration.*. step_transition === slow today; lives as a named binding so a future designer pass can retune wizard pacing without re-sweeping every consumer. Implementer MUST reference the alias, not the raw duration, on T19 step-to-step transitions.",
+      "step_transition": "slow"
     },
     "easing": {
       "linear": "linear",
@@ -422,7 +530,8 @@
       "modal_scrim": { "property": "opacity", "duration": "normal", "easing": "linear", "reduced": "micro" },
       "toast_enter": { "property": "opacity, transform", "duration": "fast", "easing": "out", "reduced": "opacity-only at micro" },
       "skeleton_pulse": { "property": "opacity", "duration": "1200ms", "easing": "in_out", "reduced": "disabled — flat block" },
-      "spinner_rotate": { "property": "transform", "duration": "1000ms", "easing": "linear", "reduced": "replaced by static 'Loading…' text + indeterminate progress bar (no rotation)" }
+      "spinner_rotate": { "property": "transform", "duration": "1000ms", "easing": "linear", "reduced": "replaced by static 'Loading…' text + indeterminate progress bar (no rotation)" },
+      "wizard_step_transition": { "property": "opacity", "duration": "step_transition", "easing": "out", "reduced": "instant — no opacity fade; the next step renders flat, current step is removed; SR announcement still fires per design-system §4.D.T19" }
     }
   },
 
@@ -437,8 +546,10 @@
     "modal": 1300,
     "toast": 1400,
     "tooltip": 1500,
+    "onboarding_overlay": 1550,
     "lock_screen": 1600,
-    "panic_overlay": 1700
+    "panic_overlay": 1700,
+    "_onboarding_note": "onboarding_overlay (1550) sits ABOVE tooltip (1500) and BELOW lock_screen (1600). Semantics: T19 wizard chrome is a full-viewport surface (not a modal — there is no underlying app shell yet for a first-launch user) but is NOT a lock — a lock implies prior authenticated state. A user mid-onboarding who triggers a 15-min idle timeout MUST see the lock-screen overlay drawn on TOP of the wizard, and panic-wipe MUST draw on top of everything. Z-order intentionally preserves this lock/panic precedence."
   },
 
   "breakpoint": {
@@ -666,12 +777,137 @@
     "concern_intake_form": { "form_variant": "with_anonymous_toggle_default_on" },
     "reprisal_log_entry": { "card_variant": "sensitive_c4", "requires_passphrase_prompt": true },
     "sensitive_read_feed": { "toast_variant": "sensitive_activity", "feed_variant": "audit_feed" },
-    "onboarding_passphrase_print": { "page_variant": "print_layout" },
+    "onboarding_passphrase_print": { "page_variant": "print_layout", "max_width": "layout.max_width.recovery_sheet_print" },
     "photo_capture": { "advisory": "gps_removed", "location_input": "free_text_only" },
     "offline_banner": { "alert_variant": "offline" },
     "lock_screen": { "z": "z_index.lock_screen" },
-    "panic_wipe": { "modal_variant": "destructive_confirm", "z": "z_index.panic_overlay" },
+    "panic_wipe": {
+      "modal_variant": "destructive_confirm",
+      "z_modal": "z_index.modal",
+      "z_overlay_inprogress": "z_index.panic_overlay",
+      "overlay_bg": "color.{mode}.onboarding.panic_overlay_bg",
+      "overlay_fg": "color.{mode}.onboarding.panic_overlay_fg",
+      "literal_phrase": "WIPE",
+      "literal_phrase_match": "case_insensitive",
+      "ready_delay_ms_default": 200,
+      "_f53_contract": "F-53 destructive_confirm — literal-phrase input is keystroke-gated until ready promise resolves; pre-ready synthesized Enter does NOT fire wipe; Escape does NOT dismiss. See design-system §3.2 + §4.D.T19 PanicWipeModal."
+    },
     "session_list": { "table_variant": "sessions" },
-    "audit_feed": { "table_variant": "audit_feed" }
+    "audit_feed": { "table_variant": "audit_feed" },
+
+    "onboarding_wizard": {
+      "_comment": "T19 / ADR-0020 — OnboardingFlow wizard chrome + step indicator + per-step nav. State spec lives in design-system.md §4.D.T19. The wizard renders a full-viewport chrome on first-launch (no app shell yet) at z_index.onboarding_overlay. Lock-screen and panic-overlay draw above the wizard if triggered mid-flow.",
+      "z": "z_index.onboarding_overlay",
+      "chrome_bg": "color.{mode}.onboarding.wizard_chrome_bg",
+      "chrome_border": "color.{mode}.onboarding.wizard_chrome_border",
+      "max_width": "layout.max_width.wizard_chrome",
+      "step_count": 7,
+      "step_labels": ["D.1 Device", "D.2 Hosting", "D.3 Passkey", "D.4 Recovery", "D.5 Sessions", "D.6 Verify", "D.7 Done"],
+      "_d5_canonical": "Per ADR-0020 Decision 2.a + designer's pass 2026-05-24: D.5 canonical = SESSION-REVOCATION PRIMER. The print sheet is D.4.print (a sub-step rendered via @media print stylesheet). Resolves G-T19-2 labelling drift.",
+      "step_indicator": {
+        "variants": ["pending", "active", "complete"],
+        "border_width": "border_width.step_indicator",
+        "icon_pending": "circle-outline (icon.size.sm)",
+        "icon_active": "circle-filled (icon.size.sm)",
+        "icon_complete": "checkmark (icon.size.sm) — REQUIRED in addition to the success color (color-blind safe)",
+        "tokens": {
+          "pending_bg": "color.{mode}.onboarding.step_indicator_pending_bg",
+          "pending_fg": "color.{mode}.onboarding.step_indicator_pending_fg",
+          "pending_border": "color.{mode}.onboarding.step_indicator_pending_border",
+          "active_bg": "color.{mode}.onboarding.step_indicator_active_bg",
+          "active_fg": "color.{mode}.onboarding.step_indicator_active_fg",
+          "active_border": "color.{mode}.onboarding.step_indicator_active_border",
+          "complete_bg": "color.{mode}.onboarding.step_indicator_complete_bg",
+          "complete_fg": "color.{mode}.onboarding.step_indicator_complete_fg",
+          "complete_border": "color.{mode}.onboarding.step_indicator_complete_border"
+        }
+      },
+      "step_transition": {
+        "duration": "motion.duration.step_transition",
+        "easing": "motion.easing.out",
+        "reduced_motion": "instant — no opacity fade; SR announces step change via role=status"
+      },
+      "test_only_props": {
+        "_comment": "Test-only — runtime-stripped in production per ADR-0020 Decision 8. Source references via split-form: '__test_' + 'step'.",
+        "__test_step": "OnboardingStep override; ignored when MODE === 'production'",
+        "__test_user_agent": "UA override for browser-baseline gate; ignored when MODE === 'production'"
+      }
+    },
+
+    "browser_baseline_badge": {
+      "_comment": "T19 / ADR-0020 — D.3 browser-baseline pass/fail badge. Always icon + text; never color-only.",
+      "variants": ["pass", "fail"],
+      "tokens": {
+        "pass_bg": "color.{mode}.onboarding.browser_baseline_pass_bg",
+        "pass_fg": "color.{mode}.onboarding.browser_baseline_pass_fg",
+        "pass_border": "color.{mode}.onboarding.browser_baseline_pass_border",
+        "fail_bg": "color.{mode}.onboarding.browser_baseline_fail_bg",
+        "fail_fg": "color.{mode}.onboarding.browser_baseline_fail_fg",
+        "fail_border": "color.{mode}.onboarding.browser_baseline_fail_border"
+      },
+      "icon_pass": "check (icon.size.sm)",
+      "icon_fail": "x-circle (icon.size.sm)",
+      "label_pass_key": "onboarding.baseline.pass.label",
+      "label_fail_key": "onboarding.baseline.fail.label"
+    },
+
+    "device_fingerprint_card": {
+      "_comment": "T19 / D.1 — UA + platform string render. NEVER includes IP, geolocation, navigator.connection, Sec-CH-UA-Full-Version-List. Human-inspection only; never crosses a trust boundary.",
+      "data_testid": "device-fingerprint",
+      "typography": "typography.roles.code",
+      "tokens": {
+        "bg": "color.{mode}.onboarding.device_fingerprint_bg",
+        "fg": "color.{mode}.onboarding.device_fingerprint_fg",
+        "border": "color.{mode}.onboarding.device_fingerprint_border"
+      }
+    },
+
+    "recovery_passphrase_reveal": {
+      "_comment": "T19 / D.4 — on-screen passphrase reveal (hold-to-reveal per Amendment F). Composes RecoveryPassphraseScreen.svelte. Largest typography token + highest-contrast pair per ADR-0003 Amendment F operational rule 5.",
+      "typography": "typography.roles.totp",
+      "tokens": {
+        "fg": "color.{mode}.onboarding.passphrase_reveal_fg",
+        "bg": "color.{mode}.onboarding.passphrase_reveal_bg",
+        "border": "color.{mode}.onboarding.passphrase_reveal_border",
+        "chunk_separator": "color.{mode}.onboarding.passphrase_chunk_separator"
+      },
+      "max_width": "layout.max_width.form",
+      "chunk_size_words": 5,
+      "_forbidden": "No copy-to-clipboard control; no SpeechSynthesis; no screenshot-friendly affordance; no <input> rendering of the plaintext. Static-lint enforced per ADR-0003 Amendment F operational rule 4."
+    },
+
+    "recovery_blob_download": {
+      "_comment": "T19 / D.4 — secondary off-device-copy affordance. The downloaded JSON is the ENCRYPTED blob + kdf_params metadata; NEVER the passphrase. ADR-0020 Decision 3.a Option C.",
+      "variant": "button.ghost",
+      "tokens": {
+        "fg": "color.{mode}.onboarding.download_affordance_fg",
+        "border": "color.{mode}.onboarding.download_affordance_border"
+      },
+      "icon": "download (icon.size.sm)",
+      "label_key": "onboarding.recovery.download.label",
+      "helper_key": "onboarding.recovery.download.helper",
+      "min_target": "touch_target.min"
+    },
+
+    "session_revocation_primer": {
+      "_comment": "T19 / D.5 (canonical) — primer for revoking other sessions during enrollment. NOT the full Surface H list; an informational primer with a single 'Revoke other sessions' destructive secondary action and a 'Skip — I'll do this later' tertiary. Composes lib/auth/session.ts listSessions + revokeAllSessions.",
+      "list_variant": "table.sessions",
+      "primary_action_key": "onboarding.sessions.revoke_other.label",
+      "secondary_action_key": "onboarding.sessions.skip.label",
+      "advance_target": "D.7",
+      "_f39_contract": "revokeAllSessions resolves only after server confirms ≤5s propagation (post-T05.1). UI success state lands when promise resolves; toast confirms count revoked.",
+      "_empty_state": "If only the current session exists, list shows the single 'This device' row and the primer copy explains there's nothing else to revoke; Skip becomes the only forward action (still navigates to D.7)."
+    },
+
+    "completion_summary": {
+      "_comment": "T19 / D.7 — terminal 'You're set up' summary. Lists what was accomplished (passkey set, recovery sheet printed-and-verified, browser supported, device flagged personal) AND points to where panic-wipe + sessions live for future need (per ADR-0020 Decision 3.f).",
+      "variant": "card.elevated",
+      "tokens": {
+        "success_bg": "color.{mode}.onboarding.completion_success_bg",
+        "success_fg": "color.{mode}.onboarding.completion_success_fg",
+        "success_border": "color.{mode}.onboarding.completion_success_border"
+      },
+      "icon": "check-circle (icon.size.lg) — REQUIRED in addition to color"
+    }
   }
 }

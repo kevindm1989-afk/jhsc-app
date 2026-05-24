@@ -1677,6 +1677,7 @@ Each item has a documented rationale and a follow-up.
 | O-16 | **Reprisal-log status-flip as soft-delete** (F-36) | Not gated by 4-eyes today. | **Add to T13**. |
 | O-17 | **Protected-modal focus-trap timing ambiguity** (F-53, a11y A-2) | Design-system §3.1/§3.2 do not pin trap-engagement to `modal.show()`. Coercion-resistance posture (RA-1 compensating controls) is timing-sensitive. | **Architect amendment pass #2** to tighten §3.1/§3.2 wording; test-writer to land M-53a/b/c invariants regardless. If RA-1 / HG-1 lands as single-signer, M-53a/b/c become launch-blockers. |
 | O-18 | **Recovery-passphrase low-vision escape hatch** (F-54, a11y A-5) | Surface D.6 currently has only "fail 3 times to re-display" path; punitive for low-vision / dyslexia / cognitive-impairment users. Audio-narration mode rejected (widens threat space); hold-to-reveal + cap + audit-log adopted. | **Add to T07 + design-system §4.D**; new audit-log enum value `identity_privkey.recovery_blob.viewed`; en-CA plain-language strings required. |
+| O-19 | **Panic-wipe local-only residual** (F-106 / F-109 / F-115; §8.T19 panic-wipe residual block) — un-revoked server sessions, off-device JSON-blob theft, and HTTP-cache flush gaps survive a local-only wipe | User-adjudicated 2026-05-24 (Q4 disposition: local-only v1). Surface H (D.5) is the user-driven path for server-side session revocation; panic-wipe modal copy guides the user to also visit Sessions when safe. | Tracked as G-T19-3 in `.context/known-gaps.md` (server-cascade panic-wipe is a future task with its own threat-modeler re-pass). |
 
 ---
 
@@ -1877,3 +1878,469 @@ The accessibility-specialist's preliminary read on A-5 — "no new coercion vect
 **Cross-border transfers:** no change. The two flagged (Sentry EU; Supabase + AWS ca-central US-incorporated) remain the only ones.
 
 **Privacy / compliance:** the new audit-log enum value `identity_privkey.recovery_blob.viewed` is a C1 record (no PI in the body — just `{actor_id, enrollment_session_id, reveal_count, ts}`), retention follows the existing 24-month audit-log floor; PIPEDA principle-9 (individual access) is satisfied because the user can see their own recovery-blob-viewed events in their audit-feed slice.
+
+---
+
+## §8.T19 — Identity-recovery onboarding (D.1 → D.7)
+
+**Source:** ADR-0020 (2026-05-24) "T19 identity-recovery onboarding library + OnboardingFlow / PanicWipeModal composition" §Threat-model delta summary; user-adjudicated open questions Q1 (T19 IS first-device enrollment), Q4 (panic-wipe local-only for v1), Q5 (fr-CA deferred to G-T19-1). Test scaffold `apps/web/test/T19/onboarding.test.ts` (195 lines). RecoveryPassphraseScreen.svelte (existing surface; Amendment F hold-to-reveal). Existing library: `lib/auth/{passkey-enroll,passkey-assert,session,totp-bootstrap,rate-limit,auth-core}.ts`.
+
+**F-range reserved:** F-101 through F-115 (continuing from F-100 in §3.11). No collision with §3.x existing findings. No renumbering of prior findings.
+
+**Trust-boundary deltas T19 introduces:**
+
+- `panicWipe()` crosses **B4** (browser-session boundary) for IndexedDB / cache / cookie destruction; the `panic_wipe.invoked` audit-emit crosses **B1** (auth boundary) into the server-side audit row (audit-BEFORE-side-effect ordering — mirrors F-24 inversion at the destructive-action surface).
+- The recovery-blob JSON download crosses **NO** trust boundary in app terms; the user moves it off-device out-of-band via the OS file picker.
+- The D.3 passkey ceremony crosses **B1** into the WebAuthn server-side verification path (composes existing F-37 RP-ID binding; T19 introduces no new attack surface on B1 beyond reuse).
+- The D.4 recovery-blob write crosses **B2** (E2EE boundary) with ciphertext only (composes existing F-12 single-POST + F-08 KDF floor; T19 introduces no new attack surface on B2 beyond reuse).
+
+**PI touchpoints T19 surfaces (all classified, residency-pinned, retention-pinned; cross-ref §4 PI processing map):**
+
+| Surface | Field | Class | Plaintext location | Ciphertext location | Crosses | Residency | Retention | Purpose (PIPEDA 4.3.4) |
+|---|---|---|---|---|---|---|---|---|
+| D.1 | UA + platform string (`navigator.userAgent` + `navigator.platform`) | C1 (operational; NOT PI per ADR-0010 — already known to the server in every HTTP request) | Browser RAM, DOM (rendered for human inspection) | n/a | none (rendered client-only; NEVER transmitted as a structured audit-meta value) | client device | not persisted | Honest framing per ADR-0008 — show the user which device they are enrolling |
+| D.4 | Recovery passphrase (in-memory) | C4-equivalent (it derives the privkey-unwrapping key) | Browser RAM only — closure scope, never `window.*` | n/a (NEVER persisted; the BLOB that is persisted is encrypted-by-passphrase, not the passphrase itself) | none in v1 | client device only | cleared on advance to D.5_session_revoke; cleared on hard refresh | Recovery on device loss (existing F-08 purpose) |
+| D.4 | Identity privkey (in-memory) | C3 (already in scope from T07) | Browser RAM | IndexedDB (passkey-wrapped); `recovery_blobs` (passphrase-wrapped, server-side via T07.1) | B2 | client device + ca-central-1 (server-side blob) | existing T07 retention | Existing T07 purpose |
+| D.6 | Recovery passphrase (typed-back) | C4-equivalent | Browser RAM (the `<input>` element value) | n/a | none | client device only | cleared on successful match or attempt-counter reset | Verification per F-08 type-back |
+| D.7 + panic-wipe | `actor_pseudonym` for the wipe-emitting user | C1 (HMAC pseudonym per ADR-0016) | n/a | audit_log | B1 (audit-emit only) | ca-central-1 | 7y (mirrors F-58 forensic class) | Forensic record of destructive action |
+
+**Data-minimization assertion:** T19 collects no PI not already collected by T05 / T07 / ADR-0008 / ADR-0010. The UA + platform string is already known to the server via every HTTP request; the D.1 render is the same data shown to the user instead of hidden. No `Sec-CH-UA-Full-Version-List`, no `navigator.connection`, no geolocation, no IP. See F-105 below.
+
+---
+
+### Spoofing (S)
+
+#### F-101 | S | Coerced enrollment on attacker-controlled device (T19 first-launch widens ADR-0008 reach surface)
+**Description.** T19 IS first-device enrollment (per Q1 adjudication). A worker who has just received a TOTP invite slip may be coerced (by an employer, by a spouse, by a controlling co-worker) to traverse D.1 → D.7 on the attacker's chosen device — a shared family laptop, an employer-issued kiosk, a "lend me your phone" smartphone. Once D.7 completes, the attacker holds the device with: (a) the wrapped identity privkey in IndexedDB, (b) a session cookie with up to 15-min TTL, (c) possibly a printed recovery sheet the coerced user was forced to surrender. The membership is permanently bound to that device until the user proactively re-enrolls — and the F-41 printed-sheet coercion lineage now anchors at enrollment time, not post-enrollment.
+
+**Affected:** D.1 surface (`OnboardingFlow.svelte` → `D1DeviceAdvisory.svelte`); ADR-0008 advisory copy; HG-10 lawyer-ratified `i18n/en-CA.json` `onboarding.advisory.*` keys.
+
+**Likelihood:** Medium-low. The adversary model A2 (employer-owned device) + A3 (coerced rep) is in scope; the attack requires physical access at the exact enrollment moment.
+
+**Impact:** High — a wrong-device enrollment surrenders the entire identity envelope. Same impact envelope as F-41 plus T2 employer-device.
+
+**Priority:** Medium.
+
+**Mitigations (testable):**
+
+- *M-101a (advisory presence + content).* "D.1 renders a heading matching `/personal device/i`, a primary button matching `/personal device.*continue/i`, a secondary button matching `/stop.*switch.*personal/i`, AND copy stating (a) the device will store identity material, (b) the user MUST NOT enroll on a shared or employer-issued device, (c) the app does not detect MDM, (d) a recovery passphrase is required (per ADR-0020 Decision 7 D.1 list)." **Test obligation:** `apps/web/test/T19/onboarding.test.ts` lines 40-48 already pins headings + buttons + `data-testid="device-fingerprint"`; extend to assert the four copy clauses (a)–(d) once HG-10 lands the i18n keys.
+- *M-101b (advance gate).* "D.1 → D.2 transition is gated on an explicit click of the `/personal device.*continue/i` button. No keyboard shortcut, no auto-advance, no URL `?step=D.2` skip in production." **Test obligation:** programmatic `dispatchEvent(new Event('load'))` does not advance past D.1; only a real click does. Static lint: `lib/onboarding/step-machine.ts` rejects any `gates.D1` predicate that doesn't read from the explicit-click ref.
+- *M-101c (device fingerprint = UA + platform only).* "The `data-testid='device-fingerprint'` element renders ONLY `navigator.userAgent` + `navigator.platform`; NEVER an IP, NEVER `navigator.connection.*`, NEVER `Sec-CH-UA-Full-Version-List`, NEVER geolocation. The string is rendered client-only and NEVER appears in any structured audit-meta payload, any Sentry breadcrumb, any console.log, any toast." **Test obligation:** unit test on `lib/onboarding/device-fingerprint.ts` snapshot-asserts the composition; integration test asserts the rendered text contains no `\\d+\\.\\d+\\.\\d+\\.\\d+` (no IP shape) and no key in `auditSpy.captured` contains the rendered fingerprint string.
+
+**Residual:** Accepted via M-101a/b/c + ADR-0008's honest-framing posture. F-41 dominates the long-tail; T19 does not widen it materially.
+
+---
+
+#### F-102 | S | Passkey ceremony MITM via wrong-origin enrollment (composition of T05 enrollFirstDevice into D.3)
+**Description.** D.3 composes `enrollFirstDevicePasskey()` from `lib/auth/passkey-enroll.ts`. The composition could pass a wrong origin (e.g., a misconfigured staging URL leaking into production via a Vite env var) and bind the passkey to the wrong RP-ID, opening F-37 at the onboarding boundary. T05's library validates RP-ID; the T19 composition must NOT bypass that validation.
+
+**Affected:** `lib/onboarding/steps/D3PasskeyEnrollment.svelte` → `enrollFirstDevicePasskey()`; the `__test_user_agent` test-only prop (production-stripped per ADR-0020 Decision 8) MUST NOT also expose a `__test_origin` override that ships into production.
+
+**Likelihood:** Low. Requires a misconfiguration AND a network-level MITM positioning.
+
+**Impact:** High — wrong-RP-ID passkey is a permanent silent compromise (the user thinks they enrolled; the attacker holds an assertable credential for the wrong origin that may be controllable). Same envelope as F-37.
+
+**Priority:** Medium.
+
+**Mitigations (testable):**
+
+- *M-102a (T05 composition contract).* "`D3PasskeyEnrollment.svelte` calls `enrollFirstDevicePasskey()` with the live `window.location.origin` (NEVER a hard-coded string, NEVER a value read from a URL query param, NEVER a value read from `__test_*` props in production)." **Test obligation:** unit test snapshots the call site and asserts `origin === window.location.origin` at call time. Static lint: grep `lib/onboarding/steps/D3PasskeyEnrollment.svelte` for any literal `'http'` string outside test fixtures; assert zero matches.
+- *M-102b (test-prop production strip).* "The `__test_user_agent` prop is no-op in `import.meta.env.MODE === 'production'`; no `__test_origin` prop exists." **Test obligation:** mirror ADR-0020 Decision 8 — grep production bundle for the literal strings `__test_step`, `__test_user_agent`; assert zero matches. Add `__test_origin` to the grep-banned list defensively.
+- *M-102c (inherits F-37 from T05).* The cross-reference: F-37's test (`apps/web/test/T05` RP-ID origin rejection) covers the underlying library. T19 only needs to assert the composition path doesn't bypass — see M-102a. **Cross-ref F-37.**
+
+**Residual:** Low. F-37's library-level test is the load-bearing assertion; T19 composition tests are defense-in-depth.
+
+---
+
+#### F-103 | S | TOTP phishing during D.3 precondition (composition of T05 totp-bootstrap into pre-D.3 flow)
+**Description.** D.3 expects a TOTP code in-hand (ADR-0020 Decision 1 / Q1 resolution — "co-chair generates TOTP invite" precondition). A phisher could (a) intercept the TOTP slip in transit (email MITM, paper-slip theft), (b) call the user posing as the co-chair asking them to "read me your code to verify", or (c) deploy a fake onboarding surface on a look-alike origin that collects the TOTP then re-uses it on the real surface (the TOTP is single-use per F-38, so the phisher must race the user). Once the phisher consumes the TOTP, D.3's passkey ceremony binds the FIRST DEVICE to the phisher's device — the legitimate user then gets 401/410 on their own onboarding attempt.
+
+**Affected:** D.3 → `enrollFirstDevicePasskey()` (which internally calls TOTP consumption per `lib/auth/auth-core.ts:323` `constantTimeEqual` on TOTP code); T05's `attemptTotpLogin` path; the G-T05-11 410/401 differential carry-forward.
+
+**Likelihood:** Medium. The email MITM + paper-slip-theft surface is the standard A2 vector; the race-to-consume requires the phisher to be operationally fast but is feasible.
+
+**Impact:** High — first-device binding is the permanent root of trust; a phished bootstrap is a full takeover until the user notices their own enrollment fails and the co-chair re-issues (re-issue requires 4-eyes per ADR-0002).
+
+**Priority:** Medium-high.
+
+**Mitigations (testable):**
+
+- *M-103a (TOTP rate-limit dual-window per F-38 + G-T08-13 lineage).* "TOTP wrong-code attempts on the same invite are rate-limited at ≤5 per 15 minutes per user (the existing TOTP_WRONG_LIMIT = 5, TOTP_WRONG_WINDOW_MS = 15 * 60_000 in `lib/auth/rate-limit.ts:27-28`). The 6th wrong attempt within the window locks the invite and requires co-chair re-issue." **Test obligation:** existing F-38 test in T05 suite covers the library; T19's contribution is a regression test that D.3 surfaces the lock with a user-readable copy key `t('onboarding.totp.locked')` (NOT echoing the wrong code, NOT echoing the user's email/identifier — see F-107). **Cross-ref F-38, G-T08-13.**
+- *M-103b (constant-time TOTP comparison preserved).* "The composition path D.3 → `enrollFirstDevicePasskey` → TOTP-consume preserves the `constantTimeEqual` check at `auth-core.ts:79`. The T19 layer MUST NOT introduce a `===` short-circuit." **Test obligation:** static lint: grep `lib/onboarding/steps/D3PasskeyEnrollment.svelte` for `totp` AND `===` AND `code` in the same statement; assert zero matches. Cross-ref the T05 timing-equivalence assertion in F-40.
+- *M-103c (G-T05-11 410/401 differential — explicit carry-forward, NOT closed by T19).* "T19 does NOT close G-T05-11. The 410/401 differential on `enrollFirstDevice` for `reason='expired'` vs `reason='consumed'` remains an architect-adjudication item; T19's D.3 surfaces a single generic copy `t('onboarding.passkey.enrollment_failed')` regardless of underlying reason." **Test obligation:** D.3 error surface displays the same text for both differential cases; test seeds an `EnrollResult` with each reason and asserts identical DOM text + identical `data-testid='enrollment-error'`. **Cross-ref G-T05-11.**
+
+**Residual:** Medium until G-T05-11 is closed (architect adjudication). The T19 layer can collapse the user-visible surface but cannot collapse the network-observable differential.
+
+---
+
+### Tampering (T)
+
+#### F-104 | T | In-memory passphrase reference exfiltrated via malicious browser extension or DevTools attach (D.4 → D.6 window)
+**Description.** Decision 2.d holds the generated passphrase in a closure-scope memory ref between D.4 (generation) and D.6 (type-back match). A browser extension with `activeTab` permission OR a remote DevTools attach via Chrome Remote Debug can heap-snapshot the JS process and find the passphrase string. Once the type-back matches (D.6), the ref is cleared, narrowing the window to roughly 30 seconds of user interaction. F-11 (memory disclosure via DevTools) is the parent class; this is the T19-specific manifestation.
+
+**Affected:** `lib/onboarding/steps/D4RecoveryPassphrase.svelte` passphrase ref; `RecoveryPassphraseScreen.svelte` `export let passphrase = ''` (line 38); the wizard state machine's D.4 → D.6 → D.5_session_revoke transitions.
+
+**Likelihood:** Low. Requires an installed malicious extension OR a remote-debug attach on the user's device during the enrollment window. F-11 class.
+
+**Impact:** High — the passphrase yields the identity privkey via the recovery blob.
+
+**Priority:** Medium.
+
+**Mitigations (testable):**
+
+- *M-104a (closure scope, not `window.*`).* "The in-memory passphrase ref is held in a Svelte component-local `let` binding (or a closure inside `lib/onboarding/recovery-blob-download.ts`); it is NEVER assigned to `window.*`, NEVER assigned to `globalThis.*`, NEVER assigned to a module-level `let` outside the component instance." **Test obligation:** static lint via grep on `lib/onboarding/` for `window.passphrase`, `globalThis.passphrase`, and any module-level `let passphrase`; assert zero matches outside test fixtures. Mirrors G-T10-16 module-singleton anti-pattern lineage.
+- *M-104b (ref cleared on advance to D.5_session_revoke).* "On the D.6 → D.5_session_revoke transition (typed-back match), the in-memory passphrase ref is overwritten to `''` (or a zero-filled buffer if the implementer chooses `Uint8Array`); the type-back `<input>` value is set to `''`; the D.4 `<input>` value is set to `''`." **Test obligation:** integration test exercises D.4 → D.6 successful match; immediately after match, expose a `__test_only_get_passphrase_ref()` via `TestWipeStore`-style debug seam (test-only; production-stripped per Decision 8); assert returns `''`.
+- *M-104c (no autocomplete + no spellcheck on the type-back input).* "The D.6 type-back `<input>` carries `autocomplete='off'` AND `spellcheck='false'` AND `autocapitalize='none'` AND `autocorrect='off'`. Defense against Chromium cloud-spellcheck roundtripping the passphrase to Google. Defense against password-manager autofill polluting the user's vault with the passphrase under a wrong-form heuristic." **Test obligation:** DOM assertion on the D.6 input attributes. (Architect's Threat-model delta summary §T notes this explicitly.)
+- *M-104d (constant-time type-back compare).* "The D.6 match compares typed input to in-memory ref via `libsodium.memcmp` OR a hand-written constant-time scan over the full string length; NEVER `===`. Defense-in-depth against timing channels even though jsdom-equivalent contexts don't expose them." **Test obligation:** static lint on D.6 component for `===` in any line referencing `passphrase` AND `typed`; assert zero matches. Mirror of `auth-core.ts:79` `constantTimeEqual` pattern.
+
+**Residual:** Low with M-104a/b/c/d. F-11 dominates the residual; T19 doesn't widen materially.
+
+---
+
+#### F-105 | T | Recovery-blob JSON download tampered before re-import on a future device
+**Description.** Decision 2.d offers the user a JSON-download of the encrypted recovery blob (the SAME ciphertext as the server-side `recovery_blobs` row, packaged with `kdf_params` metadata for off-device portability). The user may store this JSON on a USB key, in a password manager, on a personal cloud drive. A future attacker who finds the JSON (filesystem theft, cloud-account compromise) AND who learns the passphrase (F-41 printed-sheet coercion) can decrypt. SEPARATELY: an attacker who tampers with the JSON between download and re-import on a future device can substitute their own ciphertext, causing the user to "recover" into an attacker-controlled identity. T19 is OUT OF SCOPE for the re-import path (that's a future task), but the JSON contract must be tamper-evident on re-import.
+
+**Affected:** `lib/onboarding/recovery-blob-download.ts` (the JSON serializer); the contract the future re-import path consumes.
+
+**Likelihood:** Low. Requires both filesystem-level theft of the JSON AND attacker-control of the re-import surface.
+
+**Impact:** High — recovery-into-attacker-identity is a full takeover.
+
+**Priority:** Low (the re-import path is not in T19; T19 sets the contract).
+
+**Mitigations (testable):**
+
+- *M-105a (AEAD-wrapped on-disk format identical to server-side blob).* "The downloaded JSON is `{ ciphertext: base64(secretbox(identity_privkey, argon2id(passphrase, salt))), kdf_params: { ops, mem, salt }, version: 1, blob_id: <uuid> }`. The `secretbox` MAC is the integrity surface; a tampered ciphertext fails MAC verification on decrypt. NEVER includes the passphrase. NEVER includes the raw identity privkey." **Test obligation:** unit test on `recovery-blob-download.ts` — snapshot the JSON shape; assert keys are EXACTLY `{ciphertext, kdf_params, version, blob_id}` (closed allowlist — mirrors F-19 closed-allowlist pattern); assert NO key named `passphrase`, `privkey`, `priv`, `secret`, `seed`. Decrypt-after-tamper test: flip one byte in `ciphertext`; assert decrypt throws.
+- *M-105b (downloaded JSON contains no PI).* "The downloaded JSON contains no `user_id`, no `email`, no `actor_pseudonym`, no `display_name`. The `blob_id` is a fresh UUID issued at download time, NOT correlatable to any other identifier." **Test obligation:** static lint — grep `recovery-blob-download.ts` for `user`, `email`, `display_name`; assert no match outside type-only references. Snapshot test asserts JSON has no field matching email-shape (`[^@]+@[^@]+`) or HMAC-pseudonym-shape (32-char hex).
+- *M-105c (future re-import contract documented).* "The JSON's `version: 1` field is the negotiated contract for the future re-import path. T19 documents in `lib/onboarding/recovery-blob-download.ts` header: `// Re-import path (out of T19 scope): caller MUST verify version === 1, MUST call secretbox_open before trusting any byte, MUST treat MAC failure as a hard error (NOT a 'corrupted file — proceed anyway' fallback).`" **Test obligation:** static lint asserts the header comment exists; mirrors G-T07-10 (KeyStore interface split documentation lineage).
+
+**Residual:** Accepted with M-105a/b/c. Re-import path threat-model pass is deferred to the future task.
+
+---
+
+### Repudiation (R)
+
+#### F-106 | R | User claims "I did not invoke panic-wipe" — audit row must survive the wipe itself
+**Description.** Panic-wipe destroys IndexedDB, caches, session cookie, and in-memory state on the user's device. If the audit row `panic_wipe.invoked` is written AFTER the local destruction, a transient network failure during the audit-emit leaves NO forensic trace — the user can later truthfully or falsely deny invoking the action. Operationally indistinguishable from a hostile actor wiping a coerced user's device. The F-24 audit-BEFORE-side-effect pattern (export pipeline) and the F-58 audit-WITH-side-effect pattern (retention sweep) both apply here as patterns; T19's pattern is **audit-BEFORE-side-effect** because the side-effect is irreversibly local and unobservable from the server.
+
+**Affected:** `lib/lock/panic-wipe.ts` `panicWipe()` function; `WipeStore.emitAudit()` ordering contract (ADR-0020 Decision 4); the new `panic_wipe.invoked` audit-event enum value (ADR-0020 Decision 5).
+
+**Likelihood:** Medium (network failures during destructive actions are operationally common).
+
+**Impact:** Medium — repudiation surface for A3 (coerced rep) + A4 (external attacker who gained local control + invoked panic-wipe to erase forensic evidence).
+
+**Priority:** Medium-high.
+
+**Mitigations (testable):**
+
+- *M-106a (audit-BEFORE-side-effect ordering).* "`panicWipe()` calls `WipeStore.emitAudit({event_type: 'panic_wipe.invoked', meta: {...}})` and AWAITS its `{ok: true}` resolution BEFORE invoking ANY of `clearIndexedDb`, `clearCaches`, `clearSessionStorage`, `clearLocalStorage`, `tearDownSessionCookie`. If `emitAudit` returns `{ok: false}` (network failure, server 5xx, timeout), `panicWipe()` returns `{status: 'audit_failed', destruction_attempted: false}` and the user is shown a danger toast `t('panic.audit_emit_failed')` directing them to try again on a reachable network." **Test obligation:** in `apps/web/test/T19/` add a new test mirroring the existing F-53 destructive_confirm tests — inject a `TestWipeStore.__debugForceAuditFailure()`; call `panicWipe()`; assert (a) no `clearIndexedDb` call was made (use `TestWipeStore.__debugListClearedDatabases()` returns `[]`), (b) the returned status is `audit_failed`, (c) the user-visible toast appears. This is the ADR-0020 Decision 11 "panic-wipe atomicity" test ordering.
+- *M-106b (audit row meta shape is binding).* "The `panic_wipe.invoked` row's `meta` field is EXACTLY `{surface: 'settings' | 'lock_screen', wipe_scope: 'local_only', completed: boolean, partial_failure_classes: readonly ('indexeddb' | 'caches' | 'sessionstorage' | 'localstorage' | 'session_cookie')[]}` per ADR-0020 Decision 5. NO `actor_pseudonym` outside the standard audit-row top-level field. NO IP. NO UA fingerprint. NO `device_id` (the device is about to be wiped; identifying it would be PI without purpose)." **Test obligation:** unit test snapshots the meta shape; closed-allowlist assertion mirrors F-19 (export field allowlist). Static lint: grep `lib/lock/panic-wipe.ts` for `ip`, `userAgent`, `navigator.`; assert zero matches in the audit-meta construction.
+- *M-106c (partial-failure attribution preserved).* "If a clearXxx call throws AFTER the audit row commits, the audit row is rewritten (a second `panic_wipe.invoked` row, NOT an UPDATE of the first — audit-log is append-only per T18) with `meta.completed = false` AND `meta.partial_failure_classes` enumerating the failed subsystems. The first row stands as the 'attempted' record; the second as the 'partial completion' record. A forensic walk reading both rows can reconstruct what happened." **Test obligation:** inject `TestWipeStore.__debugForceClearFailure('caches')`; call `panicWipe()`; assert TWO audit rows exist, the second with `meta.partial_failure_classes = ['caches']`.
+
+**Residual:** Low with M-106a/b/c. Mirrors the F-24 / F-58 audit-anchored repudiation closure pattern at the destructive-action surface.
+
+---
+
+#### F-107 | R | Onboarding completion is NOT audit-logged — gap analysis vs ADR-0020 Decision 5
+**Description.** ADR-0020 Decision 5 / Option J chooses NOT to add an `onboarding.completed` audit-log enum value, reasoning that completion is observable from co-occurrence of `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written` rows. The threat-modeler examines whether this leaves a repudiation gap: can a user later credibly claim "I never completed onboarding" if both pre-existing rows fire but D.5_session_revoke + D.7 are not directly recorded?
+
+**Analysis.** The two pre-existing audit rows are SERVER-INSTRUMENTED on existing endpoints (T05.1 `enroll_first_passkey`, T07.1 `store_recovery_blob`). They commit before D.4 → D.6 transitions in the wizard. A user who closes the tab between D.6 (type-back match) and D.7 (terminal "done") has both server-side rows but the wizard never reached "completion" in any meaningful UX sense. **However:** the security-relevant fact is that the user's passkey is enrolled and the recovery blob is on-server — these are the artifacts that bind the user to the account. The wizard's D.7 click is operational, not security-relevant; the user can re-enter the app via the now-enrolled passkey regardless.
+
+**Verdict.** The architect's choice is defensible. The "completion" the user might dispute is the UX-level "I clicked done" — but the security artifacts (passkey + recovery blob) are already audit-anchored, and the user CAN dispute their existence via the standard audit-feed access path (PIPEDA Principle 9). **No new audit event needed.** If a future regulator surfaces an "explicit onboarding-completion consent record" requirement (e.g., Quebec Law 25 if scope ever expands), a follow-on `onboarding.completed` event can be added via the standard ADR-0003 Amendment A six-mirror dance.
+
+**Affected:** D.7 surface; the audit-log enum at `observability/audit-log.md`.
+
+**Likelihood:** Low.
+
+**Impact:** Low.
+
+**Priority:** Accepted-with-rationale; tracked as design choice, not a finding requiring a mitigation.
+
+**Mitigation:** *M-107 (no new audit event in T19; document rationale).* "ADR-0020 Decision 5 / Option J reasoning is preserved as-is. T19 does NOT reserve an `onboarding.completed` enum value. The combined visibility of `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written` is the structural anchor for onboarding completion." **Test obligation:** none required — this is a deliberate design choice. If a future task adds the event, the new findings re-open this slot.
+
+**Residual:** Accepted.
+
+---
+
+### Information disclosure (I)
+
+#### F-108 | I | Passphrase in DOM / clipboard / accessibility tree beyond the hold-to-reveal window
+**Description.** Amendment F + M-54a/b/c/d already pin the hold-to-reveal contract for the "show again" surface inside `RecoveryPassphraseScreen.svelte`. T19's composition surface (`D4RecoveryPassphrase.svelte`) adds a NEW context: the initial D.4 display where the passphrase is shown for the user to print/save. That initial display is a different surface than the "show again" hold-to-reveal — it presents the passphrase on first generation. The composition MUST NOT (a) expose a clipboard-copy affordance (Amendment F operational rule 4), (b) expose a `SpeechSynthesisUtterance` audio path (Amendment F rejected option (A) per F-54 verdict), (c) make the passphrase available to the accessibility tree as a live-region with role=alert (which could be screen-read aloud in an ambient-mic context).
+
+**Affected:** `lib/onboarding/steps/D4RecoveryPassphrase.svelte`; the print stylesheet at D.5_print; the JSON download serializer.
+
+**Likelihood:** Medium (implementer-introduced regression class — easy to add a "Copy passphrase" button thinking it's a convenience).
+
+**Impact:** High (passphrase exfiltration = identity-blob unwrapping).
+
+**Priority:** Medium-high.
+
+**Mitigations (testable):**
+
+- *M-108a (no clipboard on D.4 display; mirrors M-54d).* "`D4RecoveryPassphrase.svelte` MUST NOT render any element with `data-testid='copy-passphrase'`; MUST NOT invoke `navigator.clipboard.writeText` with the passphrase; MUST NOT register an `onCopy` handler on the passphrase element that succeeds (the implementer MAY register one that calls `e.preventDefault()` and emits a toast 'Copy disabled — use the printed sheet')." **Test obligation:** DOM assertion + static lint (extend ADR-0020 Decision 11 lint mirror of Amendment F operational rule 4 to cover D4RecoveryPassphrase.svelte).
+- *M-108b (no TTS on D.4 or D.6).* "Static lint: grep `lib/onboarding/steps/D4RecoveryPassphrase.svelte` AND `lib/onboarding/steps/D6TypeBackVerify.svelte` AND `lib/onboarding/recovery/*.svelte` for `SpeechSynthesisUtterance`, `window.speechSynthesis`, `tts`, `tts.speak`; assert zero matches outside test fixtures." **Test obligation:** the static lint script `check-onboarding-no-passphrase-leak.sh` per ADR-0020 Decision 11.
+- *M-108c (no live-region announcement of the passphrase).* "The element wrapping the passphrase MUST NOT have `aria-live='assertive'` or `aria-live='polite'` set. If a live-region announcement is needed for accessibility (e.g., 'passphrase generated'), it announces ONLY a non-leaking message (`t('onboarding.recovery.passphrase_generated_announcement')` — wording must not contain the passphrase value). The passphrase itself is in a static `<code>` block." **Test obligation:** axe rule + DOM assertion; the passphrase `<code>` is checked to have no `aria-live` attribute, no `role='alert'`, no `role='status'`.
+- *M-108d (no autocomplete / spellcheck on the type-back input — mirrors M-104c).* See M-104c.
+
+**Residual:** Low with M-108a/b/c/d.
+
+---
+
+#### F-109 | I | Recovery blob remains in service-worker cache after panic-wipe
+**Description.** ADR-0013 establishes a bounded allowlist of service-worker cache routes. `panicWipe()` clears `caches.delete(...)` for each entry in that allowlist (ADR-0020 Decision 4 `WipeStore.clearCaches`). If a future PR adds the `/api/recovery_blobs/*` route or similar to the SW cache allowlist (in violation of F-10's cache-routing policy) AND that PR ships before T19, panic-wipe might miss the new cache entries because the panic-wipe library reads from a static list of cache names rather than enumerating all caches.
+
+**Affected:** `lib/lock/panic-wipe.ts` cache-clear path; ADR-0013 allowlist; the SW cache routing rules (F-10 lineage).
+
+**Likelihood:** Low. F-10 + ADR-0013 prevent recovery-blob caching at the routing layer; this is a defense-in-depth scenario.
+
+**Impact:** Medium. A cached encrypted recovery blob in a post-wipe service-worker cache is still ciphertext — the attacker also needs the passphrase. But it widens the breach surface.
+
+**Priority:** Low.
+
+**Mitigations (testable):**
+
+- *M-109a (panic-wipe clears caches enumerated dynamically).* "`WipeStore.clearCaches` accepts `cacheNames: readonly string[]` per ADR-0020 Decision 4. The production `BrowserWipeStore.clearCaches` implementation calls `caches.keys()` to enumerate ALL caches and passes them to `caches.delete()` one-by-one — NOT a hard-coded subset of ADR-0013's allowlist. This makes panic-wipe robust to future cache-allowlist additions." **Test obligation:** unit test on `BrowserWipeStore.clearCaches` with a jsdom Cache shim — populate three caches; call clear; assert all three are gone. Static lint: grep `lib/lock/panic-wipe.ts` for any hard-coded array of cache names; assert that the call site uses `await caches.keys()` (dynamic enumeration) rather than a literal array.
+- *M-109b (cross-ref F-10 ensures the policy violation doesn't happen in the first place).* "F-10's service-worker cache allowlist test (T10) is the structural enforcer that recovery-blob routes don't land in the cache. Panic-wipe's dynamic enumeration is defense-in-depth." **Cross-ref F-10.**
+
+**Residual:** Low.
+
+---
+
+#### F-110 | I | Error messages leak passphrase, TOTP code, or UA fingerprint into toasts / Sentry breadcrumbs / console
+**Description.** D.2 / D.3 / D.4 / D.6 surfaces all have error paths (network failure, baseline fail, type-back mismatch, libsodium-Argon2id-unavailable). A naive `catch (e) { showToast(e.message) }` could surface PI: the TOTP code in a "TOTP 123456 failed" message, the passphrase in a "could not encrypt 'horse-battery-staple-…'" message, the UA fingerprint in a "browser too old: Mozilla/5.0…" message. The ADR-0020 Decision 3.e "no PII in URLs / logs / errors" hard rule applies, but a regression class.
+
+**Affected:** All error paths in `lib/onboarding/steps/*.svelte`; the structured-logger plumbing (G-T05-4 lineage); Sentry breadcrumb capture (ADR-0010); the canonical `argon2id_unavailable_libsodium_wrappers_sumo_required` error key path.
+
+**Likelihood:** Medium-high (implementer regression class).
+
+**Impact:** Medium (PI in logs/toasts; for the passphrase case, High).
+
+**Priority:** Medium-high.
+
+**Mitigations (testable):**
+
+- *M-110a (closed-allowlist error keys; user-facing strings via i18n).* "Every user-facing error in `lib/onboarding/` resolves to an i18n key declared in `lib/onboarding/copy-keys.ts` (the closed allowlist per ADR-0020 Decision 11). The resolved error string MUST NOT contain (a) any 32+ byte high-entropy substring (passphrase shape), (b) any 6-digit numeric substring (TOTP shape) outside of error-code constants, (c) any UA string." **Test obligation:** for each error path (enumerate via static-analysis on `lib/onboarding/`), inject a fixture with a known canary value in the underlying error; capture the rendered toast text; assert canary is absent. Mirror of F-67 (retention-sweep no-PII-in-errors) test obligation T16-NO-PII-ERRORS-1.
+- *M-110b (Argon2id unavailable error: canonical key stays in operator logs only).* "When `encryptRecoveryBlob` throws `argon2id_unavailable_libsodium_wrappers_sumo_required` per ADR-0003 Amendment G, the user-visible toast surfaces `t('onboarding.recovery.error.argon2_unavailable')` (a plain-language string); the canonical error symbol ONLY appears in the structured logger's INFO line (per G-T05-4 carry-forward). No passphrase, no privkey bytes appear anywhere." **Test obligation:** unit test mocks `encryptRecoveryBlob` to throw; captures the toast text; asserts toast text does NOT contain `argon2id_unavailable_libsodium_wrappers_sumo_required`; structured-log capture asserts the canonical symbol DOES appear (operator-debuggable).
+- *M-110c (Sentry breadcrumb scrubber covers onboarding paths).* "Sentry `beforeSend` allowlist (ADR-0010 / T02) MUST cover `lib/onboarding/*` paths; any breadcrumb captured from these paths is filtered to remove `passphrase`, `totp`, `userAgent`, `platform` keys." **Test obligation:** integration test fires every onboarding error path; captures the Sentry transport payload (via the existing PI canary test scaffold T02); asserts canary passphrase, canary TOTP code, canary fingerprint are all absent.
+
+**Residual:** Low with M-110a/b/c.
+
+---
+
+#### F-111 | I | Passphrase leaks into URL, sessionStorage, or localStorage via wizard state regression
+**Description.** ADR-0020 Decision 2.b mandates in-memory wizard state; hard refresh restarts at D.1. A future PR could add URL-hash state persistence ("for convenience — user can come back to D.5 after print"), accidentally leaking the wizard step into browser history / referrer headers, and (in the worst case) leaking the passphrase if the implementer's URL-hash serializer round-trips the wizard's component state.
+
+**Affected:** `lib/onboarding/step-machine.ts`; SvelteKit routing under `/onboarding`; the navigation handlers.
+
+**Likelihood:** Low (the architect explicitly forbids it).
+
+**Impact:** Critical if a passphrase ever lands in URL (browser history is unsanitizable; referrer headers cross trust boundaries).
+
+**Priority:** Medium (low likelihood × critical impact).
+
+**Mitigations (testable):**
+
+- *M-111a (static lint — no URL state in onboarding modules).* "Grep `lib/onboarding/` (excluding tests) for `window.location.hash`, `window.location.search`, `pushState`, `replaceState`, `sessionStorage`, `localStorage`; assert zero matches. The exception is `document.title` / `history.length` reads (informational only — no PI write). Mirror of ADR-0020 Decision 11 `check-onboarding-no-pii-in-url.sh` and `check-onboarding-no-passphrase-leak.sh`." **Test obligation:** CI script returning non-zero on any match; the test is `apps/web/test/T19/static-lint-no-pii-in-url.test.ts`.
+- *M-111b (route-inventory test).* "No SvelteKit route under `/onboarding/*` accepts a query string, URL hash, or URL path segment carrying state. The route map is asserted at CI time." **Test obligation:** route-inventory test enumerates routes and assert `/onboarding`, `/onboarding/`, no others, and that none consume `$page.url.searchParams` for wizard-step state.
+- *M-111c (no PII in URLs hard rule, already in §6 Invariant 5).* **Cross-ref Invariant 5 strengthened** (ban `key|secret|passphrase|priv|nonce` URL params).
+
+**Residual:** Low with M-111a/b/c.
+
+---
+
+### Denial of service (D)
+
+#### F-112 | D | Argon2id resource exhaustion via repeated D.4 retry / refresh-loop
+**Description.** D.4's `encryptRecoveryBlob` invokes Argon2id with the F-08 floor (ops=4, mem=512MB) which takes 1-3 seconds on consumer hardware. A hostile script (e.g., a malicious browser extension scripted to invoke a hard refresh of the onboarding tab in a loop, OR a coerced user repeatedly clicking "regenerate passphrase") could pin a CPU core for the duration of the loop. Worse: a coerced rep forced to enroll over and over could exhaust their battery / starve other tabs / cause the browser to throttle.
+
+**Affected:** D.4 surface; `lib/crypto/recovery-blob.ts` Argon2id derivation path; the wizard's restart-from-D.1 behavior on hard refresh.
+
+**Likelihood:** Low (requires hostile script OR coerced user; the user can close the tab to escape).
+
+**Impact:** Low (local resource exhaustion only — no server impact because the recovery-blob POST is rate-limited by F-12 single-POST semantics; no PI exposure).
+
+**Priority:** Low.
+
+**Mitigations (testable):**
+
+- *M-112a (client-side rate-limit on D.4 confirm — mirrors G-T08-13 dual-window).* "A client-side counter in the wizard state machine limits D.4 → D.6 transition attempts to ≤10 per 60s per wizard session (in-memory; resets on D.1 restart). The 11th attempt within 60s returns a structured error `t('onboarding.recovery.rate_limited')` without invoking `encryptRecoveryBlob`." **Test obligation:** unit test on `lib/onboarding/step-machine.ts` rate-limiter — invoke D.4 → D.6 11 times in 60s; assert the 11th returns the rate-limited error AND `encryptRecoveryBlob` was NOT called on the 11th attempt.
+- *M-112b (cooperative-caller note — server side is already F-12 protected).* "The server-side `recovery_blobs` POST is single-POST per user (F-12); subsequent POSTs return 409 unless preceded by `users.reset_recovery`. Client-side rate-limit (M-112a) is defense-in-depth for the CPU-burn scenario; the server-side cost is bounded by F-12 regardless." **Cross-ref F-12.**
+
+**Residual:** Accepted with M-112a + cross-ref F-12.
+
+---
+
+#### F-113 | D | Panic-wipe spam / rapid-fire invocation exhausts audit log throughput
+**Description.** The destructive-confirm modal (`PanicWipeModal.svelte`) is F-53-gated (literal-phrase type-back "WIPE" + `ready_delay_ms` 200ms gate). A coerced user OR a hostile script could automate the type-back + click cycle. Each invocation emits a `panic_wipe.invoked` audit row server-side AND attempts the local destruction. If the local destruction succeeds on the first invocation, the second invocation operates on an empty IndexedDB (no harm); but the audit row spam could flood the server-side audit log.
+
+**Affected:** `lib/lock/PanicWipeModal.svelte`; `WipeStore.emitAudit`; the server-side audit-write rate (composes T05.1 / T07.1 / T18 audit-emission paths).
+
+**Likelihood:** Low (the F-53 200ms gate + literal-phrase requirement makes scripted invocation slow; ~1 invocation/second max).
+
+**Impact:** Low (audit-log writes are cheap; no PI leak; T18 integrity check handles the volume).
+
+**Priority:** Low.
+
+**Mitigations (testable):**
+
+- *M-113a (post-wipe lockout).* "After a successful `panicWipe()` (status === `completed` OR `partially_completed`), the panic-wipe surface is unmountable for the remainder of the browser session — there is no IndexedDB to wipe, no in-memory state to clear, and the user must re-enroll via D.1 (which itself routes away from the panic-wipe surface). Subsequent invocations within the same session return `{status: 'no_op', reason: 'already_wiped'}` and do NOT emit a second audit row." **Test obligation:** call `panicWipe()` twice in succession; assert exactly one `panic_wipe.invoked` audit row emitted; second call returns the `no_op` status.
+- *M-113b (F-53 destructive-confirm 200ms gate bounds throughput).* The existing F-53 invariants M-53a/b/c already enforce the type-back + ready-delay gate. Even a scripted attacker is bounded to ~1 invocation per 200ms wall-clock. **Cross-ref F-53.**
+
+**Residual:** Accepted with M-113a/b + cross-ref F-53.
+
+---
+
+### Elevation of privilege (E)
+
+#### F-114 | E | First-user-no-membership-yet bootstrap: T19 must NOT confer admin role on the enrolling user
+**Description.** T19 is first-device enrollment (Q1 resolution). The user invoking D.1 may be (a) the FIRST EVER user in a brand-new workplace, with no `committee_membership` row, or (b) a subsequent worker added by an existing co-chair via TOTP invite. The bootstrap edge: if T19 implicitly grants the first user `worker_co_chair` role on D.7 completion (a common "first-user-is-admin" convenience pattern), that would (a) violate ADR-0004's RLS posture (role assignment is a co-chair-issued action with 4-eyes on certain transitions), (b) bypass HG-1 (4-eyes on certain destructive ops), (c) create a permanent silent privilege-grant in the audit log. **The architect's design correctly defers workplace-bootstrap to a separate task; T19 is identity-only.** The threat-modeler verifies the deferral is structurally enforced.
+
+**Affected:** D.7 `D7Complete.svelte` terminal step; the wizard state machine; `committee_membership` writes (T06's surface — T19 must NOT write here).
+
+**Likelihood:** Low (the architect's design explicitly does not write to `committee_membership`).
+
+**Impact:** Critical if regressed — implicit-admin grant is a permanent silent privilege escalation invisible until a forensic walk.
+
+**Priority:** Medium (low likelihood × critical impact).
+
+**Mitigations (testable):**
+
+- *M-114a (T19 writes nothing to `committee_membership`).* "T19 PR-review-time assertion: `git diff --name-only main...T19-branch -- src/lib/committee/` returns empty AND `git diff main...T19-branch -- src/lib/onboarding/` contains zero references to `committee_membership`, `role`, `worker_co_chair`, `certified_member`. Static lint: grep `lib/onboarding/` for `committee_membership` / `INSERT INTO committee_membership` / `role:`; assert zero matches. The D.7 completion DOES NOT write any role-confer row in any table." **Test obligation:** integration test exercises D.1 → D.7 end-to-end; admin-connection query asserts `SELECT count(*) FROM audit_log WHERE event_type LIKE 'role.%' AND ts > test_start_ts` returns 0; `SELECT count(*) FROM committee_membership WHERE user_id = test_user_id` returns whatever was seeded BEFORE the test (typically 0 for first-user, or 1 for invited-by-co-chair), unchanged by T19.
+- *M-114b (no-elevation invariant documented in `D7Complete.svelte` header).* "`D7Complete.svelte` opens with a comment: `// INVARIANT: T19 does NOT confer any role. Workplace bootstrap is a separate task. Any future change adding a role-write here re-opens F-114.` Static lint asserts the header comment exists." **Test obligation:** mirror of M-105c documentation lint.
+- *M-114c (subsequent-device flow not in T19 scope but documented).* "If the user enrolling at T19 is NOT the first user (a co-chair already issued them an invite + a `committee_membership` row exists with `active=false`), the activation of that row is the co-chair's action, NOT T19's. T19's D.7 completion does NOT flip `active=false → true` on `committee_membership`. The co-chair issues the activation via Surface I (out of T19 scope)." **Test obligation:** test exercises D.1 → D.7 with a pre-seeded inactive `committee_membership` row; admin-connection asserts the row's `active` field is UNCHANGED post-D.7.
+
+**Residual:** Low with M-114a/b/c.
+
+---
+
+#### F-115 | E | Coerced panic-wipe used to lock out the legitimate user (this is a feature, not a bug — document the invariant)
+**Description.** An attacker who briefly gains physical access to the user's device could invoke panic-wipe to destroy local state and lock the user out. Q4 user-adjudication chose local-only panic-wipe for v1, which means: (a) the local IndexedDB is gone (the user loses fast-path access on this device), BUT (b) the server-side identity + recovery blob are intact, AND (c) the recovery passphrase + the JSON download (if the user kept either) can restore on a fresh device. The legitimate user is inconvenienced (must re-enroll on a fresh device using the recovery flow, which is a separate future task) but is NOT permanently locked out provided the recovery artifacts are intact off-device. **This is the intended posture per ADR-0020 Option E + Q4 resolution.**
+
+**Affected:** `panicWipe()` semantics; the recovery-flow contract for cross-device restore (future task).
+
+**Likelihood:** Low (requires physical access OR coerced user invoking wipe).
+
+**Impact:** Low if user has off-device recovery artifacts; High if user does not (which is the SAME envelope as F-41 + device theft).
+
+**Priority:** Documented residual, not actionable in T19.
+
+**Mitigation (documentation only):**
+
+- *M-115 (document the invariant in panic-wipe modal copy + tech-writer's HG-10 scope).* "PanicWipeModal copy MUST state: (a) this is irreversible on this device; (b) this does NOT remove data from the server — your committee can still see prior contributions; (c) if you have your recovery passphrase off-device (printed sheet OR JSON download), you can restore on another device — see the recovery flow; (d) if you do NOT have your recovery passphrase off-device, you will need to ask a co-chair for a fresh TOTP invite to re-enroll." **Test obligation:** the i18n key `t('panic.modal.body')` text matches `/irreversible|cannot be undone/i` AND `/server|committee/i` AND `/recovery passphrase|recovery sheet/i` AND `/co-chair|invite/i`. HG-10 lawyer-ratifies the precise wording.
+
+**Residual:** Accepted as the user-adjudicated posture (Q4). See §7 add to known-gaps as O-19 below.
+
+---
+
+### Panic-wipe local-only residual risk (user-adjudicated; document explicitly)
+
+**The residual.** Q4 user-adjudication on 2026-05-24 chose **local-only panic-wipe for v1**. An attacker who holds the device immediately post-wipe (or who took a memory snapshot pre-wipe) retains exposure surfaces that local-only wipe does NOT close:
+
+1. **Un-revoked server sessions.** The SvelteKit session cookie is cleared from the browser by `WipeStore.tearDownSessionCookie()`, but the server-side session row remains "valid" until its 15-min TTL expires (per ADR-0002 § session TTL). An attacker who exfiltrated the JWT BEFORE the wipe (e.g., via the malicious browser extension scenario in F-104) can replay it for up to 15 minutes after the wipe. **Mitigation per ADR-0020 D.5 (Surface H):** the user-driven path for server-side session revocation is the D.5 session-revocation primer at T19 completion AND the post-onboarding Surface H session-listing. **The user coerced into wiping SHOULD also revoke server sessions when safe** — copy in PanicWipeModal modal MUST state this (HG-10 tech-writer scope).
+
+2. **Cached HTTP responses in browser memory not yet flushed.** Service-worker caches are dynamically enumerated by `BrowserWipeStore.clearCaches` (per M-109a). HTTP responses held in the browser's HTTP cache (separate from SW cache) are NOT clearable by app code; they expire on browser-driven cache eviction. **Mitigation:** SW cache routing policy (F-10) ensures no plaintext PI lands in any cache that survives the wipe; HTTP cache for `/api/*` routes is set to `Cache-Control: no-store` by SvelteKit's default + ADR-0013 (defense-in-depth).
+
+3. **Off-device copies of the recovery blob the user downloaded (if attacker had filesystem access).** If the user took the Option C JSON download at D.4 AND the attacker has filesystem-level access to where the user stored it, the JSON is exfiltrable as ciphertext-of-secret. **Mitigation:** the JSON is libsodium-secretbox-wrapped (M-105a); the attacker also needs the passphrase (F-41 envelope).
+
+**Documented mitigations (combined):**
+
+- **Surface H (D.5) is the user-driven path for server revocation.** Tech-writer's HG-10 scope MUST include explicit guidance in `t('panic.modal.body')` directing the user to also visit Settings → Sessions if they can reach a safe network.
+- **PanicWipeModal copy MUST mention the residual** (per M-115 mitigation above) so the user knows local-only is the v1 posture.
+- **Recommended future work (out of T19 scope, tracked as G-T19-3):** server-side anomaly detection for sessions whose owning device has invoked panic-wipe but whose JWT continues to ping. The "device is hostile" inference fires `A-SESSION-001` for operator review. This is the server-cascade posture Q4 deferred.
+
+**Tracking:** Add **O-19 Panic-wipe local-only (Q4 user-adjudicated; v1 ships with the residual)** to §7 Open Threats / Accepted Risks. Cross-reference to G-T19-3 in `.context/known-gaps.md` (provisional carry-forward already named in ADR-0020 §Follow-ups).
+
+---
+
+### Test-writer must-cover items beyond the existing 195-line scaffold
+
+The existing scaffold pins the high-water-mark contracts (D.1 advisory, D.2 hosting copy, D.3 baseline gate, D.4 → D.7 with show-again audit row, F-53 destructive_confirm + literal-phrase gate + Escape no-dismiss, panic-wipe IndexedDB clear). The threat-modeler's §8.T19 adds the following obligations on top:
+
+| Finding | Mitigation | Test obligation |
+|---|---|---|
+| F-101 | M-101a, b, c | D.1 advisory text content (4 clauses post-HG-10); D.1 → D.2 explicit-click gate; device-fingerprint composition + no-IP assertion. |
+| F-102 | M-102a, b, c | D.3 origin = `window.location.origin` snapshot; production-bundle grep for `__test_user_agent` + `__test_origin`; cross-ref F-37. |
+| F-103 | M-103a, b, c | D.3 TOTP-locked copy assertion; static lint for `===` near `totp`; collapsed 410/401 user-visible text. |
+| F-104 | M-104a, b, c, d | Static lint for `window.passphrase`/`globalThis.passphrase`/module-level `let passphrase`; post-match ref-cleared assertion; input attribute assertions (autocomplete/spellcheck/autocapitalize/autocorrect); static lint for `===` near `passphrase`/`typed`. |
+| F-105 | M-105a, b, c | JSON snapshot test (closed allowlist); tampered-byte decrypt-throw test; header-comment lint. |
+| F-106 | M-106a, b, c | Audit-emit-failure aborts wipe (TestWipeStore.__debugForceAuditFailure); meta-shape snapshot; partial-failure double-row test (TestWipeStore.__debugForceClearFailure('caches')). |
+| F-108 | M-108a, b, c | No `data-testid='copy-passphrase'` on D.4; no TTS static lint on D.4/D.6/recovery; passphrase `<code>` has no aria-live/role=alert/role=status. |
+| F-109 | M-109a | BrowserWipeStore.clearCaches dynamic enumeration test (3 caches populated → all cleared); static lint against hard-coded cache name arrays in panic-wipe.ts. |
+| F-110 | M-110a, b, c | Per-error-path canary test (passphrase/TOTP/UA absent from toasts); Argon2id-unavailable canonical-symbol-only-in-logs assertion; Sentry breadcrumb scrubber test. |
+| F-111 | M-111a, b, c | Static lint script `check-onboarding-no-pii-in-url.sh` (already in ADR-0020 Decision 11); route-inventory test; cross-ref Invariant 5. |
+| F-112 | M-112a | Client-side rate-limit unit test (11 D.4 → D.6 attempts in 60s; 11th rejected without calling encryptRecoveryBlob). |
+| F-113 | M-113a | Two-in-a-row `panicWipe()` invocations → exactly one audit row; second returns `no_op`. |
+| F-114 | M-114a, b, c | PR-review-time `git diff` assertion for committee_membership absence; D.7 header comment lint; integration test asserts zero role-confer audit rows post-D.7; pre-seeded inactive membership unchanged. |
+| F-115 | M-115 | Modal copy regex match (irreversible + server/committee + recovery passphrase + co-chair/invite). |
+
+**Existing scaffold tests REMAIN unchanged** per ADR-0020 handoff to test-writer ("Do NOT modify the existing 195-line scaffold's assertions"). Test-writer ADDS the above.
+
+---
+
+### Compliance mapping (PIPEDA + Ontario specific to §8.T19)
+
+| Principle | T19 surface | Coverage |
+|---|---|---|
+| 4.1 Accountability | D.7 audit-log surface (combined `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written` + `panic_wipe.invoked` rows attributed to the actor's HMAC pseudonym) | Covered — audit-log trail per F-106 mitigation; F-107 verdict accepts the absence of a separate `onboarding.completed` event. |
+| 4.2 Identifying purposes | D.1 + D.2 + D.4 copy (HG-10 tech-writer scope) | Covered — purpose statement per M-101a clause (a)+(c)+(d); F-110 ensures purpose strings stay in i18n catalog (no leak surface). |
+| 4.3 Consent | D.1 advisory + D.2 hosting tradeoff (explicit click) | Covered — M-101b explicit-click gate; PIPEDA 4.3.4 informed-of-purpose carried by the HG-10 ratified i18n strings (mirrors G-T08-11 precedent). |
+| 4.4 Limiting collection | T19 collects no PI not already collected by T05/T07/ADR-0008/ADR-0010 | Covered — data-minimization assertion above; F-105 closed-allowlist on JSON; F-106 closed-allowlist on panic-wipe audit-meta. |
+| 4.5 Limiting use / disclosure / retention | New audit event `panic_wipe.invoked` 7y retention (ADR-0020 Decision 5); other rows ride existing schedules | Covered — no new operational table; existing ADR-0016 schedules apply. |
+| 4.6 Accuracy | Not directly engaged by T19 (no user-profile data is collected) | N/A. |
+| 4.7 Safeguards | Argon2id F-08 floor preserved; constant-time TOTP + passphrase compare (M-103b + M-104d); audit-BEFORE-side-effect for panic-wipe (M-106a); no-passphrase-leak static lints (M-104a, M-108a/b, M-110a, M-111a); RP-ID binding preserved (M-102a) | Covered. |
+| 4.8 Openness | Privacy policy reachable from D.2 secondary link (ADR-0020 Decision 7 D.2 clause); user-visible purpose statements | Covered. |
+| 4.9 Individual access | `panic_wipe.invoked` rows are visible to the actor in their audit-feed slice (post-re-enrollment; the device that wiped does not have access until re-enrollment) | Covered — same access posture as F-54 `identity_privkey.recovery_blob.viewed`. |
+| 4.10 Challenging compliance | Standard channels (out of T19 scope) | N/A. |
+| **AODA / WCAG 2.0 AA** | axe coverage per ADR-0020 Decision 11 + accessibility-specialist Phase F passes | Covered — see ADR-0020 task #5 + #7. |
+| **Quebec Law 25** | Out of scope — T19 ships en-CA only (Q5 resolution to G-T19-1); no Quebec users in v1 scope | N/A — re-engaged if fr-CA rollout opens. |
+| **PHIPA** | Not engaged — no health information in T19 surface | N/A. |
+| **PCI DSS** | Not engaged — no payment surface in T19 | N/A. |
+| **FIPPA / MFIPPA** | Not engaged — no government/municipal data in T19 | N/A — Canadian residency satisfied via ADR-0001 (ca-central-1). |
+
+**Cross-border transfers introduced by T19:** **NONE.** All server-side writes (passkey enrollment, recovery blob, session revocation, audit row emission) flow through existing T05.1 / T07.1 endpoints in ca-central-1. The JSON download is user-mediated and crosses no app boundary. The Sentry EU breadcrumb path (ADR-0010) is preserved with the F-110 scrubber pass.
+
+---
+
+### Top 5 prioritized risks (T19 only; for the parent agent's summary)
+
+1. **F-103 (S, Medium-high) — TOTP phishing during D.3 precondition.** Mitigations M-103a (TOTP dual-window rate-limit), M-103b (constant-time compare), M-103c (collapsed user-visible 410/401 surface). Carry-forward: G-T05-11 differential remains open at the network layer.
+2. **F-110 (I, Medium-high) — Error messages leak passphrase/TOTP/UA into toasts/Sentry/console.** Mitigations M-110a (closed-allowlist error keys + canary tests), M-110b (Argon2id canonical symbol in operator logs only), M-110c (Sentry breadcrumb scrubber coverage).
+3. **F-108 (I, Medium-high) — Passphrase exposed via clipboard/TTS/live-region beyond hold-to-reveal.** Mitigations M-108a/b/c (no copy button, no TTS static lint, no aria-live on passphrase element), M-108d (no autocomplete/spellcheck cross-ref).
+4. **F-106 (R, Medium-high) — Panic-wipe forensic-trace loss if audit row written after wipe.** Mitigations M-106a (audit-BEFORE-side-effect ordering), M-106b (closed-allowlist meta shape), M-106c (partial-failure double-row attribution).
+5. **F-101 (S, Medium) — Coerced enrollment on attacker-controlled device.** Mitigations M-101a (advisory copy content), M-101b (explicit-click gate), M-101c (fingerprint = UA+platform only).
+
+**No BLOCKERS surfaced. Verdict: PASS.** The architect's ADR-0020 design is internally coherent; T19 ships as library + Svelte composition with the mitigations above as testable obligations.
+
+**Re-open triggers for §8.T19:**
+
+1. Q4 disposition reversed (server-cascade panic-wipe added) → F-106, F-109, F-113, F-115 re-score; new findings around server-cascade race conditions.
+2. fr-CA copy lands (G-T19-1) → F-101, F-103, F-110, F-115 mitigations re-test against the translated strings (HG-10 second ratification).
+3. `__test_step` / `__test_user_agent` production-strip regression → F-102 + F-110 re-open.
+4. Onboarding-resume-vs-restart-from-D.1 (Q2 architect's prior) reversed → F-104, F-111 re-open (passphrase persistence widens).
+5. The future re-import path for the downloaded JSON ships → F-105 re-passes against the actual re-import contract.
+6. A `localStorage` write lands anywhere under `lib/onboarding/` or `lib/lock/` → F-111 re-opens.
+7. The `panic_wipe.invoked` enum's SQL half (T07.1 or T19-audit-extension) is deferred indefinitely → F-106 mitigation M-106a/b/c become aspirational pending the SQL CHECK widening.
+
+**Carry-forwards (test-writer / implementer must observe):**
+
+| ID | Description | Owner | Surface |
+|---|---|---|---|
+| G-T19-1 | fr-CA copy deferred (Q5) — existing in known-gaps.md. | localization-specialist | i18n |
+| G-T19-2 | D.5 labelling drift (design-system D.5 = print; ADR-0020 D.5 = session revocation) — existing in ADR-0020 §Follow-ups. | designer | design-system §4 |
+| G-T19-3 | Server-cascade panic-wipe deferred (Q4 + the §8.T19 residual mitigation #3 above). | architect + future task | Server-side session anomaly detection |
+| G-T19-4 | Onboarding-resume-vs-restart-from-D.1 (Q2) — existing in ADR-0020 §Follow-ups. | architect | wizard state machine |
+| G-T19-5 (NEW) | `__test_origin` defensively added to the production-bundle-strip grep allowlist (F-102 M-102b). | implementer | T19 CI suite |
+| G-T19-6 (NEW) | Static lint script `check-onboarding-no-passphrase-leak.sh` MUST cover `D4RecoveryPassphrase.svelte`, `D6TypeBackVerify.svelte`, and `lib/onboarding/recovery/*.svelte` (F-108 M-108b extension of Amendment F operational rule 4). | implementer | T19 CI suite |
+| G-T19-7 (NEW) | Sentry breadcrumb scrubber `beforeSend` allowlist extends to `lib/onboarding/*` paths (F-110 M-110c). | observability-setup | ADR-0010 / T02 |
+| G-T19-8 (NEW) | `BrowserWipeStore.clearCaches` enumerates via `caches.keys()` (F-109 M-109a) rather than a hard-coded list. | implementer | `lib/lock/panic-wipe.ts` production wire-up |
+
+---
+
+### Handoff packets
+
+- **To test-writer:** consume the "Test-writer must-cover items beyond the existing 195-line scaffold" table above. Each row is a required failing test before the implementer's pass. The existing 195-line scaffold is PINNED per ADR-0020 — ADD the new tests; do NOT modify the scaffold.
+- **To security-reviewer:** at PR time, verify F-101 (advisory + fingerprint), F-102 (origin source), F-103 (rate-limit + constant-time), F-104 (closure scope + clear-on-advance + input attrs), F-106 (audit-BEFORE-side-effect + closed-allowlist meta + partial-failure attribution), F-110 (no-PII-in-errors canary), F-111 (no-PII-in-URLs static lint), F-114 (no role-confer write in T19 diff). Special attention to F-103 because G-T05-11 remains open at the network layer; F-106 because the audit-BEFORE-side-effect ordering is load-bearing.
+- **To privacy-reviewer:** consume the PI touchpoints table + the compliance mapping table above. No new operational table (HG-15 does not fire); no new retention class (HG-9 does not fire); no new subprocessor (ADR-0010 preserved); no cross-border transfer (Q4 confirmed). HG-10 lawyer-ratification on the D.1/D.2/D.4/D.6/panic-wipe copy is the load-bearing privacy gate (ADR-0020 task #2).
+- **To the user (required human-gate decisions):** none NEW from §8.T19 beyond ADR-0020's pre-existing list. The HG-10 lawyer ratification of the i18n copy is the only blocking gate; HG-15, HG-9, HG-12 explicitly do not fire per ADR-0020. The Q4 residual is documented and accepted.
+
+---

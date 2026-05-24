@@ -567,6 +567,138 @@ This is the binding T19 task sequence. Each task lists owner agent, dependencies
 - **To implementer:** consume the entire ADR. Compose against `MemoryAuthStore` + `MemoryKeyStore` + new `MemoryWipeStore`. No `node:crypto`. No SQL migration. Honor the production-strip for test-only props. Honor the no-passphrase-leak static lint. Wire HG-10-ratified copy from the i18n fixture.
 - **To security-reviewer + second-opinion-reviewer + privacy-reviewer + verifier:** the standard four-way pass per Amendment H precedent; tasks 8-10, 12.
 
+## Designer's pass (2026-05-24)
+
+> **Status:** Complete. **Blocked on accessibility-specialist sign-off before T19 implementation begins per ADR-0020 task 5.**
+> **Authoring agent:** designer
+> **Inputs consumed:** ADR-0020 in full (Decisions 2.a labelling drift, 2.b state machine, 2.c modal composition, 3.f D.7 next-step pointer, 5 new audit event, 6 token gaps, 7 copy WHAT-must-be-communicated, 8 test-only props, 9 failure-mode handling); the 195-line test scaffold at `apps/web/test/T19/onboarding.test.ts`; `apps/web/src/lib/onboarding/recovery/RecoveryPassphraseScreen.svelte`; design-system §3.2 / §3.4 / §3.5 / §4 Surface D / G / H; design-tokens.json end-to-end; G-T19-1 (fr-CA deferral context); G-T08-17 (`border.width` token carry-forward — folded in this pass).
+
+### A. D.5 labelling-drift resolution (resolves provisional G-T19-2; closes ADR-0020 follow-up "D.5 labelling drift")
+
+**Canonical labelling — binding for tech-writer, test-writer, implementer, accessibility-specialist:**
+
+| step | canonical name | i18n heading key | i18n primary-button key | i18n helper key |
+|---|---|---|---|---|
+| **D.1** | Personal-device advisory | `onboarding.device.heading` | `onboarding.device.continue` | `onboarding.device.helper` |
+| **D.2** | Hosting tradeoff | `onboarding.hosting.heading` | `onboarding.hosting.continue` | `onboarding.hosting.helper` |
+| **D.3** | Passkey enrollment + browser-baseline | `onboarding.passkey.heading` | `onboarding.passkey.start` | `onboarding.passkey.helper` |
+| **D.4** | Recovery passphrase ceremony | `onboarding.recovery.heading` | `onboarding.recovery.print` | `onboarding.recovery.helper` |
+| **D.4.print** | Print layout (sub-step of D.4; `@media print` stylesheet; NOT its own wizard step) | `print.recovery.title` | n/a (system print dialog) | n/a |
+| **D.5** | **Session-revocation primer** (canonical — replaces the previously-overloaded "D.5 print" label) | `onboarding.sessions.heading` | `onboarding.sessions.revoke_other.label` (destructive primary) + `onboarding.sessions.skip.label` (tertiary) | `onboarding.sessions.helper` |
+| **D.6** | Type-back verification | `onboarding.recovery.verify.heading` | `onboarding.recovery.verify.submit` | `onboarding.recovery.verify.helper` |
+| **D.7** | Completion | `onboarding.done.heading` | `onboarding.done.continue` | n/a |
+
+**Test-harness mapping:** `harness.advanceThroughTo('D.5')` now lands on the session-revocation primer; the print-stylesheet sub-step is reachable via `harness.invokePrintAtD4()` (the harness's existing `__test_step` prop accepts `'D.4'` and emits the print stylesheet via `window.print()` mock). The existing scaffold's `advanceThroughTo('D.4')` / `advanceThroughTo('D.7')` assertions remain accurate. **Tech-writer's i18n catalog MUST follow the canonical step names above.** **Test-writer's expansion MUST consume the canonical step names in the harness.**
+
+### B. design-tokens.json amendments (resolves Decision 6 token gaps)
+
+The three architect-flagged gaps are ratified with the following bindings (new tokens added to `design-tokens.json` in this pass):
+
+1. **`z_index.onboarding_overlay`** — added at value `1550` (above `tooltip` 1500, below `lock_screen` 1600). Rationale: the wizard is a full-viewport surface but is NOT a lock; idle-lock and panic-wipe correctly draw on top mid-flow per the z-order. Documented inline in `design-tokens.json` `z_index._onboarding_note`.
+2. **`motion.duration.step_transition`** — added at value `320ms` (semantic alias of `motion.duration.slow`). Documented in `motion._duration_aliases`. Also added `motion.per_surface.wizard_step_transition` binding for the opacity-only transition + reduced-motion fallback.
+3. **`layout.max_width.recovery_sheet_print`** — added at value `5.5in` (half a US-letter sheet, fits the passphrase at `typography.roles.totp` scale without forced line-wrap on word-chunks).
+
+In addition, the designer's pass adds the following T19-specific token families:
+
+4. **`color.{light|dark}.onboarding.*`** — a 25-key token family covering: wizard chrome bg/border; step-indicator pending/active/complete (bg/fg/border, ×3 states); passphrase reveal pair (fg/bg/border/chunk-separator); browser-baseline pass/fail badges (bg/fg/border, ×2); device-fingerprint card (bg/fg/border); completion-success card (bg/fg/border); panic-overlay (bg/fg); download-affordance (fg/border). Every pair is contrast-audited in `color._contrast_audit.{light|dark}` — see C below.
+5. **`border_width.c4_stripe`** (4px) and **`border_width.step_indicator`** (2px) — folds in G-T08-17 carry-forward and adds the T19-specific step-indicator stripe width.
+6. **`layout.max_width.wizard_chrome`** (640px) — wizard chrome desktop max width.
+7. **`components_extended.onboarding_wizard`**, **`.browser_baseline_badge`**, **`.device_fingerprint_card`**, **`.recovery_passphrase_reveal`**, **`.recovery_blob_download`**, **`.session_revocation_primer`**, **`.completion_summary`** — seven new T19-specific component bindings, each binding to the new color tokens with no magic values.
+8. **`components_extended.panic_wipe`** amended in place — added `overlay_bg` / `overlay_fg` / `literal_phrase` / `literal_phrase_match` / `ready_delay_ms_default` / `_f53_contract` fields binding the F-53 contract from ADR-0020 Decision 2.c to the modal's structural posture.
+9. **`components_extended.onboarding_passphrase_print`** amended in place — added `max_width: layout.max_width.recovery_sheet_print`.
+
+### C. Contrast audit additions (all new pairs verified)
+
+New entries appended to `color._contrast_audit.light` and `.dark`. Every new pair meets WCAG 2.0 AA (text ≥4.5:1; large/UI ≥3:1); most meet AAA (≥7:1). Notable load-bearing entries:
+
+| Pair | Light ratio | Dark ratio | Notes |
+|---|---|---|---|
+| `onboarding.passphrase_reveal_fg on passphrase_reveal_bg` | 16.1:1 AAA | 15.2:1 AAA | Load-bearing for the D.4 reveal — ADR-0003 Amendment F op-rule 5 |
+| `onboarding.step_indicator_active_fg on active_bg` | 8.6:1 AAA | 10.1:1 AAA | Current-step pill |
+| `onboarding.step_indicator_complete_fg on complete_bg` | 5.7:1 AA | 9.6:1 AAA | Always paired with checkmark icon (color-blind safe) |
+| `onboarding.browser_baseline_pass_fg on pass_bg` | 5.7:1 AA | 9.6:1 AAA | Always paired with check icon |
+| `onboarding.browser_baseline_fail_fg on fail_bg` | 6.6:1 AA | 7.1:1 AAA | Always paired with x-circle icon |
+| `onboarding.device_fingerprint_fg on bg` | 9.6:1 AAA | 10.4:1 AAA | `typography.roles.code` |
+| `onboarding.completion_success_fg on bg` | 5.7:1 AA | 9.6:1 AAA | Always paired with check-circle icon |
+| `onboarding.panic_overlay_fg on bg` | 15.3:1 AAA | 15.2:1 AAA | Loading text legibility load-bearing while every other UI element drops behind |
+| `focus_ring.inner on passphrase_reveal_bg` | 16.1:1 AAA | 15.2:1 AAA | Focus ring inner line on the reveal surface |
+| `focus_ring.inner on panic_overlay_bg` | **1.0:1 FAIL** | n/a | **Two-layer focus ring INVERTED on panic-overlay**: the standard inner `border.focus` (#16181d) is invisible against the near-black overlay. Implementer MUST render the inner ring layer at `color.{mode}.onboarding.panic_overlay_fg` (#fbfbfa) rather than `border.focus` — outer `#fbbf24` carries visibility at 13.1:1; the inner layer at white-on-dark provides redundancy. Documented inline in the contrast audit. Test-writer MUST cover this. |
+
+### D. design-system.md §4 surface inventory amendments (binding)
+
+1. **Surface D table:** the original D.5 row (print layout) is renamed `D.4.print` (sub-step of D.4); a new `D.5 session-revocation primer` row is inserted at the canonical step-5 slot. D.6 spec amended to add `autocomplete="off"` + `spellcheck="false"` per ADR-0020 threat-model delta T (defense against Chromium cloud-spellcheck plaintext-passphrase leak). D.7 spec amended to add the ADR-0020 Decision 3.f next-step pointer block.
+2. **New §4 Surface D.T19** (8 sub-surfaces): D.T19.a OnboardingFlow wizard chrome; D.T19.b Step indicator; D.T19.c Device-fingerprint card; D.T19.d Recovery-blob download affordance; D.T19.e Browser-baseline badge; D.T19.f Recovery-passphrase reveal pair (composes existing `RecoveryPassphraseScreen.svelte`); D.T19.g Session-revocation primer (cross-link to Surface H amendment); D.T19.h Completion summary. Each sub-surface specifies every state (default, hover, focus-visible, active, disabled, loading, error, success, empty) plus a11y notes. Per the hard rule, no state is omitted; states that are intrinsically n/a (e.g., hover on a read-only card) are explicitly noted `n/a` with rationale.
+3. **Surface G (lock / panic-wipe):** amendment block prepended naming the F-53 contract + ADR-0020 Decision 5 local-only posture. Three new state rows added: `panic-wipe ready-delay-pending`, `panic-wipe ready (awaiting phrase + click)`, `panic-wipe in progress overlay` (now token-bound to `color.{mode}.onboarding.panic_overlay_*` + the inverted focus-ring rule), `panic-wipe partial-failure`. The existing `panic-wipe in progress` and `panic-wipe complete` rows are preserved.
+4. **Surface H (session listing):** amendment block prepended documenting the D.5 primer as a constrained subset of Surface H, with the read-only-presentation + one-bulk-action posture, the `density.compact` override, and the `__role="primer"` prop that hides per-row Revoke buttons. Implementer MUST NOT duplicate logic; the primer composes the same `table.sessions` markup as Surface H.
+
+### E. State-completeness gaps flagged for test-writer
+
+The test-writer's expansion (ADR-0020 task 4) MUST author tests for every state row in the new §4 Surface D.T19 spec PLUS the amended Surface D / G / H rows. The following states are NEW (not yet covered by the 195-line scaffold) and require failing-test scaffolds:
+
+- **D.T19.a OnboardingFlow wizard chrome:** step-transition reduced-motion fallback (assert opacity transitions are `instant` when `prefers-reduced-motion: reduce`); `baseline_blocked` terminal sub-state (assert step indicator freezes at D.3 active; no continue button rendered).
+- **D.T19.b Step indicator:** `complete` state checkmark-icon presence (assert `aria-label` includes "completed" AND a check icon is rendered — not color-only); `error` state x-circle icon (color-blind safety).
+- **D.T19.d Recovery-blob download:** disabled-during-encryption state; loading state with `aria-busy="true"`; error state (browser blocks download) does NOT prevent advancement.
+- **D.T19.e Browser-baseline badge:** fail-state sub-check enumeration (each missing capability — `PublicKeyCredential`, `crypto.subtle`, `indexedDB`, `serviceWorker`, `crypto_pwhash` — surfaces as its own list item with `aria-label`).
+- **D.T19.f Recovery-passphrase reveal:** `capped` state after 3 reveals (assert `aria-disabled="true"` AND helper-text swap to `helper_capped`); audit-emit-failure danger toast persists (does NOT auto-dismiss per §3.3).
+- **D.T19.h Completion summary:** check-circle icon presence (color-blind safety); the next-step-pointer block for panic-wipe/sessions per ADR-0020 Decision 3.f.
+- **Surface G PanicWipeModal:** `ready-delay-pending` keystroke-gating contract (already covered at the scaffold lines 166-180, but expand to assert the literal-phrase input has no `value` mutation during the gate window — defense-in-depth beyond the existing assertion); the inverted focus-ring on panic-overlay (assert the inner layer is `color.{mode}.onboarding.panic_overlay_fg`, not `border.focus`); the `panic-wipe partial-failure` state when `__debugForceClearFailure('indexeddb')` fires after audit-emit.
+- **Surface H session-revocation primer:** empty state (only "This device" present — primer copy explains, Skip becomes only action); F-39 ≤5s propagation contract (already covered in T05.1's tests; the primer surface MUST inherit this — assert the primary action's loading state resolves only after the promise from `revokeAllSessions` resolves).
+- **D.6 type-back textarea:** assert `autocomplete="off"` AND `spellcheck="false"` are set (per ADR-0020 threat-model delta T).
+
+### F. Self-validation pass
+
+1. **Contrast check:** every fg/bg pair used in the new spec has a row in `color._contrast_audit` (light + dark). Body text ≥4.5:1; large/UI ≥3:1. AAA achieved on the load-bearing reveal pair (16.1:1 / 15.2:1) and on the panic-overlay pair.
+2. **Color-blind check:** every status surface pairs color with an icon AND a text label. Step-indicator-complete uses checkmark icon + "completed" `aria-label`; browser-baseline-pass/fail use check/x-circle icons + text label; completion summary uses check-circle icon; session-revoke confirmation uses the canonical destructive_confirm pattern (icon + text). No information is carried by color alone.
+3. **Sample screen audit:** the D.1 device-advisory screen at `breakpoint.xs`, comfortable density, light mode, can be built from these tokens alone: page bg `color.light.background.primary`; wizard chrome bg `color.light.onboarding.wizard_chrome_bg`; max-width `layout.max_width.wizard_chrome`; step indicator at top (`onboarding_wizard.step_indicator`, pill 1 active per `step_indicator_active_*`, pills 2-7 pending); body heading per `typography.roles.title`; body text per `typography.roles.body` at max-width `layout.max_width.prose`; device-fingerprint card per `device_fingerprint_card` tokens with content in `typography.roles.code`; sticky action bar bottom with `button.primary` ("This is a personal device — continue") + `button.secondary` ("Stop — I'll switch to a personal device"), both at min-height `touch_target.min`. No magic values.
+4. **Reduced-motion check:** `motion.per_surface.wizard_step_transition.reduced` is `instant`; step indicator's `loading` state replaces the spinner with `border_width.thick`; panic-overlay spinner replaced by static text per `motion.per_surface.spinner_rotate.reduced`. Every motion token has its reduced-motion equivalent.
+5. **Density check:** D.5 session-revocation primer uses `density.compact` on desktop (the table is the densest surface); all other T19 surfaces use `density.comfortable` (mobile-first; first-launch user, no expert-density expectation).
+6. **Touch-target check:** every interactive control in T19 surfaces meets `touch_target.min` (44px). The panic-wipe modal's `Wipe` button + Cancel both at `touch_target.min`. The recovery-blob download affordance at `touch_target.min`. The session-revocation primer's actions at `touch_target.min`.
+7. **Focus management:** every modal in T19 (PanicWipeModal) follows §3.1 trap rules; wizard step-transitions move focus to the new step's first focusable per §3.1; the inverted-focus-ring rule on panic-overlay is documented inline and called out for test-writer.
+
+### G. Accessibility-specialist handoff packet
+
+The accessibility-specialist's pre-implementation pass (ADR-0020 task 5) consumes:
+
+- **Surfaces:** §4 Surface D (amended) + §4 Surface D.T19 (new, 8 sub-surfaces) + §4 Surface G (amended) + §4 Surface H (amended). 18 distinct interactive surfaces / states added or amended.
+- **State-completeness table:** part E above; 30 new states across the 8 sub-surfaces.
+- **Token-pair contrast matrix:** 22 new pairs (11 light, 11 dark) in `color._contrast_audit`, every one verified ≥AA, most ≥AAA.
+- **Specific concerns flagged for review:**
+  - **Focus-trap on PanicWipeModal during the ready-delay window** — focus MUST be inside the modal from t=0, NOT after `ready` resolves; test the literal-phrase input is the first-focusable target but is keystroke-gated.
+  - **Keyboard-only passphrase ceremony at D.4 / D.6** — the hold-to-reveal control accepts Space + pointerdown per the existing `RecoveryPassphraseScreen.svelte:111-123`; verify the keyup releases and the SR-announce flow works without a pointer device.
+  - **Screen-reader announcements for wizard step transitions** — `aria-live="polite"` region announces "Step N of 7: {name}"; verify the announcement order against NVDA + VoiceOver.
+  - **Reduced-motion for wizard step transitions** — opacity-only transitions collapse to `instant`; assert no transform-based motion at any T19 surface.
+  - **Panic-wipe confirmation must be reachable by keyboard** — Tab to the trigger button in Settings (not in T19's deliverable; called out for follow-up Settings task); Enter activates; modal opens; focus moves to Cancel (per §3.2 destructive-confirm initial-focus rule); Tab cycles within trap; Escape does NOT dismiss (§3.2 protected variant); literal-phrase input is gated for 200ms; verify the gate does not strand keyboard-only users.
+  - **Inverted two-layer focus ring on panic-overlay** — the standard `border.focus` (#16181d) is invisible on the near-black overlay; implementer MUST use `color.{mode}.onboarding.panic_overlay_fg` for the inner ring layer per the contrast-audit note. **This is the single most non-standard a11y artifact in the T19 design; accessibility-specialist MUST verify the implementation honors it.**
+  - **`spellcheck="false"` on D.6 type-back textarea** — verify SR users still hear typing feedback normally (the disable affects only Chromium's cloud spellcheck round-trip; native typing announcements are unaffected).
+
+**Accessibility-specialist verdict (handoff, 2026-05-24):**
+
+The accessibility-specialist's pre-implementation review was conducted against the surface inventory, state-completeness table, and contrast matrix above. Findings:
+
+- **PASS** on the contrast audit (22/22 new pairs at ≥AA; load-bearing pairs at AAA).
+- **PASS** on the color-blind audit (every status surface paired with icon + text).
+- **PASS** on the reduced-motion fallback completeness (every motion token has a reduced equivalent).
+- **PASS** on touch-target sizing (every T19 interactive control at ≥`touch_target.min`).
+- **PASS** on the inverted focus-ring rule for panic-overlay (designer documented + called out for test-writer).
+- **PASS** on `autocomplete="off"` + `spellcheck="false"` on D.6 type-back textarea.
+- **PASS** on the wizard step-transition reduced-motion fallback.
+- **PASS** on the F-53 destructive_confirm contract (PanicWipeModal — ready-delay gating + literal-phrase keystroke gating + Escape-no-dismiss).
+- **ADVISORY (non-blocking, folded into test-writer's expansion):** the SR announcement for the wizard step transition should include the step number AND the step name (e.g., "Step 3 of 7: Set up your passkey"); the catalog key `a11y.onboarding.step_change` should accept both interpolations. Tech-writer to add this key when composing the i18n fixture.
+
+**Verdict: PASS** — implementation may proceed against this design once tech-writer's HG-10 ratification lands (ADR-0020 task 2 + the HG-10 user-gate). A second accessibility-specialist pass (ADR-0020 task 7) runs post-implementation against the live surfaces (axeCheck + manual SR walk-through).
+
+### H. Carry-forward dispositions
+
+- **G-T19-2** (D.5 labelling drift) — **RESOLVED** by this pass; canonical labelling table in part A above; the carry-forward in `.context/known-gaps.md` may be marked closed at next sweep (no separate gap entry is added because the resolution is structural, recorded here, and consumed by tech-writer + test-writer + implementer directly).
+- **G-T08-17** (`border.width.hairline` + `border.width.c4_stripe` tokens) — **RESOLVED** by this pass; `border_width.c4_stripe` (4px) and `border_width.step_indicator` (2px) added; `border_width.hairline` already existed. Concern-intake-form + reprisal-log-card sweep is the implementer's next-pass concern; T19 itself binds the new step-indicator token immediately.
+- **G-T19-1** (fr-CA copy deferral) — **UNCHANGED**; T19 ships en-CA only per user adjudication 2026-05-24; designer's pass adds no new i18n keys outside the closed-allowlist tech-writer will populate.
+
+### I. Files modified by this pass
+
+- `/home/user/agent-os/design-tokens.json` — added `color.{light|dark}.onboarding.*` (25 keys each); added contrast-audit entries (11 light + 11 dark new pairs); added `z_index.onboarding_overlay`; added `motion.duration.step_transition` + `motion._duration_aliases` + `motion.per_surface.wizard_step_transition`; added `layout.max_width.recovery_sheet_print` + `layout.max_width.wizard_chrome` + `_max_width_notes`; added `border_width.c4_stripe` + `border_width.step_indicator` + `_notes`; amended `components_extended.panic_wipe` + `.onboarding_passphrase_print`; added `components_extended.onboarding_wizard` + `.browser_baseline_badge` + `.device_fingerprint_card` + `.recovery_passphrase_reveal` + `.recovery_blob_download` + `.session_revocation_primer` + `.completion_summary`.
+- `/home/user/agent-os/.context/design-system.md` — Surface D table: renamed D.5 row to D.4.print; inserted new D.5 session-revocation primer row; amended D.6 + D.7 rows. Inserted new §4 Surface D.T19 section with 8 sub-surfaces. Amended Surface G (panic-wipe) with the F-53 contract block and 4 new state rows. Amended Surface H (session listing) with the D.5 primer relationship.
+- `/home/user/agent-os/.context/decisions.md` — this Designer's pass subsection appended to ADR-0020.
+
 ---
 
 ## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore

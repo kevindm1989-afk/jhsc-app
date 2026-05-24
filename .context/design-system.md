@@ -171,9 +171,11 @@ This is a persistent in-app feed every active member sees. It is the **HG-6 / F-
 
 ---
 
-### Surface D — Onboarding (ADR-0008 + ADR-0001 + RA-1 + F-08)
+### Surface D — Onboarding (ADR-0008 + ADR-0001 + RA-1 + F-08 + ADR-0020 T19)
 
 First-launch flow. Plain-language; no lawyer voice.
+
+> **D.5 LABELLING-DRIFT RESOLUTION (designer's pass 2026-05-24, per ADR-0020 follow-up G-T19-2):** the canonical D.1→D.7 step labels are now aligned with ADR-0020's librarian briefing. The print sheet is renamed **D.4.print** (a sub-step of D.4 rendered via `@media print`); **D.5** is now the **session-revocation primer**; **D.6** stays type-back verify; **D.7** stays completion. The original §4 D.5 row below (which described the print stylesheet) is preserved as `D.4.print` in the table; a new `D.5 session-revocation primer` row replaces the step-5 slot. The test scaffold's `advanceThroughTo('D.4')` / `advanceThroughTo('D.7')` references are unaffected; the harness exposes steps by name and the harness's `'D.5'` step name now maps to the session-revocation primer (not the print sheet). Implementer + test-writer MUST consume this canonical labelling.
 
 | step | state | visible cues | a11y notes | empty/loading/error coverage |
 |---|---|---|---|---|
@@ -183,9 +185,121 @@ First-launch flow. Plain-language; no lawyer voice.
 | **D.3 passkey enrollment — in progress** | OS WebAuthn dialog | Modal scrim covers app; small in-app card says `onboarding.passkey.waiting` ("Waiting for your device…") | `aria-live="polite"` on the waiting card | If timeout / NotAllowed → inline error in the same card with Retry; on too many retries, return to D.3 explain |
 | **D.3 passkey enrollment — done** | WebAuthn returns credential | Inline confirmation: checkmark + `onboarding.passkey.done` ("Passkey set on this device") + primary `onboarding.passkey.continue` ("Next: print your recovery sheet") | `role="status"` | n/a |
 | **D.4 recovery passphrase — generate** | post-D.3 | Headline `onboarding.recovery.heading` ("Your recovery sheet"); body explains in plain English: "If you lose this device AND your passkey, the only way back into your account is the recovery passphrase below. There is no admin who can reset it. Print this sheet and store it somewhere safe and **not** at work."; a card with the printable layout (see D.5) embedded; primary `onboarding.recovery.print` ("Print recovery sheet"); secondary `onboarding.recovery.copy` (copy to clipboard with a warning that clipboard isn't a substitute for printing) | The passphrase is rendered in `typography.roles.code` at large size; pre-formatted for screen-reader to read each chunk separately | If `window.print()` unavailable → fallback text and instructions for using the browser's print menu |
-| **D.5 recovery passphrase — print layout** | print stylesheet | Print-only layout (`@media print`): single page, no headers/footers, no app chrome. Layout: (a) tribunal-style header `print.recovery.title` ("JHSC App — Recovery sheet for {display_name}") with date; (b) the passphrase rendered as `typography.roles.totp` (large mono) in five word-chunks separated by visible space; (c) the salt rendered as `typography.roles.hash` underneath, labelled; (d) below the passphrase, a single boxed warning paragraph: "If anyone has this sheet, they can recover your account on a new device. Treat it like a key. Do not store it at work."; (e) a footer with the URL of the app + the build hash | All print-only content uses serif `typography.family.serif` to differentiate from on-screen; high contrast (black on white only) | If browser blocks `window.print()` → user is shown the same layout on-screen with instructions to use system print |
-| **D.6 recovery passphrase — type-back verification** | post-print | Headline `onboarding.recovery.verify.heading` ("Type the passphrase back to confirm"); textarea input; the previously-shown passphrase is **not** visible on this screen (user must consult the printed sheet); primary `onboarding.recovery.verify.submit` ("Confirm"); on mismatch, error_state inline with attempt counter | The textarea is `aria-required="true"` and `aria-describedby` linked to the helper "Type the words exactly as printed, separated by spaces." | If 3 attempts wrong → return to D.4 (re-display the passphrase); F-08 mitigation requires the type-back; without verification the user cannot proceed |
-| **D.7 done** | post-D.6 | Headline `onboarding.done.heading` ("You're set up"); summary card listing: passkey set, recovery sheet printed-and-verified, browser supported, device flagged as personal; primary `onboarding.done.continue` ("Open the app") | `role="status"` | n/a |
+| **D.4.print recovery passphrase — print layout** *(sub-step of D.4; was previously labelled "D.5" before the 2026-05-24 designer-pass labelling resolution)* | print stylesheet | Print-only layout (`@media print`): single page, no headers/footers, no app chrome. Max width `layout.max_width.recovery_sheet_print` (5.5in). Layout: (a) tribunal-style header `print.recovery.title` ("JHSC App — Recovery sheet for {display_name}") with date; (b) the passphrase rendered as `typography.roles.totp` (large mono) in five word-chunks separated by visible space; (c) the salt rendered as `typography.roles.hash` underneath, labelled; (d) below the passphrase, a single boxed warning paragraph: "If anyone has this sheet, they can recover your account on a new device. Treat it like a key. Do not store it at work."; (e) a footer with the URL of the app + the build hash | All print-only content uses serif `typography.family.serif` to differentiate from on-screen; high contrast (black on white only) | If browser blocks `window.print()` → user is shown the same layout on-screen with instructions to use system print |
+| **D.5 session-revocation primer** *(NEW per ADR-0020 + designer-pass 2026-05-24 — canonical D.5 slot)* | post-type-back at D.6 success transitions here; OR directly during onboarding when the user wants to review existing sessions before completion | Headline `onboarding.sessions.heading` ("Sign out other devices?"); body explains in plain English: "If you've ever signed into this account on another phone or laptop, you can sign those sessions out now. This is optional. You can do it later from Settings."; renders `session_revocation_primer` (see §4.T19): a compact session list (variant of `table.sessions`) showing each known session row (device, OS/browser, last-seen, 'This device' badge); primary destructive button `onboarding.sessions.revoke_other.label` ("Revoke other sessions"); tertiary `onboarding.sessions.skip.label` ("Skip — I'll do this later"). Both advance to D.7 on click | Primary action follows §3.5 destructive-action pattern but **without** the per-record passphrase or 4-eyes gate (the user just authenticated their first passkey at D.3; re-auth is unnecessary). Action's `aria-describedby` links to a small helper count ("3 other sessions will be signed out"). If revoking the current session is somehow selected, surface §3.2's protected-modal pattern (this should not be reachable through the primer's controls — the primer pre-filters; defense-in-depth). Live region announces revocation success per `a11y.session.revoked` catalog key. | **empty** (only this device exists): list shows the single 'This device' row; primer copy explains there's nothing else to revoke; Skip becomes the only forward action (still navigates to D.7). **loading** (`revokeAllSessions` in flight): button enters `loading` state with `onboarding.sessions.revoking.label` ("Signing out other devices…"); list rows are interactive-disabled; F-39 contract pins ≤5s server propagation. **success**: toast `success` confirms count revoked; auto-advance to D.7 after 500ms (reduced-motion: immediate). **error**: inline `error_state.network` or `error_state.session_expired`; retry button replaces primary; Skip remains available so a network failure does not strand the user mid-enrollment. |
+| **D.6 recovery passphrase — type-back verification** | post-print | Headline `onboarding.recovery.verify.heading` ("Type the passphrase back to confirm"); textarea input; the previously-shown passphrase is **not** visible on this screen (user must consult the printed sheet OR the hold-to-reveal control per Amendment F); primary `onboarding.recovery.verify.submit` ("Confirm"); on mismatch, error_state inline with attempt counter | The textarea is `aria-required="true"` and `aria-describedby` linked to the helper "Type the words exactly as printed, separated by spaces."; additionally `autocomplete="off"` and `spellcheck="false"` (per ADR-0020 threat-model delta T — defense against Chromium cloud-spellcheck plaintext-passphrase leak) | If 3 attempts wrong → return to D.4 (re-display the passphrase); F-08 mitigation requires the type-back; without verification the user cannot proceed |
+| **D.7 done** | post-D.5 session-revocation-primer skip OR revoke-complete | Headline `onboarding.done.heading` ("You're set up"); `completion_summary` card (see §4.T19): icon `check-circle` (`icon.size.lg`) + summary listing — passkey set, recovery sheet printed-and-verified, browser supported, device flagged personal; below the summary, an informational block per ADR-0020 Decision 3.f naming where panic-wipe + sessions live for future need; primary `onboarding.done.continue` ("Open the app") | `role="status"` on the success card; the next-step pointer block is `role="region"` `aria-labelledby` pointing to its heading | n/a |
+
+---
+
+### Surface D.T19 — Onboarding wizard infrastructure (NEW — ADR-0020)
+
+Wizard chrome + per-step infrastructure shared across D.1–D.7. Per ADR-0020 task 1, the architect's identified token gaps (`z_index.onboarding_overlay`, `motion.duration.step_transition`, `layout.max_width.recovery_sheet_print`) have been ratified and added to `design-tokens.json`. Implementers MUST bind every visual via these tokens; no magic values.
+
+#### Surface D.T19.a — OnboardingFlow (wizard chrome)
+
+Full-viewport wizard chrome rendered on first launch. Sits at `z_index.onboarding_overlay` (1550 — above tooltip 1500, below lock_screen 1600 + panic_overlay 1700, so idle-lock and panic-wipe correctly draw on top mid-flow).
+
+| state | trigger | visible cues (tokens) | a11y notes | empty/loading/error coverage |
+|---|---|---|---|---|
+| **default (active step rendered)** | User is at any of D.1–D.7 | Full-viewport bg `color.{mode}.onboarding.wizard_chrome_bg`; max-width `layout.max_width.wizard_chrome` (640px) on desktop, full-width on mobile per layout pattern 5.4; top-aligned step indicator (7 pills, see D.T19.b); body area; sticky bottom action bar (Back/secondary on left, Continue/primary on right) — bar respects safe-area-inset-bottom on iOS Safari. Per-step transition opacity-only, `motion.per_surface.wizard_step_transition` (`duration.step_transition` = 320ms, easing `out`). | Wizard root is `role="region"` with `aria-labelledby` pointing to the current step's heading; `aria-live="polite"` region announces step change ("Step 3 of 7: Set up your passkey"); focus moves to first focusable in the new step on each transition; tab order is DOM-order. | n/a — every step has its own state matrix below. |
+| **hover** | n/a at chrome level | n/a — hover lives on the per-step controls (button/input variants per existing component spec). | n/a | n/a |
+| **focus-visible** | Tab into any control inside the chrome | Two-layer focus ring per `shadow.focus_ring`. | Skip-to-content link surfaces at top-left when focused (per §3.1). | n/a |
+| **active** | n/a at chrome level | n/a | n/a | n/a |
+| **disabled** | n/a — wizard chrome is never disabled (a baseline-block uses its own state below). | n/a | n/a | n/a |
+| **loading (during a step's async)** | Any step's primary action triggers an async (D.3 passkey enroll, D.4 encryptRecoveryBlob, D.5 revokeAllSessions) | Sticky action bar's primary button enters `loading` per button component spec; chrome remains interactive for Back-button unless the operation explicitly forbids it (D.4 in mid-encrypt forbids Back; D.5 in mid-revoke forbids Back). | `aria-busy="true"` on the body region for the duration; live region announces the in-progress text (e.g., "Encrypting recovery blob…", per `a11y.onboarding.{step}.loading` keys). | If user attempts Back during a forbidden window → toast `warning` ("Please wait — the current step is finishing"). |
+| **error (per-step)** | Per-step failure (network, crypto, baseline) | Inline `error_state` variant per the failure class — `network`, `crypto`, `permission`. The wizard chrome itself does NOT swallow the error; the step component renders the error inline above its own primary action. | `role="alert"` on the error block; focus moves to the error heading on first render. | Always present — every step has an error sub-state. |
+| **success (per-step)** | Step's success advances to the next | Step transition fires per `motion.per_surface.wizard_step_transition`; step indicator advances (current → complete, next → active). | `role="status"` announcement per `a11y.onboarding.{step}.success`. | n/a |
+| **empty** | n/a — wizard always has a current step. | n/a | n/a | n/a |
+| **baseline_blocked** (terminal sub-state — not a step) | `D.3` runtime feature-detection OR `checkBrowserBaseline()` fails | Body replaces with a block-state card: heading `onboarding.browser.unsupported.heading` ("Your browser is too old"); `browser_baseline_badge` (fail variant) listing which checks failed; body lists supported browsers (Chrome 109+, Edge 109+, Firefox 122+, Safari 16+) per ADR-0002; secondary `onboarding.browser.unsupported.reload` ("Reload after switching browsers"); NO continue button. Step indicator freezes at D.3 (no advance, no complete). | Block-state card has `role="alert"`; focus moves to the heading. | This IS the error coverage for D.3 baseline. |
+
+**Per-screen DOM contract (binding for implementer + test-writer):**
+- Test scaffold requires `data-testid="device-fingerprint"` on D.1; `data-testid="onboarding-d2-body"` on D.2; `role="heading"` matches `/personal device/i` on D.1; `role="button"` matches `/personal device.*continue/i` and `/stop.*switch.*personal/i` on D.1; `role="button"` matches `/set up passkey/i` on D.3 (baseline pass); body text matches `/browser is too old/i` on D.3 (baseline fail).
+- Step-indicator: `<ol>` with one `<li>` per step; current step has `aria-current="step"`; complete steps have `aria-label` ending "completed".
+- Test-only props `__test_step` / `__test_user_agent`: per ADR-0020 Decision 8, source references via split-form (`'__test_' + 'step'`); runtime no-op when `MODE === 'production'`; build-time grep CI test asserts the literals are absent from the production bundle.
+
+#### Surface D.T19.b — Step indicator
+
+7-pill horizontal indicator on desktop; vertical condensed (current-step pill only + "Step 3 of 7" text) on mobile below `breakpoint.md`.
+
+| state | visible cues (tokens) | a11y notes |
+|---|---|---|
+| **pending** | Bg `color.{mode}.onboarding.step_indicator_pending_bg`; fg `..._pending_fg`; border `border_width.step_indicator` `..._pending_border`; icon `circle-outline` (icon.size.sm); label in `typography.roles.caption` | `aria-disabled="true"`; `aria-label` "Step N, not yet reached" |
+| **active** | Bg `..._active_bg`; fg `..._active_fg`; border `..._active_border`; icon `circle-filled`; label in `typography.roles.caption`, weight `semibold` | `aria-current="step"`; `aria-label` "Step N of 7, current" |
+| **complete** | Bg `..._complete_bg`; fg `..._complete_fg`; border `..._complete_border`; **icon `checkmark` REQUIRED** in addition to color (color-blind safe per anti-pattern #3); label in `typography.roles.caption` | `aria-label` "Step N, completed" |
+| **focus-visible** | Two-layer focus ring per `shadow.focus_ring` on any pill that becomes a click target (only complete pills are clickable for review-only re-visit) | Tab order matches DOM order |
+| **hover** (complete pills only) | Slight darken via `color.{mode}.surface.hover`; cursor `pointer` | n/a |
+| **active** (complete pills only — pressed) | `color.{mode}.surface.press` | n/a |
+| **disabled** | Pending pills only — not clickable; cursor `default` | `aria-disabled="true"` |
+| **loading** | When the wizard is in a per-step loading state, the active pill shows a small inline spinner overlay; reduced-motion: pill border thickens to `border_width.thick` instead of spinner | `aria-busy="true"` on the pill |
+| **error** | When the active step is in error, the active pill bg shifts to `color.{mode}.state.danger_bg`, fg `state.danger`; icon `x-circle` | `role="alert"` is on the inline error block, not the pill; pill state is supportive only |
+| **success** | Transient (250ms) — pill briefly highlights `..._complete_bg` then settles into the standard `complete` styling on next-step entry | n/a |
+| **empty** | n/a — indicator always renders all 7 pills | n/a |
+
+#### Surface D.T19.c — Device fingerprint card (D.1)
+
+| state | visible cues (tokens) | a11y notes |
+|---|---|---|
+| **default** | `card.default` with bg `color.{mode}.onboarding.device_fingerprint_bg`; fg `..._fg`; border `..._border`; content rendered in `typography.roles.code`: UA string on line 1, platform on line 2. NEVER renders IP, geolocation, `Sec-CH-UA-Full-Version-List`, navigator.connection — per ADR-0020 §3.e. | `data-testid="device-fingerprint"`; `aria-label` "Browser information (this is what your browser tells the page; nothing here is sent to the server)" |
+| **focus-visible / hover / active / disabled / loading / error / success / empty** | n/a — this is a read-only render of UA + platform; no interactive states. The card is a focusable element ONLY if the user can copy/inspect its text (per OS-native text-select); no app-level click handler. | n/a |
+
+#### Surface D.T19.d — Recovery-blob download affordance (D.4 secondary)
+
+| state | visible cues (tokens) | a11y notes | empty/loading/error coverage |
+|---|---|---|---|
+| **default** | `button.ghost` with fg `color.{mode}.onboarding.download_affordance_fg`; border `..._border`; icon `download` (icon.size.sm) + label `onboarding.recovery.download.label` ("Download encrypted recovery blob"); helper text below in `typography.roles.hint` per `onboarding.recovery.download.helper` ("This is the encrypted file. It is NOT the passphrase. Store it separately.") | Min target `touch_target.min`; `aria-describedby` to the helper text | n/a |
+| **hover** | Per `button.ghost` hover tokens | n/a | n/a |
+| **focus-visible** | Two-layer focus ring per `shadow.focus_ring` | n/a | n/a |
+| **active** | Per `button.ghost` active tokens | n/a | n/a |
+| **disabled** | Per `button.ghost` disabled tokens; only disabled while D.4 is still in the encryption phase | `aria-disabled="true"`; helper text updates to "Available once the recovery blob is ready" | n/a |
+| **loading** | Spinner inline + label changes to `onboarding.recovery.download.preparing` ("Preparing download…") | `aria-busy="true"` | n/a |
+| **error** | Toast `warning` ("Download blocked by the browser — the encrypted blob is still saved on this device"); button stays available for retry; the wizard does NOT block advancement (per ADR-0020 Decision 9 — download is opt-in) | `role="alert"` on the toast | Always present |
+| **success** | Toast `success` ("Downloaded. Move this file off your device."); button label transiently switches to "Downloaded — download again" then settles | `role="status"` | n/a |
+| **empty** | n/a — the affordance is always offered at D.4 | n/a | n/a |
+
+#### Surface D.T19.e — Browser-baseline badge (D.3)
+
+Inline status badge below the D.3 heading reporting which checks the runtime passed/failed.
+
+| state | visible cues (tokens) | a11y notes |
+|---|---|---|
+| **pass** | Bg `color.{mode}.onboarding.browser_baseline_pass_bg`; fg `..._pass_fg`; border `..._pass_border`; icon `check` (icon.size.sm) + label `onboarding.baseline.pass.label` ("This browser is supported") | `role="status"` once on render; never color-only |
+| **fail** | Bg `..._fail_bg`; fg `..._fail_fg`; border `..._fail_border`; icon `x-circle` + label `onboarding.baseline.fail.label` ("This browser is too old"); below the badge, a `<ul>` enumerates which sub-checks failed (`PublicKeyCredential` absent, `crypto.subtle` absent, `indexedDB` absent, `navigator.serviceWorker` absent, `crypto_pwhash` (libsodium) absent per ADR-0003 Amendment G) | `role="alert"`; sub-check list has `aria-label` "Failed checks" |
+| **focus-visible** | Badge is not focusable; the supported-browsers links beneath it are focusable per standard button rules | n/a |
+| **hover/active/disabled/loading/empty** | n/a — the badge is a read-only state indicator. | n/a |
+| **error** | n/a — the fail state IS the error surface | n/a |
+| **success** | n/a — covered by pass state | n/a |
+
+#### Surface D.T19.f — Recovery-passphrase reveal pair (D.4 — composes RecoveryPassphraseScreen.svelte)
+
+The on-screen passphrase rendering. Composes the existing `RecoveryPassphraseScreen.svelte` per ADR-0020 Decision 2.d. Per ADR-0003 Amendment F operational rule 5: largest typography token + highest-contrast pair.
+
+| state | visible cues (tokens) | a11y notes | empty/loading/error coverage |
+|---|---|---|---|
+| **default (concealed; before any hold-to-reveal)** | The reveal region is collapsed; only the hold-to-reveal button is visible (existing surface owns the button). No passphrase in DOM. | `aria-live="polite"` region for "Hold the reveal button to show the passphrase" | n/a |
+| **hold-in-progress** | Existing surface owns the press feedback (it owns the button); no token changes from the designer at this layer. | Existing handler | n/a |
+| **revealed (transient — only while held)** | `<code>` element rendered in `typography.roles.totp`; fg `color.{mode}.onboarding.passphrase_reveal_fg` (foreground.primary); bg `..._reveal_bg` (background.primary); border `..._reveal_border` 2px (the load-bearing high-contrast pair — 16.1:1 / 15.2:1 light/dark); chunked into 5-word groups separated visually by `..._chunk_separator` foreground at reduced size | `role="region"` `aria-live="polite"` per existing component; the visible passphrase MUST NOT be inside an `<input>` (autocomplete/paste-history risk); the chunk separator MUST be visually-hidden in screen-reader output so SR reads the passphrase as a single string | n/a |
+| **focus-visible** | Two-layer focus ring per `shadow.focus_ring` on the reveal control; inner line at 16.1:1 against `..._reveal_bg` is load-bearing per contrast audit | n/a | n/a |
+| **hover / active / disabled** | Hold-to-reveal control owns these per existing surface; designer does NOT modify | n/a | n/a |
+| **loading** | The audit-emit-before-reveal contract (Amendment F operational rule 2) means there IS a "preparing reveal" sub-state. Existing surface shows the helper text; designer adds: during this sub-state, the reveal region is NOT in the DOM (per M-54b — the passphrase is not in DOM until audit resolves ok). | Existing `role="status"` on helper | n/a |
+| **error (audit failed)** | Existing surface fires danger toast; designer ratifies: toast uses `toast.danger` variant per §3.3 (manual dismiss only); the reveal region remains absent from DOM. | `role="alert"` per existing surface | Always present |
+| **success** | n/a — "success" is the revealed transient state above | n/a | n/a |
+| **capped (3 reveals consumed in this enrollment session)** | Existing surface owns the helper-text swap; designer ratifies: the reveal control becomes `aria-disabled="true"`; helper text per `onboarding.recovery.show_again.helper_capped` | `aria-disabled="true"` | Always present after 3rd reveal |
+| **empty** | n/a — the surface always renders at D.4 | n/a | n/a |
+
+**Forbidden affordances (per ADR-0003 Amendment F operational rule 4; static-lint enforced):** copy-to-clipboard control, SpeechSynthesis call, file-export of the plaintext, screenshot-friendly affordance, `<input>` rendering of the plaintext. None appear in any of the above states.
+
+#### Surface D.T19.g — Session-revocation primer (D.5 — see also Surface H amendment)
+
+Spec lives in the D.5 row of Surface D's table above. The primer is a constrained subset of Surface H's full session-listing surface; see "Surface H amendment" below for the cross-link.
+
+#### Surface D.T19.h — Completion summary (D.7)
+
+| state | visible cues (tokens) | a11y notes |
+|---|---|---|
+| **default** | `card.elevated` (variant); bg `color.{mode}.onboarding.completion_success_bg`; fg `..._success_fg`; border `..._success_border`; **icon `check-circle` (`icon.size.lg`) REQUIRED**; checklist of 4 lines (passkey set, recovery sheet printed-and-verified, browser supported, device flagged personal), each with its own check icon; below the card, an `alert_banner.info` strip linking to where panic-wipe + sessions live for future need (per ADR-0020 Decision 3.f) | `role="status"` on the card; the next-step pointer block is `role="region"` `aria-labelledby` to its heading |
+| **focus-visible** | Two-layer focus ring on the "Open the app" primary button | n/a |
+| **hover / active / disabled / loading / error / success / empty** | n/a — D.7 is a terminal render; only the primary action has interactive states (per `button.primary`) | n/a |
 
 ---
 
@@ -215,7 +329,9 @@ First-launch flow. Plain-language; no lawyer voice.
 
 ---
 
-### Surface G — Lock / panic-wipe (T2 / T6)
+### Surface G — Lock / panic-wipe (T2 / T6 + ADR-0020 T19 amendments)
+
+> **AMENDMENT (designer's pass 2026-05-24, per ADR-0020 T19):** the panic-wipe modal is canonicalized as `PanicWipeModal` (free-standing component in `lib/lock/`, mounted at the app-shell level; NOT inside OnboardingFlow per ADR-0020 Decision 2.c). The F-53 destructive_confirm contract is binding: (a) `ready_delay_ms` gate (default 200ms) — primary button does not accept activation before `ready` resolves; (b) literal-phrase input is keystroke-gated (does not accept any input) before `ready`; (c) Escape during the ready-delay transition does NOT dismiss (consistent with §3.2 no-Escape-dismiss list); (d) the wipe is LOCAL-ONLY (IndexedDB + service-worker caches + sessionStorage + localStorage + session cookie + in-memory libsodium buffers) per ADR-0020 Decision 5 and user adjudication 2026-05-24; no server-side cascade. The `panic_wipe.invoked` audit row MUST be written BEFORE any wipe side-effect (audit-before-side-effect per F-53). On partial failure, the audit row's `meta.partial_failure_classes` enumerates the failed subsystems; the in-progress overlay transitions to an error_state listing what was and was not cleared. The user is told to close the tab + re-install or seek help. New T19-specific state rows are added below the original lock/panic table.
 
 | state | trigger | visible cues | a11y notes | empty/loading/error coverage |
 |---|---|---|---|---|
@@ -225,10 +341,16 @@ First-launch flow. Plain-language; no lawyer voice.
 | **panic-wipe confirm** | Modal | Headline `panic.heading` ("Wipe this device's data"); body lists in plain English what will be removed: encrypted IndexedDB store, session, cached settings; warns that wiping does NOT remove the data from the server (other devices and the committee retain their access); requires the user to type the literal word "WIPE" into a text input; Cancel + Wipe buttons (Wipe variant `destructive`, disabled until the word matches case-insensitive) | Text input is `aria-required="true"`; the Wipe button has `aria-describedby` pointing to the required-phrase hint | n/a |
 | **panic-wipe in progress** | User clicks Wipe with phrase typed | Full-viewport overlay at `z_index.panic_overlay`; centered: spinner + heading `panic.wiping.heading` ("Wiping…"); no controls | `aria-busy="true"`; SR announces "Wiping local data" | If wipe partial-fails → error_state with details; user is told what was and wasn't wiped |
 | **panic-wipe complete** | IndexedDB cleared, session torn down, service-worker caches purged | Page redirects to a fresh login surface; toast `success` ("Local data wiped. Sign in again to continue, or close this tab to leave the app.") | `role="status"` | n/a |
+| **panic-wipe ready-delay-pending** *(NEW per ADR-0020 / T19)* | Modal just opened; `ready` promise in flight (default 200ms) | Modal is visible; primary `Wipe` button is `aria-disabled="true"`; literal-phrase input is rendered but its keystroke handler is gated — input value remains empty even if user types; helper text per `panic.readydelay.helper` ("Preparing…") | `aria-busy="true"` on the modal body; `role="alert"` is NOT yet attached (no destructive state to announce yet); Escape keydown is captured by the modal but does NOT dismiss | n/a — this is a short transient |
+| **panic-wipe ready (awaiting phrase + click)** *(NEW per ADR-0020 / T19)* | `ready` resolved; literal-phrase input now accepts keystrokes; primary button still disabled until phrase matches (case-insensitive) | Standard `destructive_confirm` styling; primary button enables when input value matches "WIPE" case-insensitive | `aria-required="true"` on the literal-phrase input; primary button `aria-describedby` to the required-phrase hint; Escape continues to NOT dismiss (this is the §3.2 protected variant) | n/a |
+| **panic-wipe in progress overlay** *(NEW per ADR-0020 / T19 — replaces the prior "panic-wipe in progress" row with full token binding)* | Full-viewport overlay at `z_index.panic_overlay` (1700); bg `color.{mode}.onboarding.panic_overlay_bg` (rgba near-black, 0.92 light / 0.94 dark); fg `..._panic_overlay_fg`; centered spinner + heading `panic.wiping.heading` ("Wiping…") in `typography.roles.section`; no other controls; on this surface the focus ring uses the INVERTED two-layer construction per the design-tokens contrast audit (outer `fbbf24` 13.1:1 carries visibility; inner uses `..._panic_overlay_fg` rather than `border.focus`) | `aria-busy="true"`; SR announces `a11y.panic.in_progress` ("Wiping local data — do not close this tab"); focus is trapped inside the overlay; reduced-motion: spinner replaced by static "Wiping…" text + indeterminate progress bar per `motion.per_surface.spinner_rotate` reduced-motion rule | If wipe partial-fails → transitions to `panic-wipe partial-failure` (new row below); if total-fail before any side-effect → modal returns to ready state with `error_state.crypto` inline |
+| **panic-wipe partial-failure** *(NEW per ADR-0020 / T19)* | One or more `WipeStore` clear* calls returned `{ok: false}` after the audit row was committed | Overlay transitions to error_state: heading `panic.partial_failure.heading` ("Wipe partially completed"); enumerated list of which subsystems were and were not cleared (read from `meta.partial_failure_classes`); body explains in plain English what to do ("Close this tab, then uninstall and reinstall the app from your home screen. Contact the worker co-chair if anyone is around to help."); single primary `panic.partial_failure.close` ("Close this tab") | `role="alert"` on the error heading; SR announces `a11y.panic.partial_failure`; focus moves to the error heading | This IS error coverage |
 
 ---
 
-### Surface H — Session listing (F-39 / T05)
+### Surface H — Session listing (F-39 / T05 + ADR-0020 T19 amendments)
+
+> **AMENDMENT (designer's pass 2026-05-24, per ADR-0020 T19):** D.5 of the onboarding wizard (`Surface D.T19.g`) renders a **constrained subset** of Surface H — the "session-revocation primer". The primer is its own component (`SessionRevocationPrimer.svelte`, see `components_extended.session_revocation_primer` in `design-tokens.json`) and intentionally LACKS Surface H's per-row Revoke buttons + Revoke-all destructive_confirm; the primer offers ONLY "Revoke other sessions" (one bulk action) + "Skip — I'll do this later". The data source is the same `listSessions` library call as Surface H. Once the user is past D.7, Surface H proper is the canonical session-management surface (Settings → Sessions). The primer is read-only-presentation + one bulk action; Surface H is full per-row management. Implementer MUST NOT duplicate logic — the primer composes the same `table.sessions` markup with a `density.compact` override and a `__role="primer"` prop that hides the per-row Revoke buttons. The current-session badge ("This device") is rendered identically in both surfaces.
 
 | state | trigger | visible cues | a11y notes | empty/loading/error coverage |
 |---|---|---|---|---|
