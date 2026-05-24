@@ -1053,6 +1053,49 @@ ADR-0020 task 7 is **NOT closed.** The implementer must address A11Y-T19-1 throu
 
 ---
 
+## Security-reviewer's pass (2026-05-24)
+
+> **Status:** FAIL.
+> **Authoring agent:** security-reviewer
+> **Commit reviewed:** `4e9d1a0` (T19 implementer pass at 236/236 tests green).
+> **Inputs consumed:** ADR-0020 in full (Decisions 2.b/2.d/3.d/3.e/4/5/7/8/11); `.context/threat-model.md` §8.T19 (F-101→F-115); `.context/known-gaps.md` G-T19-1/3/5/6/7/8; the implementer's diff `e0f5d8b..4e9d1a0`; `lib/auth/{passkey-enroll,session,rate-limit}.ts` (T05 lineage); `lib/crypto/{recovery-blob,passphrase}.ts` (T07 lineage); `lib/onboarding/recovery/RecoveryPassphraseScreen.svelte` (pre-existing, T19 composed).
+
+### Verdict
+
+**FAIL — 5 BLOCKING, 6 ADVISORY, 2 NIT findings.**
+
+**Three most consequential BLOCKING findings:**
+
+1. **S-T19-1** (`apps/web/src/lib/onboarding/OnboardingFlow.svelte:169`) — hardcoded passphrase literal `'horse battery staple correct shuffle window planet harbor stone river'` used as the D.4 in-memory ref. ADR-0020 Decision 2.d step 2 mandates `generatePassphrase()` from `lib/crypto/passphrase.ts`. Every user reaching D.4 in this wizard would be assigned the same passphrase. Cross-ref OWASP A02 / F-104.
+2. **S-T19-2** (`apps/web/src/lib/onboarding/recovery/RecoveryPassphraseScreen.svelte:155-157`) — passphrase `<code>` is wrapped in `<div role="region" aria-live="polite">`. F-108 M-108c explicitly forbids `aria-live` on the passphrase-bearing element. Screen readers will announce the passphrase value when revealed (ambient-mic exfil vector — M-108c's named threat). The `scripts/check-onboarding-no-passphrase-leak.sh` FORBIDDEN array does NOT include `aria-live` / `role=alert` / `role=status` despite G-T19-6 naming them.
+3. **S-T19-5** (`apps/web/src/lib/onboarding/OnboardingFlow.svelte:154-163`) — the wizard chrome's `onD3Start` does NOT call `enrollFirstDevicePasskey` from `lib/auth/passkey-enroll.ts`. The TOTP input bound at line 397 is never consumed. F-102 M-102a, F-103 M-103a/b/c, F-37 RP-ID binding — all unsatisfied because the function is never invoked. The separate `D3PasskeyEnrollment.svelte` does the right thing but is never imported by `OnboardingFlow.svelte`.
+
+**Three most consequential ADVISORY findings:**
+
+1. **S-T19-3** (`apps/web/src/lib/onboarding/steps/D4RecoveryPassphrase.svelte:20`) — `<script context="module">` declares `let __module_passphrase_ref = ''` at module-singleton scope. F-104 M-104a explicitly forbids "module-level `let` outside the component instance". Combined with the production-path callers at `OnboardingFlow.svelte:174,213` (only the test-seam READS are gated by MODE !== 'production'; the WRITE backing var is unconditional).
+2. **S-T19-4** (`apps/web/src/lib/lock/wipe-store.ts:230-237`) — `BrowserWipeStore.emitAudit` is a no-op stub returning `{ok:true}` unconditionally. F-106 M-106a "audit row commits BEFORE local destruction" is satisfied in ORDER but the audit row is NEVER ACTUALLY EMITTED in production. The deferral matches re-open trigger #7 in §8.T19 but is not recorded in `known-gaps.md`.
+3. **S-T19-7** (`apps/web/src/lib/onboarding/state-machine.ts:125-154`) — `createOnboardingRateLimiter` defined but never called. F-112 M-112a's 11th-attempt-rejects contract is unsatisfied in the wizard chrome.
+
+### Script-run exit codes
+
+- `scripts/check-onboarding-test-props-stripped.sh /home/user/agent-os/apps/web/build` → exit **0** (bundle is clean of the three banned literals; S-T19-10 caveat — the wizard surface is not bundled into any route, so the test is structurally vacuous).
+- `scripts/check-onboarding-no-passphrase-leak.sh` → exit **0** for the FORBIDDEN regex set (clipboard + TTS); however the FORBIDDEN list is INCOMPLETE — G-T19-6 names aria-live / role=alert / role=status / autofocus, none of which the script checks.
+
+### Composition gap
+
+`OnboardingFlow.svelte` (the wizard chrome) does NOT compose `lib/auth/passkey-enroll.ts` at D.3 nor `lib/auth/session.ts` at D.5. The inlined D.3 handler is `if (PublicKeyCredential exists) advance; else error` — no enrollment ceremony, no TOTP rate-limit, no RP-ID binding, no `enrollFirstDevicePasskey` call. The side step components (`D3PasskeyEnrollment.svelte`, `D7Complete.svelte`) compose correctly but are never imported by `OnboardingFlow.svelte`. As shipped, the wizard is functionally a UI mock.
+
+### Files modified by this pass
+
+- `/home/user/agent-os/security-review-t19.md` — full structured findings report (S-T19-1 through S-T19-13).
+- `/home/user/agent-os/.context/decisions.md` — this Security-reviewer's pass subsection appended to ADR-0020.
+
+### Recommendation
+
+**Block merge.** Escalate to human review for an architect adjudication: is `OnboardingFlow.svelte` intentionally a UI-stub destined to be wired in a follow-on (T19.1?) sibling task, or is T19 meant to ship as a complete monolithic surface? The 5 BLOCKING findings are real against the §8.T19 contract and ADR-0020 binding clauses; the test suite passes because the integration harness simulates the auth client rather than composing against the production-path stores.
+
+---
+
 ## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore
 
 **Status:** Accepted
