@@ -1057,6 +1057,120 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope (T17.1):** pgTAP column-name assertion.
 **Blocker for:** PIPEDA 4.10 reconstructability + RA-2 reconciliation join.
 
+## T18 — Audit-log integrity
+
+> Library-only T18 (ADR-0002 Amendment H) closes library halves of G-T16-8 (integrity-job reconciliation join), G-T17-PRIV-7 (structural-fields-only join), G-T17-9 (zero-event-count convention), G-T17-RA2-ANCHOR-CONSUMER (snapshot-pinned 5-field manifest consumer), G-T16-RECONCILE-CEILING (`__ceiling__` never read), and G-T11-23 (hash-determinism via runtime_pin coherence). RA-2 compensating control #3 transitions from "in plan" to "operational at library boundary" — production-operational on T18.1 ship. The 14 G-T18-* entries below come from the T18 reviewer pass + threat-model §3.11 + privacy review.
+
+### G-T18-1 — SupabaseIntegrityStore + pg_cron 04:30 ET daily (T18.1)
+**Source:** ADR-0019 §sibling task spec; threat-model §3.11.
+**Finding:** T18 ships MemoryIntegrityStore only. T18.1 ships SupabaseIntegrityStore + integrity_check_runs SQL migration + pg_cron 04:30 ET daily integrity job + Edge Function trigger surface (`post_rotation`, `post_export`) + `integrity_check_role` non-login SECURITY DEFINER role + `pg_advisory_xact_lock` SHARED with backup pass (EXCLUSIVE with restore; key `hashtext('audit_chain_global')`).
+**Resolution scope (T18.1):** SQL migration + pg_cron + Edge Functions + advisory lock coordination.
+**Blocker for:** first production integrity check.
+
+### G-T18-2 — `xact_start()` shim for production SupabaseIntegrityStore.nowMs() (T18.1)
+**Source:** privacy-review-t18.md G-T18-PRIV-13; lineage G-T16-9 / G-T17-2.
+**Finding:** MemoryIntegrityStore.nowMs() uses monotonic shim (Date.now() + skew). SupabaseIntegrityStore must source from `xact_start()` so all timestamp comparisons use the transaction's clock.
+**Resolution scope (T18.1):** SQL SupabaseIntegrityStore.
+**Blocker for:** none. Hygiene.
+
+### G-T18-3 — Server-side structured Error logging at 8 swallowed-catch sites
+**Source:** privacy-review-t18.md G-T18-PRIV-3; security Finding 1 lineage; mirrors G-T16-PRIV-3 + G-T17-PRIV-3.
+**Finding:** integrity-core.ts now wraps all 8 store-call paths in try/catch with closed-literal error_codes (BLOCK 1 closed in cycle). Operator observability behind the structured error_code surface still needs server-side structured Error logging with PI scrubbing. The closed-literal contract is intact; the underlying Error.message is discarded.
+**Resolution scope (T18.1):** route swallowed Error to server-side log sink with PI scrubbing.
+**Blocker for:** PIPEDA 4.10 operator reconstructability.
+
+### G-T18-4 — CI no-import test (T18→T16, T18→T17 architectural purity)
+**Source:** privacy-review-t18.md G-T18-PRIV-4.
+**Finding:** T18 has zero imports from `../retention/` or `../backup/` (verified by reviewer inspection). The structural property must be enforced by CI, not by reviewer inspection. ESLint rule banning `lib/{retention,backup}/**` imports from within `lib/audit-integrity/**` is the cleanest fix.
+**Resolution scope (T18.1):** ESLint rule extension + CI test.
+**Blocker for:** PIPEDA 4.5 enforcement independence.
+
+### G-T18-5 — HG-15 re-ratification at T18.1
+**Source:** privacy-review-t18.md G-T18-PRIV-5; threat-model §3.11.
+**Finding:** T18.1 introduces new physical `integrity_check_runs` table + new `integrity_check_role` non-login role (B6.2 boundary) + optional `audit_chain_anchors` table.
+**Resolution scope (T18.1):** prepare HG-15 packet; user ratifies before SQL migration lands.
+**Blocker for:** T18.1 PR submission.
+
+### G-T18-6 — `audit.integrity_check.{ran,mismatch}` + `audit.chain_anchor.weekly` ADR-0003 Amendment A enum extension dance (T18.1)
+**Source:** ADR-0019 §6 + observability/audit-log.md §1.
+**Finding:** Three new audit-event enum values need six-mirror extension dance: TS const (landed in T18); SQL CHECK constraint, RETENTION_SCHEDULE entry, audit_log_retention_schedule SQL row, audit-log.md §1 table, scripts/check-audit-enum-coverage.sh (all defer to T18.1). Mirrors G-T08-9 / G-T13-14 / G-T14-7 / G-T17-6.
+**Resolution scope (T18.1):** SQL CHECK + ADR-0016 schedule rows + observability doc + enum coverage script.
+**Blocker for:** T18.1 PR submission.
+
+### G-T18-7 — §PI inventory amendments (T18.1)
+**Source:** privacy-review-t18.md G-T18-PRIV-1.
+**Finding:** §PI inventory amendments needed for `integrity_check_runs` (no PI; structural counts + run metadata) + optional `audit_chain_anchors` (no PI; head triple + delivery timestamp).
+**Resolution scope (T18.1):** add rows to §PI inventory.
+**Blocker for:** T18.1 PR submission.
+
+### G-T18-8 — A-AUDIT-001 / A-INTEGRITY-001 / A-INTEGRITY-002 alert sink wiring (observability-setup, post-T18.1)
+**Source:** privacy-review-t18.md G-T18-PRIV-2; threat-model §3.11 F-95.
+**Finding:** library returns `would_fire_alert` symbol + closed-literal `runtime_pin_mismatch` error_code. Production needs alert sinks for:
+- A-AUDIT-001 zero-threshold on any mismatch row (chain-walk OR backup-diff).
+- A-INTEGRITY-001 missed-cron (T18.1 cron NOT running for >24h).
+- A-INTEGRITY-002 distinct-cause routing on `unattributable_count > 0` (separate from A-AUDIT-001).
+- `runtime_pin_mismatch` routed to A-INTEGRITY-001-variant (OPERATIONAL), NOT A-AUDIT-001 (F-93 false-positive prevention).
+**Resolution scope (T18.1 → observability pass):** define + wire 3 alert sinks with distinct-cause routing.
+**Blocker for:** RA-2 compensating control #3 monitoring posture.
+
+### G-T18-9 — Backup-diff cursor pagination in production (T18.1)
+**Source:** second-opinion CF-5.
+**Finding:** Library reads all live rows for the dump-id-range in one `readChainSegment` call (MVP scope; in-memory mirror handles fine). At production scale (1M+ rows), SupabaseIntegrityStore must page via Postgres cursor to avoid memory blow-up.
+**Resolution scope (T18.1):** SupabaseIntegrityStore.readChainSegment uses cursor paging.
+**Blocker for:** production scale (>100k row chain).
+
+### G-T18-10 — Pin chain-walk vs backup-diff attribution semantics divergence (T18.1 pgTAP)
+**Source:** privacy-review-t18.md G-T18-PRIV-9.
+**Finding:** Chain-walk gap attribution (any-bucket > 0) vs backup-diff attribution (per-event-type > 0) have intentionally divergent semantics. Chain-walk doesn't know the missing row's event_type; dump-diff does. T18.1 pgTAP should pin both with rationale comments.
+**Resolution scope (T18.1):** pgTAP assertions + comments.
+**Blocker for:** none. Documentation.
+
+### G-T18-11 — `node_runtime_pin` semver-only column assertion (T18.1 pgTAP)
+**Source:** privacy-review-t18.md G-T18-PRIV-10.
+**Finding:** ran-row `meta.node_runtime_pin` carries `{node_version, openssl_version}`. NOT PI but fingerprintable platform metadata; T18.1 pgTAP should add column-level assertion that values are semver-shape only (no hostname, no FS path, no env content).
+**Resolution scope (T18.1):** pgTAP column assertion.
+**Blocker for:** none. Defense-in-depth.
+
+### G-T18-12 — Off-app weekly anchor email delivery to worker co-chair (T18.1)
+**Source:** ADR-0019 §7 + RA-2 §4267-4297; privacy-review-t18.md G-T18-PRIV-6.
+**Finding:** library emits `audit.chain_anchor.weekly` row with head triple `(id, ts_ms, hash)`. T18.1 Edge Function ships the weekly delivery email to worker co-chair's email-of-record. Co-chair email is operator-mediated (NOT stored in app; chosen at delivery time). RA-2 manual backstop; absence does NOT re-open RA-2.
+**Resolution scope (T18.1):** Edge Function + co-chair email config (operator-side).
+**Blocker for:** RA-2 manual backstop completeness.
+
+### G-T18-13 — ADR-0019 §5 algorithm step-ordering amendment
+**Source:** security Finding 4 ADVISORY; second-opinion CF-2.
+**Finding:** Implementation reorders steps 3-6 (read manifest → pin check → record run → snapshot vs ADR's record run → snapshot → read manifest → pin check). Implementer-documented motivation: no orphan `running` row on manifest failure. Security properties preserved.
+**Resolution scope (next ADR pass):** ADR-0019 amendment ratifying implementation order, OR refactor to match ADR.
+**Blocker for:** none. Documentation.
+
+### G-T18-14 — `head_read_failed` + `lease_check_failed` literals ADR amendment
+**Source:** security Finding 5 ADVISORY + Finding 1 in-cycle fix.
+**Finding:** Implementation closed union now has 7 literals (5 in ADR + `head_read_failed` for manifest-read failure + `lease_check_failed` added in reviewer pass). Adding more-specific literals is safer than collapsing. Update ADR-0019 §5 step 11 + threat-model §3.11 F-100 enumeration to mirror.
+**Resolution scope (next ADR + threat-model pass):** sync enumeration.
+**Blocker for:** none. Documentation.
+
+### G-T18-15 — `__forceChainWalkException` overloads two store methods (test hygiene)
+**Source:** security Finding 6 ADVISORY.
+**Finding:** Single test flag causes both `readChainSegment` and `readChainHead` to throw. Conflates targeted error-path testing. Currently OK because each test creates a fresh store.
+**Resolution scope (next test-writer pass):** split into `__forceChainSegmentException` + `__forceHeadReadException`, OR document the overload explicitly.
+**Blocker for:** none. Test-surface hygiene.
+
+### G-T18-16 — Test bugs to address in next test-writer pass
+**Source:** second-opinion CF-13 + minor.
+**Finding:** Test coverage gaps identified by second-opinion that didn't make the F-86..F-100 cut:
+- Two concurrent `runIntegrityCheck` calls in-process (advisory lock is T18.1 scope; library has only the lease window which is not race-safe for in-process double-invocation).
+- A sweep_run whose window STRADDLES the manifest's `committed_at_ms` (corner of Option G; not pinned by F-92 (a)-(e)).
+- A backup_manifest with `audit_log_rows_in_dump: []` (empty dump; should produce zero mismatches with `backup_diff_performed: true`).
+- A chain-walk over an empty chain after `readLatestCommittedBackupManifest` returns non-null (manifest sees rows; live chain is empty — should fire backup_diff mismatches on every dump row older than cutoff).
+**Resolution scope (next test-writer pass):** 4 additional tests.
+**Blocker for:** none. Coverage enhancement.
+
+### G-T18-17 — `compareIds` exported but currently unused (dead code now / live code later)
+**Source:** privacy-review-t18.md G-T18-PRIV-12.
+**Finding:** `compareIds` exported from `integrity-core.ts:680` is documented as "reserved for future ordering work"; NOT re-exported via barrel. Consider moving to a `_internal.ts` to make the dead-code-now / live-code-later transition explicit, OR remove until needed.
+**Resolution scope (next library pass):** move or remove.
+**Blocker for:** none. Code organization.
+
 ---
 
 ## How to use this file
@@ -1071,5 +1185,6 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 - When working on T16: search for `G-T05-6`, `G-T05-7`, and the retention-sweep entries under any task.
 - When working on T16.1 / production wire-up: search for `G-T16-*` and resolve them in a single pass.
 - When working on T17.1 / production wire-up: search for `G-T17-*` and resolve them in a single pass.
+- When working on T18.1 / production wire-up: search for `G-T18-*` and resolve them in a single pass.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.
