@@ -359,7 +359,7 @@
   data-testid="onboarding-wizard"
   data-current-step={currentStep}
 >
-  <ol aria-label="Wizard progress" data-testid="step-indicator">
+  <ol aria-label={t('a11y.onboarding.step_indicator_landmark')} data-testid="step-indicator">
     {#each [0, 1, 2, 3, 4, 5, 6] as i}
       {@const state = pillState(i)}
       {@const isComplete = state === 'complete'}
@@ -368,10 +368,10 @@
       <li
         aria-current={isActive ? 'step' : null}
         aria-label={isComplete
-          ? `Step ${i + 1}, completed`
+          ? t('a11y.onboarding.step_pill_completed', { n: i + 1 })
           : isActive
-            ? `Step ${i + 1} of ${TOTAL_STEPS}, current`
-            : `Step ${i + 1}, not yet reached`}
+            ? t('a11y.onboarding.step_pill_current', { n: i + 1, m: TOTAL_STEPS })
+            : t('a11y.onboarding.step_pill_pending', { n: i + 1 })}
         aria-disabled={state === 'pending' ? 'true' : null}
         data-state={state}
         data-step-indicator-label={stepLabel(i)}
@@ -401,6 +401,12 @@
       m: TOTAL_STEPS,
       step_name: stepLabel(stepNumber(currentStep) - 1)
     })}
+    {#if d5_in_progress}
+      <span data-testid="step-loading-sr">{t('a11y.onboarding.step_loading_announcement', { step_name: stepLabel(stepNumber(currentStep) - 1) })}</span>
+    {/if}
+    {#if d6Error || d4_rateLimitedKey}
+      <span data-testid="step-error-sr">{t('a11y.onboarding.step_error_announcement', { step_name: stepLabel(stepNumber(currentStep) - 1) })}</span>
+    {/if}
   </div>
 
   <div
@@ -458,9 +464,9 @@
         <div role="alert" data-testid="browser-baseline-badge">
           <span class="sr-only">{t('a11y.onboarding.browser_baseline_fail_announcement')}</span>
           {t('onboarding.browser_baseline_d2.body_fail')}
-          <ul aria-label="Failed checks">
+          <ul aria-label={t('a11y.onboarding.failed_checks_list_label')}>
             {#each baseline.checks.filter((c) => !c.pass) as check}
-              <li aria-label={`Failed capability: ${check.key}`}>{check.key}</li>
+              <li aria-label={t('a11y.onboarding.failed_capability_label', { key: check.key })}>{check.key}</li>
             {/each}
             {#if !baseline.ua_baseline_ok}
               <li aria-label={t('onboarding.browser_baseline_d2.ua_baseline_below_supported')}>

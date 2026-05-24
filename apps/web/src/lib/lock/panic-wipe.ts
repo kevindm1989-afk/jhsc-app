@@ -56,29 +56,34 @@ export interface PanicWipeResult {
   reason?: 'already_wiped';
 }
 
-// Per-store post-wipe lockout — WeakSet keyed on the WipeStore instance.
-// A second `panicWipe({store})` on the SAME store returns no_op. Tests
-// create fresh stores per-test so lockout state does not leak.
+// Per-store post-wipe lockout — WeakSet keyed on the WipeStore instance
+// (uniform pattern; no module-global boolean). A second `panicWipe({store})`
+// on the SAME store returns no_op. Tests create fresh stores per-test so
+// lockout state does not leak. The default-store branch (callers that
+// omit `opts.store`) re-uses a single module-singleton BrowserWipeStore
+// so the WeakSet pattern applies uniformly.
 const __wipedStores = new WeakSet<WipeStore>();
-// Global lockout for the default `panicWipe()` call (no opts.store) — the
-// scaffold's "panicWipe() clears IndexedDB" test exercises this path.
-let __defaultStoreWiped = false;
+let __defaultBrowserStore: BrowserWipeStore | null = null;
 
-/** Test-only seam: reset the global default-store lockout. */
+function getDefaultStore(): BrowserWipeStore {
+  if (!__defaultBrowserStore) __defaultBrowserStore = new BrowserWipeStore();
+  return __defaultBrowserStore;
+}
+
+/** Test-only seam: reset the default-store lockout (re-issues the singleton
+ *  so the WeakSet drops the lockout entry). */
 export function __resetPanicWipeLockoutForTest(): void {
-  __defaultStoreWiped = false;
+  __defaultBrowserStore = null;
 }
 
 export async function panicWipe(opts?: {
   store?: WipeStore;
   surface?: 'settings' | 'lock_screen';
 }): Promise<PanicWipeResult> {
-  const store = opts?.store ?? new BrowserWipeStore();
+  const store = opts?.store ?? getDefaultStore();
   const surface = opts?.surface ?? 'settings';
 
-  const usingDefault = !opts?.store;
-  const alreadyWiped = usingDefault ? __defaultStoreWiped : __wipedStores.has(store);
-  if (alreadyWiped) {
+  if (__wipedStores.has(store)) {
     return {
       status: 'no_op',
       destruction_attempted: false,
@@ -153,8 +158,7 @@ export async function panicWipe(opts?: {
       const hook = (globalThis as { __TEST_PANIC_WIPE_HOOK?: () => void }).__TEST_PANIC_WIPE_HOOK;
       if (typeof hook === 'function') hook();
     }
-    if (usingDefault) __defaultStoreWiped = true;
-    else __wipedStores.add(store);
+    __wipedStores.add(store);
     return {
       status: 'partially_completed',
       destruction_attempted: true,
@@ -170,8 +174,7 @@ export async function panicWipe(opts?: {
     if (typeof hook === 'function') hook();
   }
 
-  if (usingDefault) __defaultStoreWiped = true;
-  else __wipedStores.add(store);
+  __wipedStores.add(store);
   return {
     status: 'completed',
     destruction_attempted: true

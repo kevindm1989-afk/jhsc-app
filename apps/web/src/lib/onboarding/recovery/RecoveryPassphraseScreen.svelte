@@ -139,6 +139,7 @@
     data-testid="show-again-control"
     aria-disabled={capReached ? 'true' : 'false'}
     aria-pressed={revealed ? 'true' : 'false'}
+    aria-describedby="recovery-show-again-button-desc"
     on:pointerdown={startPress}
     on:pointerup={endPress}
     on:pointerleave={endPress}
@@ -148,8 +149,32 @@
   >
     {t('onboarding.recovery.show_again.label')}
   </button>
+  <span id="recovery-show-again-button-desc" class="visually-hidden">
+    {t('a11y.onboarding.reveal_button_announcement')}
+  </span>
 
   <p data-testid="show-again-helper">{helperText}</p>
+  <!-- SR-only state announcers for the reveal lifecycle. The aria-pressed
+       attribute already carries the binary state; these spans add the
+       longer-form catalog copy so screen readers can read the full
+       sentence on transition (M-54c). F-108 M-108c: no aria-live on
+       these spans — the surrounding aria-pressed transition carries
+       the state-change cue; live regions on a passphrase-bearing
+       surface are forbidden. -->
+  {#if revealed && !capReached}
+    <span class="visually-hidden" data-testid="reveal-in-progress-sr">
+      {t('a11y.onboarding.reveal_in_progress_announcement')}
+    </span>
+  {:else if !revealed && !capReached}
+    <span class="visually-hidden" data-testid="reveal-hidden-sr">
+      {t('a11y.onboarding.reveal_hidden_announcement')}
+    </span>
+  {/if}
+  {#if capReached}
+    <span class="visually-hidden" data-testid="reveal-capped-sr">
+      {t('a11y.onboarding.reveal_capped_announcement')}
+    </span>
+  {/if}
 
   {#if revealed && !capReached}
     <!-- F-108 M-108c: NO aria-live / role=alert / role=status on the
@@ -169,6 +194,17 @@
 </section>
 
 <style>
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
   section {
     display: block;
   }

@@ -23,9 +23,9 @@
 </section>
 
 <section
-  role="region"
   aria-labelledby="d7-next-steps-heading"
   data-testid="completion-next-steps"
+  role="region"
 >
   <h3 id="d7-next-steps-heading">{t('onboarding.completion_d7.next_steps_heading')}</h3>
   <p>{t('onboarding.completion_d7.next_steps_body')}</p>

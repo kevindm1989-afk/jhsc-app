@@ -228,12 +228,14 @@ export class BrowserWipeStore implements WipeStore {
   }
 
   async emitAudit(_row: PanicWipeAuditRow): Promise<{ ok: boolean }> {
-    // Production audit-emission wires to the existing T05.1 audit-emit path.
-    // T19 ships the contract surface only; the SQL half lands per ADR-0020
-    // Decision 5 (T07.1 OR T19-audit-extension). Until then this is a no-op
-    // that returns ok=true so the local destruction proceeds; the production
-    // wire-up swaps this for the real emitter.
-    return { ok: true };
+    // Stub: production wire-up to T05.1 audit-emit transport pending
+    // G-T19-PRIV-3. Per F-106 M-106a (audit-BEFORE-side-effect): a wipe
+    // that cannot honestly emit its audit row MUST abort rather than
+    // proceed with the destruction, otherwise a wipe could happen with
+    // no audit trail (S-T19-4 / A-T19-4). Returning {ok: false} here
+    // keeps the caller fail-closed (`panicWipe` returns `audit_failed`
+    // and leaves local state intact) until the real emitter ships.
+    return { ok: false };
   }
 
   nowMs(): number {

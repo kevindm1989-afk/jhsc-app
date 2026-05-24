@@ -24,16 +24,30 @@ set -eu
 
 BUNDLE_DIR=${1:-/home/user/agent-os/apps/web/build}
 
-# The three banned literals.
+# The banned literals — production bundles MUST NOT carry any of these
+# symbols. The first three are the test-only Svelte props; the trailing
+# six are the test-seam symbols exported from `__test_seams.ts` /
+# `D4RecoveryPassphrase.ts` (must be runtime-stripped per ADR-0020
+# Decision 8 + the module-throw guard).
 PATTERNS=(
   '__test_step'
   '__test_user_agent'
   '__test_origin'
+  '__test_only_get_passphrase_ref'
+  '__test_advance_through_type_back'
+  '__setPassphraseRefForTest'
+  '__debugForceAuditFailure'
+  '__debugForceClearFailure'
+  '__TEST_PANIC_WIPE_HOOK'
+  '__resetPanicWipeLockoutForTest'
 )
 
 if [ ! -d "$BUNDLE_DIR" ]; then
-  echo "warn: bundle directory $BUNDLE_DIR not present; skipping" >&2
-  exit 0
+  # Bundle absent — fail closed so the CI gate cannot silently skip on
+  # a misconfigured build-dir argument (finding #25 / A-T19-10).
+  echo "FAIL: bundle directory $BUNDLE_DIR not present — the grep gate cannot run." >&2
+  echo "G-T19-5 requires a built bundle at $BUNDLE_DIR before this script runs." >&2
+  exit 1
 fi
 
 FAILURES=0

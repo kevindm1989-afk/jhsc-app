@@ -136,7 +136,14 @@ describe('T19 / T2 — panic-wipe + F-53 destructive_confirm', () => {
     const user = await supa.enrollUser(SYNTHETIC_USER_A);
     await supa.idb.populate({ ident_priv_wrapped_local: 'ciphertext', queue: [] });
     const { panicWipe } = await import('../../src/lib/lock/panic-wipe');
-    await panicWipe();
+    // F-106 M-106a: the production BrowserWipeStore's emitAudit is a
+    // fail-closed stub pending G-T19-PRIV-3 (the T05.1 audit-emit
+    // transport wire-up). To exercise the wipe-clears-IDB contract
+    // without forging the audit row, mount a TestWipeStore whose
+    // emitAudit succeeds — the test asserts post-wipe state, NOT the
+    // audit-emit transport (covered in d6-panic-wipe).
+    const { MemoryWipeStore } = await import('../../src/lib/lock/wipe-store');
+    await panicWipe({ store: new MemoryWipeStore() });
     const snapshot = await supa.idb.snapshotEntireStore();
     expect(snapshot).toEqual([]);
     // Subsequent navigation: assert lock screen / re-enrollment surface.

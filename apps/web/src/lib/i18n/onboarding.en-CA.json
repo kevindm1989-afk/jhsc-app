@@ -261,12 +261,19 @@
       "panic_wipe_in_progress_announcement": "Wiping local data. Do not close this tab.",
       "panic_wipe_complete_announcement": "Local data wiped.",
       "panic_wipe_partial_failure_announcement": "Wipe partly completed. Some parts could not be cleared.",
+      "panic_wipe_type_back_label": "Type WIPE to confirm",
       "session_revoked_announcement": "Other sessions signed out.",
       "browser_baseline_pass_announcement": "Browser check passed. You can continue.",
       "browser_baseline_fail_announcement": "Browser check failed. Setup cannot continue on this browser.",
       "step_loading_announcement": "{step_name} is in progress. Please wait.",
       "step_error_announcement": "{step_name} could not finish. See the error message below.",
-      "device_fingerprint_announcement": "Browser information. This is what your browser tells the page. Nothing here is sent to the server."
+      "device_fingerprint_announcement": "Browser information. This is what your browser tells the page. Nothing here is sent to the server.",
+      "step_indicator_landmark": "Wizard progress",
+      "step_pill_completed": "Step {n}, completed",
+      "step_pill_current": "Step {n} of {m}, current",
+      "step_pill_pending": "Step {n}, not yet reached",
+      "failed_checks_list_label": "Failed checks",
+      "failed_capability_label": "Failed capability: {key}"
     }
   }
 }

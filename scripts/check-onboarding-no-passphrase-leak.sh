@@ -33,6 +33,7 @@ ROOT=/home/user/agent-os/apps/web/src/lib/onboarding
 FILES=(
   "$ROOT/steps/D4RecoveryPassphrase.svelte"
   "$ROOT/steps/D6TypeBackVerify.svelte"
+  "$ROOT/OnboardingFlow.svelte"
 )
 
 # Add every Svelte file under lib/onboarding/recovery/.
@@ -42,11 +43,38 @@ if [ -d "$ROOT/recovery" ]; then
   done < <(find "$ROOT/recovery" -name '*.svelte' -type f -print0)
 fi
 
+# Forbidden affordances anywhere in the passphrase-bearing surfaces.
 FORBIDDEN=(
   'navigator\.clipboard\.writeText'
   'SpeechSynthesisUtterance'
   'window\.speechSynthesis'
   '\btts\.speak\b'
+  # autofocus on the passphrase-bearing surfaces can race the audit-
+  # before-side-effect contract; manage focus deterministically.
+  '\bautofocus\b'
+)
+
+# Forbidden ONLY on the strictest set (the wrapper files that render the
+# passphrase <code> directly). The chrome (OnboardingFlow) legitimately
+# uses aria-live / role="alert" / role="status" for the wizard's step-
+# change announcer and error toasts; those are NOT on the passphrase-
+# bearing element. The wrapper files MUST NOT decorate the visible
+# passphrase region with any live-region attribute (F-108 M-108c — TTS
+# exfiltration + AODA cognitive-accessibility defense).
+STRICT_FILES=(
+  "$ROOT/steps/D4RecoveryPassphrase.svelte"
+  "$ROOT/steps/D6TypeBackVerify.svelte"
+)
+if [ -d "$ROOT/recovery" ]; then
+  while IFS= read -r -d '' f; do
+    STRICT_FILES+=("$f")
+  done < <(find "$ROOT/recovery" -name '*.svelte' -type f -print0)
+fi
+
+STRICT_FORBIDDEN=(
+  'aria-live'
+  'role="alert"'
+  'role="status"'
 )
 
 FAILURES=0
@@ -58,6 +86,24 @@ for f in "${FILES[@]}"; do
     if grep -E -n "$pat" "$f" >/dev/null 2>&1; then
       echo "FAIL: $f matches forbidden pattern: $pat" >&2
       grep -E -n "$pat" "$f" >&2
+      FAILURES=$((FAILURES + 1))
+    fi
+  done
+done
+
+for f in "${STRICT_FILES[@]}"; do
+  if [ ! -f "$f" ]; then
+    continue
+  fi
+  for pat in "${STRICT_FORBIDDEN[@]}"; do
+    # Allow legitimate role="alert" only on the d4-error toast (rendered
+    # outside the passphrase <code>); we keep the lint strict but
+    # narrow-allowlist the d4-error testid line. The passphrase-bearing
+    # <code> MUST remain free of these attributes.
+    matches=$(grep -E -n "$pat" "$f" | grep -v 'data-testid="d4-error"' || true)
+    if [ -n "$matches" ]; then
+      echo "FAIL: $f matches strict-forbidden pattern: $pat" >&2
+      echo "$matches" >&2
       FAILURES=$((FAILURES + 1))
     fi
   done
