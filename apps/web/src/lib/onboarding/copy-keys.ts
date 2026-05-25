@@ -210,7 +210,16 @@ export const COPY_KEYS = Object.freeze([
   'a11y.onboarding.browser_baseline_fail_announcement',
   'a11y.onboarding.step_loading_announcement',
   'a11y.onboarding.step_error_announcement',
-  'a11y.onboarding.device_fingerprint_announcement'
+  'a11y.onboarding.device_fingerprint_announcement',
+  // Orphan-key reconciliation (privacy + adversarial review): a11y keys
+  // consumed via t() but previously absent from the closed allowlist.
+  'a11y.onboarding.step_indicator_landmark',
+  'a11y.onboarding.step_pill_completed',
+  'a11y.onboarding.step_pill_current',
+  'a11y.onboarding.step_pill_pending',
+  'a11y.onboarding.failed_checks_list_label',
+  'a11y.onboarding.failed_capability_label',
+  'a11y.onboarding.panic_wipe_type_back_label'
 ] as const);
 
 export type CopyKey = (typeof COPY_KEYS)[number];

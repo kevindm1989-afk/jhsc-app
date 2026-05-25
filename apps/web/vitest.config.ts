@@ -20,6 +20,16 @@ export default defineConfig({
       hot: false,
       compilerOptions: {
         dev: true
+      },
+      // PanicWipeModal exposes the legacy `component.$on('close', ...)` API
+      // (A-T19-RR-2 contract). Svelte 5 only honours `$on` when the component
+      // is compiled with `compatibility.componentApi: 4`; scope it to that one
+      // file so other components keep the Svelte 5 instance API.
+      dynamicCompileOptions({ filename }) {
+        if (filename.endsWith('PanicWipeModal.svelte')) {
+          return { compatibility: { componentApi: 4 } };
+        }
+        return undefined;
       }
     })
   ],

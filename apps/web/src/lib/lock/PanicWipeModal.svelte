@@ -1,3 +1,7 @@
+<!-- This component uses Svelte 4-style `export let` props + createEventDispatcher,
+     so Svelte 5 compiles it in legacy component-API mode automatically. That
+     lets callers use `component.$on('close', ...)` to subscribe to the
+     dispatched close event (A-T19-RR-2 test contract). -->
 <script>
   /**
    * PanicWipeModal — F-53 destructive_confirm + F-115 four-regex copy.
@@ -13,9 +17,11 @@
    * @see ADR-0020 §Decision 2.c
    */
   import { t } from '../i18n';
-  import { flushSync, tick, onDestroy } from 'svelte';
+  import { flushSync, tick, onDestroy, createEventDispatcher } from 'svelte';
   import { panicWipe } from './panic-wipe';
   import { MemoryWipeStore } from './wipe-store';
+
+  const dispatch = createEventDispatcher();
 
   function syncFlush() {
     try { flushSync(); } catch { /* outside effect ctx */ }
@@ -71,6 +77,7 @@
   export let __test_force_clear_failure = undefined;
   export let __test_auto_submit = undefined;
   export let __test_force_complete = undefined;
+  export let __test_store = undefined;
 
   const __probe_test_ready = '__test_' + 'ready_delay_ms';
   if (import.meta.env.MODE === 'production') {
@@ -79,6 +86,7 @@
     __test_force_clear_failure = undefined;
     __test_auto_submit = undefined;
     __test_force_complete = undefined;
+    __test_store = undefined;
   }
   void __probe_test_ready;
 
@@ -87,6 +95,9 @@
   let typedPhrase = '';
   let wipeState = 'idle';
   let partialFailedClasses = [];
+  // Persistent close announcement — lives OUTSIDE the {#if open} block so it
+  // survives the modal unmount and the SR can read it after the dialog is gone.
+  let closeAnnouncement = '';
 
   const LITERAL_PHRASE = t('onboarding.panic_wipe_d6.type_back_value');
 
@@ -138,13 +149,21 @@
   async function onConfirm() {
     if (!ready || !isPhraseMatched()) return;
     wipeState = 'in_progress';
-    const r = await panicWipe({ surface });
+    const r = await panicWipe({ store: __test_store ?? undefined, surface });
     if (r.status === 'partially_completed') {
       wipeState = 'partial_failure';
       partialFailedClasses = r.partial_failure_classes ?? [];
     } else if (r.status === 'completed') {
       wipeState = 'complete';
+    } else if (r.status === 'audit_failed') {
+      wipeState = 'audit_failed';
     }
+  }
+
+  function onCancel() {
+    closeAnnouncement = t('a11y.onboarding.modal_close_announcement');
+    open = false;
+    dispatch('close');
   }
 
   function onKeyDown(e) {
@@ -211,6 +230,16 @@
         <span class="sr-only">{t('a11y.onboarding.panic_wipe_complete_announcement')}</span>
         {t('onboarding.panic_wipe_d6.state.complete')}
       </div>
+    {:else if wipeState === 'audit_failed'}
+      <!-- A-T19-RR-1: audit-emit failed BEFORE any side-effect. Surface the
+           recoverable error and keep the modal escapable (RR-2 Cancel). No
+           in-progress overlay, no complete toast — nothing was destroyed. -->
+      <div role="alert" data-testid="panic-wipe-audit-failed">
+        {t('onboarding.panic_wipe_d6.error.audit_emit_failed')}
+      </div>
+      <button type="button" on:click={onCancel}>
+        {t('onboarding.panic_wipe_d6.cancel_button')}
+      </button>
     {:else}
       <div
         data-testid="panic-wipe-modal-body"
@@ -239,12 +268,16 @@
       >
         {t('onboarding.panic_wipe_d6.primary_button_destructive')}
       </button>
-      <button type="button">
+      <button type="button" on:click={onCancel}>
         {t('onboarding.panic_wipe_d6.cancel_button')}
       </button>
     {/if}
   </div>
 {/if}
+
+<!-- A-T19-RR-2: persistent close announcer — lives OUTSIDE {#if open} so it
+     survives the modal unmount and the SR can read the close announcement. -->
+<span class="sr-only" aria-live="polite">{closeAnnouncement}</span>
 
 <style>
   .sr-only {

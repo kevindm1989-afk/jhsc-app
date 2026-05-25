@@ -42,6 +42,7 @@
   import D7Complete from './steps/D7Complete.svelte';
   import { generateRecoveryPassphrase } from '../crypto/passphrase';
   import { generateIdentityKeypair } from '../crypto/identity-keys';
+  import { resetPanicWipeLockout } from '../lock/panic-wipe';
   // Test-only seam wiring — the seam module module-throws when MODE ===
   // 'production' (ADR-0020 Decision 8 + the build-time grep gate).
   // Under non-production the static import is valid; under production
@@ -349,7 +350,10 @@
   }
 
   function onOpenApp() {
-    // No-op in the wizard — production wires to the post-onboarding route.
+    // A fresh onboarding = a new identity, so a prior identity's panic-wipe
+    // lockout must not persist in the same tab (A-T19-RR-3).
+    resetPanicWipeLockout();
+    // No-op otherwise in the wizard — production wires to the post-onboarding route.
   }
 </script>
 

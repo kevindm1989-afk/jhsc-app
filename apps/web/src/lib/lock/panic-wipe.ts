@@ -70,9 +70,11 @@ function getDefaultStore(): BrowserWipeStore {
   return __defaultBrowserStore;
 }
 
-/** Test-only seam: reset the default-store lockout (re-issues the singleton
- *  so the WeakSet drops the lockout entry). */
-export function __resetPanicWipeLockoutForTest(): void {
+/** Reset the default-store panic-wipe lockout (re-issues the singleton so the
+ *  WeakSet drops the lockout entry). Production-callable: a fresh onboarding =
+ *  a new identity, so a prior identity's panic-wipe lockout must not persist in
+ *  the same browser tab. Idempotent and no-throw. */
+export function resetPanicWipeLockout(): void {
   __defaultBrowserStore = null;
 }
 

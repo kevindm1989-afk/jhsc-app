@@ -40,6 +40,11 @@ PATTERNS=(
   '__debugForceClearFailure'
   '__TEST_PANIC_WIPE_HOOK'
   '__resetPanicWipeLockoutForTest'
+  # Broad family catch-all (A-T19-RR-4): any `__test_<name>` symbol leaking
+  # into the bundle (e.g. __test_force_wipe_in_progress, __test_store). Source
+  # files reference these via the split-form pattern so the bundler does not
+  # constant-fold them; a literal match here means a strip regression.
+  '__test_[A-Za-z0-9_]+'
 )
 
 if [ ! -d "$BUNDLE_DIR" ]; then
@@ -58,7 +63,7 @@ for pattern in "${PATTERNS[@]}"; do
     \( -name '*.js' -o -name '*.mjs' \) \
     ! -name '*.map' \
     -type f \
-    -exec grep -l "$pattern" {} + 2>/dev/null || true)
+    -exec grep -lE "$pattern" {} + 2>/dev/null || true)
   if [ -n "$matches" ]; then
     echo "FAIL: literal '$pattern' found in production bundle:" >&2
     echo "$matches" >&2
