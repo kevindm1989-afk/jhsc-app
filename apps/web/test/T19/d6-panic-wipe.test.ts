@@ -397,3 +397,228 @@ describe('T19 / design-system §3.5 — type-back value is "WIPE"', () => {
     expect(t('onboarding.panic_wipe_d6.type_back_placeholder')).toBe('WIPE');
   });
 });
+
+// ============================================================================
+// A-T19-RR-1 — audit_failed UI branch (BLOCKING)
+//
+// When panicWipe() returns 'audit_failed', the modal must surface the
+// `error.audit_emit_failed` copy inside a role="alert" and must NOT show the
+// in-progress overlay or the complete toast (current code leaves
+// wipeState='in_progress' forever). The destructive side-effect must not have
+// fired. The injected store seam is `__test_store` (panicWipe uses it).
+// ============================================================================
+
+describe('T19 / A-T19-RR-1 — audit_failed UI branch', () => {
+  async function renderWithFailingAuditStore() {
+    const { MemoryWipeStore } = await import('../../src/lib/lock/wipe-store');
+    const store = new MemoryWipeStore();
+    store.__debugForceAuditFailure();
+    render(PanicWipeModal, {
+      props: {
+        open: true,
+        surface: 'settings',
+        __test_ready_delay_ms: 0,
+        __test_store: store
+      }
+    });
+    const input = screen.getByRole('textbox', { name: /type WIPE/i });
+    fireEvent.input(input, { target: { value: 'WIPE' } });
+    const primary = screen.getByRole('button', {
+      name: t('onboarding.panic_wipe_d6.primary_button_destructive')
+    });
+    await fireEvent.click(primary);
+    return store;
+  }
+
+  it('renders the error.audit_emit_failed copy inside a role="alert" after a failing-audit confirm', async () => {
+    await renderWithFailingAuditStore();
+    await waitFor(() => {
+      const alert = document.querySelector('[role="alert"]');
+      expect(
+        alert,
+        'expected a role="alert" element after audit_failed; modal must not stay in_progress'
+      ).not.toBeNull();
+      expect(alert!.textContent ?? '').toContain(
+        t('onboarding.panic_wipe_d6.error.audit_emit_failed')
+      );
+    });
+  });
+
+  it('does NOT render the in-progress overlay after audit_failed', async () => {
+    await renderWithFailingAuditStore();
+    await waitFor(() => {
+      // settle: the alert must be present before we assert the overlay is gone.
+      expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    });
+    expect(
+      screen.queryByTestId('panic-wipe-in-progress-overlay'),
+      'in-progress overlay must be cleared once panicWipe resolves audit_failed'
+    ).toBeNull();
+  });
+
+  it('does NOT render the complete toast after audit_failed', async () => {
+    await renderWithFailingAuditStore();
+    await waitFor(() => {
+      expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    });
+    expect(
+      screen.queryByTestId('panic-wipe-complete-toast'),
+      'complete toast must not appear when the audit emit failed'
+    ).toBeNull();
+  });
+
+  it('did NOT perform the destructive side-effect (no databases cleared, localStorage untouched)', async () => {
+    const store = await renderWithFailingAuditStore();
+    await waitFor(() => {
+      expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    });
+    expect(store.__debugListClearedDatabases()).toEqual([]);
+    expect(store.__debugListClearedCaches()).toEqual([]);
+    expect(store.__debugLocalStorageCleared()).toBe(false);
+    expect(store.__debugSessionStorageCleared()).toBe(false);
+    expect(store.__debugSessionCookieTornDown()).toBe(false);
+  });
+});
+
+// ============================================================================
+// A-T19-RR-2 — Cancel closes + focus restore + close announcement (BLOCKING)
+// ============================================================================
+
+describe('T19 / A-T19-RR-2 — Cancel: close, focus restore, announcement', () => {
+  it('(a) clicking Cancel removes the role="dialog" from the DOM', async () => {
+    render(PanicWipeModal, {
+      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
+    });
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+    const cancel = screen.getByRole('button', {
+      name: t('onboarding.panic_wipe_d6.cancel_button')
+    });
+    await fireEvent.click(cancel);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog'),
+        'dialog must be removed from the DOM after Cancel (open=false)'
+      ).toBeNull();
+    });
+  });
+
+  it('(a) clicking Cancel dispatches a `close` CustomEvent', async () => {
+    const { component } = render(PanicWipeModal, {
+      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
+    });
+    let closeFired = false;
+    component.$on('close', () => {
+      closeFired = true;
+    });
+    const cancel = screen.getByRole('button', {
+      name: t('onboarding.panic_wipe_d6.cancel_button')
+    });
+    await fireEvent.click(cancel);
+    await waitFor(() => {
+      expect(closeFired, 'Cancel must dispatch a `close` event').toBe(true);
+    });
+  });
+
+  it('(b) closing via Cancel restores focus to the trigger that opened the modal', async () => {
+    const trigger = document.createElement('button');
+    trigger.textContent = 'open';
+    document.body.appendChild(trigger);
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    render(PanicWipeModal, {
+      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
+    });
+    // Opening moves focus into the dialog (away from the trigger).
+    await waitFor(() => {
+      expect(document.activeElement).not.toBe(trigger);
+    });
+
+    const cancel = screen.getByRole('button', {
+      name: t('onboarding.panic_wipe_d6.cancel_button')
+    });
+    await fireEvent.click(cancel);
+
+    await waitFor(() => {
+      expect(
+        document.activeElement,
+        'focus must be restored to the opener trigger after Cancel'
+      ).toBe(trigger);
+    });
+    trigger.remove();
+  });
+
+  it('(c) after Cancel, an aria-live region (surviving unmount) announces the close', async () => {
+    render(PanicWipeModal, {
+      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
+    });
+    const cancel = screen.getByRole('button', {
+      name: t('onboarding.panic_wipe_d6.cancel_button')
+    });
+    await fireEvent.click(cancel);
+    await waitFor(() => {
+      const live = Array.from(document.querySelectorAll('[aria-live]')).find((el) =>
+        (el.textContent ?? '').includes(t('a11y.onboarding.modal_close_announcement'))
+      );
+      expect(
+        live,
+        'a surviving aria-live region must announce the close after Cancel'
+      ).not.toBeUndefined();
+    });
+  });
+
+  it('(regression guard) pressing Escape does NOT close the dialog (§3.5 — Escape is inert)', async () => {
+    render(PanicWipeModal, {
+      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
+    });
+    const dialog = screen.getByRole('dialog');
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(
+      screen.queryByRole('dialog'),
+      'Escape must be inert — dialog stays in the DOM'
+    ).not.toBeNull();
+  });
+});
+
+// ============================================================================
+// A-T19-RR-3 — re-onboard lockout reset (MEDIUM)
+//
+// Contract pinned (see test-writer report for the softened scope):
+//   1. fresh-store regression guard: completed → no_op on the same store.
+//   2. `resetPanicWipeLockout` is an EXPORTED, production-callable function
+//      (renamed from `__resetPanicWipeLockoutForTest`) and is no-throw /
+//      idempotent. Full default-singleton re-onboard coverage needs a
+//      default-store success seam that does not yet exist (BrowserWipeStore
+//      audit always fails), so that branch is NOT pinned here.
+// ============================================================================
+
+describe('T19 / A-T19-RR-3 — re-onboard lockout reset', () => {
+  it('(regression guard) fresh store: first wipe completes, second on the same store is no_op', async () => {
+    const { panicWipe } = await import('../../src/lib/lock/panic-wipe');
+    const { MemoryWipeStore } = await import('../../src/lib/lock/wipe-store');
+    const store = new MemoryWipeStore();
+    const first = await panicWipe({ store, surface: 'settings' });
+    expect(['completed', 'partially_completed']).toContain(first.status);
+    const second = await panicWipe({ store, surface: 'settings' });
+    expect(second.status).toBe('no_op');
+    expect((second as { reason?: string }).reason).toBe('already_wiped');
+  });
+
+  it('exports `resetPanicWipeLockout` (production name, NOT the __...ForTest alias)', async () => {
+    const mod = await import('../../src/lib/lock/panic-wipe');
+    expect(
+      typeof (mod as { resetPanicWipeLockout?: unknown }).resetPanicWipeLockout,
+      'resetPanicWipeLockout must be exported as a production-callable function'
+    ).toBe('function');
+  });
+
+  it('`resetPanicWipeLockout` is idempotent / no-throw (callable repeatedly with no args)', async () => {
+    const mod = (await import('../../src/lib/lock/panic-wipe')) as {
+      resetPanicWipeLockout: () => void;
+    };
+    expect(() => {
+      mod.resetPanicWipeLockout();
+      mod.resetPanicWipeLockout();
+    }).not.toThrow();
+  });
+});
