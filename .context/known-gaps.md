@@ -1211,6 +1211,37 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Resolution scope:** T19 implementer (or T19.1 production wire-up if Amendment H splits) implements `BrowserWipeStore.clearCaches` with the dynamic enumeration; security-reviewer asserts no string-literal cache names appear in `lib/lock/panic-wipe.ts`'s clearCaches path.
 **Blocker for:** `lib/lock/panic-wipe.ts` production wire-up (T19 monolithic OR T19.1 sibling depending on Amendment H adjudication in architect's design).
 
+### G-T19-9 — No production route mounts `OnboardingFlow` / `PanicWipeModal`
+**Source:** four-reviewer re-review pass 2026-05-25 — security S-T19-RR-1 (ADVISORY) + adversarial NEW-1 (LOW). `git log` commits `1230e43` (security re-review) + `cab2433` (adversarial re-verify).
+**Finding:** No SvelteKit route mounts `OnboardingFlow`, and no production parent renders `<PanicWipeModal>` (it is referenced only by tests; the wizard inlines D.6). Two consequences: (a) the `check-onboarding-test-props-stripped.sh` gate passes **vacuously** — there is no wizard artifact in `apps/web/build/_app` to scan, so the strip contract becomes load-bearing only once the route lands; (b) the RR-2 `on:close` close-event path has no production consumer (the modal still self-closes via `open=false`, so the user-facing escape behaviour is correct; only the parent-notification path is unexercised).
+**This is the expected Amendment-H state, NOT a T19 defect.** ADR-0020 (lines 32, 59) defers all production wire-ups — real `SupabaseAuthStore`/`SupabaseKeyStore` (G-T05-1, G-T07-2), the production `BrowserWipeStore` audit emitter (G-T19-PRIV-3 below), AND route mounting with real stores — to the existing T05.1 / T07.1 siblings. Building the route inside T19 would wire the components to `Memory*` stores on a live path, contradicting the library-only posture.
+**Resolution scope (T05.1 / T07.1 production wire-up):** add `apps/web/src/routes/onboarding/+page.svelte` (and the Settings → Wipe host for `PanicWipeModal`) wiring the components to the real Supabase/Browser stores; at that point the bundle-strip gate becomes load-bearing and an integration test should mount the modal from its real host (closes the RR-2 prod-consumer gap).
+**Blocker for:** none for T19 ship; required before the wizard is reachable in production.
+
+### G-T19-PRIV-3 — `BrowserWipeStore.emitAudit` is a fail-closed stub (no real audit transport)
+**Source:** privacy-review-t19.md P-T19-4; adversarial re-review RR-1 + re-verify; `wipe-store.ts:230-238`.
+**Finding:** `BrowserWipeStore.emitAudit` returns `{ok:false}` unconditionally, so the audit-BEFORE-side-effect contract (F-106 M-106a) holds by **failing closed** — every production panic-wipe now surfaces the `audit_emit_failed` error and destroys nothing (verified escapable + non-poisoning: `audit_failed` returns before `__wipedStores.add`, so a retry succeeds once the emitter ships). This means panic-wipe is non-functional end-to-end in production until the real emitter lands.
+**Resolution scope (T05.1 / T07.1 production wire-up):** wire `emitAudit` to the T05.1/T07.1 audit-emit transport (the three new T19 enum values ride the ADR-0003 Amendment A six-mirror dance per ADR-0020 Decision 5). Until then the fail-closed posture is the correct, safe default.
+**Blocker for:** functional production panic-wipe; not a blocker for T19 library/UI ship.
+
+### G-T19-10 — No round-trip recovery-blob decrypt test (nonce-fold path unexercised)
+**Source:** adversarial re-review RR-5 (LOW); `recovery-blob-download.ts` serializer; `lib/crypto/recovery-blob.ts`.
+**Finding:** The serializer folds `nonce‖ciphertext` into the `ciphertext` field, but no test exercises encrypt → serialize → JSON round-trip → split nonce at `crypto_secretbox_NONCEBYTES` → `decryptRecoveryBlob` → assert privkey equality. This is the exact coverage gap that originally hid the dropped-nonce bug (A-T19-1). The split-back-out lives in the re-import sibling (out of T19 download-only scope), so the round-trip can only be fully closed when that sibling exists.
+**Resolution scope:** test-writer pass adding the round-trip test alongside the recovery-blob re-import (sign-in-on-new-device) surface when it lands.
+**Blocker for:** none for T19 ship; should land with the re-import surface.
+
+### G-T19-11 — Re-onboard panic-wipe lockout: full default-singleton coverage gap
+**Source:** adversarial re-review RR-3; test-writer note (red-tests commit `de3e92d`); `panic-wipe.ts` default-store path.
+**Finding:** `resetPanicWipeLockout()` is wired into `OnboardingFlow.onOpenApp` (D.7), which substantively fixes the re-onboard lockout. But the full default-singleton re-onboard path is not unit-tested: `BrowserWipeStore.emitAudit` always fails (G-T19-PRIV-3), so the default store never reaches `__wipedStores.add`, and there is no default-store-success seam to exercise the wipe→reset→wipe cycle. The pinned tests cover the rename + idempotency only.
+**Resolution scope:** when G-T19-PRIV-3 ships the real emitter, add a default-store-success seam + an integration test covering wipe → re-onboard (onOpenApp) → second wipe succeeds.
+**Blocker for:** none for T19 ship.
+
+### G-T19-12 — HG-10 labour-lawyer copy packet must be regenerated for 5 new a11y keys
+**Source:** privacy-review-t19.md re-review P-T19-RR-1 (BLOCKING-AT-MERGE); `onboarding.en-CA.json:264-276`.
+**Finding:** The rework added 5+ user-facing `a11y.onboarding.*` catalog keys (`panic_wipe_type_back_label`, `step_indicator_landmark`, `step_pill_completed/current/pending`, `failed_checks_list_label`, `failed_capability_label`). They are correctly in-catalog and `t()`-referenced (not hardcoded), but the HG-10 A11y-string summary in ADR-0020 still enumerates the old set ("18 strings"). HG-10 requires the labour-lawyer see **every** string.
+**Resolution scope:** tech-writer regenerates the HG-10 copy packet to enumerate the new keys before routing to counsel; re-run the ADR-0020 A11y-string summary count.
+**Blocker for:** HG-10 ratification → T19 merge. (T19 merge is already gated on HG-10; this expands the packet, it does not add a new gate.)
+
 ---
 
 ## How to use this file
@@ -1226,6 +1257,6 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 - When working on T16.1 / production wire-up: search for `G-T16-*` and resolve them in a single pass.
 - When working on T17.1 / production wire-up: search for `G-T17-*` and resolve them in a single pass.
 - When working on T18.1 / production wire-up: search for `G-T18-*` and resolve them in a single pass.
-- When working on T19 (implementer / observability-setup / production wire-up): search for `G-T19-*` and resolve them by scope (implementer: G-T19-5/6/8; observability: G-T19-7; future-task: G-T19-1 fr-CA + G-T19-3 server-cascade).
+- When working on T19 (implementer / observability-setup / production wire-up): search for `G-T19-*` and resolve them by scope (implementer: G-T19-5/6/8; observability: G-T19-7; future-task: G-T19-1 fr-CA + G-T19-3 server-cascade). Production wire-up (rides T05.1 / T07.1): G-T19-9 route mount + G-T19-PRIV-3 audit emitter + G-T19-11 re-onboard coverage. test-writer (with the re-import surface): G-T19-10 round-trip decrypt. tech-writer (pre-HG-10): G-T19-12 packet regen.
 - When working on T02 ingest path: address `G-T05-4` before T05.1 ships.
 - New gaps from future reviewers append at the bottom under their task heading.
