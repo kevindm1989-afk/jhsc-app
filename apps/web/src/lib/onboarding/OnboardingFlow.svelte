@@ -378,6 +378,10 @@
       {@const isComplete = state === 'complete'}
       {@const isActive = state === 'active'}
       {@const isError = isActive && baselineBlocked}
+      <!-- svelte-ignore a11y_role_supports_aria_props_implicit -->
+      <!-- aria-disabled is not standard on the implicit listitem role, but it is
+           kept: the D.T19.b state test contracts aria-disabled="true" on pending
+           step pills, and it conveys the not-yet-reachable state to AT. -->
       <li
         aria-current={isActive ? 'step' : null}
         aria-label={isComplete

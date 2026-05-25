@@ -14,6 +14,7 @@
   absence of a location-affordance surface.
 -->
 <script lang="ts">
+  import { t } from '../i18n';
   // Free-text location field; explicitly NOT a geolocation button.
   let locationText = '';
   // Banner key — bound to the queue's `ui.lastBannerKey` when this
@@ -24,14 +25,11 @@
 </script>
 
 <section aria-labelledby="photo-capture-heading">
-  <h2 id="photo-capture-heading">Photo capture</h2>
+  <h2 id="photo-capture-heading">{t('photo.capture.heading')}</h2>
 
-  <p id="photo-gps-advisory">
-    All location and metadata is removed from this photo. The location below — if you enter it — is
-    what will be saved.
-  </p>
+  <p id="photo-gps-advisory">{t('photo.capture.advisory_inline')}</p>
 
-  <label for="photo-location-text">Location (free text)</label>
+  <label for="photo-location-text">{t('photo.location.label')}</label>
   <input
     id="photo-location-text"
     type="text"
@@ -40,7 +38,7 @@
     autocomplete="off"
   />
 
-  <button type="button">Add photo</button>
+  <button type="button">{t('photo.capture.button')}</button>
   <!--
     Deliberately omitted: any "use my current location" / geolocation
     button. The location source is free-text or the C1 location list

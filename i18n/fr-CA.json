@@ -294,7 +294,7 @@
   },
 
   "photo": {
-    "capture": { "button": "", "advisory_inline": "" },
+    "capture": { "heading": "", "button": "", "advisory_inline": "" },
     "preview": { "heading": "", "gps_advisory": "", "attach": "", "retake": "" },
     "location": { "label": "", "select_label": "", "placeholder": "" },
     "thumbnail": { "alt_with_location": "", "alt_unspecified": "" },

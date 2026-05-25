@@ -100,7 +100,15 @@ jobs:
           sudo mv /tmp/gitleaks /usr/local/bin/
 
       - name: Install semgrep
-        run: pip install --user semgrep==1.95.0
+        # Install into an isolated venv (not --user): the runner's --user
+        # site-packages carry system urllib3/chardet that conflict with
+        # semgrep's pins and made the CLI exit 7 before scanning. A clean
+        # venv with an upgraded pip resolves a self-consistent dependency set.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/semgrep-venv"
+          "$RUNNER_TEMP/semgrep-venv/bin/pip" install --upgrade pip
+          "$RUNNER_TEMP/semgrep-venv/bin/pip" install semgrep==1.95.0
+          echo "$RUNNER_TEMP/semgrep-venv/bin" >> "$GITHUB_PATH"
 
       - name: Install pgTAP runtime (perl + pg_prove)
         run: |

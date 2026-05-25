@@ -1,8 +1,8 @@
 /**
  * i18n loader (T19 — extended to consume both the root + scoped catalogs).
  *
- * Loads the en-CA catalog from /home/user/agent-os/i18n/en-CA.json (root,
- * shipped earlier) AND apps/web/src/lib/i18n/onboarding.en-CA.json (T19
+ * Loads the en-CA catalog from the repo-root i18n/en-CA.json (shipped
+ * earlier) AND apps/web/src/lib/i18n/onboarding.en-CA.json (T19
  * scoped catalog, per Tech-writer flag #4 / ADR-0020 Decision 11). The
  * scoped catalog is overlaid on top of the root catalog; if both supply
  * the same dotted key, the scoped catalog wins (so the new T19 surfaces
@@ -47,6 +47,11 @@ function resolveDot(path: string, source: Catalog): string | undefined {
   const parts = path.split('.');
   let cur: unknown = source;
   for (const p of parts) {
+    // Reject prototype-chain keys before the dynamic lookup. The catalog keys
+    // are developer-controlled literals, so this never fires in practice; it
+    // hardens the dynamic property access against prototype-pollution-shaped
+    // input (defence-in-depth).
+    if (p === '__proto__' || p === 'constructor' || p === 'prototype') return undefined;
     if (cur && typeof cur === 'object' && p in (cur as Record<string, unknown>)) {
       cur = (cur as Record<string, unknown>)[p];
     } else {

@@ -181,9 +181,12 @@ else
 fi
 
 # Deno tests for Edge Functions.
+# --allow-env: the shared logger's detectEnv() reads DENO_ENV/NODE_ENV to pick
+# its emit level; without it the runtime throws PermissionDenied before the
+# assertions run.
 if command -v deno >/dev/null 2>&1; then
   run_gate_shell "deno test (edge functions)" \
-    "deno test --allow-read supabase/functions/_shared/test/"
+    "deno test --allow-read --allow-env supabase/functions/_shared/test/"
 else
   echo "  [skip] deno test — 'deno' not installed"
   gates_skipped=$((gates_skipped+1))
