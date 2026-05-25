@@ -53,7 +53,11 @@ function resolveDot(path: string, source: Catalog): string | undefined {
     // input (defence-in-depth).
     if (p === '__proto__' || p === 'constructor' || p === 'prototype') return undefined;
     if (cur && typeof cur === 'object' && p in (cur as Record<string, unknown>)) {
-      cur = (cur as Record<string, unknown>)[p];
+      // Read-only traversal of the app's own static catalog; `p` is guarded
+      // against __proto__/constructor/prototype above, so this dynamic index
+      // cannot pollute a prototype. The semgrep "auto" rule flags the bracket
+      // access syntactically regardless of the guard — justified suppression.
+      cur = (cur as Record<string, unknown>)[p]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
     } else {
       return undefined;
     }
