@@ -51,16 +51,13 @@ jobs:
       - name: Tests (vitest)
         run: pnpm -C apps/web test
 
-  # Non-blocking: the full verification gate stack (lint, format, token
-  # audit, i18n, secrets, SAST, Deno). Several gates carry known
-  # pre-production hardening debt, so this job is informational --
-  # continue-on-error keeps the overall run green while the report stays
-  # visible in the logs. Tighten and promote to blocking as the debt is
-  # paid down.
+  # Blocking: the full verification gate stack (lint, format, token audit,
+  # i18n, secrets, SAST, Deno). The pre-production hardening debt has been
+  # paid down and scripts/verify.sh passes end-to-end, so this job is now
+  # required — a regression in any gate fails the run.
   hardening-gates:
-    name: Hardening gates (non-blocking)
+    name: Hardening gates
     runs-on: ubuntu-22.04
-    continue-on-error: true
     timeout-minutes: 25
 
     env:
