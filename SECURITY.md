@@ -7,11 +7,10 @@ deliberation content. Security reports are taken seriously.
 
 **Please do not open a public issue for security vulnerabilities.**
 
-Preferred: use GitHub's private vulnerability reporting —
-**Security → Advisories → Report a vulnerability** on this repository.
-
-Alternatively, email the maintainers at **security@<your-domain>** (replace
-with the project's real security contact before launch).
+Report privately through GitHub's private vulnerability reporting:
+**Security → Advisories → Report a vulnerability** on this repository
+(https://github.com/kevindm1989-afk/jhsc-app/security/advisories/new). This is
+the only intake channel for security reports.
 
 Please include:
 

@@ -1,24 +1,19 @@
-LICENSE PLACEHOLDER
+Copyright (c) 2026 JHSC App. All rights reserved.
 
-Choose a license for your project before publishing or sharing it.
+PROPRIETARY AND CONFIDENTIAL
 
-Common options:
+This software and its source code are proprietary and confidential. No license,
+right, or permission is granted to any person or entity to use, copy, modify,
+merge, publish, distribute, sublicense, sell, or create derivative works of any
+part of this software, in whole or in part, by any means, without the prior
+written permission of the copyright holder.
 
-- **MIT** — permissive, simple. Anyone can do almost anything with it. Use if you want maximum adoption and don't care about commercial use.
+Unauthorized copying, distribution, modification, public display, or public
+performance of this software is strictly prohibited.
 
-- **Apache 2.0** — permissive with patent grant. Better protection than MIT for projects with patentable ideas. Use for most commercial-friendly open source.
-
-- **GPL v3** — copyleft. Derivative works must also be GPL. Use if you want to ensure modifications stay open.
-
-- **AGPL v3** — strong copyleft including network use. Required modification disclosure even for SaaS. Use if you want to prevent SaaS-without-contribution.
-
-- **BSL (Business Source License)** — temporarily proprietary, transitions to open. Use for commercial products you may open-source later.
-
-- **Proprietary / All Rights Reserved** — closed source. Use for commercial products you don't want others to use.
-
-For private projects with no public component, you can leave this file empty or delete it.
-
-For Canadian context: licenses are governed by contract law. None of the above are jurisdiction-specific, but they should be reviewed by a lawyer for any commercial deployment.
-
-Once chosen, replace the entire contents of this file with the license text.
-Common templates: https://choosealicense.com
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
