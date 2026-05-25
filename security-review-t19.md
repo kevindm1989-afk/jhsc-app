@@ -1,5 +1,52 @@
 # Security review — T19 identity-recovery onboarding
 
+## Re-review (2026-05-25)
+
+**Reviewer:** security-reviewer (agent)
+**Re-review date:** 2026-05-25
+**Diff range:** `d6ce313..4c93eab` (implementer rework)
+**Mode:** READ-ONLY (no code modified)
+
+### Per-finding verdict
+
+| Finding | Prior | Verdict | Evidence |
+|---|---|---|---|
+| S-T19-1 hardcoded passphrase | BLOCKING | **CLOSED** | `OnboardingFlow.svelte` now calls `generateRecoveryPassphrase()` + `generateIdentityKeypair()` in `ensureD4Ready()`. The `'horse battery…'` literal is gone (grep empty). `generateRecoveryPassphrase` uses `sodium.randombytes_buf` → two mounts produce independent passphrases. |
+| S-T19-2 aria-live on passphrase | BLOCKING | **CLOSED** | `RecoveryPassphraseScreen.svelte:178` reveal `<div>` no longer carries `role=region`/`aria-live`. The only `aria-live` in onboarding (`OnboardingFlow.svelte:395`) is the SR-only `wizard-step-announce` carrying step-number copy, NOT the passphrase. Strict-lint now covers `aria-live`/`role=alert`/`role=status` on wrapper files (script exit 0). |
+| S-T19-3 module-level passphrase ref | BLOCKING | **CLOSED** | `D4RecoveryPassphrase.svelte` is no longer `<script context="module">`; `__module_passphrase_ref` removed (grep empty). Passphrase ref is component-instance closure (`d4_passphrase` in `OnboardingFlow.svelte`). Seam state moved to `__test_seams.ts` (keyed Map; module-throws on production import). |
+| S-T19-4 emitAudit no-op stub | BLOCKING | **CLOSED** | `wipe-store.ts` `BrowserWipeStore.emitAudit` now returns `{ok:false}` (fail-closed). `panic-wipe.ts:108-113` aborts with `audit_failed` BEFORE any `clear*` runs when `!auditAck.ok`. Audit-BEFORE-side-effect ordering enforced. |
+| S-T19-5 D.3 never enrolls passkey | BLOCKING | **CLOSED** | `OnboardingFlow.svelte:556`/D.3 branch mounts real `<D3PasskeyEnrollment>` which calls `enrollFirstDevicePasskey`. Advance is gated: `onD3Enrolled(ok)` returns early unless `ok`; component fires `onEnrolled(true)` only on `r.status===200`. `canAdvance` requires `passkey_enrolled`. |
+| S-T19-7 rate-limiter unwired | ADVISORY | **CLOSED** | `createOnboardingRateLimiter({limit:10, window_ms:60_000})` instantiated per-instance; `onD4Continue()` calls `rateLimiter.tryAttempt(Date.now())` and returns with `d4_rateLimitedKey` before advancing. 11th attempt in 60s rejects. |
+
+(S-T19-6 INVARIANT comment, S-T19-8 duplicate state-machine, S-T19-12 D.5 composition were ADVISORY/NIT in the prior pass; the rework removes `state-machine.ts` (S-T19-8 resolved), composes real `<D7Complete>` and `<D5SessionRevocationPrimer>` wiring `revokeAllSessions`. S-T19-6/S-T19-12 effectively closed.)
+
+### Nonce-recoverability (new-issue watch)
+
+**RECOVERABLE.** `serializeRecoveryBlobJson` concatenates `nonce || ciphertext` (fixed 24-byte `crypto_secretbox_NONCEBYTES` prefix) into the single `ciphertext` field, preserving the 4-key closed allowlist. The nonce bytes are present and length-deterministic, so a re-import deserializer can split them back out. The re-import/decrypt path is explicitly out-of-T19-scope (documented header) and not present in this repo — `decryptRecoveryBlob` still consumes a separate-field `RecoveryBlobShape`, so the deserializer that splits `nonce||ciphertext` MUST be implemented by the re-import sibling. No blocking loss of decryptable input.
+
+### New findings
+
+- **S-T19-RR-1 — ADVISORY (carry-forward of S-T19-10).** No SvelteKit route mounts `OnboardingFlow` (`grep OnboardingFlow apps/web/src/routes` empty; the built bundle under `apps/web/build/_app` contains no `onboarding-wizard` artifact). `check-onboarding-test-props-stripped.sh` therefore passes *vacuously* — the wizard surface is not in the bundle. Fix: add `apps/web/src/routes/onboarding/+page.svelte` importing `OnboardingFlow`, then the G-T19-5 grep gate becomes load-bearing. Not a regression; the test-seam runtime-strip (module-throw on production import + grep gate teeth) is sound.
+
+### Script exit codes
+
+- `check-onboarding-no-passphrase-leak.sh` → **exit 0** (STRICT_FORBIDDEN now includes `aria-live`/`role="alert"`/`role="status"` + `autofocus`; OnboardingFlow added to scope).
+- `check-onboarding-test-props-stripped.sh apps/web/build` → **exit 0** (PATTERNS extended with the 6 seam symbols + fail-closed on missing bundle dir). Note S-T19-RR-1: vacuous until the wizard is route-mounted.
+
+### Other checks
+
+- `grep node:crypto apps/web/src/lib/onboarding apps/web/src/lib/lock` → empty (G-T08-10 holds).
+- `__test_seams.ts` extraction removes production-callable surface: the module throws on `import.meta.env.MODE === 'production'` import (defense-in-depth) AND the seam symbols are grepped out of the production bundle. Not merely moved.
+
+### Overall verdict: **PASS-WITH-ADVISORIES**
+
+All 5 prior BLOCKING findings (S-T19-1..5) CLOSED; the ADVISORY S-T19-7 CLOSED. One non-blocking carry-forward (S-T19-RR-1) remains: route-mount the wizard so the bundle-strip gate fires. **T19 touches auth + PI + crypto custody — recommend human review before merge** even though findings are clean.
+
+---
+
+## Original review (2026-05-24)
+
+
 **Reviewer:** security-reviewer (agent)
 **Date:** 2026-05-24
 **Commit reviewed:** `4e9d1a0` (T19 implementer pass)

@@ -701,6 +701,29 @@ The accessibility-specialist's pre-implementation review was conducted against t
 
 ---
 
+## Accessibility-specialist re-review (2026-05-25)
+
+> **Status:** FAIL — one new BLOCKING (keyboard trap) introduced by the focus-trap rework; the 7 prior BLOCKING findings are otherwise CLOSED.
+> **Authoring agent:** accessibility-specialist
+> **Scope:** post-rework second pass of T19 (diff `d6ce313..4c93eab`). Full per-finding closure table in `/home/user/agent-os/accessibility-review-t19-post-impl.md` §Re-review.
+
+**Closure of prior BLOCKING findings:**
+- A11Y-T19-1 (focus-to-heading on advance) — CLOSED. `focusCurrentHeading()` runs after `tick()`; every `<h1>` is `tabindex="-1"`; every step-advance handler calls it.
+- A11Y-T19-2 (PanicWipeModal focus management) — PARTIALLY CLOSED → see RR-1. Initial focus, Tab/Shift-Tab cycle, focus-restore-on-close, and Escape-no-dismiss are all implemented correctly. BUT the Cancel button has no `on:click` and `open` is not bound, so there is no working close path from inside the modal.
+- A11Y-T19-3 / -4 (aria-describedby) — D.6 `d6-help` / `d6-err` wired; modal body context now in a `panic-wipe-modal-body` block (advisory: still no explicit `aria-describedby` on the dialog).
+- A11Y-T19-5 (axe-check stub) — CLOSED. `axe-check.ts` imports `axe-core` and calls `axe.run` with `wcag2a`+`wcag2aa` tags; `axe-check-sanity.test.ts` proves a `button-name` violation surfaces and is absent when labelled.
+- A11Y-T19-6 (no per-state axe) — CLOSED via real axe-check now invoked across the suite.
+- A11Y-T19-7 / -8 (token binding + inverted panic focus ring) — CLOSED. Components consume `var(--color-…-onboarding-…)` tokens; the panic-overlay inner ring inverts to `panic_overlay_fg`. Advisory: OnboardingFlow references some non-canonical var names (`--color-light-onboarding-fg`) that fall to generic fallbacks.
+- A11Y-T19-9 (hardcoded English) — CLOSED. No raw strings remain in the T19 Svelte files; all copy via `t(...)` catalog keys.
+
+**SR-key consumption:** 18 of 19 catalog keys now consumed (was 3). Only `modal_close_announcement` is unused — and it is unusable until the Cancel close path (RR-1) exists.
+
+**NEW BLOCKING — A11Y-T19-RR-1 (WCAG 2.1.2 keyboard trap):** `PanicWipeModal.svelte:242-244` Cancel button has no handler; the modal's `open` prop is externally controlled and not bound; Escape is (correctly) suppressed per §3.5. A keyboard-only user who opens the panic-wipe modal cannot dismiss it via any control inside the dialog. The focus trap (correctly added for A11Y-T19-2) now holds the user inside an inescapable dialog. The component doc-comment claims focus-restore-on-close, but no close is reachable. MUST add an `on:click` to Cancel that dispatches a close event / sets `open = false`, and wire `modal_close_announcement`.
+
+**Overall verdict: FAIL** (single blocking regression — RR-1). All other prior blockers closed; resolve RR-1 and the surface is expected to reach PASS-WITH-ADVISORIES.
+
+---
+
 ## Threat-modeler's pass (2026-05-24)
 
 > **Status:** PASS — no BLOCKERS surfaced in the architect's ADR-0020 design.
@@ -1093,6 +1116,28 @@ ADR-0020 task 7 is **NOT closed.** The implementer must address A11Y-T19-1 throu
 ### Recommendation
 
 **Block merge.** Escalate to human review for an architect adjudication: is `OnboardingFlow.svelte` intentionally a UI-stub destined to be wired in a follow-on (T19.1?) sibling task, or is T19 meant to ship as a complete monolithic surface? The 5 BLOCKING findings are real against the §8.T19 contract and ADR-0020 binding clauses; the test suite passes because the integration harness simulates the auth client rather than composing against the production-path stores.
+
+
+## Security-reviewer re-review (2026-05-25)
+
+**Diff range:** `d6ce313..4c93eab` (implementer rework). Full per-finding evidence in `/home/user/agent-os/security-review-t19.md` (## Re-review section).
+
+**Verdict: PASS-WITH-ADVISORIES.**
+
+**Closure count: 5 of 5 BLOCKING closed (S-T19-1..5); ADVISORY S-T19-7 also closed.**
+
+- S-T19-1 hardcoded passphrase → CLOSED (`generateRecoveryPassphrase()` + `generateIdentityKeypair()`; literal gone).
+- S-T19-2 aria-live on passphrase → CLOSED (reveal `<div>` clean; only the SR-only step-announcer carries aria-live; strict-lint extended).
+- S-T19-3 module-level passphrase ref → CLOSED (instance closure; seam state moved to `__test_seams.ts` which module-throws on production import).
+- S-T19-4 emitAudit no-op → CLOSED (returns `{ok:false}`; `panic-wipe.ts` aborts `audit_failed` before any `clear*`).
+- S-T19-5 D.3 no passkey enroll → CLOSED (real `<D3PasskeyEnrollment>` mounted; advance gated on `onEnrolled(true)` / `canAdvance` `passkey_enrolled`).
+- S-T19-7 rate-limiter unwired → CLOSED (per-instance limiter; `onD4Continue` calls `tryAttempt`; 11th/60s rejects).
+
+**New-issue watch:** nonce folded as `nonce||ciphertext` into the `ciphertext` field is RECOVERABLE (fixed 24-byte prefix; re-import deserializer is out-of-scope sibling work). `__test_seams.ts` extraction removes production-callable surface (module-throw + grep gate). `check-onboarding-no-passphrase-leak.sh` exit 0; `check-onboarding-test-props-stripped.sh apps/web/build` exit 0. No `node:crypto` in onboarding/lock.
+
+**New finding S-T19-RR-1 (ADVISORY, carry-forward of S-T19-10):** no SvelteKit route mounts `OnboardingFlow`; the production bundle contains no wizard artifact, so the test-props-strip gate passes vacuously. Add `apps/web/src/routes/onboarding/+page.svelte` to make G-T19-5 load-bearing. Non-blocking.
+
+**Recommendation:** the BLOCKING findings are resolved. Because T19 is the load-bearing auth + PI + crypto-custody surface, recommend a human review pass before merge; merge is otherwise unblocked from the security gate.
 
 ---
 
