@@ -6,24 +6,27 @@
  * + environment + scrubber wired so the SaaS round-trip is verifiable).
  *
  * Hard rules enforced in this file:
- *   - Bundled `@sentry/sveltekit` import only — never the CDN
- *     (JHSC-APP-PLAN.md §7 / ADR-0010 amendment).
+ *   - Bundled `@sentry/sveltekit` import only â€” never the CDN
+ *     (JHSC-APP-PLAN.md Â§7 / ADR-0010 amendment).
  *   - `beforeSend` / `beforeBreadcrumb` come from
  *     `$lib/observability/sentry-scrub` (the canonical scrubber; tested
  *     under T02 / sentry-scrub.test.ts).
- *   - No `Sentry.setUser({ id: rawUserId })` — only the scrub module's
+ *   - No `Sentry.setUser({ id: rawUserId })` â€” only the scrub module's
  *     pseudonym hash ever flows; the browser does not call setUser.
  *   - `tracesSampleRate: 0` per ADR-0010 amendment F-H (Phase-0 deferral).
  *   - If `PUBLIC_SENTRY_DSN` is undefined (local dev without DSN),
- *     Sentry.init is NOT called — the structured logger remains the
+ *     Sentry.init is NOT called â€” the structured logger remains the
  *     emission surface and Sentry self-test failing is the expected dev
  *     state.
  */
 import * as Sentry from '@sentry/sveltekit';
 import type { HandleClientError } from '@sveltejs/kit';
-import { PUBLIC_SENTRY_DSN } from '$env/static/public';
+import { env } from '$env/dynamic/public';
 import { beforeSend, beforeBreadcrumb } from '$lib/observability/sentry-scrub';
 import { log } from '$lib/log';
+
+// Read at runtime (not build time) so the build works without a .env present.
+const PUBLIC_SENTRY_DSN = env.PUBLIC_SENTRY_DSN;
 
 const RELEASE = (import.meta.env.VITE_RELEASE_SHA as string | undefined) ?? 'unknown';
 const ENVIRONMENT = (import.meta.env.MODE as string | undefined) ?? 'development';
@@ -36,7 +39,7 @@ if (PUBLIC_SENTRY_DSN) {
     // ADR-0010 amendment F-H: no distributed tracing in Phase 0.
     tracesSampleRate: 0,
     // ADR-0010: SDK-layer PI scrubbing. The scrub module is the canonical
-    // contract — these hooks are thin adapters whose signatures match
+    // contract â€” these hooks are thin adapters whose signatures match
     // Sentry's runtime types.
     beforeSend: (event) => beforeSend(event as Parameters<typeof beforeSend>[0]) as typeof event,
     beforeBreadcrumb: (breadcrumb) =>

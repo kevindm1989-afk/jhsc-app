@@ -1,7 +1,7 @@
 /**
  * Server-side hooks.
  *
- * Per observability/logging.md §6 (correlation):
+ * Per observability/logging.md Â§6 (correlation):
  *   - Read or generate a request_id (UUIDv4).
  *   - Propagate it to Edge Functions via the X-Request-ID header.
  *   - Return it in the response so the browser can log its tail under
@@ -19,10 +19,13 @@
 import * as Sentry from '@sentry/sveltekit';
 import { sequence } from '@sveltejs/kit/hooks';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
-import { SENTRY_DSN } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { beforeSend, beforeBreadcrumb } from '$lib/observability/sentry-scrub';
 import { log } from '$lib/log';
 import { runBootSmokeTest, KeyParityError } from '$lib/auth/server/key-parity';
+
+// Read at runtime (not build time) so the build works without a .env present.
+const SENTRY_DSN = env.SENTRY_DSN;
 
 const RELEASE = (import.meta.env.VITE_RELEASE_SHA as string | undefined) ?? 'unknown';
 const ENVIRONMENT = (import.meta.env.MODE as string | undefined) ?? 'development';
@@ -45,8 +48,8 @@ if (SENTRY_DSN) {
 }
 
 /**
- * Boot smoke test: HMAC pseudonym key parity (ADR-0016 §Decision 3 +
- * amendment pass #4 §B1). If the TS-side env-var-provided key does not
+ * Boot smoke test: HMAC pseudonym key parity (ADR-0016 Â§Decision 3 +
+ * amendment pass #4 Â§B1). If the TS-side env-var-provided key does not
  * have the same SHA-256 as the Postgres GUC `app.hmac_pseudonym_key`,
  * the server REFUSES TO SERVE (the drained flag is read on every
  * request and forces a 503 with a generic body).
@@ -57,7 +60,7 @@ if (SENTRY_DSN) {
  *    is actually present, AND (c) the staging-shim server-SHA env var
  *    is also present.
  *  - During `vite build` (static prerender) those env vars are absent
- *    by design — secrets are not injected into the build container.
+ *    by design â€” secrets are not injected into the build container.
  *    The check is therefore a no-op at build time; it activates only
  *    at runtime in production deployments where the deployer has set
  *    both env vars.
@@ -65,7 +68,7 @@ if (SENTRY_DSN) {
  *    the in-memory store uses its own per-process random key.
  *
  * The Postgres-side SHA fetch is deferred to the production wire-up
- * pass — for now we accept a `KEY_PARITY_SERVER_SHA_HEX` env var so
+ * pass â€” for now we accept a `KEY_PARITY_SERVER_SHA_HEX` env var so
  * staging can exercise the gate without a live Supabase connection.
  * Once the Supabase client is wired (T05 prod deployment) this is
  * replaced with `SELECT encode(digest(current_setting(...), 'sha256'),
@@ -97,7 +100,7 @@ const _hasKeyEnv =
  * DB, then the smoke test resolves false and the server drains.
  *
  * Trade-off: cold-start requests wait for the smoke test to resolve
- * (≤500ms in practice, one Postgres round-trip). Subsequent requests
+ * (â‰¤500ms in practice, one Postgres round-trip). Subsequent requests
  * pass through instantly because the Promise is already resolved. On
  * rejection, every request gets a 503 via the drained-state branch.
  */
@@ -120,7 +123,7 @@ if (_hasKeyEnv) {
     return stagingShimSha;
   }).then(
     () => {
-      // Success — no flag set; subsequent requests serve normally.
+      // Success â€” no flag set; subsequent requests serve normally.
     },
     (err: unknown) => {
       _drained = true;
@@ -136,7 +139,7 @@ if (_hasKeyEnv) {
 const UUID_V4_HEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function generateRequestId(): string {
-  // Best-effort UUIDv4 — crypto.randomUUID is universal in Node 22+ / modern browsers.
+  // Best-effort UUIDv4 â€” crypto.randomUUID is universal in Node 22+ / modern browsers.
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
   }
@@ -158,7 +161,7 @@ const requestIdHandle: Handle = async ({ event, resolve }) => {
 
   // TOCTOU gate (C2 fix): if the boot smoke test is still in flight,
   // hold this request until it resolves. Cold-start incurs a small
-  // latency cost (≤500ms, one Postgres round-trip); subsequent
+  // latency cost (â‰¤500ms, one Postgres round-trip); subsequent
   // requests pass through instantly because the Promise is already
   // resolved. On rejection, `_drained` is set and the short-circuit
   // below returns 503.
@@ -166,7 +169,7 @@ const requestIdHandle: Handle = async ({ event, resolve }) => {
     await _bootSmokeTestPromise;
   }
 
-  // Drained-state short-circuit (amendment pass #4 §B1): if the boot
+  // Drained-state short-circuit (amendment pass #4 Â§B1): if the boot
   // smoke test failed, every request returns 503 with a generic body.
   // We do NOT include the drained reason on the wire (it could leak
   // operational state to a probing attacker); the reason is in logs.
