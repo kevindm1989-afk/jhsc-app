@@ -107,5 +107,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libtap-parser-sourcehandler-pgtap-perl postgresql-client
 
+      - name: Build (apps/web)
+        # The "no third-party JS in bundle" gate scans the built bundle. Without
+        # a build it falls back to scanning source and false-fails on token
+        # names that appear in comments (e.g. HMAC_PSEUDONYM_KEY).
+        run: pnpm -C apps/web build
+
       - name: Run verify.sh (informational)
         run: bash scripts/verify.sh

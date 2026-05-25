@@ -9,7 +9,7 @@
  * Run: `deno test --allow-read supabase/functions/_shared/test/log.test.ts`.
  */
 
-import { assertEquals, assertNotMatch, assertStringIncludes } from 'https://deno.land/std/assert/mod.ts';
+import { assertEquals, assertNotMatch, assertStringIncludes } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import { log, SAFE_FIELDS_ALLOWLIST_ID } from '../log.ts';
 
 const CANARY_PII_X = 'CANARY_PII_X';
@@ -24,8 +24,8 @@ Deno.test('T02 / F-09 — Edge Function logger drops PI keys silently and surfac
   });
   assertEquals(captured.length, 1);
   const serialized = JSON.stringify(captured[0]);
-  assertNotMatch(new RegExp('CANARY-FIXTURE-NAME'), () => serialized);
-  assertNotMatch(new RegExp(CANARY_EMAIL.replace('.', '\\.')), () => serialized);
+  assertNotMatch(serialized, /CANARY-FIXTURE-NAME/);
+  assertNotMatch(serialized, new RegExp(CANARY_EMAIL.replace('.', '\\.')));
 });
 
 Deno.test('T02 / logging.md §4 rule 5 — canary CANARY_PII_X submitted via Edge Function body never appears in function logs', async () => {

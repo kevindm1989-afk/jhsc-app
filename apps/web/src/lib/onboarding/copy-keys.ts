@@ -20,7 +20,6 @@
  * stay in sync without forcing each component to enumerate.
  */
 
-/* eslint-disable */
 export const COPY_KEYS = Object.freeze([
   // ----- Step indicator -----
   'onboarding.step_indicator.pending',

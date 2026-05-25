@@ -13,8 +13,6 @@
  * silently leaking the seam.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 if (typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'production') {
   // HUMAN-APPROVED: production builds throw on import of this module; the
   // build-time grep gate is the structural enforcement. Throwing at import

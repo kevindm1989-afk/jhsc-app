@@ -43,11 +43,7 @@ const IDB_DATABASE_NAMES: readonly string[] = Object.freeze([
   'jhsc-prefs'
 ]);
 
-export type PanicWipeStatus =
-  | 'completed'
-  | 'partially_completed'
-  | 'audit_failed'
-  | 'no_op';
+export type PanicWipeStatus = 'completed' | 'partially_completed' | 'audit_failed' | 'no_op';
 
 export interface PanicWipeResult {
   status: PanicWipeStatus;
@@ -121,7 +117,9 @@ export async function panicWipe(opts?: {
   let cacheNames: readonly string[] = [];
   try {
     if (typeof (globalThis as { caches?: unknown }).caches !== 'undefined') {
-      cacheNames = await (globalThis as { caches: { keys: () => Promise<string[]> } }).caches.keys();
+      cacheNames = await (
+        globalThis as { caches: { keys: () => Promise<string[]> } }
+      ).caches.keys();
     }
   } catch {
     cacheNames = [];
