@@ -1,4 +1,0 @@
-# Runbooks per alert
-
-Copy templates/runbook.md here, one per alert defined in your observability
-config. Without runbooks, alerts train your on-call to ignore alerts.
