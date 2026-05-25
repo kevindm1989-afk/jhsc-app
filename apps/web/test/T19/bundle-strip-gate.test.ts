@@ -20,36 +20,34 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { REPO_ROOT } from '../_helpers/paths';
 
-// Invoke bash with a repo-relative script path + cwd=REPO_ROOT rather than an
-// absolute path. Git Bash / MSYS mangle absolute drive-letter paths in argv
-// ("No such file or directory" on C:/...); a relative path resolved against
-// cwd avoids that and works identically on POSIX.
+// Everything is passed to bash RELATIVE to cwd=REPO_ROOT — both the script and
+// the fixture bundle dir. This sidesteps Git Bash / MSYS absolute drive-letter
+// path translation (which mangles `C:\...` argv and cannot stat Windows temp
+// paths outside the repo), and behaves identically on POSIX.
 const SCRIPT_REL = 'scripts/check-onboarding-test-props-stripped.sh';
 
+// Dot-prefixed so it is ignored by the source-tree walkers in the other suites.
 const createdDirs: string[] = [];
 
+// Returns the bundle dir path RELATIVE to REPO_ROOT (e.g. ".rr4-bundle-AbC123").
 function makeBundleDir(fileContents: Record<string, string>): string {
-  const dir = mkdtempSync(path.join(tmpdir(), 'rr4-bundle-'));
-  createdDirs.push(dir);
-  mkdirSync(path.join(dir, 'chunks'), { recursive: true });
+  const abs = mkdtempSync(path.join(REPO_ROOT, '.rr4-bundle-'));
+  createdDirs.push(abs);
+  mkdirSync(path.join(abs, 'chunks'), { recursive: true });
   for (const [name, contents] of Object.entries(fileContents)) {
-    const full = path.join(dir, name);
+    const full = path.join(abs, name);
     mkdirSync(path.dirname(full), { recursive: true });
     writeFileSync(full, contents, 'utf8');
   }
-  return dir;
+  // A single path segment — no separators to translate on either platform.
+  return path.relative(REPO_ROOT, abs);
 }
 
-// bash (incl. Git Bash on Windows) treats backslashes as escapes; hand it
-// forward-slash paths. On POSIX this is a no-op (no backslashes present).
-const toBashPath = (p: string): string => p.replace(/\\/g, '/');
-
-function runGate(bundleDir: string): { status: number; stderr: string; stdout: string } {
-  const res = spawnSync('bash', [SCRIPT_REL, toBashPath(bundleDir)], {
+function runGate(bundleDirRel: string): { status: number; stderr: string; stdout: string } {
+  const res = spawnSync('bash', [SCRIPT_REL, bundleDirRel], {
     encoding: 'utf8',
     cwd: REPO_ROOT
   });
