@@ -22,7 +22,9 @@
 
 set -eu
 
-BUNDLE_DIR=${1:-/home/user/agent-os/apps/web/build}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+BUNDLE_DIR=${1:-"$REPO_ROOT/apps/web/build"}
 
 # The banned literals — production bundles MUST NOT carry any of these
 # symbols. The first three are the test-only Svelte props; the trailing

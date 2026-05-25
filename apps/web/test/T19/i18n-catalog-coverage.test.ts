@@ -10,7 +10,7 @@
  *   - Tech-writer's pass §Compliance — every key referenced by D.1..D.7 + panic-wipe is
  *     present in the scoped catalog
  *
- * NOTE: the existing scaffold reads the ROOT catalog at /home/user/agent-os/i18n/en-CA.json
+ * NOTE: the existing scaffold reads the ROOT catalog at <repo>/i18n/en-CA.json
  * via `t()` from `apps/web/src/lib/i18n/index.ts`. The T19 scoped catalog ships separately
  * at `apps/web/src/lib/i18n/onboarding.en-CA.json` per Tech-writer flag #4. The implementer
  * is responsible for wiring the i18n loader to consume BOTH catalogs (root + scoped).
@@ -22,9 +22,14 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { WEB_ROOT, REPO_ROOT } from '../_helpers/paths';
 import scopedCatalog from '../../src/lib/i18n/onboarding.en-CA.json' with { type: 'json' };
 
-const ROOT_CATALOG_PATH = '/home/user/agent-os/i18n/en-CA.json';
+const ROOT_CATALOG_PATH = path.join(REPO_ROOT, 'i18n/en-CA.json');
+const SRC_ROOTS = [
+  path.join(WEB_ROOT, 'src/lib/onboarding'),
+  path.join(WEB_ROOT, 'src/lib/lock')
+];
 
 function flattenKeys(obj: unknown, prefix = ''): string[] {
   if (obj === null || typeof obj !== 'object') return [];
@@ -78,10 +83,7 @@ describe('T19 / Decision 11 — every scoped catalog key is consumed (no orphans
     );
     expect(scopedKeys.length).toBeGreaterThan(50);
 
-    const srcRoots = [
-      '/home/user/agent-os/apps/web/src/lib/onboarding',
-      '/home/user/agent-os/apps/web/src/lib/lock'
-    ];
+    const srcRoots = SRC_ROOTS;
     const referenced = new Set<string>();
     for (const root of srcRoots) {
       for (const f of walkSrc(root)) {
@@ -122,10 +124,7 @@ describe('T19 / Decision 11 — every component i18n key reference exists in som
       }
     }
 
-    const srcRoots = [
-      '/home/user/agent-os/apps/web/src/lib/onboarding',
-      '/home/user/agent-os/apps/web/src/lib/lock'
-    ];
+    const srcRoots = SRC_ROOTS;
     const missing: Array<{ key: string; file: string }> = [];
     for (const root of srcRoots) {
       for (const f of walkSrc(root)) {

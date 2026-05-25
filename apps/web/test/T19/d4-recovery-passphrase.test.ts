@@ -35,8 +35,11 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { WEB_ROOT, REPO_ROOT } from '../_helpers/paths';
 import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
 import { t } from '../../src/lib/i18n';
+
+const ONBOARDING_SRC = path.join(WEB_ROOT, 'src/lib/onboarding');
 
 beforeEach(() => {
   freezeClock();
@@ -68,7 +71,7 @@ function walkSrc(root: string): string[] {
 
 describe('T19 / F-104 M-104a — passphrase ref is closure-scope only', () => {
   it('no source file under lib/onboarding writes to window.passphrase or globalThis.passphrase', () => {
-    const files = walkSrc('/home/user/agent-os/apps/web/src/lib/onboarding');
+    const files = walkSrc(ONBOARDING_SRC);
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
@@ -80,7 +83,7 @@ describe('T19 / F-104 M-104a — passphrase ref is closure-scope only', () => {
   });
 
   it('no module-level `let passphrase` appears under lib/onboarding (must live inside the component closure)', () => {
-    const files = walkSrc('/home/user/agent-os/apps/web/src/lib/onboarding');
+    const files = walkSrc(ONBOARDING_SRC);
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
@@ -104,8 +107,8 @@ describe('T19 / F-104 M-104a — passphrase ref is closure-scope only', () => {
 describe('T19 / F-104 M-104d — no === on passphrase or typed in D.4/D.6 sources', () => {
   it('D4RecoveryPassphrase.svelte and D6TypeBackVerify.svelte have zero `===` on a passphrase|typed line', () => {
     const files = [
-      '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D4RecoveryPassphrase.svelte',
-      '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D6TypeBackVerify.svelte'
+      path.join(ONBOARDING_SRC, 'steps/D4RecoveryPassphrase.svelte'),
+      path.join(ONBOARDING_SRC, 'steps/D6TypeBackVerify.svelte')
     ];
     const offenders: string[] = [];
     for (const f of files) {
@@ -232,7 +235,7 @@ describe('T19 / F-105 M-105a/b — recovery-blob-download JSON shape', () => {
 
 describe('T19 / F-105 M-105c — recovery-blob-download header comment documents the re-import contract', () => {
   it('recovery-blob-download.ts opens with a comment naming version, MAC verification, and the no-fallback contract', () => {
-    const p = '/home/user/agent-os/apps/web/src/lib/onboarding/recovery-blob-download.ts';
+    const p = path.join(ONBOARDING_SRC, 'recovery-blob-download.ts');
     expect(existsSync(p), `expected ${p} to exist`).toBe(true);
     const src = readFileSync(p, 'utf8');
     // The first 80 lines hold the file header per F-105 M-105c.
@@ -263,7 +266,7 @@ describe('T19 / F-108 M-108a — D.4 has no copy-passphrase affordance', () => {
   });
 
   it('D4RecoveryPassphrase source has zero references to navigator.clipboard', () => {
-    const p = '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D4RecoveryPassphrase.svelte';
+    const p = path.join(ONBOARDING_SRC, 'steps/D4RecoveryPassphrase.svelte');
     const src = readFileSync(p, 'utf8');
     // The component MAY register an onCopy handler that calls preventDefault;
     // it MUST NOT call navigator.clipboard.writeText with the passphrase.
@@ -277,7 +280,7 @@ describe('T19 / F-108 M-108a — D.4 has no copy-passphrase affordance', () => {
 
 describe('T19 / F-108 M-108b + G-T19-6 — no speech synthesis under onboarding/recovery', () => {
   it('no source file under lib/onboarding (excluding tests) references SpeechSynthesisUtterance / window.speechSynthesis / tts', () => {
-    const files = walkSrc('/home/user/agent-os/apps/web/src/lib/onboarding');
+    const files = walkSrc(ONBOARDING_SRC);
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
@@ -290,8 +293,8 @@ describe('T19 / F-108 M-108b + G-T19-6 — no speech synthesis under onboarding/
 
   it('the G-T19-6 static-lint script exists and covers D4RecoveryPassphrase / D6TypeBackVerify / recovery/*', () => {
     const candidates = [
-      '/home/user/agent-os/scripts/check-onboarding-no-passphrase-leak.sh',
-      '/home/user/agent-os/apps/web/scripts/check-onboarding-no-passphrase-leak.sh'
+      path.join(REPO_ROOT, 'scripts/check-onboarding-no-passphrase-leak.sh'),
+      path.join(WEB_ROOT, 'scripts/check-onboarding-no-passphrase-leak.sh')
     ];
     const present = candidates.find((p) => existsSync(p));
     expect(present, `expected G-T19-6 script at one of: ${candidates.join(', ')}`).toBeDefined();
@@ -358,7 +361,7 @@ describe('T19 / F-110 M-110a — D.4 error rendering does not echo the passphras
 
 describe('T19 / F-111 M-111a — wizard state never lands in URL or web-storage', () => {
   it('no source file under lib/onboarding (excluding tests) references window.location.hash / search / pushState / replaceState / sessionStorage / localStorage', () => {
-    const files = walkSrc('/home/user/agent-os/apps/web/src/lib/onboarding');
+    const files = walkSrc(ONBOARDING_SRC);
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
@@ -384,11 +387,11 @@ describe('T19 / F-111 M-111a — wizard state never lands in URL or web-storage'
 
 describe('T19 / F-111 M-111b — onboarding routes do not consume URL search params for wizard state', () => {
   it('no route file under src/routes/onboarding references $page.url.searchParams', () => {
-    const root = '/home/user/agent-os/apps/web/src/routes/onboarding';
+    const root = path.join(WEB_ROOT, 'src/routes/onboarding');
     if (!existsSync(root)) {
       // The implementer may name the route differently (e.g., /enroll) — assert defensively
       // by scanning the entire routes tree for a wizard-step query reading.
-      const routes = '/home/user/agent-os/apps/web/src/routes';
+      const routes = path.join(WEB_ROOT, 'src/routes');
       if (!existsSync(routes)) {
         // No routes shipped yet; the production-strip test for prop-driven step
         // selection covers the alternative path.

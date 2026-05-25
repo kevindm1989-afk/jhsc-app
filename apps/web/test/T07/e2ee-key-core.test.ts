@@ -48,6 +48,8 @@ import {
   cleanup,
 } from '@testing-library/svelte';
 import RecoveryPassphraseScreen from '../../src/lib/onboarding/recovery/RecoveryPassphraseScreen.svelte';
+import nodePath from 'node:path';
+import { WEB_ROOT, REPO_ROOT } from '../_helpers/paths';
 
 let supa: TestSupabase;
 let core: KeyCore;
@@ -415,7 +417,7 @@ describe('T07 / HG-2 / ADR-0003 Amendment A / F-07 — Invariant 8 key-material 
     // test. Here we assert the script exists and runs to completion (smoke).
     const { execSync } = await import('node:child_process');
     const out = execSync('bash scripts/check-audit-enum-coverage.sh', {
-      cwd: '/home/user/agent-os',
+      cwd: REPO_ROOT,
     }).toString();
     expect(out).toMatch(/OK|PASS|coverage complete/i);
   });
@@ -671,7 +673,7 @@ describe('T07 / HG-12 / ADR-0003 Amendment F — recovery-passphrase "show again
     let matches = '';
     try {
       matches = execSync(
-        `grep -rn --include='*.ts' --include='*.svelte' -E 'SpeechSynthesisUtterance|window\\.speechSynthesis|\\btts\\b' /home/user/agent-os/apps/web/src/lib/onboarding/recovery/`
+        `grep -rn --include='*.ts' --include='*.svelte' -E 'SpeechSynthesisUtterance|window\\.speechSynthesis|\\btts\\b' ${nodePath.join(WEB_ROOT, 'src/lib/onboarding/recovery/')}`
       ).toString();
     } catch {
       matches = '';

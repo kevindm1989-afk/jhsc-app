@@ -22,8 +22,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { REPO_ROOT } from '../_helpers/paths';
 
-const SCRIPT = '/home/user/agent-os/scripts/check-onboarding-test-props-stripped.sh';
+const SCRIPT = path.join(REPO_ROOT, 'scripts/check-onboarding-test-props-stripped.sh');
 
 const createdDirs: string[] = [];
 

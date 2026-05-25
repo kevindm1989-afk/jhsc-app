@@ -25,10 +25,13 @@ import { render, screen, cleanup } from '@testing-library/svelte';
 import { freezeClock, restoreClock } from '../_helpers/clock';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { WEB_ROOT } from '../_helpers/paths';
 import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
 import { createTestSupabase, type TestSupabase } from '../_helpers/supabase-test';
 import { SYNTHETIC_USER_A } from '../_helpers/fixtures';
 import { t } from '../../src/lib/i18n';
+
+const ONBOARDING_SRC = path.join(WEB_ROOT, 'src/lib/onboarding');
 
 let supa: TestSupabase;
 beforeEach(async () => {
@@ -111,8 +114,8 @@ describe('T19 / F-114 M-114b — D7Complete.svelte header documents the no-eleva
     // Either name is accepted (the architect uses D7Complete in some places and
     // D7Completion in others). Try both.
     const candidates = [
-      '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D7Complete.svelte',
-      '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D7Completion.svelte'
+      path.join(ONBOARDING_SRC, 'steps/D7Complete.svelte'),
+      path.join(ONBOARDING_SRC, 'steps/D7Completion.svelte')
     ];
     const present = candidates.find((p) => existsSync(p));
     expect(present, `expected one of: ${candidates.join(' OR ')} to exist`).toBeDefined();
@@ -130,7 +133,7 @@ describe('T19 / F-114 M-114b — D7Complete.svelte header documents the no-eleva
 
 describe('T19 / F-114 M-114a — no committee_membership writes anywhere in lib/onboarding source', () => {
   it('no source under lib/onboarding references "committee_membership" / "INSERT INTO committee_membership"', () => {
-    const files = walkSrc('/home/user/agent-os/apps/web/src/lib/onboarding');
+    const files = walkSrc(ONBOARDING_SRC);
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
@@ -143,7 +146,7 @@ describe('T19 / F-114 M-114a — no committee_membership writes anywhere in lib/
   });
 
   it('no source under lib/onboarding writes a "role: <something>" object literal naming a privileged role', () => {
-    const files = walkSrc('/home/user/agent-os/apps/web/src/lib/onboarding');
+    const files = walkSrc(ONBOARDING_SRC);
     const offenders: string[] = [];
     const PRIVILEGED = /\b(worker_co_?chair|certified_member|employer_co_?chair)\b/;
     for (const f of files) {

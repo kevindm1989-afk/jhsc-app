@@ -31,8 +31,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
 import { existsSync, readFileSync } from 'node:fs';
+import nodePath from 'node:path';
+import { WEB_ROOT } from '../_helpers/paths';
 import PanicWipeModal from '../../src/lib/lock/PanicWipeModal.svelte';
 import { t } from '../../src/lib/i18n';
+
+const PANIC_WIPE_SOURCE = nodePath.join(WEB_ROOT, 'src/lib/lock/panic-wipe.ts');
 
 beforeEach(() => {
   freezeClock();
@@ -124,7 +128,7 @@ describe('T19 / F-106 M-106b — audit row meta is the closed allowlist', () => 
   });
 
   it('panic-wipe.ts source has no reference to navigator.* or `ip` inside the audit-meta construction', () => {
-    const src = readFileSync('/home/user/agent-os/apps/web/src/lib/lock/panic-wipe.ts', 'utf8');
+    const src = readFileSync(PANIC_WIPE_SOURCE, 'utf8');
     const stripped = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
     expect(stripped).not.toMatch(/navigator\./);
     expect(stripped).not.toMatch(/['"]ip['"]\s*:/);
@@ -175,7 +179,7 @@ describe('T19 / F-106 M-106c — partial-failure produces a SECOND audit row', (
 
 describe('T19 / F-109 M-109a + G-T19-8 — BrowserWipeStore.clearCaches enumerates dynamically', () => {
   it('panic-wipe.ts source uses `caches.keys()` and does NOT hard-code a cache-name array', () => {
-    const p = '/home/user/agent-os/apps/web/src/lib/lock/panic-wipe.ts';
+    const p = PANIC_WIPE_SOURCE;
     expect(existsSync(p)).toBe(true);
     const src = readFileSync(p, 'utf8');
     const stripped = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');

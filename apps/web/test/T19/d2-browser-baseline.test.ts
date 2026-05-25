@@ -23,6 +23,8 @@ import { freezeClock, restoreClock } from '../_helpers/clock';
 import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
 import { t } from '../../src/lib/i18n';
 import { existsSync, readFileSync } from 'node:fs';
+import nodePath from 'node:path';
+import { WEB_ROOT, REPO_ROOT } from '../_helpers/paths';
 
 beforeEach(() => {
   freezeClock();
@@ -129,7 +131,7 @@ describe('T19 / F-102 + Surface D.T19.e — browser baseline badge', () => {
 
 describe('T19 / F-102 M-102a — D.3 passkey enrollment call passes window.location.origin', () => {
   it('D3PasskeyEnrollment source file does not contain any hard-coded http(s) URL literal (only window.location.origin)', () => {
-    const path = '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D3PasskeyEnrollment.svelte';
+    const path = nodePath.join(WEB_ROOT, 'src/lib/onboarding/steps/D3PasskeyEnrollment.svelte');
     expect(existsSync(path)).toBe(true);
     const src = readFileSync(path, 'utf8');
     // Strip comments + the standard test-only-prop split form so we only scan
@@ -152,8 +154,8 @@ describe('T19 / F-102 M-102b + G-T19-5 — production-bundle grep gate names all
   it('a CI script exists that greps the production bundle for __test_step, __test_user_agent, __test_origin', () => {
     // Either of the two paths the implementer may choose for the script.
     const candidates = [
-      '/home/user/agent-os/scripts/check-onboarding-test-props-stripped.sh',
-      '/home/user/agent-os/apps/web/scripts/check-onboarding-test-props-stripped.sh'
+      nodePath.join(REPO_ROOT, 'scripts/check-onboarding-test-props-stripped.sh'),
+      nodePath.join(WEB_ROOT, 'scripts/check-onboarding-test-props-stripped.sh')
     ];
     const present = candidates.find((p) => existsSync(p));
     expect(present, `expected one of ${candidates.join(' OR ')} to exist`).toBeDefined();
@@ -171,7 +173,7 @@ describe('T19 / F-102 M-102b + G-T19-5 — production-bundle grep gate names all
 
 describe('T19 / Decision 8 — test-only props are runtime no-op under MODE=production', () => {
   it('OnboardingFlow source contains the MODE === "production" runtime guard for test props', () => {
-    const path = '/home/user/agent-os/apps/web/src/lib/onboarding/OnboardingFlow.svelte';
+    const path = nodePath.join(WEB_ROOT, 'src/lib/onboarding/OnboardingFlow.svelte');
     expect(existsSync(path)).toBe(true);
     const src = readFileSync(path, 'utf8');
     // The guard MUST exist near the top of the prop-application code path.
@@ -183,7 +185,7 @@ describe('T19 / Decision 8 — test-only props are runtime no-op under MODE=prod
     // OR as variables. Either way, the BARE LITERAL strings '__test_step' /
     // '__test_user_agent' must NOT appear concatenated in a single quoted token
     // inside a runtime call site (only inside type / comment / split-form contexts).
-    const path = '/home/user/agent-os/apps/web/src/lib/onboarding/OnboardingFlow.svelte';
+    const path = nodePath.join(WEB_ROOT, 'src/lib/onboarding/OnboardingFlow.svelte');
     const src = readFileSync(path, 'utf8');
     // The split-form pattern OR an explicit destructure binding is acceptable;
     // a bare 'foo.__test_step' chain in a runtime call site is the regression.

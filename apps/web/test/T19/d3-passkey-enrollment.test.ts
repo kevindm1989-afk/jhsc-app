@@ -23,7 +23,11 @@ import { freezeClock, restoreClock } from '../_helpers/clock';
 import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
 import { t } from '../../src/lib/i18n';
 import { existsSync, readFileSync } from 'node:fs';
+import nodePath from 'node:path';
+import { WEB_ROOT } from '../_helpers/paths';
 import { TOTP_WRONG_LIMIT } from '../../src/lib/auth/rate-limit';
+
+const D3_SOURCE = nodePath.join(WEB_ROOT, 'src/lib/onboarding/steps/D3PasskeyEnrollment.svelte');
 
 const CHROME_130_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -66,7 +70,7 @@ describe('T19 / D.3 — catalog keys reachable', () => {
 
 describe('T19 / F-103 M-103a — TOTP rate-limit surfaced at D.3', () => {
   it('D.3 source consumes onboarding.passkey_d3.error.totp_locked when rate-limit fires (catalog key reference)', () => {
-    const path = '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D3PasskeyEnrollment.svelte';
+    const path = D3_SOURCE;
     expect(existsSync(path)).toBe(true);
     const src = readFileSync(path, 'utf8');
     // The component MUST reference the canonical key (so the closed-allowlist
@@ -94,7 +98,7 @@ describe('T19 / F-103 M-103a — TOTP rate-limit surfaced at D.3', () => {
 
 describe('T19 / F-103 M-103b — D.3 source does not use `===` on the TOTP code', () => {
   it('D.3 source has zero occurrences of `===` on the same line as `totp` and `code`', () => {
-    const path = '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D3PasskeyEnrollment.svelte';
+    const path = D3_SOURCE;
     const src = readFileSync(path, 'utf8');
     const lines = src.split('\n');
     const offenders = lines.filter(
@@ -133,7 +137,7 @@ describe('T19 / F-103 M-103c — collapsed user-visible 410/401 surface', () => 
   });
 
   it('D.3 source references the collapsed-error key (closed-allowlist consumption)', () => {
-    const path = '/home/user/agent-os/apps/web/src/lib/onboarding/steps/D3PasskeyEnrollment.svelte';
+    const path = D3_SOURCE;
     const src = readFileSync(path, 'utf8');
     expect(src).toMatch(/onboarding\.passkey_d3\.error\.enrollment_failed_generic/);
   });

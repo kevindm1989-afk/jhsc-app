@@ -24,7 +24,9 @@
 
 set -eu
 
-ROOT=/home/user/agent-os/apps/web/src/lib/onboarding
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+ROOT="$REPO_ROOT/apps/web/src/lib/onboarding"
 
 # Surfaces covered (per G-T19-6 + Amendment F operational rule 4):
 #   - lib/onboarding/D4RecoveryPassphrase.svelte (wrapper)
