@@ -84,9 +84,17 @@ export function generateEnrollmentSessionId(): string {
  * reason key on rejection so the wizard's error surface can render a
  * closed-allowlist t() key (F-110 M-110a).
  */
-export function canAdvance(
-  state: OnboardingWizardState
-): { ok: true } | { ok: false; reason: 'device_not_confirmed' | 'passkey_not_enrolled' | 'passphrase_not_acknowledged' | 'passphrase_not_confirmed' | 'terminal' } {
+export function canAdvance(state: OnboardingWizardState):
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | 'device_not_confirmed'
+        | 'passkey_not_enrolled'
+        | 'passphrase_not_acknowledged'
+        | 'passphrase_not_confirmed'
+        | 'terminal';
+    } {
   if (!isOrdered(state.step)) return { ok: false, reason: 'terminal' };
   switch (state.step) {
     case 'D.1':
@@ -107,7 +115,8 @@ export function canAdvance(
       // succeeds. The ORDER array reflects the canonical sequence but
       // advance() handles the D.4 → D.6 → D.5 → D.7 routing as per
       // ADR-0020 Decision 2.b).
-      if (!state.passphrase_acknowledged) return { ok: false, reason: 'passphrase_not_acknowledged' };
+      if (!state.passphrase_acknowledged)
+        return { ok: false, reason: 'passphrase_not_acknowledged' };
       return { ok: true };
     case 'D.5':
       // D.5 → D.7 is always allowed (Skip is a tertiary action).
@@ -155,10 +164,7 @@ export function advance(state: OnboardingWizardState): OnboardingWizardState {
 }
 
 /** Jump to a specific step (test-only / harness use). */
-export function jumpTo(
-  state: OnboardingWizardState,
-  step: OnboardingStep
-): OnboardingWizardState {
+export function jumpTo(state: OnboardingWizardState, step: OnboardingStep): OnboardingWizardState {
   return { ...state, step };
 }
 

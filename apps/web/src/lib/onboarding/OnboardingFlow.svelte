@@ -27,10 +27,7 @@
   import { runExtendedBaseline } from './browser-baseline';
   import {
     initialState,
-    advance as advanceState,
     canAdvance,
-    blockBaseline,
-    generateEnrollmentSessionId,
     createOnboardingRateLimiter,
     TOTAL_STEPS,
     stepNumber
@@ -240,7 +237,11 @@
       d4_passphrase = phr.passphrase;
       d4_identity_privkey = kp.private_key;
       d4_passphrase_ready = true;
-      try { __setRef(d4_passphrase, enrollment_session_id); } catch { /* prod */ }
+      try {
+        __setRef(d4_passphrase, enrollment_session_id);
+      } catch {
+        /* prod */
+      }
     } catch {
       // Argon2 unavailable in this jsdom build is OK — the passphrase
       // generator itself does not call Argon2; only the encrypt path does.
@@ -264,7 +265,11 @@
     // 32-char Crockford base32 placeholder (matches the production shape).
     const seed = 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa';
     d4_passphrase = seed;
-    try { __setRef(seed, enrollment_session_id); } catch { /* prod */ }
+    try {
+      __setRef(seed, enrollment_session_id);
+    } catch {
+      /* prod */
+    }
   }
 
   // Synchronously seed D.4 when the test forces us into the surface so the
@@ -281,7 +286,7 @@
     }
   });
 
-  function onD4DownloadComplete(_ok) {
+  function onD4DownloadComplete() {
     // Wizard does NOT block advancement on download failure (Decision 9).
   }
 
@@ -321,7 +326,11 @@
       d4_identity_privkey = new Uint8Array(0);
       typedBack = '';
       typeBackAttempts = 0;
-      try { __clearRefs(); } catch { /* prod */ }
+      try {
+        __clearRefs();
+      } catch {
+        /* prod */
+      }
       wizardState = { ...wizardState, passphrase_confirmed: true };
       const gate = canAdvance(wizardState);
       if (!gate.ok) return;
@@ -395,21 +404,25 @@
     {/each}
   </ol>
 
-  <div
-    aria-live="polite"
-    data-testid="wizard-step-announce"
-    class="sr-only"
-  >
+  <div aria-live="polite" data-testid="wizard-step-announce" class="sr-only">
     {t('a11y.onboarding.step_change', {
       n: stepNumber(currentStep),
       m: TOTAL_STEPS,
       step_name: stepLabel(stepNumber(currentStep) - 1)
     })}
     {#if d5_in_progress}
-      <span data-testid="step-loading-sr">{t('a11y.onboarding.step_loading_announcement', { step_name: stepLabel(stepNumber(currentStep) - 1) })}</span>
+      <span data-testid="step-loading-sr"
+        >{t('a11y.onboarding.step_loading_announcement', {
+          step_name: stepLabel(stepNumber(currentStep) - 1)
+        })}</span
+      >
     {/if}
     {#if d6Error || d4_rateLimitedKey}
-      <span data-testid="step-error-sr">{t('a11y.onboarding.step_error_announcement', { step_name: stepLabel(stepNumber(currentStep) - 1) })}</span>
+      <span data-testid="step-error-sr"
+        >{t('a11y.onboarding.step_error_announcement', {
+          step_name: stepLabel(stepNumber(currentStep) - 1)
+        })}</span
+      >
     {/if}
   </div>
 
@@ -448,7 +461,9 @@
         {t('onboarding.advisory_d1.secondary_button')}
       </button>
     {:else if currentStep === 'D.2'}
-      <h1 id="onboarding-current-heading" tabindex="-1">{t('onboarding.browser_baseline_d2.heading')}</h1>
+      <h1 id="onboarding-current-heading" tabindex="-1">
+        {t('onboarding.browser_baseline_d2.heading')}
+      </h1>
       <div data-testid="onboarding-d2-body">
         {#each (t('onboarding.browser_baseline_d2.body_pass') ?? '').split('\n\n') as p}
           <p>{p}</p>
@@ -470,7 +485,9 @@
           {t('onboarding.browser_baseline_d2.body_fail')}
           <ul aria-label={t('a11y.onboarding.failed_checks_list_label')}>
             {#each baseline.checks.filter((c) => !c.pass) as check}
-              <li aria-label={t('a11y.onboarding.failed_capability_label', { key: check.key })}>{check.key}</li>
+              <li aria-label={t('a11y.onboarding.failed_capability_label', { key: check.key })}>
+                {check.key}
+              </li>
             {/each}
             {#if !baseline.ua_baseline_ok}
               <li aria-label={t('onboarding.browser_baseline_d2.ua_baseline_below_supported')}>
@@ -498,11 +515,14 @@
         {t('a11y.onboarding.passphrase_field_announcement')}
       </span>
       <D4RecoveryPassphrase
-        enrollment_session_id={enrollment_session_id}
+        {enrollment_session_id}
         user_id={''}
         passphrase={d4_passphrase}
         identity_privkey={d4_identity_privkey}
-        suppress_download_button={!!__test_force_encryption_in_progress || !!__test_force_download_in_progress || !!__test_force_download_success || !!__test_force_reveal_cap}
+        suppress_download_button={!!__test_force_encryption_in_progress ||
+          !!__test_force_download_in_progress ||
+          !!__test_force_download_success ||
+          !!__test_force_reveal_cap}
         suppress_reveal_button={!!d4_revealCapped}
         onDownloadComplete={onD4DownloadComplete}
       />
@@ -559,15 +579,19 @@
       <D5SessionRevocationPrimer
         session_count={__test_session_count ?? 1}
         failed_devices={__test_revoke_partial_failure ?? []}
-        __test_revoke_delay_ms={__test_revoke_delay_ms}
-        __test_revoke_error={__test_revoke_error}
+        {__test_revoke_delay_ms}
+        {__test_revoke_error}
         bind:in_progress={d5_in_progress}
         onAdvance={onD5Advance}
       />
     {:else if currentStep === 'D.6'}
-      <h1 id="onboarding-current-heading" tabindex="-1">{t('onboarding.passphrase_d4.confirm_label')}</h1>
+      <h1 id="onboarding-current-heading" tabindex="-1">
+        {t('onboarding.passphrase_d4.confirm_label')}
+      </h1>
       <D6TypeBackVerify bind:typed_value={typedBack} />
-      <span id="d6-help" data-testid="d6-help" class="sr-only">{t('onboarding.passphrase_d4.confirm_helper')}</span>
+      <span id="d6-help" data-testid="d6-help" class="sr-only"
+        >{t('onboarding.passphrase_d4.confirm_helper')}</span
+      >
       <p>{t('onboarding.passphrase_d4.confirm_helper')}</p>
       <button type="button" on:click={onD6Submit}>
         {t('onboarding.passphrase_d4.primary_button')}

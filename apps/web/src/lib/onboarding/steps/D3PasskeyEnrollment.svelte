@@ -32,7 +32,7 @@
   export let user_id = '';
   export let totp = '';
   /** Called with the result of enrollFirstDevicePasskey (parent state machine). */
-  export let onEnrolled = (/** @type {boolean} */ _ok) => {};
+  export let onEnrolled = () => {};
 
   let errorKey = null;
   let inProgress = false;
@@ -69,7 +69,7 @@
         errorKey = 'onboarding.passkey_d3.error.enrollment_failed_generic';
         onEnrolled(false);
       }
-    } catch (_e) {
+    } catch {
       errorKey = 'onboarding.passkey_d3.error.passkey_ceremony_failed';
       onEnrolled(false);
     } finally {
@@ -82,13 +82,7 @@
   <h2>{t('onboarding.passkey_d3.heading')}</h2>
   <p>{t('onboarding.passkey_d3.body')}</p>
   <label for="totp">{t('onboarding.passkey_d3.totp_label')}</label>
-  <input
-    id="totp"
-    type="text"
-    inputmode="numeric"
-    autocomplete="one-time-code"
-    bind:value={totp}
-  />
+  <input id="totp" type="text" inputmode="numeric" autocomplete="one-time-code" bind:value={totp} />
   <button type="button" on:click={start}>{t('onboarding.passkey_d3.primary_button')}</button>
   {#if errorKey === 'onboarding.passkey_d3.error.totp_invalid'}
     <div role="alert">{t('onboarding.passkey_d3.error.totp_invalid')}</div>

@@ -107,5 +107,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libtap-parser-sourcehandler-pgtap-perl postgresql-client
 
+      - name: Build (apps/web)
+        run: pnpm -C apps/web build
+
       - name: Run verify.sh (informational)
         run: bash scripts/verify.sh

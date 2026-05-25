@@ -39,7 +39,7 @@
    *  control (used for the state-completeness D.T19.f capped row). */
   export let suppress_reveal_button = false;
   /** Called after a successful download (lets OnboardingFlow record completion state). */
-  export let onDownloadComplete = (/** @type {boolean} */ _ok) => {};
+  export let onDownloadComplete = () => {};
 
   let error = null;
   let downloadInProgress = false;
@@ -79,7 +79,7 @@
         filename
       );
       onDownloadComplete(r.ok);
-    } catch (_e) {
+    } catch {
       // F-110 M-110b — surface the plain-language key, not the canonical symbol.
       error = t('onboarding.passphrase_d4.error.argon2_unavailable');
       onDownloadComplete(false);
@@ -98,11 +98,7 @@
        any live-region attribute. -->
   <code data-testid="recovery-passphrase">{passphrase}</code>
   {#if !suppress_reveal_button}
-    <RecoveryPassphraseScreen
-      {enrollment_session_id}
-      user={{ user_id }}
-      {passphrase}
-    />
+    <RecoveryPassphraseScreen {enrollment_session_id} user={{ user_id }} {passphrase} />
   {/if}
   {#if !suppress_download_button}
     <button type="button" on:click={downloadJson}>

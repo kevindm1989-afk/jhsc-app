@@ -36,7 +36,11 @@ export {
 
 export { RETENTION_SCHEDULE, OPERATIONAL_TABLE_SCHEDULE, computeScheduleHash } from './schedule';
 
-export type { RetentionStore, DeleteBatchResult, RetentionDeletedAuditRow } from './retention-store';
+export type {
+  RetentionStore,
+  DeleteBatchResult,
+  RetentionDeletedAuditRow
+} from './retention-store';
 
 export { runRetentionPass } from './retention-core';
 export type { RunRetentionPassOpts } from './retention-core';

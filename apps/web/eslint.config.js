@@ -38,7 +38,7 @@ export default [
       '@typescript-eslint/no-unused-vars': [
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
-      ],
+      ]
       // (T16 / G-T11-9 mirror is scoped below to non-retention production
       //  source so files within the retention library can deep-import from
       //  their sibling modules.)

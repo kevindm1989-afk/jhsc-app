@@ -93,8 +93,7 @@ function probeLocks(): boolean {
 function probePasskey(): boolean {
   return safe(
     () =>
-      typeof (globalThis as { PublicKeyCredential?: unknown }).PublicKeyCredential ===
-        'function' ||
+      typeof (globalThis as { PublicKeyCredential?: unknown }).PublicKeyCredential === 'function' ||
       typeof (globalThis as { PublicKeyCredential?: unknown }).PublicKeyCredential === 'object',
     false
   );
