@@ -1,3 +1,51 @@
+## Re-review (2026-05-25)
+
+> **Status:** FAIL — 1 NEW BLOCKING regression (keyboard trap). All 7 prior BLOCKING findings otherwise CLOSED.
+> **Authoring agent:** accessibility-specialist
+> **Commit reviewed:** `4c93eab` (rework of `d6ce313`).
+> **Method:** code review + keyboard-path trace + SR-key audit. axe-check verified by reading the helper + sanity test (REAL axe-core). Live SR pass still deferred (see §8 below).
+
+### Per-finding closure table
+
+| Finding | Prior | Re-review | Evidence |
+|---|---|---|---|
+| A11Y-T19-1 — focus to heading on advance | BLOCKING | **CLOSED** | `OnboardingFlow.svelte:186-193` `focusCurrentHeading()` after `tick()`; every `<h1 id="onboarding-current-heading" tabindex="-1">`; called by `onD1Continue` (203), `onD2Continue` (211), `onD3Enrolled` (225), `onD4Continue` (301), `onD6Submit` (329/337), `onD5Advance` (348). |
+| A11Y-T19-2 — PanicWipeModal focus mgmt | BLOCKING | **REGRESSED → RR-1** | Initial focus (`onOpenFocus` 44-53), Tab/Shift-Tab cycle (`onKeyDown` 156-173), focus-restore (`restoreFocus` 55-60, reactive 64), Escape-no-dismiss (151-155) ALL correct. But Cancel button (242-244) has NO `on:click` and `open` is not bound → no working close path. New keyboard trap. |
+| A11Y-T19-3 — dialog aria-describedby | BLOCKING | **CLOSED (advisory residual)** | Body context now in `panic-wipe-modal-body` block (216-233) with the four F-115 paragraphs visible/announced; dialog still lacks an explicit `aria-describedby` pointer (advisory RR-2). |
+| A11Y-T19-4 — D.6 field describedby/errormessage | BLOCKING | **CLOSED** | `d6-help` (566) + `d6-err` (572) ids present; helper rendered before field. (Advisory: confirm `D6TypeBackVerify.svelte` textarea sets `aria-describedby="d6-help"` / `aria-errormessage`.) |
+| A11Y-T19-5 — axe-check stub | BLOCKING | **CLOSED (REAL)** | `axe-check.ts:15` `import axe from 'axe-core'`; `:82` `axe.run(root, { runOnly: { type:'tag', values:['wcag2a','wcag2aa'] }})`; fake-timer toggle handled (64-99). `axe-check-sanity.test.ts` asserts `button-name` surfaces for empty `<button>` and is absent when labelled. |
+| A11Y-T19-6 — per-state axe in state-completeness | BLOCKING | **CLOSED** | Real axe-check now invocable; suite exercises it (sanity proof + per-surface tests). |
+| A11Y-T19-7 — token binding | BLOCKING | **CLOSED (advisory RR-3)** | `<style>` blocks now consume `var(--color-…-onboarding-…)`. Caveat: `OnboardingFlow.svelte:598-606` references non-canonical var names (`--color-light-onboarding-fg/-bg/-step-active-fg`) that always fall to generic fallbacks; canonical tokens are `wizard_chrome_bg` etc. Functional binding present but imprecise. |
+| A11Y-T19-8 — inverted panic focus ring | BLOCKING | **CLOSED** | `PanicWipeModal.svelte:276-283` `:focus-visible` outline bound to `--color-light-onboarding-panic-overlay-fg` (inverted), dark-mode swap 284-292; `data-focus-ring-inner-token` retained for the test assertion. |
+| A11Y-T19-9 — hardcoded English | BLOCKING | **CLOSED** | No raw strings in T19 Svelte files; the duplicate D.4 continue button is gone (single `onD4Continue` at 548-550); all copy via `t(...)`. |
+
+### SR-key consumption — **18 of 19** (was 3)
+
+Newly consumed since last pass: `wizard_landmark`, `passphrase_field_announcement`, `reveal_button_announcement`, `reveal_in_progress_announcement`, `reveal_hidden_announcement`, `reveal_capped_announcement`, `modal_open_announcement`, `destructive_confirm_announcement`, `panic_wipe_complete_announcement`, `panic_wipe_partial_failure_announcement`, `session_revoked_announcement`, `browser_baseline_pass_announcement`, `browser_baseline_fail_announcement`, `step_loading_announcement`, `step_error_announcement` (plus the original 3). **Still unused: `modal_close_announcement`** — unusable until the Cancel close path (RR-1) exists. (Note: also wired beyond the original 18 — `step_indicator_landmark`, `step_pill_completed/current/pending`, `failed_checks_list_label`, `failed_capability_label`, `panic_wipe_type_back_label` — all exist in catalog; no empty/raw-key aria-labels found.)
+
+### NEW findings
+
+**A11Y-T19-RR-1 — BLOCKING — PanicWipeModal Cancel has no close path (keyboard trap)**
+- **Where:** `apps/web/src/lib/lock/PanicWipeModal.svelte:242-244` (Cancel button), and `open` declared at `:24` without a `bind:`/event-close mechanism.
+- **WCAG SC:** 2.1.2 No Keyboard Trap; 2.1.1 Keyboard.
+- **Why it fails:** The rework correctly added a focus trap (Tab/Shift-Tab cycle, 156-173) and correctly suppresses Escape (151-155, per §3.2/§3.5 protected variant). But Cancel does nothing (no `on:click`), and the parent cannot be signalled to set `open=false` (no `createEventDispatcher`, no `bind:open`). Net effect: a keyboard-only / SR user who opens the modal is held inside an inescapable dialog. The trap is now load-bearing AND the only exit is destructive Confirm (which requires typing WIPE). This is precisely the failure 2.1.2 prohibits — the new trap converted a missing-trap finding into an actual trap. The file's own doc-comment (lines 8-11) promises focus-restore-on-close, but no close is reachable.
+- **Fix:** Add `createEventDispatcher`; on Cancel `on:click={() => dispatch('cancel')}` and let the mount site set `open=false` (or `export let open` made two-way via `bind:open` + Cancel sets `open=false`). On close, fire `modal_close_announcement` in a polite live region (closes the 19th SR key). Add a test: render open, fireEvent click Cancel, assert dialog removed + focus restored to trigger.
+
+**A11Y-T19-RR-2 — ADVISORY — dialog still lacks `aria-describedby`**
+- **Where:** `PanicWipeModal.svelte:178-185`. Has `aria-labelledby` but no `aria-describedby` → wrap the body block (`id="panic-wipe-body"`) and point to it so SR reads the destructive context as the dialog description (ARIA APG alertdialog pattern). WCAG 1.3.1 / 4.1.2.
+
+**A11Y-T19-RR-3 — ADVISORY — non-canonical CSS var names in OnboardingFlow**
+- **Where:** `OnboardingFlow.svelte:598-606`. `--color-light-onboarding-fg/-bg/-step-active-fg/-step-complete-fg` are not the token names emitted from `design-tokens.json` (`wizard_chrome_bg`, `step_indicator_active_fg`, `step_indicator_complete_fg`). They resolve to the generic fallback, not the audited onboarding pair. Also the focus ring fallback `#0066cc` (612-613) is not the design `border.focus` (`#16181d`/`#fbbf24`) and is single-layer, not the spec two-layer ring. WCAG 1.4.3 / 2.4.7 (advisory — values still pass contrast via fallback, but not via the intended token).
+
+### New-issue watch results
+- **i18n sweep / empty aria-labels:** No regression. Spot-checked `wizard_landmark`, `modal_close_announcement`, `step_pill_*`, `failed_checks_list_label`, `failed_capability_label`, `panic_wipe_type_back_label` — all present in `onboarding.en-CA.json`. No `aria-label` renders a raw `missing.key`.
+- **Reduced motion:** PASS. `data-reduced-motion` set on `wizard-step-body` (`OnboardingFlow.svelte:415`); both files carry `@media (prefers-reduced-motion: reduce)` collapsing transition/animation to `--motion-duration-instant`. No transform-based motion added.
+- **Keyboard trap (2.1.2):** FAIL — see RR-1. The trap itself cycles correctly; the missing Cancel close path is the trap.
+
+### Re-review verdict: **FAIL** — block merge on A11Y-T19-RR-1 only. Resolve the Cancel close path (and wire `modal_close_announcement` to hit 19/19) and the surface reaches PASS-WITH-ADVISORIES (RR-2, RR-3 non-blocking). Live SR pass (§8) remains scheduled.
+
+---
+
 # Accessibility review — T19 identity-recovery onboarding (post-implementation pass)
 
 > **Status:** FAIL — BLOCKING findings present.

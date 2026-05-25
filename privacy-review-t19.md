@@ -1,3 +1,18 @@
+## Re-review (2026-05-25)
+
+**Verdict: PASS-WITH-ADVISORIES. P-T19-2 CLOSED. Merge still gated on HG-10; HG-10 packet must be REGENERATED for 5 new a11y keys.**
+
+- **P-T19-2** (hard-coded English, former OnboardingFlow.svelte:547-550) — **CLOSED.** Grep for "Settings → Sessions"/"Settings → Wipe"/"sign out other devices" returns zero. Region now t()-only (lines 548-549). G-T19-PRIV-1 resolved.
+- **P-T19-1 / HG-10** — STILL PENDING (correct). Banner intact at decisions.md:795 + onboarding.en-CA.json:20.
+- **P-T19-RR-1 (NEW, BLOCKING-AT-MERGE)** — HG-10 packet stale. Rework added 5 user-facing keys (panic_wipe_type_back_label, step_indicator_landmark, step_pill_completed/current/pending, failed_checks_list_label, failed_capability_label) at onboarding.en-CA.json:264-276. In catalog (lawyer-reviewable) and t()-referenced (OnboardingFlow.svelte:362,371-374,467,469) — NOT hardcoded. But A11y summary at decisions.md:832-834 still says "18 strings" and omits them. Regenerate the HG-10 A11y summary before routing to counsel. Regime: PIPEDA 4.3.4 + ADR-0020 Decision 7 + HG-10 (lawyer must see every string).
+  - Non-privacy note: new keys absent from copy-keys.ts COPY_KEYS — flag to verifier (orphan-key contract), not a privacy block.
+- **Over-collection re-check** — PASS. recovery-blob-download.ts holds the 4-key allowlist (lines 44-49, 79-88); nonce folded into ciphertext (non-PI), no separate nonce key, no PI fields. device-fingerprint unchanged (UA+platform only). browser-baseline.ts detection-only/client-side/no-transmission; passkey probe does NOT enumerate authenticators (lines 93-101); argon2id probe reads cache only (lines 113-130).
+- **emitAudit** now {ok:false} fail-closed (wipe-store.ts:230-238); PanicWipeAuditRow.meta still closed allowlist (lines 26-35), no new PI. Strengthens P-T19-4 posture; G-T19-PRIV-3 (prod wire-up) still open.
+- New interpolations {n}/{m}/{key} are non-PII operational tokens; {key} is a BaselineCheckKey enum value. No {user_name}/{email}.
+- Threat-model §8.T19: no classification/residency/retention/purpose drift. No new subprocessor; no cross-border transfer.
+
+---
+
 # Privacy Review T19 — Identity-Recovery Onboarding Library + OnboardingFlow / PanicWipeModal Composition
 
 **Status: PASS-WITH-ADVISORIES (BLOCKED-AT-MERGE on HG-10 + 1 catalog-bypass finding)**
