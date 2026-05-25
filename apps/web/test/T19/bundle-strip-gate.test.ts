@@ -40,8 +40,12 @@ function makeBundleDir(fileContents: Record<string, string>): string {
   return dir;
 }
 
+// bash (incl. Git Bash on Windows) treats backslashes as escapes; hand it
+// forward-slash paths. On POSIX this is a no-op (no backslashes present).
+const toBashPath = (p: string): string => p.replace(/\\/g, '/');
+
 function runGate(bundleDir: string): { status: number; stderr: string; stdout: string } {
-  const res = spawnSync('bash', [SCRIPT, bundleDir], { encoding: 'utf8' });
+  const res = spawnSync('bash', [toBashPath(SCRIPT), toBashPath(bundleDir)], { encoding: 'utf8' });
   return {
     status: res.status ?? -1,
     stderr: res.stderr ?? '',
