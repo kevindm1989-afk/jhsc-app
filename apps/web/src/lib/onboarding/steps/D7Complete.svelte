@@ -22,11 +22,10 @@
   </ul>
 </section>
 
-<section
-  aria-labelledby="d7-next-steps-heading"
-  data-testid="completion-next-steps"
-  role="region"
->
+<!-- svelte-ignore a11y_no_redundant_roles -->
+<!-- role="region" is implicit on a named <section>, but kept explicit because the
+     D.T19.h state-completeness test asserts the literal role attribute. -->
+<section aria-labelledby="d7-next-steps-heading" data-testid="completion-next-steps" role="region">
   <h3 id="d7-next-steps-heading">{t('onboarding.completion_d7.next_steps_heading')}</h3>
   <p>{t('onboarding.completion_d7.next_steps_body')}</p>
 </section>

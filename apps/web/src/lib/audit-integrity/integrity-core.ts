@@ -392,9 +392,7 @@ export interface RunWeeklyChainAnchorOpts {
  * or batch_size (F-97). The result's `error_code` is a closed literal
  * union (F-100).
  */
-export async function runIntegrityCheck(
-  opts: RunIntegrityCheckOpts
-): Promise<IntegrityRunResult> {
+export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<IntegrityRunResult> {
   const { store, config } = opts;
   const trigger = assertValidTrigger(config.trigger);
   const lease_window_ms = config.lease_window_ms ?? INTEGRITY_DEFAULT_LEASE_WINDOW_MS;
@@ -569,8 +567,7 @@ export async function runIntegrityCheck(
     unattributable_count: backupDiffOutcome.unattributable_count,
     backup_diff_performed,
     backup_manifest_run_id: manifest === null ? null : manifest.run_id,
-    resume_after_id:
-      status === 'capped' ? chainWalkOutcome.last_walked_id : null,
+    resume_after_id: status === 'capped' ? chainWalkOutcome.last_walked_id : null,
     node_runtime_pin: { ...livePin },
     schedule_hash: manifest === null ? null : manifest.schedule_hash
   };
@@ -599,8 +596,7 @@ export async function runIntegrityCheck(
         unattributable_count: backupDiffOutcome.unattributable_count,
         backup_diff_performed,
         backup_manifest_run_id: manifest === null ? null : manifest.run_id,
-        resume_after_id:
-          status === 'capped' ? chainWalkOutcome.last_walked_id : null,
+        resume_after_id: status === 'capped' ? chainWalkOutcome.last_walked_id : null,
         node_runtime_pin: livePin,
         schedule_hash: manifest === null ? null : manifest.schedule_hash
       },

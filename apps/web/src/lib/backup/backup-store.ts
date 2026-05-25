@@ -15,7 +15,12 @@
  * `BACKUP_OBJECT_LOCK_DAYS`.
  */
 
-import type { BackupAuditLogHead, BackupManifest, BackupManifestStatus, BackupNodeRuntimePin } from './types';
+import type {
+  BackupAuditLogHead,
+  BackupManifest,
+  BackupManifestStatus,
+  BackupNodeRuntimePin
+} from './types';
 
 /**
  * Structured upload-rejection reason vocabulary (F-82). Closed literal union;
@@ -40,7 +45,10 @@ export type BackupPutResult =
  */
 export type BackupDeleteResult =
   | { readonly deleted: true }
-  | { readonly deleted: false; readonly reason: 'still_locked' | 'not_found' | 'unknown_storage_error' };
+  | {
+      readonly deleted: false;
+      readonly reason: 'still_locked' | 'not_found' | 'unknown_storage_error';
+    };
 
 /**
  * Committed-manifest summary returned by `listCommittedManifests`.

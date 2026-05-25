@@ -1,0 +1,14 @@
+# gitleaks configuration for jhsc-app.
+#
+# Extends gitleaks' default ruleset (useDefault = true) and allowlists a
+# known-synthetic, non-secret test fixture that is deliberately shaped like
+# a credential so the Sentry-scrub test can prove scrubFreeText() collapses
+# key-shaped blobs. This is NOT a real secret.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic 40-char base64-shaped fixture in the T02 Sentry-scrub test — hand-typed test data proving the scrubber collapses key-shaped blobs; not a credential."
+paths = ['''apps/web/test/T02/sentry-scrub\.test\.ts''']
+regexes = ['''AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCd''']

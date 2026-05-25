@@ -14,8 +14,8 @@
  *   - ADR-0014 — HMAC scheme, salt version, sequence number.
  *   - threat-model §3.5 F-44 (tamper) / F-45 (no plaintext residue) /
  *     F-47 (queue cap 500).
- *   - audit-log.md §1 — `queue.integrity_fail` canonical name; forbidden
- *     alias `inspection.synced.hmac_fail` (per ADR-0010 Amendment F-B).
+ *   - audit-log.md §1 — `queue.integrity_fail` canonical name; its legacy
+ *     threat-model alias is forbidden in code (per ADR-0010 Amendment F-B).
  *   - alerts.md — A-QUEUE-001 (every queue.integrity_fail fires alert).
  */
 

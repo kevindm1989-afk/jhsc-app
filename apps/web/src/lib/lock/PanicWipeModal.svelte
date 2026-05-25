@@ -24,7 +24,11 @@
   const dispatch = createEventDispatcher();
 
   function syncFlush() {
-    try { flushSync(); } catch { /* outside effect ctx */ }
+    try {
+      flushSync();
+    } catch {
+      /* outside effect ctx */
+    }
   }
 
   export let open = false;
@@ -44,9 +48,7 @@
     if (!root) return [];
     const sel =
       'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    return Array.from(root.querySelectorAll(sel)).filter(
-      (el) => !el.hasAttribute('aria-hidden')
-    );
+    return Array.from(root.querySelectorAll(sel)).filter((el) => !el.hasAttribute('aria-hidden'));
   }
 
   async function onOpenFocus() {
@@ -61,8 +63,8 @@
   }
 
   function restoreFocus() {
-    if (priorFocus && typeof (priorFocus).focus === 'function') {
-      (priorFocus).focus();
+    if (priorFocus && typeof priorFocus.focus === 'function') {
+      priorFocus.focus();
     }
     priorFocus = null;
   }
@@ -203,6 +205,10 @@
 </script>
 
 {#if open}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- The keydown listener implements the WAI-ARIA modal focus trap (Tab/Shift+Tab
+       wrap); the dialog role + tabindex=-1 is the correct pattern. The listener is
+       focus management, not a click affordance. -->
   <div
     role="dialog"
     aria-modal="true"
@@ -215,7 +221,11 @@
     <!-- SR-only announcers: modal_open + destructive_confirm + (when
          applicable) panic_wipe_* state transitions. The visible heading
          carries the same information for sighted users. -->
-    <span class="sr-only">{t('a11y.onboarding.modal_open_announcement', { modal_name: t('onboarding.panic_wipe_d6.modal_heading') })}</span>
+    <span class="sr-only"
+      >{t('a11y.onboarding.modal_open_announcement', {
+        modal_name: t('onboarding.panic_wipe_d6.modal_heading')
+      })}</span
+    >
     <span class="sr-only">{t('a11y.onboarding.destructive_confirm_announcement')}</span>
     {#if wipeState === 'in_progress'}
       <div
@@ -250,10 +260,7 @@
         {t('onboarding.panic_wipe_d6.cancel_button')}
       </button>
     {:else}
-      <div
-        data-testid="panic-wipe-modal-body"
-        aria-busy={!ready ? 'true' : null}
-      >
+      <div data-testid="panic-wipe-modal-body" aria-busy={!ready ? 'true' : null}>
         <p>{t('onboarding.panic_wipe_d6.modal_body_what_happens')}</p>
         <p>{t('onboarding.panic_wipe_d6.modal_body_what_doesnt')}</p>
         <p>{t('onboarding.panic_wipe_d6.modal_residual_risk_callout')}</p>
@@ -308,7 +315,8 @@
      at 1.0:1 on the overlay). Tokens land via the global CSS var
      namespace produced from design-tokens.json. */
   [role='dialog']:focus-visible {
-    outline: 2px solid var(--color-light-onboarding-panic-overlay-fg, var(--color-light-foreground-primary, #16181d));
+    outline: 2px solid
+      var(--color-light-onboarding-panic-overlay-fg, var(--color-light-foreground-primary, #16181d));
     outline-offset: 2px;
   }
   [data-testid='panic-wipe-in-progress-overlay'] {
@@ -320,12 +328,16 @@
     /* Inverted inner ring per the design-system rule: on near-black the
        inner layer must be the foreground (light) color, not the standard
        focus_ring.inner (#16181d) which would render at 1.0:1 invisible. */
-    outline: 2px solid var(--color-light-onboarding-panic-overlay-fg, var(--color-light-foreground-primary, #f3f4f6));
+    outline: 2px solid
+      var(--color-light-onboarding-panic-overlay-fg, var(--color-light-foreground-primary, #f3f4f6));
     outline-offset: 2px;
   }
   @media (prefers-color-scheme: dark) {
     [role='dialog']:focus-visible {
-      outline-color: var(--color-dark-onboarding-panic-overlay-fg, var(--color-dark-foreground-primary, #f3f4f6));
+      outline-color: var(
+        --color-dark-onboarding-panic-overlay-fg,
+        var(--color-dark-foreground-primary, #f3f4f6)
+      );
     }
     [data-testid='panic-wipe-in-progress-overlay'] {
       background: var(--color-dark-onboarding-panic-overlay-bg, rgba(0, 0, 0, 0.92));

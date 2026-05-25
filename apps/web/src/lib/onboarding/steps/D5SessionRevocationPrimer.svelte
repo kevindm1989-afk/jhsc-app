@@ -21,7 +21,11 @@
   import { flushSync } from 'svelte';
 
   function syncFlush() {
-    try { flushSync(); } catch { /* outside effect ctx */ }
+    try {
+      flushSync();
+    } catch {
+      /* outside effect ctx */
+    }
   }
 
   /** Production auth client (lib/auth/types.AuthClient). Optional in test. */

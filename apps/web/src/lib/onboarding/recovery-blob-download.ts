@@ -52,7 +52,6 @@ function bytesToBase64(b: Uint8Array): string {
   if (typeof Buffer !== 'undefined') return Buffer.from(b).toString('base64');
   let s = '';
   for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]!);
-  // eslint-disable-next-line no-undef
   return btoa(s);
 }
 

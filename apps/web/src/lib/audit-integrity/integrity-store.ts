@@ -187,9 +187,7 @@ export interface IntegrityStore {
    * terminal state, write all mismatch audit rows BEFORE the ran row, and
    * emit the `audit.integrity_check.ran` row LAST (omitted on errored runs).
    */
-  emitIntegrityCheckRunAndMismatches(
-    args: EmitIntegrityCheckRunAndMismatchesArgs
-  ): Promise<void>;
+  emitIntegrityCheckRunAndMismatches(args: EmitIntegrityCheckRunAndMismatchesArgs): Promise<void>;
 
   /** Single-row emission for the weekly anchor (F-96). */
   emitChainAnchorWeekly(row: ChainAnchorWeeklyAuditRow): Promise<void>;

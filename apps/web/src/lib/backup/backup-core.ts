@@ -126,7 +126,10 @@ function errorCodeForUploadRejection(reason: BackupUploadRejectionReason): Backu
 
 function abortedStatusForUploadRejection(
   reason: BackupUploadRejectionReason
-): 'aborted_object_lock_policy_rejected' | 'aborted_cross_region_destination_refused' | 'aborted_unknown_storage_error' {
+):
+  | 'aborted_object_lock_policy_rejected'
+  | 'aborted_cross_region_destination_refused'
+  | 'aborted_unknown_storage_error' {
   switch (reason) {
     case 'object_lock_policy_rejected':
       return 'aborted_object_lock_policy_rejected';

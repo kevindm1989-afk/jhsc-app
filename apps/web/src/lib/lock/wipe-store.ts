@@ -35,7 +35,9 @@ export interface PanicWipeAuditRow {
 }
 
 export interface WipeStore {
-  clearIndexedDb(databaseNames: readonly string[]): Promise<{ ok: boolean; failed: readonly string[] }>;
+  clearIndexedDb(
+    databaseNames: readonly string[]
+  ): Promise<{ ok: boolean; failed: readonly string[] }>;
   clearCaches(cacheNames: readonly string[]): Promise<{ ok: boolean; failed: readonly string[] }>;
   clearSessionStorage(): Promise<{ ok: boolean }>;
   clearLocalStorage(): Promise<{ ok: boolean }>;

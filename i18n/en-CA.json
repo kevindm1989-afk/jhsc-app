@@ -375,6 +375,7 @@
 
   "photo": {
     "capture": {
+      "heading": "Photo capture",
       "button": "Add photo",
       "advisory_inline": "GPS removed automatically. Enter location as text or pick from the list."
     },

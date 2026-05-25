@@ -338,10 +338,7 @@ export class MemoryIntegrityStore implements TestIntegrityStore {
     return this.toMaterialized(sorted[0]!);
   }
 
-  async hasOpenIntegrityRunWithinWindow(
-    now_ms: number,
-    lease_window_ms: number
-  ): Promise<boolean> {
+  async hasOpenIntegrityRunWithinWindow(now_ms: number, lease_window_ms: number): Promise<boolean> {
     for (const r of this.integrityRuns) {
       if (r.status !== 'running') continue;
       if (now_ms - r.started_at_ms < lease_window_ms) return true;
@@ -531,8 +528,7 @@ export class MemoryIntegrityStore implements TestIntegrityStore {
     this.backupManifests.push({
       run_id: input.run_id,
       committed_at_ms: input.committed_at_ms,
-      audit_log_head:
-        input.audit_log_head === null ? null : { ...input.audit_log_head },
+      audit_log_head: input.audit_log_head === null ? null : { ...input.audit_log_head },
       per_event_row_counts: { ...input.per_event_row_counts },
       retention_sweep_runs_snapshot_ts_ms: input.retention_sweep_runs_snapshot_ts_ms,
       schedule_hash: input.schedule_hash,

@@ -342,7 +342,7 @@ export class MemoryRetentionStore implements TestRetentionStore {
     // Operational table fixtures use a kind-specific ts column. Normalise to
     // ts_ms based on the table name.
     const id =
-      typeof row.id === 'string' ? row.id : (row.id !== undefined ? String(row.id) : randomUUID());
+      typeof row.id === 'string' ? row.id : row.id !== undefined ? String(row.id) : randomUUID();
     let ts_ms: number | undefined;
     if (table_name === 'auth_totp_consumed_log') {
       ts_ms = typeof row.consumed_at_ms === 'number' ? row.consumed_at_ms : undefined;

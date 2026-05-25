@@ -51,16 +51,13 @@ jobs:
       - name: Tests (vitest)
         run: pnpm -C apps/web test
 
-  # Non-blocking: the full verification gate stack (lint, format, token
-  # audit, i18n, secrets, SAST, Deno). Several gates carry known
-  # pre-production hardening debt, so this job is informational --
-  # continue-on-error keeps the overall run green while the report stays
-  # visible in the logs. Tighten and promote to blocking as the debt is
-  # paid down.
+  # Blocking: the full verification gate stack (lint, format, token audit,
+  # i18n, secrets, SAST, Deno). The pre-production hardening debt has been
+  # paid down and scripts/verify.sh passes end-to-end, so this job is now
+  # required — a regression in any gate fails the run.
   hardening-gates:
-    name: Hardening gates (non-blocking)
+    name: Hardening gates
     runs-on: ubuntu-22.04
-    continue-on-error: true
     timeout-minutes: 25
 
     env:
@@ -100,12 +97,26 @@ jobs:
           sudo mv /tmp/gitleaks /usr/local/bin/
 
       - name: Install semgrep
-        run: pip install --user semgrep==1.95.0
+        # Install into an isolated venv (not --user): the runner's --user
+        # site-packages carry system urllib3/chardet that conflict with
+        # semgrep's pins and made the CLI exit 7 before scanning. A clean
+        # venv with an upgraded pip resolves a self-consistent dependency set.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/semgrep-venv"
+          "$RUNNER_TEMP/semgrep-venv/bin/pip" install --upgrade pip
+          "$RUNNER_TEMP/semgrep-venv/bin/pip" install semgrep==1.95.0
+          echo "$RUNNER_TEMP/semgrep-venv/bin" >> "$GITHUB_PATH"
 
       - name: Install pgTAP runtime (perl + pg_prove)
         run: |
           sudo apt-get update
           sudo apt-get install -y libtap-parser-sourcehandler-pgtap-perl postgresql-client
+
+      - name: Build (apps/web)
+        # The "no third-party JS in bundle" gate scans the built bundle. Without
+        # a build it falls back to scanning source and false-fails on token
+        # names that appear in comments (e.g. HMAC_PSEUDONYM_KEY).
+        run: pnpm -C apps/web build
 
       - name: Run verify.sh (informational)
         run: bash scripts/verify.sh

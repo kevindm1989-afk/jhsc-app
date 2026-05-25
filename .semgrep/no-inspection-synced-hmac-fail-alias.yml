@@ -16,7 +16,10 @@ rules:
       Amendment F-B in .context/decisions.md, observability/audit-log.md
       §6 finding #2.
     severity: ERROR
-    languages: [typescript, javascript, generic]
+    # pattern-regex is text-based; generic mode applies it across all scanned
+    # file types under paths.include. (semgrep rejects mixing `generic` with
+    # named languages in one rule.)
+    languages: [generic]
     paths:
       include:
         - 'apps/web/**'

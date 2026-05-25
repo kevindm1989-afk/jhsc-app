@@ -25,12 +25,12 @@ rules:
         - '.context/**'
     patterns:
       - pattern-either:
-          - pattern: log.info({ ..., attributes: { ..., display_name: ..., ... } })
-          - pattern: log.info({ ..., attributes: { ..., email: ..., ... } })
-          - pattern: log.info({ ..., attributes: { ..., phone: ..., ... } })
-          - pattern: log.info({ ..., attributes: { ..., body: ..., ... } })
-          - pattern: log.info({ ..., attributes: { ..., password: ..., ... } })
-          - pattern: log.info({ ..., attributes: { ..., token: ..., ... } })
-          - pattern: log.warn({ ..., attributes: { ..., display_name: ..., ... } })
-          - pattern: log.error({ ..., attributes: { ..., email: ..., ... } })
-          - pattern: log.error({ ..., attributes: { ..., body: ..., ... } })
+          - pattern: 'log.info({ ..., attributes: { ..., display_name: ..., ... } })'
+          - pattern: 'log.info({ ..., attributes: { ..., email: ..., ... } })'
+          - pattern: 'log.info({ ..., attributes: { ..., phone: ..., ... } })'
+          - pattern: 'log.info({ ..., attributes: { ..., body: ..., ... } })'
+          - pattern: 'log.info({ ..., attributes: { ..., password: ..., ... } })'
+          - pattern: 'log.info({ ..., attributes: { ..., token: ..., ... } })'
+          - pattern: 'log.warn({ ..., attributes: { ..., display_name: ..., ... } })'
+          - pattern: 'log.error({ ..., attributes: { ..., email: ..., ... } })'
+          - pattern: 'log.error({ ..., attributes: { ..., body: ..., ... } })'
