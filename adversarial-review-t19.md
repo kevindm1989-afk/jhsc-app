@@ -1,3 +1,38 @@
+## Re-review (2026-05-25)
+
+**Verdict: FAIL — but materially improved. Block on RR-1 + RR-2 (small panic-wipe-flow cluster).** All 13 prior BLOCKING findings CLOSED or correctly fail-closed; the undecryptable-blob (A-T19-1) is genuinely fixed (nonce SURVIVES), not papered over. Test-change scrutiny found no skips/only/deleted/loosened assertions — implementer did not cheat.
+
+### Prior-finding closure (against diff d6ce313..4c93eab)
+
+| ID | Status | Evidence |
+|----|--------|----------|
+| A-T19-1 nonce dropped | **CLOSED — nonce SURVIVES** | encryptRecoveryBlob returns {salt,nonce,ciphertext}; D4 passes nonce; serializer folds nonce‖ciphertext into the ciphertext field (recovery-blob-download.ts:78). Split-back-out is documented re-import scope. |
+| A-T19-2 zeros key + no download | CLOSED | Real identity_privkey (32-byte guard); downloadRecoveryBlobJson does createObjectURL + <a download>.click. |
+| A-T19-3 hardcoded passphrase | CLOSED | generateRecoveryPassphrase() called; no literal remains. |
+| A-T19-4 emitAudit no-op | CLOSED (fail-closed) | returns {ok:false}; panicWipe aborts audit_failed before any clear. See RR-1. |
+| A-T19-5 aria-live on passphrase | CLOSED | no live-region on/around the passphrase code element. |
+| A-T19-6 baseline short-circuit | CLOSED | real per-capability probes; argon2id probes crypto_pwhash. |
+| A-T19-7/8 seams in bundle | PARTIALLY CLOSED | seams in __test_seams.ts w/ prod module-throw; grep gate lists 6 symbols. BUT export let __test_* literals still present on 3 components — RR-4. |
+| A-T19-9 leak-lint toothless | CLOSED | scans OnboardingFlow + strict aria-live/role checks. |
+| A-T19-10 pass on missing bundle | CLOSED | exit 1 on absent bundle. |
+| A-T19-11 hardcoded English | CLOSED | zero unkeyed text/aria; no enforcing lint though (gap). |
+| A-T19-12 gates not enforced | CLOSED | every handler consults canAdvance(wizardState); gate logic is real. |
+| A-T19-13 D.3 no enrollment | CLOSED | wizard mounts D3PasskeyEnrollment → enrollFirstDevicePasskey; advance only on onEnrolled(true). |
+
+### NEW findings
+
+- **A-T19-RR-1 [BLOCKING]** — Panic-wipe silently non-functional in production. emitAudit fail-closes {ok:false} (correct per M-106a), but PanicWipeModal has NO `audit_failed` UI branch (only in_progress/partial/complete/idle). User types WIPE, clicks, modal silently stays idle — no error, no destruction, no trace. Fix: render an audit_failed state. Track G-T19-PRIV-3 as a release blocker. Missing test: modal renders error on audit_failed.
+- **A-T19-RR-2 [BLOCKING]** — Inescapable modal. Cancel button (PanicWipeModal.svelte:242-244) STILL has no on:click (prior A-T19-21 NIT not fixed); Escape swallowed (correct per §3.5); Tab trapped. Keyboard user who changes mind cannot leave. (Same defect as a11y A11Y-T19-RR-1, independently confirmed.) Fix: bind Cancel → close + restore focus (NOT on Escape). Missing test: clicking Cancel closes + restores focus.
+- **A-T19-RR-3 [MEDIUM]** — Re-onboard panic-wipe lockout still broken in production. getDefaultStore() memoizes one BrowserWipeStore singleton; after a wipe it lives in __wipedStores. Re-onboard in same tab (no reload) → second panic-wipe gets {status:'no_op','already_wiped'}, no destruction/audit. Same defect class as the old module-global boolean, relocated. Masked by RR-1 now; surfaces when the real emitter ships. Missing test: re-onboard via default-store path (all F-113 tests use fresh MemoryWipeStore).
+- **A-T19-RR-4 [LOW]** — Bundle grep gate misses new child-component test props (__test_session_count, __test_revoke_*, __test_force_*, __test_ready_delay_ms, etc. on OnboardingFlow/PanicWipeModal/D5) — none use the split-form decoy. Fix: add a `__test_` family regex to the gate.
+- **A-T19-RR-5 [LOW]** — No round-trip decrypt test; the nonce-fold branch is NEVER exercised (every serializer test passes no nonce). This is the exact coverage gap that hid A-T19-1 originally. Missing test: encrypt → serialize → JSON round-trip → split nonce at crypto_secretbox_NONCEBYTES → decrypt → assert privkey equality. (test-writer scope.)
+
+### Test-change scrutiny: all LEGITIMATE
+
+No .skip/.only/xit in test/T19. d6 imports MemoryWipeStore from a byte-identical re-export shim. d4 serializer tests unchanged-but-weak (never feed a nonce; RR-5). i18n D5 fixed-label assertions match Designer §A. No assertions deleted/loosened.
+
+---
+
 # Adversarial Review — T19 identity-recovery onboarding
 
 **Verdict: FAIL — BLOCK ON FINDINGS.**

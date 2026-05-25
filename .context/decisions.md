@@ -1141,6 +1141,35 @@ ADR-0020 task 7 is **NOT closed.** The implementer must address A11Y-T19-1 throu
 
 ---
 
+## Privacy-reviewer re-review (2026-05-25)
+
+**Diff range:** `d6ce313..4c93eab`. Full evidence in `/home/user/agent-os/privacy-review-t19.md` (## Re-review section).
+
+**Verdict: PASS-WITH-ADVISORIES.**
+
+- **P-T19-2** (hard-coded English bypassing catalog + HG-10 packet) **CLOSED** — string deleted, region now t()-only; G-T19-PRIV-1 resolved.
+- **Over-collection re-check PASS** for both recovery-blob (4-key allowlist holds; nonce folded into ciphertext, non-PI) and browser-baseline (detection-only, no transmission, passkey probe does not enumerate authenticators).
+- **emitAudit fail-closed** {ok:false}; audit-row meta unchanged closed allowlist; no new PI.
+- **NEW P-T19-RR-1 (BLOCKING-AT-MERGE):** rework added 5 user-facing a11y catalog keys (onboarding.en-CA.json:264-276) — correctly in-catalog + t()-referenced, but the HG-10 A11y-string summary in this ADR ("18 strings") is stale. **REGENERATE the HG-10 packet** to enumerate the new keys before routing to counsel. Non-privacy note: the 5 keys are absent from copy-keys.ts COPY_KEYS — flag to verifier (orphan-key contract). Merge remains gated on HG-10 lawyer ratification.
+
+---
+
+## Adversarial-reviewer re-review (2026-05-25)
+
+**Diff range:** `d6ce313..4c93eab`. Full evidence in `/home/user/agent-os/adversarial-review-t19.md` (## Re-review section).
+
+**Verdict: FAIL — but materially improved. Block on RR-1 + RR-2 (a small panic-wipe-flow cluster).**
+
+**Closure: all 13 prior BLOCKING CLOSED or correctly fail-closed.** A-T19-1 (undecryptable blob) genuinely fixed — nonce SURVIVES (folded nonce‖ciphertext), not papered over. Test-change scrutiny: all LEGITIMATE (no .skip/.only, no deleted/loosened assertions).
+
+- **A-T19-RR-1 [BLOCKING]** — Panic-wipe silently non-functional in production: emitAudit fail-closes {ok:false} (correct per M-106a) but PanicWipeModal has NO `audit_failed` UI branch. User types WIPE, clicks, modal silently stays idle — no error, no destruction, no trace. Fix: render audit_failed state. G-T19-PRIV-3 becomes a release blocker.
+- **A-T19-RR-2 [BLOCKING]** — Inescapable modal: Cancel button (PanicWipeModal.svelte:242-244) has no on:click; Escape swallowed (correct per §3.5); Tab trapped. Keyboard user who changes mind cannot leave. (Same defect as a11y A11Y-T19-RR-1, independently confirmed.) Fix: bind Cancel → close + restore focus.
+- **A-T19-RR-3 [MEDIUM]** — Re-onboard panic-wipe lockout still broken in production (getDefaultStore() singleton lives in __wipedStores after wipe; second wipe in same tab → no_op). Masked by RR-1; surfaces when the real emitter ships. Carry-forward.
+- **A-T19-RR-4 [LOW]** — Bundle grep gate misses new child-component test props (__test_session_count, __test_revoke_*, __test_force_*, __test_ready_delay_ms, D5 __test_revoke_*) — none use the split-form decoy. Add a `__test_` family regex.
+- **A-T19-RR-5 [LOW]** — No round-trip decrypt test; the nonce-fold branch is never exercised (the exact gap that hid A-T19-1). test-writer scope.
+
+---
+
 ## ADR-0019 — T18 audit-log integrity library + MemoryIntegrityStore
 
 **Status:** Accepted
