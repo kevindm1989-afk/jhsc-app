@@ -24,7 +24,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { REPO_ROOT } from '../_helpers/paths';
 
-const SCRIPT = path.join(REPO_ROOT, 'scripts/check-onboarding-test-props-stripped.sh');
+// Invoke bash with a repo-relative script path + cwd=REPO_ROOT rather than an
+// absolute path. Git Bash / MSYS mangle absolute drive-letter paths in argv
+// ("No such file or directory" on C:/...); a relative path resolved against
+// cwd avoids that and works identically on POSIX.
+const SCRIPT_REL = 'scripts/check-onboarding-test-props-stripped.sh';
 
 const createdDirs: string[] = [];
 
@@ -45,7 +49,10 @@ function makeBundleDir(fileContents: Record<string, string>): string {
 const toBashPath = (p: string): string => p.replace(/\\/g, '/');
 
 function runGate(bundleDir: string): { status: number; stderr: string; stdout: string } {
-  const res = spawnSync('bash', [toBashPath(SCRIPT), toBashPath(bundleDir)], { encoding: 'utf8' });
+  const res = spawnSync('bash', [SCRIPT_REL, toBashPath(bundleDir)], {
+    encoding: 'utf8',
+    cwd: REPO_ROOT
+  });
   return {
     status: res.status ?? -1,
     stderr: res.stderr ?? '',
