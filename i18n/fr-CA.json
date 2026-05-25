@@ -211,7 +211,17 @@
       "subheading": "",
       "field": { "title": "", "body": "", "passphrase": "", "passphrase_confirm": "" },
       "passphrase": { "helper": "" },
-      "actions": { "save": "", "saving": "" }
+      "actions": { "save": "", "saving": "" },
+      "consent": {
+        "heading": "",
+        "lead": "",
+        "bullet_encrypted": "",
+        "bullet_visible": "",
+        "bullet_why": "",
+        "bullet_not_visible": "",
+        "ohsa_reminder": "",
+        "checkbox_label": ""
+      }
     },
     "passphrase": {
       "heading": "",

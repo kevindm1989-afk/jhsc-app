@@ -604,6 +604,81 @@ describe('T19 / A-T19-RR-2 — Cancel: close, focus restore, announcement', () =
 });
 
 // ============================================================================
+// A11Y-T19-2 — modal focus trap: Tab / Shift+Tab cycle within the dialog
+// (WCAG 2.1.2 / 2.4.3 — the focus-trap WRAP logic in onKeyDown). Previously
+// only the focus-restore and audit-failed focus-move paths were tested.
+// ============================================================================
+
+describe('T19 / A11Y-T19-2 — focus trap wraps Tab / Shift+Tab', () => {
+  const FOCUSABLE_SEL =
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  function focusablesIn(dialog: HTMLElement): HTMLElement[] {
+    return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SEL)).filter(
+      (el) => !el.hasAttribute('aria-hidden')
+    );
+  }
+
+  // Mount the modal and wait until the deferred onOpenFocus() has settled
+  // initial focus onto the first focusable (the type-back input). Doing this
+  // first prevents that late .focus() from stealing focus mid-test.
+  async function mountReady(): Promise<HTMLElement[]> {
+    render(PanicWipeModal, {
+      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
+    });
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => expect(focusablesIn(dialog).length).toBeGreaterThanOrEqual(2));
+    const focusables = focusablesIn(dialog);
+    await waitFor(() => expect(document.activeElement).toBe(focusables[0]));
+    return focusables;
+  }
+
+  it('Tab on the last focusable wraps to the first', async () => {
+    const focusables = await mountReady();
+    const dialog = screen.getByRole('dialog');
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    last.focus();
+    expect(document.activeElement).toBe(last);
+    await fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(
+      document.activeElement,
+      'Tab on the last focusable must wrap focus to the first (trap)'
+    ).toBe(first);
+  });
+
+  it('Shift+Tab on the first focusable wraps to the last', async () => {
+    const focusables = await mountReady();
+    const dialog = screen.getByRole('dialog');
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    first.focus();
+    expect(document.activeElement).toBe(first);
+    await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(
+      document.activeElement,
+      'Shift+Tab on the first focusable must wrap focus to the last (trap)'
+    ).toBe(last);
+  });
+
+  it('Tab in the middle of the focus ring does not force a wrap', async () => {
+    const focusables = await mountReady();
+    const dialog = screen.getByRole('dialog');
+    if (focusables.length < 3) return; // needs an interior element to exercise
+    const middle = focusables[1];
+
+    middle.focus();
+    expect(document.activeElement).toBe(middle);
+    await fireEvent.keyDown(dialog, { key: 'Tab' });
+    // The handler only intervenes at the boundaries; a mid-ring Tab leaves
+    // focus untouched (the browser would advance it natively).
+    expect(document.activeElement).toBe(middle);
+  });
+});
+
+// ============================================================================
 // A-T19-RR-3 — re-onboard lockout reset (MEDIUM)
 //
 // Contract pinned (see test-writer report for the softened scope):
