@@ -1240,6 +1240,7 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t19.md re-review P-T19-RR-1 (BLOCKING-AT-MERGE); `onboarding.en-CA.json:264-276`.
 **Finding:** The rework added 5+ user-facing `a11y.onboarding.*` catalog keys (`panic_wipe_type_back_label`, `step_indicator_landmark`, `step_pill_completed/current/pending`, `failed_checks_list_label`, `failed_capability_label`). They are correctly in-catalog and `t()`-referenced (not hardcoded), but the HG-10 A11y-string summary in ADR-0020 still enumerates the old set ("18 strings"). HG-10 requires the labour-lawyer see **every** string.
 **Resolution scope:** tech-writer regenerates the HG-10 copy packet to enumerate the new keys before routing to counsel; re-run the ADR-0020 A11y-string summary count.
+**Status (2026-05-25): packet regeneration DONE** (tech-writer pass, commit recording this gap). Counts corrected to 151 + 26 + 1 = 178; A11y summary updated 18→26 with the new SR categories. Substantive-delta audit of the +17 `onboarding.*` keys found all operational EXCEPT `panic_wipe_d6.error.audit_emit_failed` — a duress-context safety claim ("we did not wipe anything … nothing has been deleted yet") that the RR-1 fix made user-reachable; folded into HG-10 packet Paragraph 5(e) so it gets per-paragraph counsel ratification. **Remaining: external labour-lawyer ratification (HG-10) — out of agent scope.**
 **Blocker for:** HG-10 ratification → T19 merge. (T19 merge is already gated on HG-10; this expands the packet, it does not add a new gate.)
 
 ---
