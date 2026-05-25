@@ -478,6 +478,25 @@ describe('T19 / A-T19-RR-1 — audit_failed UI branch', () => {
     expect(store.__debugSessionStorageCleared()).toBe(false);
     expect(store.__debugSessionCookieTornDown()).toBe(false);
   });
+
+  // WCAG 2.4.3 — the destructive button that held focus unmounts on the
+  // idle→audit_failed transition; focus must move to the audit_failed Cancel,
+  // not be stranded on a detached node / dropped to <body>.
+  it('moves focus to the audit_failed Cancel button (focus not orphaned)', async () => {
+    await renderWithFailingAuditStore();
+    await waitFor(() => {
+      expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    });
+    const cancel = screen.getByRole('button', {
+      name: t('onboarding.panic_wipe_d6.cancel_button')
+    });
+    await waitFor(() => {
+      expect(
+        document.activeElement,
+        'focus must land on the audit_failed Cancel button, not <body>'
+      ).toBe(cancel);
+    });
+  });
 });
 
 // ============================================================================

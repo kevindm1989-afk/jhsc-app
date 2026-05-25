@@ -1,3 +1,41 @@
+## Re-verify (2026-05-25, fix pass)
+
+> **Status:** PASS-WITH-ADVISORIES — RR-1 CLOSED; 1 NEW advisory (audit_failed focus orphan, RR-4).
+> **Authoring agent:** accessibility-specialist
+> **Commit reviewed:** `e4843e2` (fix of `de3e92d`).
+> **Method:** code review + keyboard-path trace + SR-key recount. Live SR pass still deferred (§8 prior).
+
+### Per-finding closure
+
+**A11Y-T19-RR-1 — keyboard trap / dead Cancel — CLOSED.**
+- `onCancel` (`PanicWipeModal.svelte:163-167`) sets `open = false`, `dispatch('close')`, and assigns `closeAnnouncement`.
+- Both Cancel buttons wired: idle (`:271` `on:click={onCancel}`) and audit_failed (`:240`).
+- `open=false` → reactive `$: if (!open && priorFocus) restoreFocus()` (`:70`) fires → focus restored to trigger. Working keyboard exit confirmed.
+- Escape STILL inert: `onKeyDown` (`:170-173`) `preventDefault` + `stopPropagation` + early `return`, no `open=false`. §3.5 protected-variant intact. Not regressed.
+- Focus trap (Tab/Shift-Tab cycle `:175-192`) intact; now has a working non-destructive exit via Cancel. WCAG 2.1.2 satisfied.
+
+### SR-key consumption — **19 of 19**
+- `modal_close_announcement` now consumed via the persistent `aria-live="polite"` sr-only `<span>` at `:280`, positioned OUTSIDE `{#if open}` so it survives modal unmount. `closeAnnouncement` is set in `onCancel` BEFORE `open=false`, so the string is present in the live region when the dialog tears down → SR announces "Dialog closed." after the dialog is gone. Politeness `polite` is correct (non-interrupting status). Catalog key present (`onboarding.en-CA.json:259`). 18 → 19.
+
+### audit_failed focus-order verdict — ORPHANED (new finding RR-4, ADVISORY)
+- `role="alert"` on the error text (`:237`) auto-announces the message — good.
+- BUT on transition idle→audit_failed (`onConfirm` `:158-159`), the idle branch unmounts including the destructive button that held focus (`:263-270`). The audit_failed branch (`:237-242`) mounts with NO programmatic focus move. The previously-focused button is now a detached node → focus drops to `<body>`. Keyboard/SR users lose their place mid-ceremony. WCAG 2.4.3 Focus Order. Same class as the prior A11Y-T19-1.
+- Cancel reachability in audit_failed: PASS — same `cancel_button` label, same `onCancel`, reachable by Tab once focus is recovered.
+
+### NEW findings
+**A11Y-T19-RR-4 — ADVISORY — focus orphaned on idle→audit_failed transition**
+- Where: `PanicWipeModal.svelte:158-159` (state set) + `:237-242` (audit_failed branch, no focus call).
+- WCAG: 2.4.3 Focus Order.
+- Fix: after setting `wipeState='audit_failed'`, `await tick()` then move focus to the alert (`tabindex="-1"` on the `role="alert"` div) or to the Cancel button. Add a test asserting `document.activeElement` is inside the audit_failed branch.
+
+### Regression watch
+- `<style>` block (`:282-332`): focus-ring tokens, panic-overlay pair, dark-mode swap, and `@media (prefers-reduced-motion: reduce)` all unchanged. No regression.
+
+### Re-verify verdict: **PASS-WITH-ADVISORIES**
+RR-1 CLOSED, 19/19 SR keys. RR-2, RR-3 (prior) + RR-4 (new) are non-blocking advisories. Merge unblocked. Schedule RR-4 + live SR pass.
+
+---
+
 ## Re-review (2026-05-25)
 
 > **Status:** FAIL — 1 NEW BLOCKING regression (keyboard trap). All 7 prior BLOCKING findings otherwise CLOSED.

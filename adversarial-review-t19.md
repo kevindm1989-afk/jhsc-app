@@ -1,3 +1,21 @@
+## Re-verify (2026-05-25, fix pass) [diff de3e92d..e4843e2]
+
+**Overall: PASS-WITH-ADVISORIES.** RR-1..RR-4 genuinely closed (not papered over). New issues are pre-existing-scope or low-severity; none re-opens a blocker.
+
+- **RR-1 audit_failed UI — CLOSED.** PanicWipeModal.svelte adds `{:else if wipeState==='audit_failed'}` with role="alert" rendering error.audit_emit_failed + a wired Cancel; onConfirm transitions to it. No longer silent-stuck; escapable (dead-end-but-escapable is acceptable). audit_failed returns BEFORE `__wipedStores.add` (panic-wipe.ts:110-115) → NO lockout poisoning; retry works once the real emitter ships. Production note: BrowserWipeStore.emitAudit returns {ok:false} so every prod wipe shows the error and destroys nothing — fail-closed by design, tracked under G-T19-PRIV-3 (deferred RR-5).
+- **RR-2 inescapable modal — CLOSED, verdict WORKS-IN-PROD.** onCancel sets open=false + dispatch('close'); both Cancel buttons wired; aria-live span OUTSIDE {#if open}. The `compatibility.componentApi:4` shim (vitest.config.ts) only affects the test's `$on('close')` subscription style; in a real Svelte 5 build `open=false` self-closes (component-mutated prop) and a parent hears close via the `on:close` template directive. Test-ergonomics choice, not a correctness crutch. See NEW-1.
+- **RR-3 re-onboard lockout — CLOSED (wiring real).** resetPanicWipeLockout imported (OnboardingFlow.svelte:45), called in onOpenApp (355), bound to the D.7 "Open the app" button (580). Nulls `__defaultBrowserStore` → fresh singleton identity escapes the WeakSet lockout. Genuine fix.
+- **RR-4 bundle-strip gate — CLOSED.** Regex `__test_[A-Za-z0-9_]+` + grep -lE catches the family; does NOT match the production export `resetPanicWipeLockout` (no `__test_` prefix). Stale `__resetPanicWipeLockoutForTest` pattern matches nothing — harmless dead pattern. Missing-bundle exits 1 (A-T19-10 stays closed).
+
+**New findings:**
+- **NEW-1 [LOW / pre-existing]** No production parent mounts `<PanicWipeModal>` — grep of src/ finds it rendered ONLY by tests; no host wires on:close. The RR-2 close-event path is unexercised in prod and the modal is effectively dead code (the wizard inlines D.6). Root cause is the prior inline-D.6 deviation, NOT this fix; overlaps security S-T19-RR-1 (no route mounts the wizard). Missing test: an integration test mounting the modal from its real host.
+- **NEW-2 [LOW]** `__test_store` seam widens no leak surface the gate misses — bundle-strip-gate.test.ts asserts the literal is banned; production block nulls it. Clean.
+- **NEW-3 [INFO]** vitest.config.ts dynamicCompileOptions `endsWith('PanicWipeModal.svelte')` is correctly scoped; no other file ends with that name; no collateral compile change.
+
+**Verdict: PASS-WITH-ADVISORIES.** The 4 fixed blockers are genuinely closed. Residual: NEW-1 (no prod host) + deferred RR-5 (real emitter) keep panic-wipe non-functional end-to-end in production, but both are fail-closed and tracked.
+
+---
+
 ## Re-review (2026-05-25)
 
 **Verdict: FAIL — but materially improved. Block on RR-1 + RR-2 (small panic-wipe-flow cluster).** All 13 prior BLOCKING findings CLOSED or correctly fail-closed; the undecryptable-blob (A-T19-1) is genuinely fixed (nonce SURVIVES), not papered over. Test-change scrutiny found no skips/only/deleted/loosened assertions — implementer did not cheat.

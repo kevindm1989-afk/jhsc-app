@@ -35,6 +35,8 @@
   let dialogRoot = null;
   /** @type {HTMLInputElement | null} */
   let typeBackInputRef = null;
+  /** @type {HTMLButtonElement | null} */
+  let auditFailedCancelRef = null;
   /** @type {Element | null} */
   let priorFocus = null;
 
@@ -157,6 +159,13 @@
       wipeState = 'complete';
     } else if (r.status === 'audit_failed') {
       wipeState = 'audit_failed';
+      // A11Y (WCAG 2.4.3): the destructive button that held focus unmounts
+      // with the idle branch. Move focus to the audit_failed Cancel so it is
+      // not stranded on a detached node / dropped to <body>.
+      await tick();
+      if (auditFailedCancelRef && typeof auditFailedCancelRef.focus === 'function') {
+        auditFailedCancelRef.focus();
+      }
     }
   }
 
@@ -237,7 +246,7 @@
       <div role="alert" data-testid="panic-wipe-audit-failed">
         {t('onboarding.panic_wipe_d6.error.audit_emit_failed')}
       </div>
-      <button type="button" on:click={onCancel}>
+      <button type="button" bind:this={auditFailedCancelRef} on:click={onCancel}>
         {t('onboarding.panic_wipe_d6.cancel_button')}
       </button>
     {:else}
