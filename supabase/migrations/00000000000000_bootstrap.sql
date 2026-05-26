@@ -28,11 +28,17 @@ CREATE EXTENSION IF NOT EXISTS "pgtap";
 DO $$
 BEGIN
   IF nullif(current_setting('app.hmac_pseudonym_key', true), '') IS NULL THEN
-    EXECUTE format(
-      'ALTER DATABASE %I SET app.hmac_pseudonym_key = %L',
-      current_database(),
-      'dev-ci-pseudonym-key-not-secret'
-    );
+    -- Prefer a DATABASE-level default (inherited by every later connection). If
+    -- the migration role lacks privilege (`supabase start` applies migrations as
+    -- a non-superuser), fall back to a session-scoped value so the apply still
+    -- succeeds; runtime then gets the durable default from the post-start
+    -- "ALTER DATABASE … SET" step (the live-stack CI job + the dev runbook).
+    BEGIN
+      EXECUTE format('ALTER DATABASE %I SET app.hmac_pseudonym_key = %L',
+                     current_database(), 'dev-ci-pseudonym-key-not-secret');
+    EXCEPTION WHEN insufficient_privilege THEN
+      PERFORM set_config('app.hmac_pseudonym_key', 'dev-ci-pseudonym-key-not-secret', false);
+    END;
   END IF;
 END $$;
 

@@ -60,8 +60,21 @@
 -- ============================================================================
 DO $$
 BEGIN
-  IF current_setting('app.hmac_pseudonym_key', true) IS NULL OR current_setting('app.hmac_pseudonym_key', true) = '' THEN
-    RAISE EXCEPTION 'app.hmac_pseudonym_key GUC not set. Set via ALTER DATABASE ... SET app.hmac_pseudonym_key = ''<key>''; before running this migration.';
+  -- The HMAC pseudonym key is consumed at RUNTIME by the SECURITY DEFINER
+  -- functions below (never at apply time). If it is absent we seed the
+  -- NON-SECRET dev/CI placeholder rather than hard-failing the apply: prefer a
+  -- DATABASE-level default, falling back to session scope when the migration
+  -- role lacks privilege (`supabase start` applies as a non-superuser).
+  -- Production sets the real key out-of-band BEFORE migrating, so this guard
+  -- sees it and never overrides it; the boot key-match smoke test is the
+  -- production backstop (ADR-0002 Amendment G + ADR-0016 + B1 / HG-15).
+  IF nullif(current_setting('app.hmac_pseudonym_key', true), '') IS NULL THEN
+    BEGIN
+      EXECUTE format('ALTER DATABASE %I SET app.hmac_pseudonym_key = %L',
+                     current_database(), 'dev-ci-pseudonym-key-not-secret');
+    EXCEPTION WHEN insufficient_privilege THEN
+      PERFORM set_config('app.hmac_pseudonym_key', 'dev-ci-pseudonym-key-not-secret', false);
+    END;
   END IF;
 END $$;
 
