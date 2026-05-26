@@ -198,13 +198,9 @@ jobs:
       - name: Start Supabase (applies migrations; init seeds the dev GUC)
         run: supabase start
 
-      - name: Pin the pseudonym GUC for client connections
-        # The init migration sets it session-scoped for the apply run; client
-        # (pg_prove) connections need it as a DB default too.
-        run: |
-          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
-            -c "ALTER DATABASE postgres SET app.hmac_pseudonym_key = 'dev-ci-pseudonym-key-not-secret';"
-
+      # No GUC-pinning step: the Supabase local `postgres` role is not a
+      # superuser and cannot ALTER DATABASE … SET a custom parameter, so the
+      # pgTAP suite sets the (non-secret) pseudonym key itself at session scope.
       - name: Run committee pgTAP against the live stack (real auth.uid/RLS)
         run: |
           pg_prove -d "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
