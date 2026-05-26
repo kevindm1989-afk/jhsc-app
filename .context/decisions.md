@@ -25,6 +25,69 @@ pointing to the new one. The history is the value.
 
 ---
 
+## ADR-0021 — T06 committee membership + roles + invite (library-only, Amendment H)
+
+**Status:** Accepted — the role-change audit event (`member.role_changed`) was ratified by the user on 2026-05-25 (the §12 auth/audit human gate, option (a)); the remaining gate is the standard PR review.
+
+**Decider(s):** architect (T06 kickoff). User adjudicated the three load-bearing options on 2026-05-25 (see Decision drivers). **HG-15 does NOT fire in T06** (no new physical table ships — `committee_membership` is modeled against `MemoryCommitteeStore`; the migration lands in T06.1). **HG-10 fires only if invite copy is user-facing** (the co-chair-facing invite surface is a later UI task; T06 ships library only). Auth-adjacent → **second-opinion-reviewer** required at PR per §11 Phase-2.
+
+**Source:** JHSC-APP-PLAN.md §2.1 (roles as a set, not a tier), §13 locked decisions #3 (committee-members-only), #6 (personal-device), #8 (passkeys + TOTP invite); ADR-0002 (passkeys + TOTP first-device enrollment; the co-chair generates the TOTP invite); ADR-0002 Amendment G.3 (`users.active`/`users.role` are T05-owned; `users.display_name`/`users.off_employer_contact` deferred to T06); ADR-0002 Amendment H (library/sibling split); the T05 `users` migration (`supabase/migrations/00000000000001_auth.sql`); observability/audit-log.md §1 closed enum (`member.added`, `member.removed`, `committee.key_rotated` already reserved); the T08 `ConcernStore.isActiveMember()` dependency (`apps/web/src/lib/concerns/concern-store.ts:63`).
+
+## Context
+
+T06 is the committee-membership spine: who is on the worker side, what role-set each member holds, and how a new member is invited and activated. It is currently **not started** (no `lib/committee/`, no migration beyond the T05 auth side-table, no tests). Several shipped tasks already assume it: T08's `isActiveMember()` RLS mirror, T07's member-removal → committee-key-rotation hook, and T07.1's co-chair `recovery_reset` path. The locked decisions (single-tenant, passkeys-only, personal-device, E2EE for C3/C4) bound the design; this ADR ratifies the T06-specific structure.
+
+## Decision drivers (user adjudications, 2026-05-25)
+
+1. **Delivery shape — library-first (Amendment H).** T06 ships `lib/committee/` + `MemoryCommitteeStore` + jsdom tests. The `committee_membership` migration + RLS + `SupabaseCommitteeStore` land in the **T06.1** sibling (HG-15 fires there). Consequence: T08's `isActiveMember()` stays satisfied by the in-memory store until T06.1; the production RLS function ships in T06.1.
+2. **Role storage — `committee_membership.role[]` is authoritative.** Roles are a SET `{worker_member, worker_co_chair, certified_member}` (a person may hold several). `users.role` (T05 enum) is retained ONLY as the auth-path mirror; it MUST NOT be dropped without a successor amendment (per Amendment G.3 / decisions cross-ref). On any role-set change, the auth mirror is reconciled, not treated as source of truth.
+3. **`off_employer_contact` — optional, employer-domain-rejecting.** C2 PI; optional at invite time; validated on entry to REJECT employer-controlled email/phone (keeps committee comms off employer channels). Not E2EE (C2, not C3/C4) — TLS + at-rest encryption, residency ca-central-1, retention "membership + 24mo" (per Amendment G.3 inventory rows).
+
+## Decision (binding for T06 ship)
+
+### 1. File structure (`apps/web/src/lib/committee/`)
+- `types.ts` — `CommitteeRole` set type, `CommitteeMembershipRow`, `MemberInvite`, `CommitteeAuditEvent` (closed to documented enum values), `InviteResult`/denial shapes.
+- `committee-store.ts` — `CommitteeStore` interface (the persistence boundary, mirroring `ConcernStore`): membership CRUD, `isActiveMember`, invite issue/consume, RLS-denial-as-`{ok:false,reason}` (not throw), `recordCommitteeEvent`, `pseudonymOf`.
+- `memory-committee-store.ts` — `MemoryCommitteeStore` satisfying the interface for tests.
+- `committee-core.ts` — orchestration: `inviteMember`, `activateMembership` (invite-consume → member.added), `setRoles`, `removeMember` (mark inactive + grace), `reactivateMember`, with **audit-before-side-effect** ordering (mirrors concern-core).
+- `index.ts` — public exports.
+- Tests under `apps/web/test/T06/`.
+
+### 2. Schema modeled by `MemoryCommitteeStore` (T06.1 lands the SQL)
+- `committee_membership { user_id PK/FK→users, role text[] (CHECK subset of the 3), active boolean, invited_by user_id, invited_at, activated_at, deactivated_at, grace_until }`. **Single-tenant:** NO `committee_id` column or parameter anywhere (a CI test asserts the literal `committee_id` is absent from `lib/committee/`).
+- `users.display_name` (C2), `users.off_employer_contact` (C2) — added in T06.1; modeled in the membership row for the library.
+- **Removal = mark inactive + 90-day `grace_until`** before the T07 key-destroy ripple (committee key rotation excludes the removed member after grace). `member.removed` is emitted at deactivation.
+- **RLS posture (mirrored at the interface; SQL in T06.1):** read = active members; INSERT/role mutation = worker_co_chair only; a co-chair removing/demoting THEMSELVES requires a second co-chair (**4-eyes**, mirroring the reprisal/forensic 4-eyes pattern).
+
+### 3. Invite flow (composes T05; no public signup — locked)
+- A worker_co_chair issues an invite → a one-time **TOTP bootstrap** (T05 `auth_totp_bootstraps`); the invitee consumes it at first-device passkey enrollment (T05 `enrollFirstDevice`); the TOTP secret is destroyed on passkey set (F-43). T06 does NOT add a second credential type. Invite issuance is co-chair-gated; consumption activates the membership (`member.added`).
+
+### 4. Audit emission (closed enum)
+- `member.added` (on activation), `member.removed` (on deactivation) — both already on the closed enum and documented. The library emits via `store.recordCommitteeEvent`, never a raw `audit_emit(` literal.
+- **`member.role_changed`** — emitted by `setRoles` (a no-op role write emits nothing). Reserved via the partial six-mirror (TS const + audit-log.md + enum-coverage script) per the user's 2026-05-25 §12 ratification; the SQL CHECK + retention-schedule half lands in T06.1.
+
+### 5. Amendment H split / PR-time assertion
+- T06 ships ZERO SQL. `git diff --name-only main...T06-branch -- supabase/` returns empty. The migration + RLS + `SupabaseCommitteeStore` + the `users.display_name`/`off_employer_contact` columns land in **T06.1** (HG-15 fires there).
+
+## Open questions (require adjudication before the relevant code lands)
+
+1. **Role-change audit event — RESOLVED (2026-05-25, option (a)).** The user ratified reserving `member.role_changed` via the §12 auth/audit gate: the TS const + audit-log.md §1 entry + `scripts/check-audit-enum-coverage.sh` land in T06; the SQL CHECK + RETENTION_SCHEDULE + `audit_log_retention_schedule` row land in T06.1 (mirroring ADR-0020's `panic_wipe.invoked` reservation). `setRoles` emits the event; a no-op role write emits nothing.
+2. **Grace window value.** 90 days proposed (aligns with the T07 key-rotation ripple); confirm against the retention schedule (§8 / ADR-0015) at T06.1.
+
+## Reversibility
+- File structure / MemoryStore: **easy** (a redesign is contained).
+- `committee_membership` schema (T06.1): **medium** (a migration).
+- Any new audit enum value: **hard** (six-mirror; needs the §12 gate).
+
+## Cross-references
+- **ADR-0002 Amendment G.3** — `users` field-set divergence; `display_name`/`off_employer_contact` deferred here.
+- **ADR-0002 Amendment H** — the library/sibling split T06 follows.
+- **ADR-0003 Amendment A** — closed audit enum; T06 stays within `member.added`/`member.removed`; role-change is the reserved open item.
+- **T07** — member-removal → committee-key rotation ripple consumes T06's deactivation + grace.
+- **T08** — `ConcernStore.isActiveMember()` is the contract T06's `isActiveMember` / T06.1 RLS satisfies.
+
+---
+
 ## ADR-0020 — T19 identity-recovery onboarding library + OnboardingFlow / PanicWipeModal composition
 
 **Status:** Proposed

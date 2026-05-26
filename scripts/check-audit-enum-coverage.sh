@@ -59,6 +59,7 @@ EXPECTED_ENUM=(
   retention.deleted
   member.added
   member.removed
+  member.role_changed
   committee.key_rotated
   client.cache_policy_violation
   client.identity_selftest_fail
