@@ -158,15 +158,17 @@ AS $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- Grant matrix — the mint path is reachable ONLY by mint_writer. Revoking the
--- default PUBLIC EXECUTE then granting mint_writer means anon/authenticated
--- (members of PUBLIC) cannot create a session without a verified assertion.
+-- Grant matrix — the mint path is reachable ONLY by mint_writer. Supabase
+-- grants EXECUTE on new public functions directly to anon/authenticated/
+-- service_role (via default privileges), so revoke from those roles explicitly
+-- (not just PUBLIC); anon/authenticated then cannot create a session without a
+-- verified assertion (F-117/F-119).
 -- ---------------------------------------------------------------------------
-REVOKE ALL ON FUNCTION public.mint_issue_challenge(text, text, integer)   FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.mint_consume_challenge(text)                FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.mint_lookup_credential(text)                FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.mint_create_session(uuid, timestamptz)      FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.mint_bump_counter(text, bigint)             FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.mint_issue_challenge(text, text, integer)   FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.mint_consume_challenge(text)                FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.mint_lookup_credential(text)                FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.mint_create_session(uuid, timestamptz)      FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.mint_bump_counter(text, bigint)             FROM PUBLIC, anon, authenticated, service_role;
 
 GRANT EXECUTE ON FUNCTION public.mint_issue_challenge(text, text, integer) TO mint_writer;
 GRANT EXECUTE ON FUNCTION public.mint_consume_challenge(text)              TO mint_writer;
