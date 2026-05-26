@@ -101,6 +101,7 @@ this table).
 |---|---|---|
 | `member.added` | Co-chair invites + member completes enrollment | `target_member_id` |
 | `member.removed` | Co-chair removes a member; triggers key rotation downstream | `target_member_id`, `triggers_rotation_id` |
+| `member.role_changed` | Co-chair changes a member's role set (ADR-0021; reserved by T06, SQL CHECK + retention-schedule half lands in T06.1) | `roles_before`, `roles_after` |
 | `committee.key_rotated` | A scheduled (non-removal-triggered) rotation completes. NOTE: a member-removal rotation is captured by the `committee_data_key.rotation.*` enum above; this is the standalone case. | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `reason` |
 
 ### Service-worker / cache (T10 — HG-3)
