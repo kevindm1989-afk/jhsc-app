@@ -118,10 +118,37 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.is_active_member(uuid) FROM public;
 GRANT EXECUTE ON FUNCTION public.is_active_member(uuid) TO authenticated, supabase_auth_admin;
 
--- Read = active committee members (the T08 is_active_member contract).
+-- ---------------------------------------------------------------------------
+-- session_is_live — F-116 cross-system revocation gate (ADR-0023 / threat-model
+-- §3.12). The minted GoTrue JWT carries the auth_sessions jti as `session_id`;
+-- this consults the authoritative revocation list (auth_sessions.revoked_at,
+-- F-39) so a revoked/expired session is denied within the same request rather
+-- than authorizing for the full token TTL. Default-deny: no claim / no row /
+-- revoked / expired => false. (Auth primitive; may relocate to the auth
+-- migration when the GoTrue mint path lands — see ADR-0023.)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.session_is_live()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.auth_sessions
+    WHERE session_id = NULLIF(current_setting('request.jwt.claims', true)::jsonb ->> 'session_id', '')::uuid
+      AND revoked_at IS NULL
+      AND expires_at > now()
+  );
+$$;
+REVOKE EXECUTE ON FUNCTION public.session_is_live() FROM public;
+GRANT EXECUTE ON FUNCTION public.session_is_live() TO authenticated, supabase_auth_admin;
+
+-- Read = active committee members (the T08 is_active_member contract) with a
+-- live session (F-116 / ADR-0023): a revoked-but-unexpired JWT is denied.
 CREATE POLICY committee_membership_select_active ON public.committee_membership
   FOR SELECT TO authenticated
-  USING (public.is_active_member(auth.uid()));
+  USING (public.session_is_live() AND public.is_active_member(auth.uid()));
 
 CREATE OR REPLACE FUNCTION public._committee_is_active_co_chair(p_uid uuid)
 RETURNS boolean
@@ -188,6 +215,9 @@ DECLARE
   v_existing public.committee_membership%ROWTYPE;
   v_invite   uuid;
 BEGIN
+  IF NOT public.session_is_live() THEN
+    RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';  -- F-116: revoked/expired session
+  END IF;
   IF NOT public._committee_is_active_co_chair(v_actor) THEN
     RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';
   END IF;
@@ -275,6 +305,9 @@ DECLARE
   v_mem   public.committee_membership%ROWTYPE;
   v_losing boolean;
 BEGIN
+  IF NOT public.session_is_live() THEN
+    RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';  -- F-116: revoked/expired session
+  END IF;
   IF NOT public._committee_is_active_co_chair(v_actor) THEN
     RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';
   END IF;
@@ -338,6 +371,9 @@ DECLARE
   v_mem   public.committee_membership%ROWTYPE;
   v_grace timestamptz;
 BEGIN
+  IF NOT public.session_is_live() THEN
+    RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';  -- F-116: revoked/expired session
+  END IF;
   IF NOT public._committee_is_active_co_chair(v_actor) THEN
     RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';
   END IF;
@@ -392,6 +428,9 @@ DECLARE
   v_actor uuid := auth.uid();
   v_mem   public.committee_membership%ROWTYPE;
 BEGIN
+  IF NOT public.session_is_live() THEN
+    RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';  -- F-116: revoked/expired session
+  END IF;
   IF NOT public._committee_is_active_co_chair(v_actor) THEN
     RAISE EXCEPTION 'rls_denied' USING ERRCODE = '42501';
   END IF;

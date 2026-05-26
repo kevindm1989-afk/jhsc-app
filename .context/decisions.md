@@ -25,6 +25,43 @@ pointing to the new one. The history is the value.
 
 ---
 
+## ADR-0023 — Production Supabase foundation: GoTrue identity + Edge Functions + SupabaseCommitteeClient
+
+**Status:** Proposed (human gates: HG-15 new server↔DB trust boundary + §PI-inventory re-ratification for `auth.users`; auth-model change → **second-opinion-reviewer + threat-model required at PR**). User adjudicated the four scoping questions on 2026-05-26; threat-modeler returned **GO-WITH-CONDITIONS** (F-116–F-120, see threat-model.md §3.12).
+
+**Decider(s):** architect + threat-modeler. The cross-cutting production data layer that lets the in-memory store libraries (T05/T06/T08/T13/crypto…) get real Supabase-backed implementations. `SupabaseCommitteeClient` (against the shipped T06.1 RPCs) is the first vertical slice.
+
+**Source:** architect scoping pass + threat-model pass (2026-05-26); `supabase/migrations/0000000000000{1,2}_*.sql` (the `auth.uid()`/RLS/SECURITY-DEFINER model); `apps/web/src/lib/auth/auth-core.ts` (F-39 `auth_sessions` revocation gate); `svelte.config.js` (adapter-static); ADR-0001 (ca-central-1), ADR-0016 (pseudonym GUC).
+
+## De-risked unknowns (resolved 2026-05-26)
+- **Minting:** no native `admin.createSession`; use a **custom JWT signed with an asymmetric signing key** (RS256/ES256/Ed25519). The mint Edge Function holds **only the signing key, not `service_role`** → contained blast radius (F-118).
+- **Residency:** GoTrue stores users in the project's own Postgres `auth` schema → same **ca-central-1** region (ADR-0001). No new subprocessor.
+- **Revocation latency:** design does NOT depend on GoTrue global signOut; the existing `auth_sessions` jti revocation list (F-39; `auth_sessions.session_id` IS the jti, `auth.sql:328`) is the primary control, checked live.
+
+## Decisions (user-adjudicated 2026-05-26)
+1. **Server logic runs in Supabase Edge Functions (Deno).** The SvelteKit app stays `adapter-static`; `hooks.server.ts` remains build-time only. Matches the existing `supabase/functions/` scaffolding.
+2. **GoTrue is the RLS identity source, `auth_sessions` is the revocation authority.** A verified passkey assertion mints an asymmetric-signed JWT (`sub`=server-resolved uid, `role='authenticated'`, `session_id`=jti written to `auth_sessions`, `exp ≤ 300s`). Privileged RLS/SECURITY-DEFINER paths consult `session_is_live(jti)` (= `auth_sessions.revoked_at IS NULL`) **in addition to** `auth.uid()`. **Default-deny on disagreement.** GoTrue asserts identity; `auth_sessions` decides liveness.
+3. **High-level `SupabaseCommitteeClient`** (one method per SECURITY-DEFINER RPC), mapping Postgres `42501`/`23514` → `{ok:false,reason}`. In production the RPC IS the orchestration — `committee-core` + `MemoryCommitteeStore` remain the **test-only reference** (amends the Amendment-H "Supabase*Store implements the same low-level interface" expectation, which can't preserve the RPC's atomicity).
+4. **`@supabase/supabase-js`** added **server-only** (Edge Functions / never the browser bundle; CSP `connect-src 'self'` + the bundle gate keep it out of `build/`).
+5. **Live `supabase start` integration stage in CI** (gated behind `SKIP_SUPABASE_INTEGRATION` locally) — only a live stack proves the GoTrue→`auth.uid()`→RLS chain. (Sandbox has no Docker, so this chain is CI-verified only.)
+
+## Binding threat conditions (threat-model.md §3.12; all design-blocking)
+- **F-116** privileged paths consult `auth_sessions` live (≤5s revocation); `jwt_expiry ≤ 300s`; revoke optionally also calls GoTrue signOut as backstop.
+- **F-117** mint uid derived **server-side from the verified WebAuthn assertion only** (via `webauthn_credentials.credential_id → user_id`); verify+mint atomic; never from request body.
+- **F-118** mint function uses the **isolated signing key only**; confirm C3/C4 stay unreadable by it; document custody + rotation.
+- **F-119** `enable_signup=false` asserted; no client-reachable `admin.createUser`; orphan-`auth.users` alert.
+- **F-120** `auth.users.id = public.users.id = webauthn_credentials.user_id` invariant enforced + CI-tested.
+
+## Reversibility
+- Edge Functions + client: **medium**. `jwt_expiry`/config: low. The GoTrue auth-model commitment: **hard** (touches B1) — hence the threat-model gate.
+
+## Cross-references
+- **ADR-0022 / T06.1** — the RPCs `SupabaseCommitteeClient` calls.
+- **T05 / auth.sql** — `auth_sessions` (F-39) is reused as the revocation authority; the mint path composes `webauthn_credentials` + `enroll_first_passkey`.
+- **threat-model.md §3.12** — F-116–F-120 + the B1 redefinition.
+
+---
+
 ## ADR-0022 — T06.1 committee server: committee_membership migration + RLS + SupabaseCommitteeStore
 
 **Status:** Proposed (human gates: HG-15 new physical tables + §PI-inventory ack; second-opinion-reviewer at PR; pgTAP/Supabase integration). User adjudicated the four open questions on 2026-05-26.

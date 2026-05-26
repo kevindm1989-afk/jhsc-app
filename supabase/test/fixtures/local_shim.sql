@@ -17,6 +17,9 @@ DO $$ BEGIN CREATE ROLE supabase_auth_admin;  EXCEPTION WHEN duplicate_object TH
 
 CREATE SCHEMA IF NOT EXISTS auth;
 
+-- Production-accurate: GoTrue exposes the caller's uid via the JWT `sub` claim
+-- in the `request.jwt.claims` GUC. Tests set that GUC (and seed auth_sessions)
+-- to simulate an authenticated, live-session caller.
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid
 LANGUAGE sql STABLE
-AS $f$ SELECT NULLIF(current_setting('app.test_uid', true), '')::uuid $f$;
+AS $f$ SELECT NULLIF(current_setting('request.jwt.claims', true)::jsonb ->> 'sub', '')::uuid $f$;

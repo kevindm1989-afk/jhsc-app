@@ -50,7 +50,10 @@ file_size_limit = "50MiB"
 enabled = true
 site_url = "http://localhost:3000"
 additional_redirect_urls = ["http://localhost:3000/auth/callback"]
-jwt_expiry = 900
+# 300s (5 min) ceiling per ADR-0023 / threat-model F-116: short TTL bounds the
+# window in which a revoked session's in-flight JWT could still authorize,
+# backing the auth_sessions liveness gate (session_is_live).
+jwt_expiry = 300
 enable_signup = false
 enable_anonymous_sign_ins = false
 

@@ -186,7 +186,7 @@ fi
 # assertions run.
 if command -v deno >/dev/null 2>&1; then
   run_gate_shell "deno test (edge functions)" \
-    "deno test --allow-read --allow-env supabase/functions/_shared/test/"
+    "deno test --allow-read --allow-env supabase/functions/"
 else
   echo "  [skip] deno test — 'deno' not installed"
   gates_skipped=$((gates_skipped+1))
