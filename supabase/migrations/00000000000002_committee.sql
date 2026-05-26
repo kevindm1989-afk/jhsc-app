@@ -70,7 +70,7 @@ RETURNS text
 LANGUAGE sql
 IMMUTABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
   SELECT CASE p_event_type
     WHEN 'auth.passkey.enrolled'                          THEN '90d'
@@ -111,7 +111,7 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
   SELECT COALESCE((SELECT active FROM public.committee_membership WHERE user_id = p_uid), false);
 $$;
@@ -132,7 +132,7 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.auth_sessions
@@ -155,7 +155,7 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.committee_membership
@@ -207,7 +207,7 @@ CREATE OR REPLACE FUNCTION public.committee_invite_member(
 ) RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_actor    uuid := auth.uid();
@@ -250,7 +250,7 @@ CREATE OR REPLACE FUNCTION public.committee_activate_membership(
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_inv  public.committee_invite%ROWTYPE;
@@ -297,7 +297,7 @@ CREATE OR REPLACE FUNCTION public.committee_set_roles(
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_actor uuid := auth.uid();
@@ -364,7 +364,7 @@ CREATE OR REPLACE FUNCTION public.committee_remove_member(
 ) RETURNS timestamptz
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_actor uuid := auth.uid();
@@ -422,7 +422,7 @@ CREATE OR REPLACE FUNCTION public.committee_reactivate_member(
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_actor uuid := auth.uid();

@@ -11,6 +11,12 @@
 -- ===========================================================================
 
 BEGIN;
+-- The pseudonym key is a session GUC consumed at runtime by _committee_pseudonym()
+-- (and the auth HMAC functions). Set it here so the suite is self-contained: a
+-- plain SET is allowed for any role, whereas a DATABASE-level default isn't
+-- settable on the Supabase local stack (postgres is not a superuser there). The
+-- value is the non-secret dev/CI placeholder; no assertion depends on its bytes.
+SET app.hmac_pseudonym_key = 'dev-ci-pseudonym-key-not-secret';
 SELECT plan(21);
 
 -- Users.

@@ -153,7 +153,7 @@ jobs:
           # `sudo -u postgres` can open it.
           mkdir -p /tmp/dbtest
           cp supabase/test/fixtures/local_shim.sql \
-             supabase/migrations/00000000000000_init.sql \
+             supabase/migrations/00000000000000_bootstrap.sql \
              supabase/migrations/00000000000001_auth.sql \
              supabase/migrations/00000000000002_committee.sql \
              supabase/test/committee_rls.sql /tmp/dbtest/
@@ -163,10 +163,49 @@ jobs:
           sudo -u postgres psql -c "ALTER DATABASE jhsc_test SET app.hmac_pseudonym_key = 'ci-test-hmac-key-not-secret';"
           for f in \
             local_shim.sql \
-            00000000000000_init.sql \
+            00000000000000_bootstrap.sql \
             00000000000001_auth.sql \
             00000000000002_committee.sql; do
             echo "applying $f"
             sudo -u postgres psql -v ON_ERROR_STOP=1 -d jhsc_test -f "/tmp/dbtest/$f"
           done
           sudo -u postgres pg_prove -d jhsc_test /tmp/dbtest/committee_rls.sql
+
+  # Blocking: the FULL Supabase local stack (real GoTrue + PostgREST + Postgres).
+  # Proves the committee RLS + session_is_live surface under the real auth
+  # schema / auth.uid() / authenticated role — not the hand-rolled test shim
+  # (ADR-0023 increment 5). The committee-op handler's end-to-end HTTP proof and
+  # the mint-session handler land with T05.1 (the mint handler is deferred).
+  supabase-live-stack:
+    name: Supabase live stack (GoTrue + RLS)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Install pg_prove
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libtap-parser-sourcehandler-pgtap-perl postgresql-client
+
+      - name: Start Supabase (applies migrations; init seeds the dev GUC)
+        run: supabase start
+
+      # No GUC-pinning step: the Supabase local `postgres` role is not a
+      # superuser and cannot ALTER DATABASE … SET a custom parameter, so the
+      # pgTAP suite sets the (non-secret) pseudonym key itself at session scope.
+      - name: Run committee pgTAP against the live stack (real auth.uid/RLS)
+        run: |
+          pg_prove -d "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+            supabase/test/committee_rls.sql
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup || true
