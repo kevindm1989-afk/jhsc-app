@@ -265,6 +265,74 @@ describe('T06 / co-chair protections (last-co-chair + 4-eyes)', () => {
   });
 });
 
+describe('T06 / adversarial hardening', () => {
+  it('inviteMember refuses to overwrite a removed (inactive) membership (grace + roles preserved)', async () => {
+    await inviteAndActivate(INVITEE, ['worker_member']);
+    await removeMember(core, { user_id: FOUNDER }, INVITEE);
+    const before = await store.getMembership(INVITEE);
+    const res = await inviteMember(core, { user_id: FOUNDER }, {
+      target_user_id: INVITEE,
+      roles: ['worker_co_chair']
+    });
+    expect(res).toMatchObject({ ok: false, reason: 'membership_exists', status: 409 });
+    const after = await store.getMembership(INVITEE);
+    expect(after?.grace_until).toBe(before?.grace_until); // T07 grace contract preserved
+    expect(after?.roles).toEqual(['worker_member']); // not overwritten with attacker-chosen roles
+  });
+
+  it('a stale invite cannot resurrect a removed member (must use reactivate)', async () => {
+    await inviteAndActivate(INVITEE, ['worker_member']);
+    await removeMember(core, { user_id: FOUNDER }, INVITEE);
+    // Simulate an outstanding (unconsumed, unexpired) invite for the removed member.
+    await store.issueInvite({
+      invite_id: 'stale-1',
+      target_user_id: INVITEE,
+      issued_by: FOUNDER,
+      issued_at: clock,
+      expires_at: clock + 1_000_000,
+      consumed_at: null
+    });
+    const res = await activateMembership(core, { invite_id: 'stale-1' });
+    expect(res).toMatchObject({ ok: false, reason: 'invite_invalid' });
+    expect(await store.isActiveMember(INVITEE)).toBe(false);
+  });
+
+  it('setRoles to the same set (any order) is a no-op — no member.role_changed row', async () => {
+    await inviteAndActivate(INVITEE, ['worker_member', 'certified_member']);
+    const n = store.__debugAuditRows().length;
+    const res = await setRoles(core, { user_id: FOUNDER }, INVITEE, [
+      'certified_member',
+      'worker_member'
+    ]);
+    expect(res.ok).toBe(true);
+    expect(store.__debugAuditRows().length).toBe(n);
+  });
+
+  it('reactivate is permitted after the grace window expires', async () => {
+    await inviteAndActivate(INVITEE, ['worker_member']);
+    await removeMember(core, { user_id: FOUNDER }, INVITEE);
+    clock += REMOVAL_GRACE_MS + 1;
+    const res = await reactivateMember(core, { user_id: FOUNDER }, INVITEE);
+    expect(res.ok).toBe(true);
+    expect(await store.isActiveMember(INVITEE)).toBe(true);
+  });
+
+  it('rejects employer-domain bypass via trailing dot and multiple @', async () => {
+    const dot = await inviteMember(core, { user_id: FOUNDER }, {
+      target_user_id: 'u-dot',
+      roles: ['worker_member'],
+      off_employer_contact: 'w@employer.example.'
+    });
+    expect(dot).toMatchObject({ ok: false, reason: 'employer_contact_rejected' });
+    const multi = await inviteMember(core, { user_id: FOUNDER }, {
+      target_user_id: 'u-multi',
+      roles: ['worker_member'],
+      off_employer_contact: 'w@personal.example@employer.example'
+    });
+    expect(multi).toMatchObject({ ok: false, reason: 'employer_contact_rejected' });
+  });
+});
+
 describe('T06 / structural invariants', () => {
   it('emits ONLY events on the closed committee enum', async () => {
     await inviteAndActivate(INVITEE, ['worker_member']);

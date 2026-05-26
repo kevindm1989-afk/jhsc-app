@@ -27,7 +27,7 @@ pointing to the new one. The history is the value.
 
 ## ADR-0021 — T06 committee membership + roles + invite (library-only, Amendment H)
 
-**Status:** Proposed (awaiting human gate: PR review; plus the §12 auth/audit gate for the role-change audit event — see Open Questions)
+**Status:** Accepted — the role-change audit event (`member.role_changed`) was ratified by the user on 2026-05-25 (the §12 auth/audit human gate, option (a)); the remaining gate is the standard PR review.
 
 **Decider(s):** architect (T06 kickoff). User adjudicated the three load-bearing options on 2026-05-25 (see Decision drivers). **HG-15 does NOT fire in T06** (no new physical table ships — `committee_membership` is modeled against `MemoryCommitteeStore`; the migration lands in T06.1). **HG-10 fires only if invite copy is user-facing** (the co-chair-facing invite surface is a later UI task; T06 ships library only). Auth-adjacent → **second-opinion-reviewer** required at PR per §11 Phase-2.
 
@@ -64,14 +64,14 @@ T06 is the committee-membership spine: who is on the worker side, what role-set 
 
 ### 4. Audit emission (closed enum)
 - `member.added` (on activation), `member.removed` (on deactivation) — both already on the closed enum and documented. The library emits via `store.recordCommitteeEvent`, never a raw `audit_emit(` literal.
-- **Role changes have no existing enum value.** See Open Question 1 — the library models `setRoles`, but the audit event for it is RESERVED pending ratification, NOT emitted speculatively.
+- **`member.role_changed`** — emitted by `setRoles` (a no-op role write emits nothing). Reserved via the partial six-mirror (TS const + audit-log.md + enum-coverage script) per the user's 2026-05-25 §12 ratification; the SQL CHECK + retention-schedule half lands in T06.1.
 
 ### 5. Amendment H split / PR-time assertion
 - T06 ships ZERO SQL. `git diff --name-only main...T06-branch -- supabase/` returns empty. The migration + RLS + `SupabaseCommitteeStore` + the `users.display_name`/`off_employer_contact` columns land in **T06.1** (HG-15 fires there).
 
 ## Open questions (require adjudication before the relevant code lands)
 
-1. **Role-change audit event.** The closed enum (ADR-0003 Amendment A) has no role-change value; adding one is the HARD, six-mirror change (TS const + SQL CHECK + RETENTION_SCHEDULE + `audit_log_retention_schedule` row + audit-log.md §1 + `scripts/check-audit-enum-coverage.sh`) and touches the audit surface → **§12 human gate ("any change touching auth … retention")**. Options: (a) reserve `member.role_changed` (recommended; partial six-mirror now — TS const + audit-log.md + script — with the SQL/retention half deferred to T06.1, mirroring how ADR-0020 reserved `panic_wipe.invoked`); (b) model role changes as a `member.removed` + `member.added` pair (no new enum, but semantically lossy); (c) defer `setRoles` auditing entirely to T06.1. **Until adjudicated, `setRoles` is implemented but emits no audit event and is flagged in code.**
+1. **Role-change audit event — RESOLVED (2026-05-25, option (a)).** The user ratified reserving `member.role_changed` via the §12 auth/audit gate: the TS const + audit-log.md §1 entry + `scripts/check-audit-enum-coverage.sh` land in T06; the SQL CHECK + RETENTION_SCHEDULE + `audit_log_retention_schedule` row land in T06.1 (mirroring ADR-0020's `panic_wipe.invoked` reservation). `setRoles` emits the event; a no-op role write emits nothing.
 2. **Grace window value.** 90 days proposed (aligns with the T07 key-rotation ripple); confirm against the retention schedule (§8 / ADR-0015) at T06.1.
 
 ## Reversibility

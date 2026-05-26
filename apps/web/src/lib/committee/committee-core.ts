@@ -8,7 +8,12 @@
  *   - `activateMembership` — consume invite, activate, emit `member.added`
  *   - `setRoles`           — co-chair-gated; emit `member.role_changed`
  *   - `removeMember`       — co-chair-gated; mark inactive + grace; emit `member.removed`
- *   - `reactivateMember`   — co-chair-gated; re-activate within grace
+ *   - `reactivateMember`   — co-chair-gated; re-activate (within OR after grace)
+ *
+ * Audit ordering: membership mutations are reversible within the grace window
+ * and the in-memory store is synchronous, so the audit row is recorded after
+ * the state write. The T06.1 SupabaseCommitteeStore MUST wrap each mutation +
+ * its audit row in one transaction so a crash cannot leave an unaudited change.
  *
  * Invariants enforced (ADR-0021):
  *   - role mutations + invites require an ACTIVE worker_co_chair actor (RLS mirror);
@@ -45,7 +50,8 @@ export type CommitteeDenyReason =
   | 'employer_contact_rejected'
   | 'not_found'
   | 'invite_invalid'
-  | 'already_active';
+  | 'already_active'
+  | 'membership_exists';
 
 export interface CommitteeDenied {
   ok: false;
@@ -78,15 +84,19 @@ function primaryRole(roles: CommitteeRole[]): CommitteeRole {
   return roles[0] ?? 'worker_member';
 }
 
-/** Employer-domain rejection for off_employer_contact. Phones (no `@`) pass. */
+const normDomain = (d: string): string => d.trim().toLowerCase().replace(/\.+$/, ''); // drop FQDN trailing dot(s)
+
+/**
+ * Employer-domain rejection for off_employer_contact. Phones (no `@`) pass.
+ * A malformed multi-`@` value is rejected outright (treated as employer/invalid)
+ * so `a@personal.example@employer.example`-style strings can't slip the check.
+ */
 function isEmployerContact(contact: string, employerDomains: string[]): boolean {
-  const at = contact.lastIndexOf('@');
-  if (at < 0) return false;
-  const domain = contact
-    .slice(at + 1)
-    .trim()
-    .toLowerCase();
-  return employerDomains.some((d) => d.trim().toLowerCase() === domain);
+  const atCount = (contact.match(/@/g) ?? []).length;
+  if (atCount === 0) return false; // phone / no domain
+  if (atCount > 1) return true; // malformed — do not accept
+  const domain = normDomain(contact.slice(contact.indexOf('@') + 1));
+  return employerDomains.some((d) => normDomain(d) === domain);
 }
 
 async function actorIsActiveCoChair(store: CommitteeStore, user_id: string): Promise<boolean> {
@@ -116,8 +126,13 @@ export async function inviteMember(
     return deny('employer_contact_rejected', 422);
   }
 
+  // Never overwrite an existing membership row. An ACTIVE member is
+  // already_active; an INACTIVE (removed, in-grace) member must re-enter via
+  // reactivateMember so their grace_until (the T07 key-destroy contract) and
+  // role set are not silently wiped by a fresh createMembership.
   const existing = await store.getMembership(opts.target_user_id);
   if (existing && existing.active) return deny('already_active', 409);
+  if (existing && !existing.active) return deny('membership_exists', 409);
 
   const t = now();
   const membership: CommitteeMembershipRow = {
@@ -162,6 +177,10 @@ export async function activateMembership(
   const membership = await store.getMembership(invite.target_user_id);
   if (!membership) return deny('not_found', 404);
   if (membership.active) return deny('already_active', 409);
+  // A removed member cannot be resurrected via an invite — re-entry is
+  // reactivateMember (co-chair-gated). This blocks any stale outstanding
+  // invite from clearing a removed member's grace_until.
+  if (membership.deactivated_at !== null) return deny('invite_invalid', 422);
 
   await store.setActive({ user_id: invite.target_user_id, active: true, grace_until: null, at: t });
   await store.markInviteConsumed(opts.invite_id, t);
@@ -194,6 +213,10 @@ export async function setRoles(
   if (!membership) return deny('not_found', 404);
 
   const before = [...membership.roles];
+  // No-op: identical role set — do not write or emit a role_changed audit row.
+  if (before.length === next.length && before.every((r, i) => r === next[i])) {
+    return { ok: true };
+  }
   const losingCoChair =
     before.includes('worker_co_chair') && !next.includes('worker_co_chair') && membership.active;
   if (losingCoChair) {
