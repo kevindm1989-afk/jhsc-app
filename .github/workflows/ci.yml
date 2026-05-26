@@ -153,7 +153,7 @@ jobs:
           # `sudo -u postgres` can open it.
           mkdir -p /tmp/dbtest
           cp supabase/test/fixtures/local_shim.sql \
-             supabase/migrations/00000000000000_init.sql \
+             supabase/migrations/00000000000000_bootstrap.sql \
              supabase/migrations/00000000000001_auth.sql \
              supabase/migrations/00000000000002_committee.sql \
              supabase/test/committee_rls.sql /tmp/dbtest/
@@ -163,7 +163,7 @@ jobs:
           sudo -u postgres psql -c "ALTER DATABASE jhsc_test SET app.hmac_pseudonym_key = 'ci-test-hmac-key-not-secret';"
           for f in \
             local_shim.sql \
-            00000000000000_init.sql \
+            00000000000000_bootstrap.sql \
             00000000000001_auth.sql \
             00000000000002_committee.sql; do
             echo "applying $f"
