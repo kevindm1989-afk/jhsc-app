@@ -132,7 +132,7 @@ RETURNS text
 LANGUAGE sql
 IMMUTABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
   SELECT CASE p_event_type
     WHEN 'auth.passkey.enrolled'                          THEN '90d'
@@ -194,7 +194,7 @@ CREATE OR REPLACE FUNCTION public.audit_emit(
 ) RETURNS bigint
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_id              bigint;
@@ -379,7 +379,7 @@ CREATE OR REPLACE FUNCTION public.enroll_first_passkey(
 ) RETURNS text
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_bootstrap public.auth_totp_bootstraps%ROWTYPE;
@@ -476,7 +476,7 @@ CREATE OR REPLACE FUNCTION public.revoke_session(
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 BEGIN
   UPDATE public.auth_sessions
@@ -519,7 +519,7 @@ CREATE OR REPLACE FUNCTION public.revoke_all_sessions(
 ) RETURNS int
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_count int;
@@ -563,7 +563,7 @@ CREATE OR REPLACE FUNCTION public.revoke_passkey(
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_user_id uuid;
