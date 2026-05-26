@@ -25,6 +25,38 @@ pointing to the new one. The history is the value.
 
 ---
 
+## ADR-0022 — T06.1 committee server: committee_membership migration + RLS + SupabaseCommitteeStore
+
+**Status:** Proposed (human gates: HG-15 new physical tables + §PI-inventory ack; second-opinion-reviewer at PR; pgTAP/Supabase integration). User adjudicated the four open questions on 2026-05-26.
+
+**Decider(s):** architect. Server sibling of ADR-0021 (T06). **HG-15 FIRES** — new physical tables `committee_membership` + `committee_invite`, and new C2 columns `users.display_name` / `users.off_employer_contact`.
+
+**Source:** ADR-0021 (the library contract this server side satisfies); ADR-0002 Amendment G.3 (display_name/off_employer_contact deferred to T06); ADR-0002 Amendment H; `supabase/migrations/00000000000001_auth.sql` (the migration / RLS / SECURITY DEFINER / `audit_emit` / `retention_class_for` conventions to mirror); observability/audit-log.md §1.
+
+## Decisions (user-adjudicated 2026-05-26)
+
+1. **4-eyes co-chair self-removal — app-enforced single-call.** The `set_committee_roles` / `remove_committee_member` SECURITY DEFINER functions take a `second_approver_id` and verify, in one transaction, that it is a DISTINCT active co-chair. No async pending-approval table; matches the shipped library API (`committee-core.ts` `second_approver_id`). No new audit-enum values.
+2. **`member.role_changed` DB half — deferred CHECK/schedule to T18.** T06.1 adds only the `retention_class_for('member.role_changed') → 'membership+7y'` mapping. The strict `audit_log.event_type` CHECK + the `audit_log_retention_schedule` row are carried forward to T18 (which owns that table/CHECK), mirroring `panic_wipe.invoked`.
+3. **Invite binding — `committee_invite` join table.** A thin table (`invite_id`, `target_user_id`, FK→`auth_totp_bootstraps`, `roles`, status) so the library's `getInvite`/`markInviteConsumed` have a clean home and T05's `auth_totp_bootstraps` is untouched. Activation verifies the passkey-enrolling uid == bound `target_user_id`.
+4. **pgTAP runs and passes in CI.** A Postgres + pgTAP stage is added so `committee_membership` RLS + SECURITY DEFINER functions are integration-tested every run (the bar for a table holding real C2 PI).
+
+## Scope (binding for T06.1 ship)
+
+- **Migration** (`supabase/migrations/00000000000002_committee.sql`): `committee_membership` (PK user_id FK→users; `role text[]` CHECK subset+non-empty; `active`; invite/activation/grace timestamps; **no `committee_id`** — single-tenant); `committee_invite`; ALTER `users` ADD `display_name`, `off_employer_contact` (C2). RLS: SELECT = active members (`is_active_member(auth.uid())`); all writes via SECURITY DEFINER functions with grants REVOKED from authenticated/anon. Functions: `is_active_member`, `committee_invite_member`, `committee_activate_membership`, `committee_set_roles`, `committee_remove_member`, `committee_reactivate_member` — each wraps its mutation + `audit_emit` in one transaction (resolves the library's atomicity note); last-active-co-chair guard via `count(*) ... FOR UPDATE`.
+- **`SupabaseCommitteeStore`** (TS) mapping the `CommitteeStore` interface to the RPCs (RLS `42501` / CHECK `23514` → `{ok:false,reason}`). [next increment]
+- **pgTAP** (`supabase/test/committee_rls.sql`): RLS enabled; write grants empty; co-chair gate; last-co-chair + 4-eyes; column/CHECK presence; atomic mutation+audit; `retention_class_for('member.role_changed')`.
+- **CI**: a Postgres 16 + pgTAP job applying the migrations against a Supabase-shim bootstrap and running `pg_prove`.
+
+## Reversibility
+- Tables/columns: **medium** (a migration). Audit-enum DB CHECK: deferred (T18). RLS/function design: **medium**.
+
+## Cross-references
+- **ADR-0021** — the library this satisfies; the deferred items it closes (atomic mutation+audit, invite consumer-binding, last-co-chair in-transaction).
+- **T05.1** — `auth_totp_bootstraps` is referenced (FK from `committee_invite`), not modified.
+- **T18** — owns the `audit_log.event_type` strict CHECK + `audit_log_retention_schedule`; `member.role_changed` CHECK/schedule row carried forward there.
+
+---
+
 ## ADR-0021 — T06 committee membership + roles + invite (library-only, Amendment H)
 
 **Status:** Accepted — the role-change audit event (`member.role_changed`) was ratified by the user on 2026-05-25 (the §12 auth/audit human gate, option (a)); the remaining gate is the standard PR review.
