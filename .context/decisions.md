@@ -45,6 +45,10 @@ pointing to the new one. The history is the value.
 4. **`@supabase/supabase-js`** added **server-only** (Edge Functions / never the browser bundle; CSP `connect-src 'self'` + the bundle gate keep it out of `build/`).
 5. **Live `supabase start` integration stage in CI** (gated behind `SKIP_SUPABASE_INTEGRATION` locally) — only a live stack proves the GoTrue→`auth.uid()`→RLS chain. (Sandbox has no Docker, so this chain is CI-verified only.)
 
+## Implementation notes
+- **GUC bootstrap (2026-05-26, user-adjudicated).** The auth migration checks `app.hmac_pseudonym_key` at apply time; `supabase start` auto-applies migrations with no pre-hook. The init migration (00000000000000) seeds a **non-secret dev/CI placeholder** via `set_config(..., false)`, guarded by a coalesce so it never overrides an out-of-band value (production sets the real key via the dashboard secret; the committee-db-tests harness sets it via `ALTER DATABASE`). The placeholder is a throwaway test key, never used on real data (mirrors ADR-0016's "key set out of band" — this only unblocks local/CI apply).
+- **mint-session HTTP handler deferred to T05.1** — it needs a WebAuthn-assertion verifier running in Deno + the production signing-key custody decision, both in the T05 auth domain. The security-critical mint logic is already unit-tested (`mint-session/core.ts`); `committee-op` proves the live GoTrue→RLS chain without it.
+
 ## Binding threat conditions (threat-model.md §3.12; all design-blocking)
 - **F-116** privileged paths consult `auth_sessions` live (≤5s revocation); `jwt_expiry ≤ 300s`; revoke optionally also calls GoTrue signOut as backstop.
 - **F-117** mint uid derived **server-side from the verified WebAuthn assertion only** (via `webauthn_credentials.credential_id → user_id`); verify+mint atomic; never from request body.
