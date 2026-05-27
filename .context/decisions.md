@@ -2983,6 +2983,85 @@ The architect's posture: the fail-closed throw is the smallest correct change at
 
 ---
 
+# ADR-0003 Amendment H (2026-05-27, T05.1 mint path): The mint-session token signer uses WebCrypto ES256 — a narrow, single-file carve-out from the libsodium-only invariant, forced by the Supabase JWKS vendor constraint
+
+**Amends ADR-0003** above. Trigger: T05.1 (the deferred passkey-login mint path, ADR-0023). The mint Edge Function self-signs two short-lived JWTs (the user session token and the `mint_writer` role token it presents to PostgREST). For those tokens to be **trusted** by the Supabase stack they must be verifiable against the project JWKS. Cross-references **ADR-0003 Invariant 4** (libsodium-only crypto primitives), **ADR-0023** (mint deferral → T05.1), **ADR-0002** (passkeys), and the merged increments (PR #7 handler + signer, PR #8 ES256 + this carve-out + the assertion e2e).
+
+### The problem
+
+The mint signer was first implemented with **Ed25519 via libsodium** (Invariant 4 — `crypto_sign_detached`), which is the only signature primitive libsodium offers. Wired against a live local stack it failed at GoTrue boot:
+
+```
+failed to decode signing keys: failed to parse response body: must be one of [RS256 ES256]
+```
+
+Supabase GoTrue (and the PostgREST/Kong JWT validation that consumes its JWKS) accept **only RS256 or ES256** asymmetric signing keys. They reject Ed25519/EdDSA outright. libsodium, in turn, **cannot produce ES256 or RS256** (no NIST-curve ECDSA, no RSA). The two constraints are mutually exclusive:
+
+- **Invariant 4** ⇒ libsodium ⇒ Ed25519 only.
+- **Supabase JWKS** ⇒ ES256/RS256 only.
+
+So a mint token the vendor will validate via JWKS **cannot** be produced under a strict reading of Invariant 4. This is a genuine vendor-platform constraint, not an implementation preference.
+
+### The options weighed
+
+- **Option 1 (chosen): ES256 + a narrow Invariant-4 carve-out.** The mint-token signer uses WebCrypto `crypto.subtle` ES256; the project's native JWKS path validates it. Lowest long-term maintenance surface (no bespoke trust mechanism).
+- **Option 2 (rejected): keep Ed25519, abandon JWKS for the session write.** The mint function would write the session via a different privileged path (a dedicated `mint_writer` Postgres connection, or the GoTrue admin API). This keeps Invariant 4 pristine but adds an ongoing, bespoke privileged-write surface to maintain and threat-model, and revisits the adjudicated "no service_role / JWKS-only trust" posture. Rejected as higher maintenance + wider standing attack surface.
+
+### The amendment — single-file ES256 carve-out
+
+`supabase/functions/mint-session/signing.ts` — **and only that file** — is permitted to call WebCrypto `crypto.subtle` to sign and verify **ES256** JWTs. It is excluded by exact path in `.semgrep/no-non-libsodium-crypto.yml`. Every other module in the repository remains bound by Invariant 4 (libsodium-only); the gate continues to forbid `crypto.subtle` / `crypto-js` / `node-forge` everywhere else.
+
+**The carve-out binds:**
+
+1. **Scope is exactly one file.** The `.semgrep` `paths.exclude` entry names `supabase/functions/mint-session/signing.ts` literally — no globs, no directory-wide exemption. The mint handler (`index.ts`), the assertion verifier (`assertion.ts`), and the counter helper (`webauthn.ts`) are NOT exempt and contain no crypto primitives.
+2. **Purpose is exactly JWT signing.** The exempted file does ES256 JWS signing/verification and JWK import/export ONLY — for the session token and the `mint_writer` token. It performs no other cryptographic operation (no hashing-for-secrets, no encryption, no key agreement). The RFC-7638-style `kid` falls back to a thumbprint only for the ephemeral dev key; production supplies the `kid` via the JWK.
+3. **Keys are asymmetric + JWKS-published.** The private key is read from the `MINT_SIGNING_JWK` env secret (an EC P-256 private JWK) or generated ephemerally at boot for local/CI. `publicJwk()` is the JWKS source of truth; the private scalar `d` is never exported there. The mint key is registered as a **standby** key in the stack's signing-key set so the vendor publishes its public half.
+4. **No expansion without a successor amendment.** Any additional file, any additional algorithm, or any non-signing crypto use under this carve-out requires a new ADR-0003 amendment. Adding a path to the `.semgrep` exclude list outside this file is a blocked change absent that amendment.
+
+### Production posture
+
+The signing private key is custody-managed out-of-band (a Supabase Function secret / `MINT_SIGNING_JWK`); the matching public JWK is registered in the project's JWKS. Key rotation follows the standby-then-promote mechanism the Supabase signing-key feature provides. Local/CI use a generated ES256 key (no committed key material; the live-e2e harness generates keys via `supabase gen signing-key`).
+
+### Rationale (why a carve-out rather than weakening Invariant 4 globally)
+
+- **Minimization of blast radius.** A single-file, single-purpose exemption is the smallest change that satisfies the vendor constraint. Invariant 4's intent — one audited crypto library across the app's own primitives — holds everywhere except the one place a third-party platform dictates the algorithm.
+- **The alternative is worse.** Option 2's bespoke privileged-write path is a larger, standing surface to secure and review than a four-line semgrep exclusion plus a WebCrypto ES256 signer that only emits short-lived tokens.
+- **WebCrypto is a vetted primitive.** ES256 via `crypto.subtle` is a platform-native, audited implementation — not a third-party JS crypto library (the specific classes Invariant 4 was written to ban: `crypto-js`, `node-forge`).
+
+### Reversibility
+
+**Easy** on the code (one module + one semgrep exclude line). **Medium** on the posture: reverting to Ed25519 means re-adopting Option 2's bespoke write path (a non-trivial redesign + threat-model re-pass), so the carve-out should be treated as load-bearing once the mint path is in production use.
+
+### Compliance check additions
+
+- [x] **ADR-0003 Invariant 4 — narrowed, not broken.** libsodium remains the only crypto library for the app's own primitives; the exemption is a single file, single algorithm, single purpose, forced by a vendor constraint, and gated by an exact-path semgrep exclusion.
+- [x] No new third-party crypto library (`crypto-js` / `node-forge` / `tweetnacl`) is introduced — WebCrypto is platform-native.
+- [x] No new third-party processor; no new cross-border flow (signing is in-process in the Edge Function, ca-central-1).
+- [x] No private key material committed to the repo (env secret / ephemeral / CLI-generated for tests).
+- [x] Threat-model F-118 (isolated signing key, no shared secret, no `service_role`) — preserved: one isolated key, JWKS-validated.
+
+### Testable assertions
+
+1. **Exact-path exclusion.** `.semgrep/no-non-libsodium-crypto.yml` `paths.exclude` contains `supabase/functions/mint-session/signing.ts` and no broader mint-session glob; `semgrep --config .semgrep --error` over the repo passes.
+2. **Gate still bites elsewhere.** Introducing a `crypto.subtle.*` call in any mint-session file OTHER than `signing.ts` (e.g. `index.ts`) makes the gate fail.
+3. **ES256, asymmetric, no leaked secret.** The signing tests assert `alg: ES256`, that tokens verify under the exported public JWK, and that `publicJwk()` omits the private scalar `d` (`supabase/functions/mint-session/test/signing.test.ts`).
+4. **Live trust (deferred to a Docker env).** `scripts/mint-live-e2e.sh` proves a `mint_writer` ES256 token is accepted by the real PostgREST via the JWKS while anon is denied.
+
+### Cross-references
+
+- **ADR-0003 Invariant 4** — libsodium-only primitives; this amendment is its single, vendor-forced exception.
+- **ADR-0003 Amendment G** — fail-closed Argon2id; unaffected (recovery-blob crypto stays 100% libsodium).
+- **ADR-0023** — mint deferral to T05.1; the path this signer serves.
+- **threat-model §3.12 F-116/F-117/F-118/F-119, §3.1 F-37** — the mint-path findings the signer + handler satisfy.
+- **PR #7 / PR #8 / PR #9** — handler + signer; ES256 + this carve-out + assertion e2e; the live-e2e harness.
+
+### Follow-ups
+
+- [ ] **Architect ratification** — this amendment is the draft record of the Option-1 decision; confirm the single-file scope and the production key-custody/rotation posture.
+- [ ] **Live trust e2e** — run `scripts/mint-live-e2e.sh` in a Docker-capable env; optionally re-wire it into CI as a separate job.
+
+---
+
 # ADR-0002 Amendment H (2026-05-23, amendment pass #5): Sibling production-wire-up tasks (T05.1, T07.1, …) — library code ships in the parent task, `Supabase*Store` production wire-up ships in a numbered sibling before any deploy carrying real PI
 
 **Amends ADR-0002** above (and the broader task-list posture established alongside ADR-0001 / ADR-0003). Trigger: privacy-review-t07 BLOCKING findings T07-1 / T07-2 / T07-3 (six new tables shipping without ADR-0016 schedule rows); consolidated reviewer blockers B2 / B3 / B6 / B7 / B8 (untested SQL, missing server-side authz/audit/cap-of-3 enforcement, missing schedule rows, `view_count` over-collection). Cross-references **ADR-0001** (the parent hosting + E2EE-as-load-bearing posture), **ADR-0003 Amendment G** (Argon2id fail-closed at the library layer — composable with this pattern), **ADR-0015** + **ADR-0016** (audit-log + operational-table retention schedules that gate any new physical table from landing in `main`), and **HG-15** (operational-table retention gate; bound to T05's tables historically and now to T07.1's tables prospectively).
