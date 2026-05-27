@@ -70,5 +70,12 @@ enabled = true
 inspector_port = 8083
 policy = "oneshot"
 
+# The mint-session function is the passkey-LOGIN path: the caller has no session
+# yet, so GoTrue must NOT require a bearer token to invoke it. Authority comes
+# from the WebAuthn assertion verified inside the function, never from a JWT on
+# the request (ADR-0023 / threat-model §3.12).
+[functions.mint-session]
+verify_jwt = false
+
 [analytics]
 enabled = false
