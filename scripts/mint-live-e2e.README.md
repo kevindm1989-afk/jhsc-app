@@ -29,12 +29,19 @@ Docker is available.
 bash scripts/mint-live-e2e.sh
 ```
 The script:
-- generates two ES256 keys with `supabase gen signing-key` (GoTrue's exact
+- generates **one** ES256 key with `supabase gen signing-key` (GoTrue's exact
   format — hand-rolled JWKs caused `failed to decode signing keys` /
   `no signing key detected`; and Ed25519 is rejected with
   `must be one of [RS256 ES256]`, which is why the signer is ES256);
-- writes them to `supabase/signing_keys.local.json` (gitignored — **private**
-  key material), `keys[0]` = GoTrue current, `keys[1]` = mint standby;
+- writes it to `supabase/signing_keys.local.json` (gitignored — **private**
+  key material). **The local CLI accepts only ONE signing key**
+  (`multiple signing keys detected, only 1 signing key is supported`), so the
+  mint function signs with the **same** key GoTrue uses. A *separate*
+  validation-only mint key (key isolation) is a **hosted-Supabase** property
+  (hosted supports key rotation / multiple JWKS keys); this local harness proves
+  the trust + grant boundary, and key isolation is verified in the hosted config;
+- forces a clean restart (`supabase stop` then `start`) so the signing-key
+  config is actually loaded;
 - inserts `signing_keys_path` under `[auth]` in `config.toml`;
 - `supabase start`, runs `scripts/mint-live-e2e.ts` as the standby key, then
   restores `config.toml` and deletes the key file on exit (always).
