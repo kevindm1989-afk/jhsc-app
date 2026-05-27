@@ -26,7 +26,7 @@
  */
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { verifyAuthenticationResponse } from 'npm:@simplewebauthn/server@13';
+import { verifyWebAuthnAssertion } from './assertion.ts';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { mintSessionFromAssertion, type AssertionInput, type MintDeps } from './core.ts';
 import { signMintWriterToken, signSessionJwt } from './signing.ts';
@@ -109,31 +109,15 @@ async function handleAssert(
     // Prove the credential here (real WebAuthn verification). The tested core
     // guarantees the signer is unreachable unless this resolves ok first.
     verifyAssertion: async (input: AssertionInput) => {
-      let verification;
-      try {
-        verification = await verifyAuthenticationResponse({
-          response: {
-            id: input.credentialId,
-            rawId: input.credentialId,
-            type: 'public-key',
-            clientExtensionResults: {},
-            response: {
-              clientDataJSON: input.clientDataJSON,
-              authenticatorData: input.authenticatorData,
-              signature: input.signature
-            }
-          },
-          expectedChallenge: challenge,
-          expectedOrigin: origin,
-          expectedRPID: rpId,
-          credential: { id: credentialId, publicKey, counter: storedCounter },
-          requireUserVerification: false
-        });
-      } catch {
-        return { ok: false };
-      }
-      if (!verification.verified) return { ok: false };
-      newCounter = verification.authenticationInfo.newCounter;
+      const { verified, newCounter: reported } = await verifyWebAuthnAssertion(input, {
+        publicKey,
+        storedCounter,
+        rpId,
+        expectedOrigin: origin,
+        expectedChallenge: challenge
+      });
+      if (!verified) return { ok: false };
+      newCounter = reported;
       // Clone detection (ADR-0002): reject a non-increasing counter.
       if (!evaluateCounter(storedCounter, newCounter)) return { ok: false };
       return { ok: true, credentialId: input.credentialId };
