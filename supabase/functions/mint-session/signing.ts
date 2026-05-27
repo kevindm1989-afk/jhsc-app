@@ -23,7 +23,7 @@ interface Sodium {
   crypto_sign_seed_keypair(seed: Uint8Array): { publicKey: Uint8Array; privateKey: Uint8Array };
   crypto_sign_detached(message: Uint8Array, privateKey: Uint8Array): Uint8Array;
   crypto_sign_verify_detached(sig: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean;
-  crypto_hash_sha256(message: Uint8Array): Uint8Array;
+  crypto_generichash(hashLength: number, message: Uint8Array): Uint8Array;
 }
 import sodiumImport from 'npm:libsodium-wrappers@0.7.15';
 const sodium = sodiumImport as unknown as Sodium;
@@ -70,23 +70,26 @@ function bytesFromB64url(s: string): Uint8Array {
 
 // ---- key loading ------------------------------------------------------------
 
-async function thumbprint(xB64url: string): Promise<string> {
+async function deriveKid(xB64url: string): Promise<string> {
   await sodium.ready;
-  // RFC 7638 thumbprint for an OKP key: SHA-256 over the canonical members.
+  // A stable, opaque key id derived from the public key via BLAKE2b. (Not an
+  // RFC-7638 SHA-256 thumbprint: the standard libsodium-wrappers build omits
+  // crypto_hash_sha256; the kid only needs to be deterministic and unique. In
+  // CI/prod the kid comes from the supplied JWK, so this path is dev-only.)
   const canonical = `{"crv":"Ed25519","kty":"OKP","x":"${xB64url}"}`;
-  return b64urlFromBytes(sodium.crypto_hash_sha256(new TextEncoder().encode(canonical)));
+  return b64urlFromBytes(sodium.crypto_generichash(32, new TextEncoder().encode(canonical)));
 }
 
 async function fromSeed(seed: Uint8Array, kid?: string): Promise<KeyState> {
   await sodium.ready;
   const kp = sodium.crypto_sign_seed_keypair(seed);
-  return { privateKey: kp.privateKey, publicKey: kp.publicKey, kid: kid ?? (await thumbprint(b64urlFromBytes(kp.publicKey))) };
+  return { privateKey: kp.privateKey, publicKey: kp.publicKey, kid: kid ?? (await deriveKid(b64urlFromBytes(kp.publicKey))) };
 }
 
 async function generateEphemeral(): Promise<KeyState> {
   await sodium.ready;
   const kp = sodium.crypto_sign_keypair();
-  return { privateKey: kp.privateKey, publicKey: kp.publicKey, kid: await thumbprint(b64urlFromBytes(kp.publicKey)) };
+  return { privateKey: kp.privateKey, publicKey: kp.publicKey, kid: await deriveKid(b64urlFromBytes(kp.publicKey)) };
 }
 
 function loadKey(): Promise<KeyState> {
