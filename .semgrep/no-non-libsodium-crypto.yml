@@ -23,6 +23,12 @@ rules:
         - '**/*.test.ts'
         - 'apps/web/test/**'
         - 'observability/**'
+        # ADR-0003 amendment (vendor JWKS constraint): the mint-session token
+        # signer MUST use WebCrypto ES256 — Supabase GoTrue/PostgREST validate
+        # only RS256/ES256 signing keys and reject Ed25519, which is all
+        # libsodium can sign. Narrow carve-out for the mint-token signer ONLY;
+        # all other crypto remains libsodium-only.
+        - 'supabase/functions/mint-session/signing.ts'
     patterns:
       - pattern-either:
           - pattern: import 'crypto-js'
