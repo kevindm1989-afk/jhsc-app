@@ -46,4 +46,7 @@ test-results/
 # --- Supabase local ---
 supabase/.temp/
 supabase/.branches/
+# Locally-generated ES256 signing keys for the mint live-stack e2e
+# (scripts/mint-live-e2e.sh). Contains PRIVATE key material — never commit.
+supabase/signing_keys.local.json
 
