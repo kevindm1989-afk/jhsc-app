@@ -1,24 +1,20 @@
 [
   {
-    "kty": "EC",
-    "crv": "P-256",
-    "x": "zWykiEh4PVNnHSZQ78q_OmpUmMwULyGNaH6cqfvffWo",
-    "y": "IPFuY8qLRDOAO2J08ZyUJ3w8_gwrcg-MaVqXxr44P48",
-    "d": "wznHxJkR9xY5RpOtsv584ohw5bboVufBdLl0dddIBLI",
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "ZGlgoSejN4gQrieENjOwl-T3tQ4mPu7jvOzRyV16KsU",
+    "d": "RBsKnqBZJAGEZCJY-s0JyO4XyEcv2aRdl3AQ94rJR9g",
     "kid": "jhsc-local-gotrue",
-    "alg": "ES256",
-    "use": "sig",
-    "ext": true
+    "alg": "EdDSA",
+    "use": "sig"
   },
   {
-    "kty": "EC",
-    "crv": "P-256",
-    "x": "GmwBXVcDJZCy1w3xX3mt-oV0xZTl4nhvbXme7xXH13I",
-    "y": "SbHJFGiGdcMancWzlzDaYKE6pZJkj6X2rBdpQDyXGVk",
-    "d": "bVfMesAIMm7hO0PtD4QhUlhwSaUgwVEVjzitnxcIPMI",
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "Vmsw39drrNn0EF6iI7l03Su5u19seJGYj4fFqKwZNdk",
+    "d": "dePPxR1TnxkIJ1Ppbyqv4YrCCGr4Kk3M_aASNLtmb6E",
     "kid": "jhsc-local-mint",
-    "alg": "ES256",
-    "use": "sig",
-    "ext": true
+    "alg": "EdDSA",
+    "use": "sig"
   }
 ]

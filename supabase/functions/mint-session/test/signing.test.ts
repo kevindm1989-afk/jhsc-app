@@ -1,10 +1,12 @@
 /**
- * mint-session / signing tests (Deno-native, hermetic — no network).
- * Run: `deno test --allow-read --allow-env supabase/functions/mint-session/test/signing.test.ts`.
+ * mint-session / signing tests (Deno-native, hermetic — no network beyond the
+ * libsodium npm fetch). Run:
+ *   deno test --allow-read --allow-env supabase/functions/mint-session/test/signing.test.ts
  *
- * Proves the ES256 token surface (F-118): both tokens are asymmetric ES256,
- * carry the expected claims, verify under the locally-held public key, and the
- * exported JWKS key never leaks the private scalar.
+ * Proves the EdDSA/Ed25519 token surface (F-118, ADR-0003): both tokens are
+ * asymmetric EdDSA, carry the expected claims, verify under the locally-held
+ * public key, the exported JWKS key never leaks the private seed, and a fixed
+ * key yields a stable, honored kid.
  */
 
 import {
@@ -30,13 +32,18 @@ function decodeSegment(token: string, index: 0 | 1): Record<string, unknown> {
   return JSON.parse(atob(padded));
 }
 
-Deno.test('session JWT is ES256, carries the core claims, and verifies under the local key', async () => {
+// A FIXED, NON-SECRET Ed25519 OKP JWK (d = 32-byte seed) for the key-custody
+// test. Generated solely for this assertion; signs nothing outside this file.
+const FIXED_JWK =
+  '{"kty":"OKP","crv":"Ed25519","x":"UlNzJJIo_luiE9sGNAof8TSME62g81uaGQONrW4e9Tc","d":"e1J4O1YpCCfpyUUdeZJ4WUVqpVxMUM0m3AKWVkpX8cA","kid":"jhsc-test-fixed","alg":"EdDSA","use":"sig"}';
+
+Deno.test('session JWT is EdDSA, carries the core claims, and verifies under the local key', async () => {
   __resetKeyForTest();
   const iat = 1_750_000_000;
   const token = await signSessionJwt({ sub: 'user-1', role: 'authenticated', session_id: 'sess-1', iat, exp: iat + 300 });
 
   const header = decodeSegment(token, 0);
-  assertEquals(header.alg, 'ES256');
+  assertEquals(header.alg, 'EdDSA');
   assertEquals(header.typ, 'JWT');
   assert(typeof header.kid === 'string' && (header.kid as string).length > 0, 'kid present');
 
@@ -68,33 +75,25 @@ Deno.test('mint_writer token carries role=mint_writer and a short TTL', async ()
   assert(await verifyWithLocalKey(token), 'mint_writer token must verify');
 });
 
-Deno.test('publicJwk is JWKS-ready and never exposes the private scalar', async () => {
+Deno.test('publicJwk is JWKS-ready (OKP/Ed25519) and never exposes the private seed', async () => {
   __resetKeyForTest();
   const jwk = await publicJwk();
-  assertEquals(jwk.kty, 'EC');
-  assertEquals(jwk.crv, 'P-256');
+  assertEquals(jwk.kty, 'OKP');
+  assertEquals(jwk.crv, 'Ed25519');
   assertEquals(jwk.use, 'sig');
-  assertEquals(jwk.alg, 'ES256');
+  assertEquals(jwk.alg, 'EdDSA');
   assert(typeof jwk.kid === 'string' && jwk.kid.length > 0, 'kid present');
-  assert(!('d' in jwk), 'public JWK must not contain the private scalar d');
+  assert(!('d' in jwk), 'public JWK must not contain the private seed d');
 });
 
-Deno.test('a fixed MINT_SIGNING_JWK yields a stable kid and verifiable tokens', async () => {
-  // Generated in-test (not committed); proves the env key-custody path imports
-  // deterministically — same key in ⇒ same kid out across resets.
-  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-  const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
-
-  Deno.env.set('MINT_SIGNING_JWK', JSON.stringify(jwk));
+Deno.test('a fixed MINT_SIGNING_JWK yields its declared kid and verifiable tokens', async () => {
+  Deno.env.set('MINT_SIGNING_JWK', FIXED_JWK);
   try {
     __resetKeyForTest();
-    const kidA = (await publicJwk()).kid;
-    __resetKeyForTest();
-    const kidB = (await publicJwk()).kid;
-    assertEquals(kidA, kidB);
-
+    assertEquals((await publicJwk()).kid, 'jhsc-test-fixed');
     __resetKeyForTest();
     const token = await signMintWriterToken(Date.now());
+    assertEquals(decodeSegment(token, 0).kid, 'jhsc-test-fixed');
     assert(await verifyWithLocalKey(token), 'tokens from the imported key must verify');
   } finally {
     Deno.env.delete('MINT_SIGNING_JWK');
