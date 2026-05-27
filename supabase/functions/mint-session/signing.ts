@@ -73,8 +73,18 @@ async function thumbprint(x: string, y: string): Promise<string> {
   return b64urlFromBytes(new Uint8Array(digest));
 }
 
-async function importFromJwk(jwk: JsonWebKey): Promise<KeyState> {
-  const privateKey = await crypto.subtle.importKey('jwk', jwk, ALG, false, ['sign']);
+async function importFromJwk(jwk: JsonWebKey & { kid?: string }): Promise<KeyState> {
+  // Sanitize to only the members WebCrypto accepts for an EC key import. JWK
+  // sets in the wild (e.g. Supabase signing keys) carry kid/alg/use/key_ops/ext;
+  // a private EC key cannot declare key_ops:['verify'], so importing the raw
+  // object fails. Rebuild a clean private/public JWK and keep `kid` separately.
+  const privateKey = await crypto.subtle.importKey(
+    'jwk',
+    { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y, d: jwk.d },
+    ALG,
+    false,
+    ['sign']
+  );
   const publicKey = await crypto.subtle.importKey(
     'jwk',
     { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y },
@@ -82,7 +92,11 @@ async function importFromJwk(jwk: JsonWebKey): Promise<KeyState> {
     true,
     ['verify']
   );
-  return { privateKey, publicKey, kid: await thumbprint(jwk.x!, jwk.y!) };
+  // Honour the JWK's own `kid` when present so the JWS header matches the key's
+  // entry in the published JWKS (PostgREST/GoTrue select the verifying key by
+  // `kid`); otherwise fall back to the RFC-7638 thumbprint.
+  const kid = jwk.kid ?? (await thumbprint(jwk.x!, jwk.y!));
+  return { privateKey, publicKey, kid };
 }
 
 async function generateEphemeral(): Promise<KeyState> {

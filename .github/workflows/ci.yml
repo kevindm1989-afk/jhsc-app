@@ -212,3 +212,59 @@ jobs:
       - name: Stop Supabase
         if: always()
         run: supabase stop --no-backup || true
+
+  # Isolated from supabase-live-stack ON PURPOSE: this job opts the local stack
+  # into ASYMMETRIC ES256 signing keys (the mint key registered as a standby key
+  # in supabase/signing_keys.test.json) and proves the mint token-trust path
+  # end-to-end. Kept separate so any friction in the asymmetric-key wiring reds
+  # only this job, never the committee/mint pgTAP coverage above (ADR-0023 /
+  # threat-model §3.12 — F-118 isolation + F-117/F-119 grant boundary, live).
+  # NOTE: the full Edge Function + real WebAuthn assertion e2e is a later
+  # increment; this validates the JWKS trust + mint_writer EXECUTE boundary.
+  mint-live-e2e:
+    name: Mint live e2e (asymmetric JWKS trust)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.46.x
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Register the mint key as a standby signing key
+        # Insert signing_keys_path under the [auth] table only (not [auth.email]).
+        # The file is a JWK array: [gotrue current key, mint standby key] — both
+        # NON-SECRET CI test keys; their public halves are published in the JWKS.
+        run: |
+          awk '1; /^\[auth\]$/ {print "signing_keys_path = \"./signing_keys.test.json\""}' \
+            supabase/config.toml > /tmp/config.toml && mv /tmp/config.toml supabase/config.toml
+          # signing_keys_path may resolve relative to the config dir OR the repo
+          # root depending on CLI version; stage a copy at the root so either wins.
+          cp supabase/signing_keys.test.json ./signing_keys.test.json
+          echo "--- [auth] section after edit ---"
+          grep -n -A2 '^\[auth\]$' supabase/config.toml
+
+      - name: Start Supabase (asymmetric ES256 signing keys)
+        run: supabase start
+
+      - name: Run the mint live e2e
+        run: |
+          supabase status -o env > /tmp/sb.env
+          set -a; . /tmp/sb.env; set +a
+          MINT_SIGNING_JWK="$(jq -c '.[1]' supabase/signing_keys.test.json)" \
+          SUPABASE_URL="$API_URL" \
+          SUPABASE_ANON_KEY="$ANON_KEY" \
+            deno run --allow-net --allow-env --allow-read scripts/mint-live-e2e.ts
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup || true

@@ -1,0 +1,24 @@
+[
+  {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "zWykiEh4PVNnHSZQ78q_OmpUmMwULyGNaH6cqfvffWo",
+    "y": "IPFuY8qLRDOAO2J08ZyUJ3w8_gwrcg-MaVqXxr44P48",
+    "d": "wznHxJkR9xY5RpOtsv584ohw5bboVufBdLl0dddIBLI",
+    "kid": "jhsc-local-gotrue",
+    "alg": "ES256",
+    "use": "sig",
+    "ext": true
+  },
+  {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "GmwBXVcDJZCy1w3xX3mt-oV0xZTl4nhvbXme7xXH13I",
+    "y": "SbHJFGiGdcMancWzlzDaYKE6pZJkj6X2rBdpQDyXGVk",
+    "d": "bVfMesAIMm7hO0PtD4QhUlhwSaUgwVEVjzitnxcIPMI",
+    "kid": "jhsc-local-mint",
+    "alg": "ES256",
+    "use": "sig",
+    "ext": true
+  }
+]
