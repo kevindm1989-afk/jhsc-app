@@ -15,6 +15,7 @@ import {
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
   initCommitteeDataKey,
+  issueEnrollmentChallenge,
   issueRecoveryBlobReset,
   mapRpcError,
   recordCommitteeDataKeyUnwrap,
@@ -23,6 +24,7 @@ import {
   revokeCommitteeMember,
   rotateCommitteeDataKey,
   storeRecoveryBlob,
+  verifyAndEnrollIdentityKeypair,
   wrapCommitteeDataKeyForMember,
   type RpcError,
   type RpcPort
@@ -60,6 +62,83 @@ Deno.test('enrollIdentityKeypair forwards public_key + fingerprint, returns user
     fn: 'enroll_identity_keypair',
     args: { p_public_key: '\\x' + '42'.repeat(32), p_pubkey_fingerprint: 'a'.repeat(64) }
   });
+});
+
+// ---- F-02 sealed-box enrollment challenge (G-T07-9) ----------------------
+
+Deno.test('issueEnrollmentChallenge forwards pubkey + fingerprint + raw_nonce + ttl', async () => {
+  const c: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const r = await issueEnrollmentChallenge(fakeRpc({ data: 'chal-1', error: null }, c), {
+    public_key_hex: '\\x' + '42'.repeat(32),
+    pubkey_fingerprint: 'a'.repeat(64),
+    raw_nonce_hex: '\\x' + 'cd'.repeat(32),
+    ttl_minutes: 10
+  });
+  assert(r.ok);
+  assertEquals(r.data, { challenge_id: 'chal-1' });
+  assertEquals(c[0], {
+    fn: 'issue_enrollment_challenge',
+    args: {
+      p_public_key: '\\x' + '42'.repeat(32),
+      p_pubkey_fingerprint: 'a'.repeat(64),
+      p_raw_nonce: '\\x' + 'cd'.repeat(32),
+      p_ttl_minutes: 10
+    }
+  });
+});
+
+Deno.test('issueEnrollmentChallenge defaults ttl_minutes to 10', async () => {
+  const c: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  await issueEnrollmentChallenge(fakeRpc({ data: 'chal-1', error: null }, c), {
+    public_key_hex: '\\x42',
+    pubkey_fingerprint: 'a'.repeat(64),
+    raw_nonce_hex: '\\xcd'
+  });
+  assertEquals((c[0]?.args as { p_ttl_minutes: number }).p_ttl_minutes, 10);
+});
+
+Deno.test('verifyAndEnrollIdentityKeypair forwards challenge_id + raw_nonce_observed, returns user_id', async () => {
+  const c: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const r = await verifyAndEnrollIdentityKeypair(fakeRpc({ data: 'u-1', error: null }, c), {
+    challenge_id: 'chal-1',
+    raw_nonce_observed_hex: '\\x' + 'cd'.repeat(32)
+  });
+  assert(r.ok);
+  assertEquals(r.data, { user_id: 'u-1' });
+  assertEquals(c[0], {
+    fn: 'verify_and_enroll_identity_keypair',
+    args: { p_challenge_id: 'chal-1', p_raw_nonce_observed: '\\x' + 'cd'.repeat(32) }
+  });
+});
+
+Deno.test('verifyAndEnrollIdentityKeypair surfaces wrong_nonce (P0001) as 403', async () => {
+  const r = await verifyAndEnrollIdentityKeypair(
+    fakeRpc({ data: null, error: { code: 'P0001', message: 'wrong_nonce' } }, []),
+    { challenge_id: 'chal-1', raw_nonce_observed_hex: '\\x00' }
+  );
+  assert(!r.ok);
+  assertEquals(r.reason, 'wrong_nonce');
+  assertEquals(r.status, 403);
+});
+
+Deno.test('verifyAndEnrollIdentityKeypair surfaces challenge_expired (P0001) as 410', async () => {
+  const r = await verifyAndEnrollIdentityKeypair(
+    fakeRpc({ data: null, error: { code: 'P0001', message: 'challenge_expired' } }, []),
+    { challenge_id: 'chal-1', raw_nonce_observed_hex: '\\xcd' }
+  );
+  assert(!r.ok);
+  assertEquals(r.reason, 'challenge_expired');
+  assertEquals(r.status, 410);
+});
+
+Deno.test('verifyAndEnrollIdentityKeypair surfaces challenge_consumed (P0001) as 409', async () => {
+  const r = await verifyAndEnrollIdentityKeypair(
+    fakeRpc({ data: null, error: { code: 'P0001', message: 'challenge_consumed' } }, []),
+    { challenge_id: 'chal-1', raw_nonce_observed_hex: '\\xcd' }
+  );
+  assert(!r.ok);
+  assertEquals(r.reason, 'challenge_consumed');
+  assertEquals(r.status, 409);
 });
 
 Deno.test('enrollIdentityKeypair surfaces duplicate (23505) — F-12 / Invariant 1', async () => {
@@ -278,6 +357,12 @@ Deno.test('mapRpcError honors message literal first, then ERRCODE fallback', () 
     [{ code: 'P0001', message: 'no_active_members' }, 'no_active_members', 422],
     [{ code: '55P03', message: 'rotation_in_progress' }, 'rotation_in_progress', 423],
     [{ code: 'P0001', message: 'rotation_not_started' }, 'rotation_not_started', 422],
+    // F-02 (G-T07-9) reasons.
+    [{ code: 'P0001', message: 'wrong_nonce' }, 'wrong_nonce', 403],
+    [{ code: 'P0001', message: 'challenge_expired' }, 'challenge_expired', 410],
+    [{ code: 'P0001', message: 'challenge_consumed' }, 'challenge_consumed', 409],
+    [{ code: 'P0001', message: 'invalid_nonce' }, 'invalid_input', 422],
+    [{ code: 'P0001', message: 'invalid_ttl' }, 'invalid_input', 422],
     // Validation literals collapse to invalid_input.
     [{ code: 'P0001', message: 'invalid_pubkey' }, 'invalid_input', 422],
     [{ code: 'P0001', message: 'invalid_blob' }, 'invalid_input', 422],

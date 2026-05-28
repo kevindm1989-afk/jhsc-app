@@ -42,9 +42,12 @@ export type T07Reason =
   | 'no_active_members'
   | 'rotation_in_progress'
   | 'rotation_not_started'
+  | 'challenge_expired'
+  | 'challenge_consumed'
+  | 'wrong_nonce'
   | 'unknown';
 
-export type OpStatus = 400 | 403 | 404 | 409 | 422 | 423;
+export type OpStatus = 400 | 403 | 404 | 409 | 410 | 422 | 423;
 export type OpResult<T> = { ok: true; data: T } | { ok: false; reason: T07Reason; status: OpStatus };
 
 const MESSAGE_LITERALS: ReadonlySet<string> = new Set([
@@ -57,6 +60,9 @@ const MESSAGE_LITERALS: ReadonlySet<string> = new Set([
   'no_active_members',
   'rotation_in_progress',
   'rotation_not_started',
+  'challenge_expired',
+  'challenge_consumed',
+  'wrong_nonce',
   'invalid_pubkey',
   'invalid_blob',
   'invalid_kdf_params',
@@ -66,6 +72,8 @@ const MESSAGE_LITERALS: ReadonlySet<string> = new Set([
   'invalid_args',
   'invalid_trigger',
   'invalid_new_key',
+  'invalid_nonce',
+  'invalid_ttl',
   '4eyes_required'
 ]);
 
@@ -79,6 +87,9 @@ const STATUS: Record<T07Reason, OpStatus> = {
   no_active_members: 422,
   rotation_in_progress: 423,
   rotation_not_started: 422,
+  challenge_expired: 410,
+  challenge_consumed: 409,
+  wrong_nonce: 403,
   unknown: 400
 };
 
@@ -127,6 +138,15 @@ export function mapRpcError(error: RpcError): { reason: T07Reason; status: OpSta
       case 'rotation_not_started':
         reason = 'rotation_not_started';
         break;
+      case 'challenge_expired':
+        reason = 'challenge_expired';
+        break;
+      case 'challenge_consumed':
+        reason = 'challenge_consumed';
+        break;
+      case 'wrong_nonce':
+        reason = 'wrong_nonce';
+        break;
       default:
         reason = 'invalid_input';
     }
@@ -162,6 +182,41 @@ export function enrollIdentityKeypair(
   return call<string>(rpc, 'enroll_identity_keypair', {
     p_public_key: input.public_key_hex,
     p_pubkey_fingerprint: input.pubkey_fingerprint
+  }).then((r) => (r.ok ? { ok: true, data: { user_id: r.data } } : r));
+}
+
+// ---------------------------------------------------------------------------
+// F-02 sealed-box enrollment challenge (G-T07-9). Two-step handshake:
+//   1. issueEnrollmentChallenge — server stores HMAC(nonce) + the Edge
+//      Function seals the raw nonce to the posted pubkey via crypto_box_seal.
+//   2. verifyAndEnrollIdentityKeypair — client posts the unsealed nonce; the
+//      SQL function re-HMACs, compares, and atomically commits identity_keys.
+// ---------------------------------------------------------------------------
+
+export function issueEnrollmentChallenge(
+  rpc: RpcPort,
+  input: {
+    public_key_hex: string;
+    pubkey_fingerprint: string;
+    raw_nonce_hex: string;
+    ttl_minutes?: number;
+  }
+): Promise<OpResult<{ challenge_id: string }>> {
+  return call<string>(rpc, 'issue_enrollment_challenge', {
+    p_public_key: input.public_key_hex,
+    p_pubkey_fingerprint: input.pubkey_fingerprint,
+    p_raw_nonce: input.raw_nonce_hex,
+    p_ttl_minutes: input.ttl_minutes ?? 10
+  }).then((r) => (r.ok ? { ok: true, data: { challenge_id: r.data } } : r));
+}
+
+export function verifyAndEnrollIdentityKeypair(
+  rpc: RpcPort,
+  input: { challenge_id: string; raw_nonce_observed_hex: string }
+): Promise<OpResult<{ user_id: string }>> {
+  return call<string>(rpc, 'verify_and_enroll_identity_keypair', {
+    p_challenge_id: input.challenge_id,
+    p_raw_nonce_observed: input.raw_nonce_observed_hex
   }).then((r) => (r.ok ? { ok: true, data: { user_id: r.data } } : r));
 }
 
