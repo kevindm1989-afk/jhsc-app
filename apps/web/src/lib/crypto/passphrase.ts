@@ -26,7 +26,7 @@
  * memory after writing the recovery blob.
  */
 
-import sodium from 'libsodium-wrappers';
+import sodium from 'libsodium-wrappers-sumo';
 import { ready } from './sodium';
 
 /** Crockford base32 alphabet — excludes i, l, o, u for transcription clarity. */

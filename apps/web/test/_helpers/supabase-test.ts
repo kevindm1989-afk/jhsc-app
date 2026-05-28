@@ -99,10 +99,12 @@ import {
 } from '../../src/lib/recovery/show-again';
 // Opt the test harness into the BLAKE2b-keyed-hash KDF substitute that
 // `recovery-blob.ts` exposes per ADR-0003 Amendment G's "test-harness
-// override flag with production guard" line. The standard
-// `libsodium-wrappers` build (the dep we ship in T07) excludes Argon2id;
-// production must use `-sumo` (per known-gap G-T07-12). Without this
-// override, every `storeRecoveryBlob` call would fail-closed per Amendment G.
+// override flag with production guard" line. The PRODUCTION build now ships
+// `libsodium-wrappers-sumo` (G-T07-12 resolved) so `crypto_pwhash` IS
+// available at runtime and the BLAKE2b branch is unreachable — the override
+// stays armed as defense-in-depth for any future test that explicitly
+// stubs the sodium module to drop `crypto_pwhash` (mirroring the pre-swap
+// world for fail-closed coverage; see test/T07/argon2id-fail-closed.test.ts).
 // Production code paths (where this override is left null) preserve the
 // fail-closed contract.
 import { __setTestOverrideUseBlake2bFallback } from '../../src/lib/crypto/recovery-blob';

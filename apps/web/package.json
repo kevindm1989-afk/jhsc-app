@@ -39,6 +39,6 @@
   },
   "dependencies": {
     "@sentry/sveltekit": "10.53.1",
-    "libsodium-wrappers": "0.7.15"
+    "libsodium-wrappers-sumo": "0.7.15"
   }
 }

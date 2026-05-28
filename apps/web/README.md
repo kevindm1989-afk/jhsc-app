@@ -104,7 +104,7 @@ apps/web/
 │   │   ├── tokens.ts                             # Typed accessor over /design-tokens.json
 │   │   ├── feature-flags.ts                      # In-process flag system (no SaaS)
 │   │   ├── sw/                                   # Service-worker skeleton (ADR-0013 allowlist)
-│   │   └── crypto/sodium.ts                      # libsodium-wrappers wrapper (ADR-0003)
+│   │   └── crypto/sodium.ts                      # libsodium-wrappers-sumo wrapper (ADR-0003 / G-T07-12)
 │   └── routes/                                   # Placeholder landing page
 └── test/                                         # READ-ONLY (test-writer owns)
     ├── _helpers/

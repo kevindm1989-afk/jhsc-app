@@ -145,6 +145,10 @@ run_gate_shell "supabase region pin (config note)" "bash scripts/check-supabase-
 # src/lib/recovery/). The test at apps/web/test/T07/e2ee-key-core.test.ts
 # greps only the first path; this gate widens to the controller location.
 run_gate_shell "recovery-surface exfil-channel lint" "bash scripts/check-recovery-surface-lint.sh"
+# G-T07-12 lockfile-lint — libsodium-wrappers-sumo is the only allowed
+# variant (Argon2id / F-08 floor); accidental revert to the non-sumo build
+# would make recovery-blob writes fail at runtime.
+run_gate_shell "libsodium-wrappers-sumo lockfile-lint" "bash scripts/check-libsodium-sumo-locked.sh"
 
 # Sentry-scrub / canary-PII test fixture is part of the Vitest gate below
 # (apps/web/test/T02/sentry-scrub.test.ts); listed here so the verify.sh

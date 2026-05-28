@@ -33,18 +33,37 @@ export const KDF_PARAMS: KdfParams = {
 export const ARGON2_UNAVAILABLE_ERROR = 'argon2id_unavailable_libsodium_wrappers_sumo_required';
 
 /**
+ * Boot-time fail-fast (G-T07-12). Call once at app start (wired in
+ * `hooks.client.ts`). If `crypto_pwhash` is missing — the standard
+ * `libsodium-wrappers` build's signature, or a deployment that somehow
+ * dropped the `-sumo` variant — this throws the canonical
+ * `argon2id_unavailable_libsodium_wrappers_sumo_required` token so the
+ * runtime fails before any recovery-blob path can silently fall through to
+ * an inferior KDF. In `NODE_ENV === 'test'` the assertion is a no-op
+ * (vitest/jsdom builds may stub libsodium for hermetic round-trip tests).
+ */
+export async function assertArgon2idAvailable(): Promise<void> {
+  const s = await ready();
+  if (typeof s.crypto_pwhash === 'function') return;
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') return;
+  throw new Error(ARGON2_UNAVAILABLE_ERROR);
+}
+
+/**
  * Test-harness override flag — see ADR-0003 Amendment G "test-harness
- * override flag with production guard". The standard `libsodium-wrappers`
- * build (the dep this repo ships in T07) excludes `crypto_pwhash`; only the
- * `-sumo` variant carries it. T07.1 swaps the dep to `-sumo` (per known-gap
- * G-T07-12); until then, the test harness explicitly opts into a
- * BLAKE2b-keyed-hash KDF substitute so the round-trip-correctness tests
- * can run. Production code paths (where this flag is left null) fail-
- * closed as Amendment G mandates.
+ * override flag with production guard".
  *
- * The flag is a NULL-by-default getter so the bundle has no hard-coded
- * "true" path; setting it from non-test code is a contract violation that
- * the lockfile-lint / boot-time assertion in T07.1 will catch.
+ * As of G-T07-12 (resolved) the production dep is `libsodium-wrappers-sumo`,
+ * which DOES expose `crypto_pwhash`. The override is now dead code on the
+ * real production path (the `crypto_pwhash !== 'function'` guard in
+ * `deriveKey` is never taken under -sumo) but stays armed for the test
+ * harness's fail-closed coverage at apps/web/test/T07/argon2id-fail-closed
+ * .test.ts — that suite explicitly stubs `./sodium` to drop `crypto_pwhash`
+ * to mirror the pre-swap world and assert the guard still throws the
+ * canonical token. The flag is a NULL-by-default getter so the bundle has
+ * no hard-coded "true" path; setting it from non-test code is caught by
+ * both the boot-time `assertArgon2idAvailable()` (in this file) AND the
+ * `scripts/check-libsodium-sumo-locked.sh` lockfile-lint gate.
  *
  * Usage from the test harness:
  *   __setTestOverrideUseBlake2bFallback(() => true);
@@ -62,9 +81,10 @@ function isBlake2bFallbackOverrideActive(): boolean {
   // the override flag MUST NOT enable the BLAKE2b path — even if a future
   // contributor or an XSS attacker calls the setter. The structural guard:
   // when NODE_ENV === 'production' the function always returns false.
-  // T07.1's libsodium-wrappers-sumo swap (G-T07-12) makes this moot at the
-  // dep level; this guard is the library-layer defense-in-depth that closes
-  // the contract textually.
+  // G-T07-12 resolved the dep-level concern (production ships
+  // libsodium-wrappers-sumo so crypto_pwhash is present and this branch is
+  // unreachable on the real production path); this guard remains as the
+  // library-layer defense-in-depth that closes the contract textually.
   if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') {
     return false;
   }
@@ -155,9 +175,9 @@ export async function encryptRecoveryBlob(
     throw new Error(ARGON2_UNAVAILABLE_ERROR);
   }
   // Argon2id salt size is canonically 16 bytes (libsodium
-  // crypto_pwhash_SALTBYTES). In the standard libsodium-wrappers build
-  // the constant is not exposed; we pin the value here directly. The
-  // pinned 16 byte salt matches the production sumo build.
+  // crypto_pwhash_SALTBYTES). The -sumo build exposes the constant; the
+  // `?? 16` keeps any test that stubs `./sodium` with a partial surface
+  // (see argon2id-fail-closed.test.ts) producing a valid salt.
   const SALT_BYTES = (s.crypto_pwhash_SALTBYTES as number | undefined) ?? 16;
   const salt = s.randombytes_buf(SALT_BYTES);
   const nonce = s.randombytes_buf(s.crypto_secretbox_NONCEBYTES);
