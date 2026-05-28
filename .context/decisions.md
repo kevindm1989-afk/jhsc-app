@@ -7850,3 +7850,62 @@ Authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). `re
 ### Follow-ups
 - [ ] Architect ratifies this fold-in (the schedule, the PI rows, the enum authorization, the unified-table shape).
 - [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` rows for the new reprisal enum values.
+
+---
+
+# T14.1 fold-in amendment (2026-05-28): work_refusal + s51_evidence schedule + §PI inventory
+
+**DRAFT for architect ratification.** Folds the T14.1 architect-owned blockers (G-T14-4 / G-T14-5) that remain after the merged T14.1 DB keystone (`supabase/migrations/00000000000006_t14.sql` + `supabase/test/t14_rls.sql`) and the audit-enum mirror that landed with PR #19 (G-T14-7 → `EXPECTED_ENUM` + `audit-log.md §1` already done; the SQL `CHECK` half stays deferred to T18 alongside the other reserved values). Cross-references **F-21** (certified-only write, certified-or-cochair audited read), **HG-6** (audit-before-ciphertext, shared `c4_read_service`), **Amendment D extension** (`reprisal_feed` now covers `work_refusal.*` + `s51_evidence.*`), and **ADR-0011 amendment (HG-5)** (s.51 photos sealed under the committee key).
+
+### 1. ADR-0016 schedule rows (G-T14-4)
+
+| Table | Retention | Class | Basis |
+|---|---|---|---|
+| `work_refusal` | **7 years** | `fixed_years` / 7y | OHSA s.43 record; PI-bearing C4. Listed among the 7y operational tables in the ADR-0018 backup scope. |
+| `s51_evidence` | **7 years** | `fixed_years` / 7y | OHSA s.51 critical-injury record; PI-bearing C4 (notes + per-photo sealed blobs). Same OHSA basis. |
+
+(No new "pending" or "rate" tables here — T14 reuses T13's `pending_four_eyes_ops` only if a future flow needs 4-eyes, and has no rate ledger by design — F-21's certified-only write is the throttle.)
+
+**HG-15** fires for the two new tables; collect user re-ratification at T14.1 PR submission.
+
+### 2. §PI inventory rows (G-T14-5)
+
+Residency ca-central-1; retention 7y (per §1). Sealed columns are committee-key ciphertext (E2EE).
+
+| Column | Class | Notes |
+|---|---|---|
+| `work_refusal.id` | C0 | opaque uuid |
+| `work_refusal.actor_id` | C1 | statutory filer anchor — F-17, never null (no anonymous mode on s.43) |
+| `work_refusal.title_ct` | C3 | committee-key-sealed title |
+| `work_refusal.notes_ct` | **C4** | committee-key-sealed s.43 narrative |
+| `work_refusal.per_record_passphrase_hash` | C1 | pgcrypto-bf; UX friction gate (G-T14-5/10) |
+| `work_refusal.status` / `created_at` / `updated_at` | C1 | lifecycle metadata |
+| `s51_evidence.id` | C0 | opaque uuid |
+| `s51_evidence.actor_id` | C1 | statutory filer anchor — F-17, never null |
+| `s51_evidence.title_ct` | C3 | committee-key-sealed title |
+| `s51_evidence.notes_ct` | **C4** | committee-key-sealed s.51 narrative |
+| `s51_evidence.photos_ct` (bytea[]) | **C4** | per-photo sealed blobs (ADR-0011 amendment); each entry `nonce || ciphertext` |
+| `s51_evidence.per_record_passphrase_hash` | C1 | pgcrypto-bf |
+| `s51_evidence.status` / `created_at` / `updated_at` | C1 | lifecycle metadata |
+
+### 3. Audit-enum authorization — status
+
+The enum-mirror for `work_refusal.{created,read,update}` + `s51_evidence.{created,read,update}` (plus the shared `sensitive.access_attempt`) is **already in the closed enum** as of PR #19's fix:
+- [x] TS const (`WORK_REFUSAL_AUDIT_EVENTS` / `S51_EVIDENCE_AUDIT_EVENTS`)
+- [x] `audit-log.md §1` (the "Work refusal + s.51 evidence (T14)" section)
+- [x] `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` (44 values total)
+- [x] retention → `match_underlying` for the target-bearing T14 events (follow the 7y `work_refusal`/`s51_evidence`)
+- [ ] SQL `CHECK` + `audit_log_retention_schedule` rows — **deferred to T18** (with the other carried-forward enum values)
+- [ ] `s51_evidence.create.rejected` (G-T14-12) — library-side concern (photo-format reject); separate enum addition when the library fix lands.
+
+### Compliance check
+- [x] PIPEDA 4.5 — 7y OHSA-bound; T16 sweep enforces it.
+- [x] No new cross-border flow / subprocessor (ca-central-1).
+- [x] ADR-0003 Invariant 4 untouched (libsodium client-side seal + pgcrypto-bf server-side hash).
+- [ ] **HG-15** user ratification of the two new tables — at T14.1 PR submission.
+- [ ] **HG-10** labour-lawyer ratification of the s.43 / s.51 consent copy (G-T13-13 mirror).
+
+### Follow-ups
+- [ ] Architect ratifies this fold-in (the 7y schedule, the PI rows).
+- [ ] When the library `node:crypto` + photo-reject (G-T14-12) lands, add `s51_evidence.create.rejected` to the enum mirror.
+- [ ] T18 lands the SQL CHECK + retention-schedule rows for the new T14 enum values.
