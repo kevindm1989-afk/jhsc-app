@@ -7795,3 +7795,58 @@ Six-mirror status (same split that landed `member.role_changed` and `panic_wipe.
 ### Follow-ups
 - [ ] Architect ratifies this fold-in (the 7y class, the PI rows, the `concern.updated` authorization).
 - [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` row for `concern.updated` (with the other carried-forward enum values).
+
+---
+
+# T13.1 fold-in amendment (2026-05-28): reprisal schedule + §PI inventory + audit-enum authorization + unified pending-op shape
+
+**DRAFT for architect ratification.** Folds the T13.1 governance blockers (G-T13-4 / G-T13-5 / G-T13-11 / G-T13-14) that the reprisal server layer requires before production. Pairs with the merged T13.1 DB keystone (`supabase/migrations/00000000000005_reprisal.sql` + `supabase/test/reprisal_rls.sql`). Cross-references **ADR-0003 Amendments B/D/E** (HG-6 audited C4 read, pseudonymized feed, forensic-reveal 4-eyes), **ADR-0007 amendment**, **ADR-0016**, **ADR-0015**, and **threat-model §3.4 F-30..F-36**.
+
+### 1. Unified pending-op table (G-T13-11)
+
+The 4-eyes ledger ships as **one** `pending_four_eyes_ops` table with a `kind` discriminator (`status_flip` | `forensic_reveal`), columns `proposer_id` / `approver_id` / `target_table` / `target_id` / `new_status` / `reveal_reason` / `created_at` / `expires_at` / `expired_at` / `revealed_actor_pseudonym` — matching the shipped `PendingFourEyesOp` library type 1:1 (architect decision 2026-05-28). This supersedes the separate `pending_destructive_ops` / `pending_forensic_reveals` naming in the ADR-0003 Amendment B/E text and confirms the G-T13-11 column names.
+
+### 2. ADR-0016 schedule rows (G-T13-4)
+
+| Table | Retention | Class | Basis |
+|---|---|---|---|
+| `reprisal_log` | **7 years** | `fixed_years` / 7y | OHSA reprisal record (PI-bearing C4); listed among the 7y operational tables in the ADR-0018 backup scope. |
+| `pending_four_eyes_ops` | **24mo** | `fixed_months` / 24mo | Operational 4-eyes ledger (C1 pseudonyms + C0 references); forensic rows clear `revealed_actor_pseudonym` at the 24h window (`expire_forensic_reveals`). |
+| `reprisal_rate_log` | **24mo** | operational | Rate ledger (actor anchor only); the T16 sweep prunes it. |
+
+**HG-15 (new tables):** fires for `reprisal_log`, `pending_four_eyes_ops`, `reprisal_rate_log`; collect user re-ratification at T13.1 PR submission.
+
+### 3. §PI inventory rows (G-T13-5)
+
+Residency ca-central-1; `reprisal_log` retention 7y (per §2). Sealed columns are committee-key ciphertext (E2EE; server never sees plaintext).
+
+| Column | Class | Notes |
+|---|---|---|
+| `reprisal_log.id` | C0 | opaque uuid |
+| `reprisal_log.actor_id` | C1 | author anchor — F-17, never null (no anonymous mode on reprisals) |
+| `reprisal_log.title_ct` / `body_ct` | **C4** | committee-key-sealed; `body_ct` is the highest-sensitivity plaintext in the system |
+| `reprisal_log.per_record_passphrase_hash` | C1 | pgcrypto-bf; UX friction gate, not reversible to the body |
+| `reprisal_log.status` / `created_at` / `updated_at` | C1 | lifecycle metadata |
+| `pending_four_eyes_ops.proposer_id` / `approver_id` | C1 | actor anchors |
+| `pending_four_eyes_ops.target_table` / `target_id` / `kind` / `new_status` / `reveal_reason` | C0/C1 | op references + reason text |
+| `pending_four_eyes_ops.revealed_actor_pseudonym` | C1 | revealed for ≤24h, then cleared (Amendment E) |
+
+### 4. Audit-enum authorization (G-T13-14)
+
+Authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). `reprisal.update` and `sensitive.access_attempt` were missing from the gate + doc and are added now; the forensic pair was already present. Mirror status:
+- [x] TS const — `REPRISAL_AUDIT_EVENTS` in `apps/web/src/lib/reprisal/types.ts` (all 8 present)
+- [x] `audit-log.md §1` rows for `reprisal.update`, `sensitive.access_attempt`, `audit.forensic_reveal.4eyes_pending/completed` (this fold-in)
+- [x] `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` adds `reprisal.update` + `sensitive.access_attempt` (this fold-in)
+- [x] retention → `match_underlying` for the target-bearing reprisal.* events (follow the `reprisal_log` 7y); the forensic `audit.*` events carry no target_id and take the audit-log default
+- [ ] SQL `audit_log.event_type` CHECK + `audit_log_retention_schedule` rows — **deferred to T18** (as with `member.role_changed` / `concern.updated`)
+
+### Compliance check
+- [x] PIPEDA 4.5 — reprisal 7y OHSA-bound; T16 sweep enforces it.
+- [x] No new cross-border flow / subprocessor (ca-central-1, in-stack).
+- [x] ADR-0003 Invariant 4 untouched (libsodium client-side seal + pgcrypto-bf server-side hash only).
+- [ ] **HG-15** user ratification of the three new tables — at T13.1 PR submission.
+- [ ] **HG-10** labour-lawyer ratification of the reprisal consent copy (G-T13-13) — before first production reprisal data.
+
+### Follow-ups
+- [ ] Architect ratifies this fold-in (the schedule, the PI rows, the enum authorization, the unified-table shape).
+- [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` rows for the new reprisal enum values.

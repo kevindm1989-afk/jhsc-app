@@ -49,8 +49,10 @@ EXPECTED_ENUM=(
   recommendation.employer_response_logged
   reprisal.created
   reprisal.read
+  reprisal.update
   reprisal.status_changed.4eyes_pending
   reprisal.status_changed.4eyes_completed
+  sensitive.access_attempt
   work_refusal.read
   s51_evidence.read
   audit.forensic_reveal.4eyes_pending
