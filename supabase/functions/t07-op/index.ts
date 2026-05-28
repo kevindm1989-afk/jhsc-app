@@ -22,6 +22,7 @@ import { log, withFunctionName } from '../_shared/log.ts';
 import {
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
+  getRecoveryBlob,
   initCommitteeDataKey,
   issueEnrollmentChallenge,
   issueRecoveryBlobReset,
@@ -72,7 +73,8 @@ type Op =
       members_rewrapped_count: number;
     }
   | { op: 'revoke_member'; removed_member_id: string; rotation_id: string }
-  | { op: 'record_selftest_fail'; meta?: Record<string, unknown> };
+  | { op: 'record_selftest_fail'; meta?: Record<string, unknown> }
+  | { op: 'get_recovery_blob' };
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -217,6 +219,9 @@ Deno.serve(async (req) => {
       break;
     case 'record_selftest_fail':
       result = await recordIdentitySelftestFail(rpc, body);
+      break;
+    case 'get_recovery_blob':
+      result = await getRecoveryBlob(rpc);
       break;
     default:
       return json({ ok: false, error: 'bad_request' }, 400);

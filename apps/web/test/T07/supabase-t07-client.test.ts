@@ -133,6 +133,53 @@ describe('T07.1 / G-T07-2 — SupabaseT07Client wire shapes', () => {
   });
 });
 
+describe('T07.1 — SupabaseT07Client.getRecoveryBlob (F-08 restore-flow read)', () => {
+  it('decodes the bytea hex back to Uint8Array on success', async () => {
+    const { transport, calls } = mockTransport([
+      {
+        status: 200,
+        body: {
+          ok: true,
+          data: {
+            blob_ciphertext_hex: '\\xdeadbeef',
+            kdf_params: { alg: 'argon2id13', version: 1 }
+          }
+        }
+      }
+    ]);
+    const client = new SupabaseT07Client({ transport });
+    const r = await client.getRecoveryBlob();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toEqual({
+      blob_ciphertext: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+      kdf_params: { alg: 'argon2id13', version: 1 }
+    });
+    expect(calls[0]?.body).toEqual({ op: 'get_recovery_blob' });
+  });
+
+  it('returns { ok: true, data: null } when no blob is on file', async () => {
+    const { transport } = mockTransport([{ status: 200, body: { ok: true, data: null } }]);
+    const client = new SupabaseT07Client({ transport });
+    const r = await client.getRecoveryBlob();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toBeNull();
+  });
+
+  it('surfaces 403 rls_denied (no session)', async () => {
+    const { transport } = mockTransport([
+      { status: 403, body: { ok: false, error: 'rls_denied' } }
+    ]);
+    const client = new SupabaseT07Client({ transport });
+    const r = await client.getRecoveryBlob();
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe('rls_denied');
+    expect(r.status).toBe(403);
+  });
+});
+
 describe('T07.1 / G-T07-2 — F-02 enrollment via sealed-box challenge', () => {
   it('enrollIdentityViaChallenge runs init → unseal → finalize, persists privkey AFTER success', async () => {
     const sealedNonce = new Uint8Array(48); // crypto_box_seal output > nonce length
