@@ -54,7 +54,11 @@ EXPECTED_ENUM=(
   reprisal.status_changed.4eyes_completed
   sensitive.access_attempt
   work_refusal.read
+  work_refusal.created
+  work_refusal.update
   s51_evidence.read
+  s51_evidence.created
+  s51_evidence.update
   audit.forensic_reveal.4eyes_pending
   audit.forensic_reveal.4eyes_completed
   export.generated
