@@ -40,6 +40,7 @@ EXPECTED_ENUM=(
   auth.passkey.revoked
   session.revoked
   concern.created
+  concern.updated
   concern.source_revealed
   inspection.synced
   inspection.synced.hmac_fail

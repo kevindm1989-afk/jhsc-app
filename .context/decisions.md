@@ -7742,3 +7742,56 @@ Security-reviewer asserts the HMAC-keyed pseudonyms hold equality across SQL ↔
 **6. HG-15 user ratification** is collected before T16 ships (not before T05 merges; T16 is the retention-sweep task that operationalizes the schedule).
 
 **No new cross-border transfers introduced.** **No new PI subprocessors introduced.** **No locked decisions re-opened.** ADR-0010's "Sentry is the only non-Supabase PI-adjacent subprocessor" posture preserved. ADR-0001's hosting tradeoff preserved.
+
+---
+
+# T08.1 fold-in amendment (2026-05-28): `concerns` retention schedule + §PI inventory + `concern.updated` audit-enum authorization
+
+**DRAFT for architect ratification.** Folds the three governance blockers the T08.1 carry-forwards (G-T08-4 / G-T08-5 / G-T08-9) require before the concerns server layer ships in production. Pairs with the merged T08.1 DB keystone (`supabase/migrations/00000000000004_concerns.sql` + `supabase/test/concerns_rls.sql`). Cross-references **ADR-0016** (operational-table retention + HMAC pseudonym), **ADR-0015** (per-event audit retention), **ADR-0003 Amendment A** (closed audit enum + the six-mirror extension dance), **ADR-0007** (concern intake), and **threat-model §3.2 F-15..F-20**.
+
+### 1. ADR-0016 schedule row — `concerns` (G-T08-4)
+
+| Table | Retention | Class | Basis |
+|---|---|---|---|
+| `concerns` | **7 years** | `fixed_years` / 7y | OHSA record-keeping obligation — `concerns` is already enumerated among the 7y PI-bearing operational tables in the ADR-0018 backup-scope decision ("`concerns`, `inspections`, … carry 7y OHSA obligations"). The T16 retention sweep keys off this row; the T16.1 `audit_log_retention_schedule` / operational schedule table is the authoritative SQL mirror. |
+
+**HG-15 (new server↔DB table):** fires for the `concerns` + `concern_rate_log` tables landed by the T08.1 migration; collect user re-ratification at T08.1 PR submission. `concern_rate_log` is an **operational** rate-limit ledger (no PI beyond the actor anchor); recommended retention **24mo** (or shorter — the T16 sweep prunes it; it carries no OHSA obligation). 
+
+### 2. §PI inventory rows — `concerns` columns (G-T08-5)
+
+All client-sealed columns are committee-key ciphertext (E2EE; the server never sees plaintext). Residency ca-central-1; retention 7y (per §1).
+
+| Column | Data class | Notes |
+|---|---|---|
+| `concerns.id` | C0 | opaque uuid |
+| `concerns.actor_id` | C1 | submitter anchor — F-17, ALWAYS present (never null), independent of the anonymous toggle |
+| `concerns.title_ct` | C3 | committee-key-sealed title |
+| `concerns.body_ct` | C3 | committee-key-sealed body |
+| `concerns.source_name_ct` | **C4** | committee-key-sealed source name; NULL when logged anonymously; omitted from `concerns_default_view` (F-18) |
+| `concerns.source_passphrase_hash` | C1 | pgcrypto-bf hash of the per-record reveal passphrase (UX gate, not the crypto gate, G-T08-6); not reversible to the source name |
+| `concerns.hazard_class` / `severity` / `location_id` | C1 | classification metadata |
+| `concerns.created_at` / `updated_at` | C1 | timestamps |
+
+### 3. `concern.updated` audit-enum authorization (G-T08-9)
+
+`concern.updated` is hereby authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). It is emitted by `concern_update` (F-16) carrying `meta.prev_field_hashes` — the **server-computed** SHA-256 of each prior sealed column, so a body/title rewrite is forensically detectable without revealing plaintext. Threat-model §3.2 F-16's spelling is reconciled to the past-tense `concern.updated` (matching `member.role_changed` / `auth.passkey.enrolled`).
+
+Six-mirror status (same split that landed `member.role_changed` and `panic_wipe.invoked`):
+- [x] TS const — `CONCERN_AUDIT_EVENTS` in `apps/web/src/lib/concerns/types.ts` (already present)
+- [x] `audit-log.md §1` "Concern intake (T08)" table row (this fold-in)
+- [x] `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` (this fold-in)
+- [x] retention class — concern audit rows carry a `target_id`, so `audit_emit`'s "default class + target_id ⇒ `match_underlying`" rule makes them follow the `concerns` row's 7y retention; no `retention_class_for` arm needed
+- [ ] SQL `audit_log.event_type` CHECK — **deferred to T18** (which owns the strict CHECK + `audit_log_retention_schedule`), exactly as `member.role_changed` / `panic_wipe.invoked` are carried forward
+- [ ] `audit_log_retention_schedule` SQL row — **deferred to T18 / T16.1** with the CHECK
+
+### Compliance check
+
+- [x] PIPEDA 4.5 (Limiting Retention) — `concerns` 7y is OHSA-obligation-bound; the T16 sweep enforces it.
+- [x] No new cross-border flow; no new subprocessor (ca-central-1, in-stack).
+- [x] ADR-0003 Invariant 4 untouched (the concern crypto is libsodium client-side + pgcrypto server-side hashing only).
+- [ ] **HG-15 user ratification** of the two new tables — collect at T08.1 PR submission.
+- [ ] **HG-10 labour-lawyer** ratification of the source-name consent copy (G-T08-11) — separate human gate, before first production concern data.
+
+### Follow-ups
+- [ ] Architect ratifies this fold-in (the 7y class, the PI rows, the `concern.updated` authorization).
+- [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` row for `concern.updated` (with the other carried-forward enum values).
