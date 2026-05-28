@@ -28,7 +28,7 @@ import {
   wrapForMember as wrapForMemberPrim
 } from './committee-key';
 import { createShowAgainController } from '../recovery/show-again';
-import type { KeyStore } from './key-store';
+import type { KeyStore, LocalIdentityStore } from './key-store';
 import type {
   EnrollIdentityResult,
   IdentityKeypair,
@@ -41,7 +41,7 @@ import type {
   WrapForMemberResult
 } from './types';
 
-export type { KeyStore } from './key-store';
+export type { KeyStore, LocalIdentityStore } from './key-store';
 export type {
   EnrollIdentityResult,
   IdentityKeypair,
@@ -68,12 +68,22 @@ export {
 } from '../recovery/show-again';
 
 /**
- * KeyCore — the orchestrator that ties the KeyStore + libsodium
- * primitives together. The harness builds one per `createTestSupabase()`
- * via `supa.keyCore()`. Public surface mirrors the test imports.
+ * KeyCore — the orchestrator that ties the KeyStore (server-bound) +
+ * LocalIdentityStore (device-local) + libsodium primitives together. The
+ * harness builds one per `createTestSupabase()` via `supa.keyCore()`.
+ * Public surface mirrors the test imports.
+ *
+ * The split (G-T07-10) makes Invariant 1 structural: every path that
+ * touches the private key reads it through `localIdentity`; the server-
+ * bound `store` has no method that takes or returns a private key. In
+ * production the two interfaces are backed by distinct classes
+ * (`SupabaseKeyStore` for `store`, `BrowserLocalIdentityStore` for
+ * `localIdentity`); in tests `MemoryKeyStore` satisfies both so a single
+ * instance is wired into both slots.
  */
 export interface KeyCore {
   store: KeyStore;
+  localIdentity: LocalIdentityStore;
   /**
    * F-03 / Invariant 3 — persist the identity privkey into IndexedDB
    * (production) or the test in-memory IDB (`supa.idb`). The harness
@@ -96,17 +106,31 @@ export interface KeyCore {
 
 export function makeKeyCore(opts: {
   store: KeyStore;
+  /**
+   * Device-local identity store. Optional — when omitted, falls back to
+   * `opts.store` (the test fallback: `MemoryKeyStore` implements both
+   * interfaces). Production wiring threads a separate
+   * `BrowserLocalIdentityStore` instance.
+   */
+  localIdentity?: LocalIdentityStore;
   idbBlobs?: Map<string, Uint8Array>;
 }): KeyCore {
   let canary: string | null = null;
   const blobs = opts.idbBlobs ?? new Map<string, Uint8Array>();
+  // Test fallback: the same MemoryKeyStore instance satisfies both
+  // interfaces, so wiring `store` into both slots is the harness default.
+  // Production callers MUST pass a distinct `localIdentity` (the SupabaseKeyStore
+  // does NOT implement LocalIdentityStore by design).
+  const localIdentity = opts.localIdentity ?? (opts.store as unknown as LocalIdentityStore);
   return {
     store: opts.store,
+    localIdentity,
     async persistIdentityToIndexedDB(identity: IdentityKeypair): Promise<void> {
-      // The MemoryKeyStore already retains the device-local privkey via
-      // `storeIdentityKeys`. We also seed the IDB shim with a marker blob
-      // so the F-03 self-test corruption test (which overwrites this blob
-      // with garbage) can detect the tamper.
+      // We seed the IDB shim with a marker blob so the F-03 self-test
+      // corruption test (which overwrites this blob with garbage) can
+      // detect the tamper. The actual device-local privkey already lives
+      // in `localIdentity` (the harness stored it via
+      // `storeIdentityPrivateKey` inside `enrollIdentityKeypair`).
       blobs.set('ident_priv_wrapped_local', new Uint8Array(identity.private_key));
     },
     async __injectCanaryForTest(c: string): Promise<void> {
@@ -151,7 +175,12 @@ export async function enrollIdentityKeypair(
   if (!ok) {
     return { status: 'rejected', reason: 'pairing_self_test_failed' };
   }
-  await core.store.storeIdentityKeys(user.user_id, kp);
+  // G-T07-10 split: private half lands ONLY on the LocalIdentityStore;
+  // the public half lands on the server-bound KeyStore. Invariant 1 is
+  // enforced structurally — there is no method on `core.store` that takes
+  // the private key.
+  await core.localIdentity.storeIdentityPrivateKey(user.user_id, kp.private_key);
+  await core.store.persistIdentityPublicKey(user.user_id, kp.public_key);
   const fp = await pubkeyFingerprint(kp.public_key);
   await core.store.recordKeyEvent({
     event_type: 'identity_keypair.created',
@@ -184,7 +213,7 @@ export async function storeRecoveryBlob(
     return { status: 'mismatch' };
   }
   // Pull the user's identity privkey from the device-local store.
-  const priv = await core.store.__getIdentityPrivateKeyLocalOnly(user.user_id);
+  const priv = await core.localIdentity.getIdentityPrivateKey(user.user_id);
   const blob = await encryptRecoveryBlob(priv, passphrase);
   // Persisted envelope: [16-byte salt][24-byte nonce][secretbox ciphertext].
   // `restoreFromRecoveryBlob` slices this shape back apart.
@@ -291,14 +320,14 @@ export async function wrapForMember(
   actor: { user_id: string },
   target_member_id: string
 ): Promise<WrapForMemberResult> {
-  return wrapForMemberPrim(core.store, actor.user_id, target_member_id);
+  return wrapForMemberPrim(core.store, core.localIdentity, actor.user_id, target_member_id);
 }
 
 export async function unwrapForSession(
   core: KeyCore,
   user: { user_id: string }
 ): Promise<{ data_key: Uint8Array; committee_key_id: string } | { error: 'no_wrap' }> {
-  return unwrapForSessionPrim(core.store, user.user_id);
+  return unwrapForSessionPrim(core.store, core.localIdentity, user.user_id);
 }
 
 export async function rotateCommitteeKey(
@@ -331,7 +360,7 @@ export async function identitySelfTest(
     // could overwrite the blob; the self-test catches the mismatch
     // BEFORE the session is treated as authenticated.
     const idbBlob = core.__idbGet('ident_priv_wrapped_local');
-    const priv = await core.store.__getIdentityPrivateKeyLocalOnly(user.user_id);
+    const priv = await core.localIdentity.getIdentityPrivateKey(user.user_id);
     if (idbBlob !== null) {
       if (idbBlob.length !== priv.length) {
         await emitSelfTestFailAudit(core, user.user_id);
@@ -362,27 +391,19 @@ export async function identitySelfTest(
 }
 
 async function emitSelfTestFailAudit(core: KeyCore, user_id: string): Promise<void> {
-  // The audit-log enum value `client.identity_selftest_fail` lives in the
-  // ADR-0015 schedule (90d retention). The KeyStore's recordKeyEvent
-  // only accepts the 8 closed-enum keymat events; emit via the auth
-  // store's path by routing through a generic emission. The MemoryAuth
-  // store handles this — production routes via `audit_emit`.
-  const ks = core.store as unknown as {
-    recordKeyEvent: (e: {
-      event_type: string;
-      meta: Record<string, unknown>;
-      actor_pseudonym: string;
-    }) => Promise<void>;
-  };
-  // The closed enum check at the type level forbids `client.identity_selftest_fail`,
-  // so we cast through `unknown`. The SQL `audit_emit` accepts arbitrary
-  // event_type strings; the closed-enum is enforced by the
-  // check-audit-enum-coverage.sh CI gate, not the runtime.
-  await ks.recordKeyEvent({
-    event_type: 'client.identity_selftest_fail' as unknown as never,
+  // G-T07-15 — `client.identity_selftest_fail` is NOT one of the 9
+  // closed-enum key-material events; it is a client-emitted operational
+  // signal (90-day retention, ADR-0015). The KeyStore exposes a separate
+  // typed emission path (`recordSelftestFail`) so we no longer need to
+  // smuggle the string through `recordKeyEvent` with an `as unknown`
+  // cast. The SQL `audit_emit` accepts the event_type verbatim;
+  // closed-enum membership is enforced by
+  // `scripts/check-audit-enum-coverage.sh` which lists this value in
+  // `EXPECTED_ENUM`.
+  await core.store.recordSelftestFail({
     actor_pseudonym: core.store.pseudonymOf(user_id),
     meta: { actor_id: user_id }
-  } as never);
+  });
 }
 
 // ---------------------------------------------------------------------------

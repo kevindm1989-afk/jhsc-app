@@ -20,7 +20,9 @@ import type {
   CommitteeKeyWrapRow,
   IdentityKeysRow,
   KeyAuditEmission,
+  KeySelftestFailEmission,
   KeyStore,
+  LocalIdentityStore,
   RecoveryBlobRow
 } from './key-store';
 import type { KdfParams, KeyMaterialAuditEvent } from './types';
@@ -28,13 +30,21 @@ import type { KdfParams, KeyMaterialAuditEvent } from './types';
 interface AuditRow {
   id: number;
   ts: string;
-  event_type: KeyMaterialAuditEvent;
+  event_type: KeyMaterialAuditEvent | 'client.identity_selftest_fail';
   actor_pseudonym: string;
   rotation_id: string | null;
   meta: Record<string, unknown>;
 }
 
-export class MemoryKeyStore implements KeyStore {
+/**
+ * Test double that satisfies BOTH the server-bound `KeyStore` interface
+ * AND the device-local `LocalIdentityStore` interface (G-T07-10). The
+ * production split is structural: `SupabaseKeyStore` implements only
+ * `KeyStore`; a separate `BrowserLocalIdentityStore` implements
+ * `LocalIdentityStore` over IndexedDB. In tests, one `MemoryKeyStore`
+ * instance backs both surfaces so the harness wires a single object.
+ */
+export class MemoryKeyStore implements KeyStore, LocalIdentityStore {
   // public-half + revoke metadata; the private half lives in a separate map
   // strictly to support the on-device F-03 self-test + unwrap round-trip
   // during tests. NEVER threaded into audit rows or external sinks.
@@ -91,23 +101,16 @@ export class MemoryKeyStore implements KeyStore {
   }
 
   // -------------------------------------------------------------------
-  // Identity keys
+  // Identity keys — KeyStore (public half) + LocalIdentityStore (private half)
   // -------------------------------------------------------------------
-  async storeIdentityKeys(
-    user_id: string,
-    keypair: { public_key: Uint8Array; private_key: Uint8Array }
-  ): Promise<void> {
-    // The server-shaped row carries the public half only — mirrors the
-    // SQL `identity_keys.public_key` column. The private half is held in
-    // a separate device-local map so the test surface can do the F-03
-    // self-test and the unwrap round-trip without breaking Invariant 1.
+  /** `KeyStore.persistIdentityPublicKey` — mirrors SQL `identity_keys.public_key`. */
+  async persistIdentityPublicKey(user_id: string, public_key: Uint8Array): Promise<void> {
     this.identityRows.set(user_id, {
       user_id,
-      public_key: new Uint8Array(keypair.public_key),
+      public_key: new Uint8Array(public_key),
       created_at: this.nowProvider(),
       revoked_at: null
     });
-    this.identityPrivateKeysDeviceLocal.set(user_id, new Uint8Array(keypair.private_key));
   }
 
   async getIdentityPublicKey(user_id: string): Promise<Uint8Array> {
@@ -118,12 +121,18 @@ export class MemoryKeyStore implements KeyStore {
     return row.public_key;
   }
 
-  async __getIdentityPrivateKeyLocalOnly(user_id: string): Promise<Uint8Array> {
+  /** `LocalIdentityStore.storeIdentityPrivateKey` — device-local only. */
+  async storeIdentityPrivateKey(user_id: string, private_key: Uint8Array): Promise<void> {
+    this.identityPrivateKeysDeviceLocal.set(user_id, new Uint8Array(private_key));
+  }
+
+  /** `LocalIdentityStore.getIdentityPrivateKey` — device-local only. */
+  async getIdentityPrivateKey(user_id: string): Promise<Uint8Array> {
     const sk = this.identityPrivateKeysDeviceLocal.get(user_id);
     if (!sk) {
       throw new Error(
         `MemoryKeyStore: device-local private key not found for ${user_id}` +
-          ' (F-03 self-test or unwrap path called before enrollment).'
+          ' (F-02 self-test or unwrap path called before enrollment).'
       );
     }
     return sk;
@@ -294,6 +303,24 @@ export class MemoryKeyStore implements KeyStore {
       event_type: event.event_type,
       actor_pseudonym: event.actor_pseudonym,
       rotation_id: event.rotation_id ?? null,
+      meta: event.meta
+    });
+  }
+
+  /**
+   * G-T07-15 — non-enum operational emission for `client.identity_selftest_fail`.
+   * Same audit-log table, separate emission path so the closed-enum
+   * `recordKeyEvent` signature stays narrow and no `as unknown` cast is
+   * needed in the orchestrator.
+   */
+  async recordSelftestFail(event: KeySelftestFailEmission): Promise<void> {
+    this.auditSeq += 1;
+    this.auditRows.push({
+      id: this.auditSeq,
+      ts: new Date(this.nowProvider()).toISOString(),
+      event_type: 'client.identity_selftest_fail',
+      actor_pseudonym: event.actor_pseudonym,
+      rotation_id: null,
       meta: event.meta
     });
   }
