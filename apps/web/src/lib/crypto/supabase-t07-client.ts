@@ -211,6 +211,33 @@ export class SupabaseT07Client {
     });
   }
 
+  /**
+   * F-08 restore-flow read path. Returns the auth.uid()'s sealed recovery
+   * blob + kdf_params, or `null` when no row exists. The SQL function
+   * (`get_recovery_blob_for_self`, migration 0010) is structurally
+   * self-only — there's no `target_user_id` parameter, so the caller can
+   * only ever fetch their own row. Once the client decrypts locally with
+   * the passphrase it should post `recordRecoveryBlobRestored` so the
+   * audit-trail records the successful restore.
+   */
+  async getRecoveryBlob(): Promise<
+    T07OpResult<{ blob_ciphertext: Uint8Array; kdf_params: Record<string, unknown> } | null>
+  > {
+    const r = await invoke<{
+      blob_ciphertext_hex: string;
+      kdf_params: Record<string, unknown>;
+    } | null>(this.opts.transport, { op: 'get_recovery_blob' });
+    if (!r.ok) return r;
+    if (!r.data) return { ok: true, data: null };
+    return {
+      ok: true,
+      data: {
+        blob_ciphertext: pgHexToBytes(r.data.blob_ciphertext_hex),
+        kdf_params: r.data.kdf_params
+      }
+    };
+  }
+
   recordRecoveryBlobRestored(input: {
     device_fingerprint_hashed: string;
   }): Promise<T07OpResult<null>> {

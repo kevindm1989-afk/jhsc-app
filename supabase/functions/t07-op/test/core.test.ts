@@ -14,6 +14,7 @@
 import {
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
+  getRecoveryBlob,
   initCommitteeDataKey,
   issueEnrollmentChallenge,
   issueRecoveryBlobReset,
@@ -347,6 +348,47 @@ Deno.test('revokeCommitteeMember surfaces 4eyes_required (42501) as rls_denied/4
 });
 
 // ---- error mapping ---------------------------------------------------------
+
+// ---- F-08 restore-flow read path (migration 0010) --------------------------
+
+Deno.test('getRecoveryBlob returns the first row unpacked into {blob_ciphertext_hex, kdf_params}', async () => {
+  const c: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const r = await getRecoveryBlob(
+    fakeRpc(
+      {
+        data: [
+          {
+            blob_ciphertext: '\\xdeadbeef',
+            kdf_params: { alg: 'argon2id13', version: 1 }
+          }
+        ],
+        error: null
+      },
+      c
+    )
+  );
+  assert(r.ok);
+  assertEquals(r.data, {
+    blob_ciphertext_hex: '\\xdeadbeef',
+    kdf_params: { alg: 'argon2id13', version: 1 }
+  });
+  assertEquals(c[0], { fn: 'get_recovery_blob_for_self', args: {} });
+});
+
+Deno.test('getRecoveryBlob returns { ok: true, data: null } when no row exists', async () => {
+  const r = await getRecoveryBlob(fakeRpc({ data: [], error: null }, []));
+  assert(r.ok);
+  assertEquals(r.data, null);
+});
+
+Deno.test('getRecoveryBlob surfaces 403 rls_denied (no session)', async () => {
+  const r = await getRecoveryBlob(
+    fakeRpc({ data: null, error: { code: '42501', message: 'rls_denied' } }, [])
+  );
+  assert(!r.ok);
+  assertEquals(r.reason, 'rls_denied');
+  assertEquals(r.status, 403);
+});
 
 // ---- G-T07-15 server-side emission path ------------------------------------
 

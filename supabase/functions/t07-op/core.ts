@@ -250,6 +250,31 @@ export function storeRecoveryBlob(
   });
 }
 
+/**
+ * F-08 restore-flow read path (migration 0010). Returns the auth.uid()'s
+ * sealed recovery blob + kdf_params, or `null` when no row exists. The
+ * SQL function is structurally self-only (no parameter); the client
+ * decrypts with the passphrase locally and posts the recovery once via
+ * `record_recovery_blob_restored`.
+ */
+export function getRecoveryBlob(
+  rpc: RpcPort
+): Promise<OpResult<{ blob_ciphertext_hex: string; kdf_params: Record<string, unknown> } | null>> {
+  return call<Array<{ blob_ciphertext: string; kdf_params: Record<string, unknown> }>>(
+    rpc,
+    'get_recovery_blob_for_self',
+    {}
+  ).then((r) => {
+    if (!r.ok) return r;
+    const row = r.data?.[0];
+    if (!row) return { ok: true, data: null };
+    return {
+      ok: true,
+      data: { blob_ciphertext_hex: row.blob_ciphertext, kdf_params: row.kdf_params }
+    };
+  });
+}
+
 export function recordRecoveryBlobRestored(
   rpc: RpcPort,
   input: { device_fingerprint_hashed: string }
