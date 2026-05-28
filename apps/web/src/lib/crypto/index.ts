@@ -69,6 +69,16 @@ export type {
   SupabaseT07ClientOptions,
   EnrollResult
 } from './supabase-t07-client';
+export {
+  enrollIdentityViaProduction,
+  storeRecoveryBlobViaProduction,
+  restoreRecoveryBlobViaProduction
+} from './production-flows';
+export type {
+  EnrollProductionResult,
+  StoreRecoveryProductionResult,
+  RestoreRecoveryProductionResult
+} from './production-flows';
 export { ARGON2_OPS, ARGON2_MEM_BYTES, KDF_PARAMS } from './recovery-blob';
 export { generateIdentityKeypair, selfTestKeypair, pubkeyFingerprint } from './identity-keys';
 export {
