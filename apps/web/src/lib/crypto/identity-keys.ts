@@ -46,11 +46,14 @@ export async function selfTestKeypair(kp: IdentityKeypair): Promise<boolean> {
 }
 
 /**
- * BLAKE2b fingerprint of the identity public key. Hex; used as
+ * BLAKE2b-32 fingerprint of the identity public key. Hex; used as
  * `ident_pubkey_fingerprint` in `identity_keypair.created` audit rows
- * (Amendment A meta requirement).
+ * (Amendment A meta requirement). The output is 32 bytes → 64 hex chars
+ * — matching the `^[0-9a-f]{64}$` regex the SQL
+ * `enroll_identity_keypair` + `issue_enrollment_challenge` functions
+ * enforce as the BLAKE2b-32 shape contract (migrations 0007 / 0008).
  */
 export async function pubkeyFingerprint(public_key: Uint8Array): Promise<string> {
   const s = await ready();
-  return s.to_hex(s.crypto_generichash(16, public_key));
+  return s.to_hex(s.crypto_generichash(32, public_key));
 }
