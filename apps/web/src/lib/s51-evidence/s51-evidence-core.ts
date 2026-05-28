@@ -25,7 +25,7 @@
 
 import { hmacSha256 } from '../crypto/hash';
 import { ready } from '../crypto/sodium';
-import { sanitizePhoto } from '../photo/sanitize';
+import { sanitizePhoto, PhotoUnsupportedFormatError } from '../photo/sanitize';
 import type { S51EvidenceStore } from './s51-evidence-store';
 import type { S51EvidenceEntry, S51EvidenceIntake, S51EvidenceListItem } from './types';
 
@@ -52,7 +52,23 @@ export interface SubmitS51EvidenceDenied {
   body: Record<string, unknown>;
 }
 
-export type SubmitS51EvidenceResult = SubmitS51EvidenceOk | SubmitS51EvidenceDenied;
+/**
+ * Photo at `rejected_index` is not a recognisable JPEG (G-T14-12).
+ * No row is written and no `s51_evidence.created` audit is emitted; a
+ * `s51_evidence.create.rejected` audit row IS emitted so an operator can
+ * trace the failure. The form surfaces a banner keyed by `banner_key`.
+ */
+export interface SubmitS51EvidenceRejected {
+  ok: false;
+  reason: 'photo_unsupported_format';
+  status: 422;
+  body: { rejected_index: number; banner_key: string };
+}
+
+export type SubmitS51EvidenceResult =
+  | SubmitS51EvidenceOk
+  | SubmitS51EvidenceDenied
+  | SubmitS51EvidenceRejected;
 
 export interface ReadS51EvidenceOk {
   ok: true;
@@ -158,12 +174,36 @@ export async function submitS51Evidence(
   const { store, committeeKeyBytes, now } = core;
   const t = now();
 
-  // HG-5: sanitize-BEFORE-encrypt for every photo.
+  // HG-5: sanitize-BEFORE-encrypt for every photo. An unsupported format on
+  // any photo aborts the whole submit (G-T14-12): no row is written, a
+  // `s51_evidence.create.rejected` audit row is emitted, and the form gets
+  // back the rejected index + a banner key.
   const photos_ct: Uint8Array[] = [];
   if (intake.photos && intake.photos.length > 0) {
-    for (const raw of intake.photos) {
-      const sanitized = await sanitizePhoto(raw);
-      photos_ct.push(await sealBytes(sanitized.bytes, committeeKeyBytes));
+    for (const [i, raw] of intake.photos.entries()) {
+      try {
+        const sanitized = await sanitizePhoto(raw);
+        photos_ct.push(await sealBytes(sanitized.bytes, committeeKeyBytes));
+      } catch (err) {
+        if (err instanceof PhotoUnsupportedFormatError) {
+          await store.recordS51EvidenceEvent({
+            event_type: 's51_evidence.create.rejected',
+            actor_pseudonym: store.pseudonymOf(actor.user_id),
+            target_id: '',
+            meta: { reason: 'photo_unsupported_format', rejected_index: i }
+          });
+          return {
+            ok: false,
+            reason: 'photo_unsupported_format',
+            status: 422,
+            body: {
+              rejected_index: i,
+              banner_key: 's51_evidence.intake.photo.unsupported_format'
+            }
+          };
+        }
+        throw err;
+      }
     }
   }
 
