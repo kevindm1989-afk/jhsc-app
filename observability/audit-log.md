@@ -53,6 +53,7 @@ These are exactly the eight from the ADR. Verbatim.
 | Enum value | When emitted | Required `meta` |
 |---|---|---|
 | `concern.created` | A worker rep submits a concern (anonymous or not — `actor_id` is always the submitter) | `anonymous_default_kept` (boolean), `hazard_class`, `severity`, `location_id` |
+| `concern.updated` | A concern's mutable text/classification columns are edited (F-16) | `prev_field_hashes` (object `{title_ct?, body_ct?}` — SHA-256 hex of each prior ciphertext column, server-computed) |
 | `concern.source_revealed` | "Reveal source" action invoked, per-record passphrase entered + audit-log row written BEFORE plaintext returns to client | `concern_id`, `per_record_unlock_ts` |
 
 ### Inspections (T10)
