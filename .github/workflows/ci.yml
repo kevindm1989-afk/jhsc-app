@@ -221,3 +221,31 @@ jobs:
       - name: Stop Supabase
         if: always()
         run: supabase stop --no-backup || true
+
+  # Mint live-trust e2e — runs scripts/mint-live-e2e.sh against a real Supabase
+  # local stack. Proves the F-118 trust path end-to-end: the mint-issued ES256
+  # token is JWKS-validated by real PostgREST, mint_writer may invoke a mint
+  # RPC, and anon is denied. Isolated from supabase-live-stack so any friction
+  # in the signing-key wiring reds only this job, not the committee/mint pgTAP
+  # coverage above. See scripts/mint-live-e2e.README.md.
+  mint-live-e2e:
+    name: Mint live-trust e2e (asymmetric JWKS)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.46.x
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run the mint live-trust e2e
+        run: bash scripts/mint-live-e2e.sh
