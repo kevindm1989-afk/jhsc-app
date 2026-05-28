@@ -16,7 +16,7 @@
  * observability/audit-log.md + threat-model §3.4 F-21.
  */
 
-import { createHmac } from 'node:crypto';
+import { hmacSha256 } from '../crypto/hash';
 import { ready } from '../crypto/sodium';
 import type { WorkRefusalStore } from './work-refusal-store';
 import type { WorkRefusalEntry, WorkRefusalIntake, WorkRefusalListItem } from './types';
@@ -98,8 +98,8 @@ async function openUtf8(ciphertext: Uint8Array, key: Uint8Array): Promise<string
  * slot with a bcrypt/argon2 hash + verify step (mirrors T13's G-T13-6
  * scope under G-T14-*).
  */
-function passphraseHash(passphrase: string, key: Uint8Array): Uint8Array {
-  return new Uint8Array(createHmac('sha256', Buffer.from(key)).update(passphrase, 'utf8').digest());
+async function passphraseHash(passphrase: string, key: Uint8Array): Promise<Uint8Array> {
+  return hmacSha256(new TextEncoder().encode(passphrase), key);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ export async function submitWorkRefusal(
 
   const title_ct = await sealUtf8(intake.title, committeeKeyBytes);
   const notes_ct = await sealUtf8(intake.body, committeeKeyBytes);
-  const per_record_passphrase_hash = passphraseHash(intake.passphrase, committeeKeyBytes);
+  const per_record_passphrase_hash = await passphraseHash(intake.passphrase, committeeKeyBytes);
 
   const insert = await store.insertWorkRefusal({
     actor_id: actor.user_id,

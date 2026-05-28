@@ -18,3 +18,17 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   for (const b of out) hex += b.toString(16).padStart(2, '0');
   return hex;
 }
+
+/**
+ * HMAC-SHA-256 via WebCrypto. Same carve-out as `sha256Hex` (lives under
+ * `src/lib/crypto/`, so the `no-non-libsodium-crypto` gate's exception applies).
+ * Used by the T13/T14 cores for the per-record passphrase UX-friction hash
+ * (the production gate is pgcrypto-bf server-side per HG-6 / G-T13-6 /
+ * G-T14-5/10; this in-browser HMAC is the in-memory mirror). Output is
+ * byte-identical to the previous `node:crypto.createHmac('sha256', key)`.
+ */
+export async function hmacSha256(message: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
+  const ck = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', ck, message);
+  return new Uint8Array(sig);
+}

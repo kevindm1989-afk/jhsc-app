@@ -23,7 +23,7 @@
  * §3.4 F-21.
  */
 
-import { createHmac } from 'node:crypto';
+import { hmacSha256 } from '../crypto/hash';
 import { ready } from '../crypto/sodium';
 import { sanitizePhoto } from '../photo/sanitize';
 import type { S51EvidenceStore } from './s51-evidence-store';
@@ -126,8 +126,8 @@ async function openBytes(ciphertext: Uint8Array, key: Uint8Array): Promise<Uint8
  * slot with a bcrypt/argon2 hash + verify step (mirrors T13's
  * G-T13-6 scope under G-T14-*).
  */
-function passphraseHash(passphrase: string, key: Uint8Array): Uint8Array {
-  return new Uint8Array(createHmac('sha256', Buffer.from(key)).update(passphrase, 'utf8').digest());
+async function passphraseHash(passphrase: string, key: Uint8Array): Promise<Uint8Array> {
+  return hmacSha256(new TextEncoder().encode(passphrase), key);
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ export async function submitS51Evidence(
 
   const title_ct = await sealUtf8(intake.title, committeeKeyBytes);
   const notes_ct = await sealUtf8(intake.body, committeeKeyBytes);
-  const per_record_passphrase_hash = passphraseHash(intake.passphrase, committeeKeyBytes);
+  const per_record_passphrase_hash = await passphraseHash(intake.passphrase, committeeKeyBytes);
 
   const insert = await store.insertS51Evidence({
     actor_id: actor.user_id,

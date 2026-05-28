@@ -20,7 +20,7 @@
  * §3.4 + observability/audit-log.md.
  */
 
-import { createHash, createHmac } from 'node:crypto';
+import { hmacSha256, sha256Hex } from '../crypto/hash';
 import { ready } from '../crypto/sodium';
 import type { ReprisalStore } from './reprisal-store';
 import type {
@@ -102,9 +102,9 @@ async function openUtf8(ciphertext: Uint8Array, key: Uint8Array): Promise<string
   return Buffer.from(pt).toString('utf8');
 }
 
-function sha256Hex(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
-}
+// sha256Hex (browser-safe SHA-256 hex via WebCrypto under the lib/crypto/
+// carve-out) is imported above. The previous local node:crypto wrapper has
+// been removed (G-T08-10 mirror — node:crypto breaks the Vite browser build).
 
 /**
  * Hash the per-record passphrase. The library uses HMAC-SHA-256 as an
@@ -113,8 +113,8 @@ function sha256Hex(bytes: Uint8Array): string {
  * verification; the form's UX-friction gate decides whether to invoke
  * the read path at all.
  */
-function passphraseHash(passphrase: string, key: Uint8Array): Uint8Array {
-  return new Uint8Array(createHmac('sha256', Buffer.from(key)).update(passphrase, 'utf8').digest());
+async function passphraseHash(passphrase: string, key: Uint8Array): Promise<Uint8Array> {
+  return hmacSha256(new TextEncoder().encode(passphrase), key);
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ export async function submitReprisal(
 
   const title_ct = await sealUtf8(intake.title, committeeKeyBytes);
   const body_ct = await sealUtf8(intake.body, committeeKeyBytes);
-  const per_record_passphrase_hash = passphraseHash(intake.passphrase, committeeKeyBytes);
+  const per_record_passphrase_hash = await passphraseHash(intake.passphrase, committeeKeyBytes);
 
   const insert = await store.insertReprisal({
     actor_id: actor.user_id,
@@ -253,7 +253,7 @@ export async function attemptReadWithPassphrase(
   if (!row) {
     return { plaintext_returned: false };
   }
-  const candidate = passphraseHash(passphrase, committeeKeyBytes);
+  const candidate = await passphraseHash(passphrase, committeeKeyBytes);
   const stored = row.per_record_passphrase_hash;
   // Constant-time compare to avoid leaking length-of-prefix-match.
   if (candidate.length !== stored.length) {
@@ -331,11 +331,11 @@ export async function updateReprisalText(
   const storePatch: { title_ct?: Uint8Array; body_ct?: Uint8Array } = {};
 
   if (patch.title !== undefined) {
-    prev_field_hashes.title_ct = sha256Hex(prior.title_ct);
+    prev_field_hashes.title_ct = await sha256Hex(prior.title_ct);
     storePatch.title_ct = await sealUtf8(patch.title, committeeKeyBytes);
   }
   if (patch.body !== undefined) {
-    prev_field_hashes.body_ct = sha256Hex(prior.body_ct);
+    prev_field_hashes.body_ct = await sha256Hex(prior.body_ct);
     storePatch.body_ct = await sealUtf8(patch.body, committeeKeyBytes);
   }
 
