@@ -59,6 +59,7 @@ EXPECTED_ENUM=(
   s51_evidence.read
   s51_evidence.created
   s51_evidence.update
+  s51_evidence.create.rejected
   audit.forensic_reveal.4eyes_pending
   audit.forensic_reveal.4eyes_completed
   export.generated

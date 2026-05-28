@@ -96,6 +96,7 @@ in T14, enumerated below.
 | `s51_evidence.created` | An s.51 critical-injury evidence record is filed by a certified member; photos sealed client-side and stored as a per-photo blob array | `created`, `photo_count` |
 | `s51_evidence.read` | **Server-emitted from `s51_evidence_read`** (HG-6) — audit-before-ciphertext; returns notes + sealed photos | `read_via` |
 | `s51_evidence.update` | An s.51 evidence entry's text is edited (F-31) | `prev_field_hashes` (object `{title_ct?, notes_ct?}`) |
+| `s51_evidence.create.rejected` | A submit was aborted because a photo failed `sanitizePhoto` (non-JPEG) — no row was written (G-T14-12) | `reason: 'photo_unsupported_format'`, `rejected_index` |
 
 Wrong-passphrase reads on the T13/T14 surfaces emit the shared
 `sensitive.access_attempt` row (`reason: 'wrong_passphrase'`, plus `table` ∈

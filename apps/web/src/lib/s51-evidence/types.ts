@@ -107,7 +107,8 @@ export interface S51EvidenceListItem {
 export const S51_EVIDENCE_AUDIT_EVENTS = [
   's51_evidence.created',
   's51_evidence.read',
-  's51_evidence.update'
+  's51_evidence.update',
+  's51_evidence.create.rejected'
 ] as const;
 
 export type S51EvidenceAuditEvent = (typeof S51_EVIDENCE_AUDIT_EVENTS)[number];
