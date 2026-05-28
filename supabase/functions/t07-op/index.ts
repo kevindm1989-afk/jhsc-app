@@ -26,6 +26,7 @@ import {
   issueEnrollmentChallenge,
   issueRecoveryBlobReset,
   recordCommitteeDataKeyUnwrap,
+  recordIdentitySelftestFail,
   recordRecoveryBlobRestored,
   recordRecoveryBlobViewed,
   revokeCommitteeMember,
@@ -70,7 +71,8 @@ type Op =
       new_key_id: string;
       members_rewrapped_count: number;
     }
-  | { op: 'revoke_member'; removed_member_id: string; rotation_id: string };
+  | { op: 'revoke_member'; removed_member_id: string; rotation_id: string }
+  | { op: 'record_selftest_fail'; meta?: Record<string, unknown> };
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -212,6 +214,9 @@ Deno.serve(async (req) => {
       break;
     case 'revoke_member':
       result = await revokeCommitteeMember(rpc, body);
+      break;
+    case 'record_selftest_fail':
+      result = await recordIdentitySelftestFail(rpc, body);
       break;
     default:
       return json({ ok: false, error: 'bad_request' }, 400);

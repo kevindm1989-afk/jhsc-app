@@ -19,6 +19,7 @@ import {
   issueRecoveryBlobReset,
   mapRpcError,
   recordCommitteeDataKeyUnwrap,
+  recordIdentitySelftestFail,
   recordRecoveryBlobRestored,
   recordRecoveryBlobViewed,
   revokeCommitteeMember,
@@ -346,6 +347,23 @@ Deno.test('revokeCommitteeMember surfaces 4eyes_required (42501) as rls_denied/4
 });
 
 // ---- error mapping ---------------------------------------------------------
+
+// ---- G-T07-15 server-side emission path ------------------------------------
+
+Deno.test('recordIdentitySelftestFail forwards meta + defaults to empty object', async () => {
+  const c: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  await recordIdentitySelftestFail(fakeRpc({ data: null, error: null }, c), {
+    meta: { reason: 'idb_corruption' }
+  });
+  assertEquals(c[0], {
+    fn: 'record_identity_selftest_fail',
+    args: { p_meta: { reason: 'idb_corruption' } }
+  });
+
+  const c2: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  await recordIdentitySelftestFail(fakeRpc({ data: null, error: null }, c2), {});
+  assertEquals(c2[0]?.args, { p_meta: {} });
+});
 
 Deno.test('mapRpcError honors message literal first, then ERRCODE fallback', () => {
   const cases: Array<[RpcError, string, number]> = [
