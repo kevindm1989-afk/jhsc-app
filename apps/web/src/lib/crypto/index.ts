@@ -59,6 +59,16 @@ export type {
 export { KEY_MATERIAL_AUDIT_EVENTS } from './types';
 export { generateRecoveryPassphrase } from './passphrase';
 export { MemoryKeyStore } from './memory-key-store';
+export { BrowserLocalIdentityStore } from './browser-local-identity-store';
+export type { BrowserLocalIdentityStoreOptions } from './browser-local-identity-store';
+export { SupabaseT07Client, bytesToPgHex, pgHexToBytes } from './supabase-t07-client';
+export type {
+  T07OpReason,
+  T07OpResult,
+  T07OpTransport,
+  SupabaseT07ClientOptions,
+  EnrollResult
+} from './supabase-t07-client';
 export { ARGON2_OPS, ARGON2_MEM_BYTES, KDF_PARAMS } from './recovery-blob';
 export { generateIdentityKeypair, selfTestKeypair, pubkeyFingerprint } from './identity-keys';
 export {

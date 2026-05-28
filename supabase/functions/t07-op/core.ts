@@ -220,6 +220,22 @@ export function verifyAndEnrollIdentityKeypair(
   }).then((r) => (r.ok ? { ok: true, data: { user_id: r.data } } : r));
 }
 
+/**
+ * G-T07-15 / G-T07-2 — emit `client.identity_selftest_fail` server-side
+ * via the SECURITY DEFINER `record_identity_selftest_fail` function
+ * (migration 0009). The CLIENT supplies the forensic meta; the SQL
+ * function adds the server-derived `actor_id` and stamps the canonical
+ * event_type / retention_class.
+ */
+export function recordIdentitySelftestFail(
+  rpc: RpcPort,
+  input: { meta?: Record<string, unknown> }
+): Promise<OpResult<null>> {
+  return call<null>(rpc, 'record_identity_selftest_fail', {
+    p_meta: input.meta ?? {}
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Recovery blob (F-08, F-12, Amendment F)
 // ---------------------------------------------------------------------------

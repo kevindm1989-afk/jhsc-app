@@ -162,13 +162,15 @@ jobs:
              supabase/migrations/00000000000006_t14.sql \
              supabase/migrations/00000000000007_t07.sql \
              supabase/migrations/00000000000008_t07_f02.sql \
+             supabase/migrations/00000000000009_t07_selftest_fail.sql \
              supabase/test/committee_rls.sql \
              supabase/test/mint_rls.sql \
              supabase/test/concerns_rls.sql \
              supabase/test/reprisal_rls.sql \
              supabase/test/t14_rls.sql \
              supabase/test/t07_rls.sql \
-             supabase/test/t07_f02_rls.sql /tmp/dbtest/
+             supabase/test/t07_f02_rls.sql \
+             supabase/test/t07_selftest_fail_rls.sql /tmp/dbtest/
           chmod -R a+rX /tmp/dbtest
           sudo -u postgres psql -c "DROP DATABASE IF EXISTS jhsc_test;" -c "CREATE DATABASE jhsc_test;"
           # Test HMAC key — NOT a secret (pgcrypto needs a non-empty key to run).
@@ -183,11 +185,12 @@ jobs:
             00000000000005_reprisal.sql \
             00000000000006_t14.sql \
             00000000000007_t07.sql \
-            00000000000008_t07_f02.sql; do
+            00000000000008_t07_f02.sql \
+            00000000000009_t07_selftest_fail.sql; do
             echo "applying $f"
             sudo -u postgres psql -v ON_ERROR_STOP=1 -d jhsc_test -f "/tmp/dbtest/$f"
           done
-          sudo -u postgres pg_prove -d jhsc_test /tmp/dbtest/committee_rls.sql /tmp/dbtest/mint_rls.sql /tmp/dbtest/concerns_rls.sql /tmp/dbtest/reprisal_rls.sql /tmp/dbtest/t14_rls.sql /tmp/dbtest/t07_rls.sql /tmp/dbtest/t07_f02_rls.sql
+          sudo -u postgres pg_prove -d jhsc_test /tmp/dbtest/committee_rls.sql /tmp/dbtest/mint_rls.sql /tmp/dbtest/concerns_rls.sql /tmp/dbtest/reprisal_rls.sql /tmp/dbtest/t14_rls.sql /tmp/dbtest/t07_rls.sql /tmp/dbtest/t07_f02_rls.sql /tmp/dbtest/t07_selftest_fail_rls.sql
 
   # Blocking: the FULL Supabase local stack (real GoTrue + PostgREST + Postgres).
   # Proves the committee RLS + session_is_live surface under the real auth
@@ -222,7 +225,7 @@ jobs:
       - name: Run committee pgTAP against the live stack (real auth.uid/RLS)
         run: |
           pg_prove -d "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
-            supabase/test/committee_rls.sql supabase/test/mint_rls.sql supabase/test/concerns_rls.sql supabase/test/reprisal_rls.sql supabase/test/t14_rls.sql supabase/test/t07_rls.sql supabase/test/t07_f02_rls.sql
+            supabase/test/committee_rls.sql supabase/test/mint_rls.sql supabase/test/concerns_rls.sql supabase/test/reprisal_rls.sql supabase/test/t14_rls.sql supabase/test/t07_rls.sql supabase/test/t07_f02_rls.sql supabase/test/t07_selftest_fail_rls.sql
 
       - name: Stop Supabase
         if: always()
