@@ -40,6 +40,8 @@
  */
 
 import type { LocalIdentityStore } from './key-store';
+import { bytesToPgHex, pgHexToBytes } from '../server-client/pg-hex';
+export { bytesToPgHex, pgHexToBytes } from '../server-client/pg-hex';
 
 // ---------------------------------------------------------------------------
 // Wire shape — mirrors supabase/functions/t07-op/core.ts T07Reason.
@@ -101,25 +103,6 @@ async function invoke<T>(
   }
   const reason: T07OpReason = (payload?.error as T07OpReason | undefined) ?? 'unknown';
   return { ok: false, reason, status: r.status };
-}
-
-// ---------------------------------------------------------------------------
-// Hex (PostgREST bytea wire format) helpers
-// ---------------------------------------------------------------------------
-
-export function bytesToPgHex(b: Uint8Array): string {
-  let s = '\\x';
-  for (const byte of b) s += byte.toString(16).padStart(2, '0');
-  return s;
-}
-
-export function pgHexToBytes(s: string): Uint8Array {
-  const stripped = s.startsWith('\\x') ? s.slice(2) : s;
-  const out = new Uint8Array(stripped.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(stripped.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
