@@ -263,8 +263,11 @@ END $$;
 -- has_named_source instead. Runs with the view owner's rights (not invoker) so
 -- it reads the RLS-locked base table, and gates rows to live, active members.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.concerns_default_view
-WITH (security_invoker = false) AS
+-- NB: no `security_invoker` reloption — that view option is PG15+, but the
+-- vanilla pgTAP CI job runs on PG14. The DEFAULT (owner's-rights) view behavior
+-- is exactly what we want here (the view owner reads the RLS-locked base table;
+-- the WHERE clause is the membership gate), and it is identical across PG14/15+.
+CREATE OR REPLACE VIEW public.concerns_default_view AS
   SELECT
     c.id, c.actor_id, c.title_ct, c.body_ct,
     c.hazard_class, c.severity, c.location_id, c.created_at, c.updated_at,
