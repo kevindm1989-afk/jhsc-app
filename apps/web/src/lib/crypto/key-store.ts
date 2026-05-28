@@ -1,26 +1,42 @@
 /**
- * KeyStore — interface mirroring T05's AuthStore pattern for T07's key core.
+ * KeyStore + LocalIdentityStore — split server-bound vs device-local
+ * interfaces (G-T07-10).
  *
- * Per ADR-0003 invariants 1, 3, 5, 6 + Amendment A + Amendment F:
+ * Per ADR-0003 Invariants 1, 3, 5, 6 + Amendment A + Amendment F:
  *   - The PRIVATE half of an identity keypair NEVER lands on the server in
- *     the clear. The store's `storeIdentityKeys` method accepts a keypair
- *     but the persistence implementation MUST only persist `public_key` to
- *     the server-side row; the private key stays device-local (IndexedDB
- *     in production, in-memory in tests).
+ *     the clear (Invariant 1). The original T07 `KeyStore.storeIdentityKeys`
+ *     contract documented this textually but accepted the full keypair —
+ *     a future implementer could persist the private half against the
+ *     contract. G-T07-10 resolves this by splitting the interface:
+ *       - `LocalIdentityStore` — device-local; holds the private key bytes
+ *         (production: IndexedDB; tests: an in-memory Map).
+ *       - `KeyStore`           — server-bound; holds the public half only.
+ *         The production `SupabaseKeyStore` (T07.1 increment 5)
+ *         implements ONLY this interface; there is no method on it that
+ *         takes or returns a private key.
  *   - The recovery blob persisted by `storeRecoveryBlob` is the ciphertext
  *     produced by `recovery-blob.ts`. The passphrase NEVER persists anywhere.
- *   - Every operation that touches key material emits one of the 8
+ *   - Every operation that touches key material emits one of the 9
  *     closed-enum audit events from ADR-0003 Amendment A. The
  *     `recordKeyEvent` method is the single emission path.
  *
+ *   G-T07-15: `client.identity_selftest_fail` is NOT one of the 9 key-material
+ *   events; it is a client-emitted operational signal (90-day retention,
+ *   ADR-0015). Pre-G-T07-15 the orchestrator cast through `unknown` to
+ *   smuggle the string through `recordKeyEvent`. The split adds
+ *   `KeyStore.recordSelftestFail` — a separate emission path with its
+ *   own typed payload that does NOT pass through the closed enum.
+ *
  * Wiring:
- *   - In tests the `MemoryKeyStore` is plugged in by the harness.
- *   - In production T07.1 lands `SupabaseKeyStore` (mirror of T05.1's
- *     `SupabaseAuthStore` split). This file ships only the interface +
- *     value-shape types — no Supabase coupling here.
+ *   - In tests the `MemoryKeyStore` is plugged in by the harness. The same
+ *     concrete class implements BOTH `KeyStore` and `LocalIdentityStore`
+ *     so the harness wires a single instance into the `KeyCore`.
+ *   - In production: a `SupabaseKeyStore` implements `KeyStore`; a separate
+ *     `BrowserLocalIdentityStore` (T07.1 increment 5) implements
+ *     `LocalIdentityStore` over IndexedDB. The orchestrator threads both.
  *
  * Source: ADR-0003 §Option A + invariants 1, 3, 5, 6; ADR-0003 Amendment A
- * (8-event audit enum); ADR-0003 Amendment F (recovery_blob.viewed).
+ * (8-event audit enum + Amendment F's 9th); G-T07-10; G-T07-15.
  */
 
 import type { KdfParams, KeyMaterialAuditEvent } from './types';
@@ -84,37 +100,50 @@ export interface KeyAuditEmission {
   rotation_id?: string;
 }
 
-export interface KeyStore {
-  // -------- Identity keys --------
+/**
+ * G-T07-15 — non-enum operational emission shape. Carries `client.identity_selftest_fail`
+ * (and any future client-emitted non-enum signals). The structured-log
+ * 90-day retention class applies; do NOT widen this to admit closed-enum
+ * key-material events (those go through `recordKeyEvent`).
+ */
+export interface KeySelftestFailEmission {
+  actor_pseudonym: string;
+  meta: Record<string, unknown>;
+}
+
+/**
+ * Device-local identity store. Holds the PRIVATE half of the X25519
+ * identity keypair. Production: backed by IndexedDB. Tests: backed by an
+ * in-memory Map on `MemoryKeyStore`. The server-bound `SupabaseKeyStore`
+ * does NOT implement this interface — Invariant 1 is enforced
+ * structurally.
+ */
+export interface LocalIdentityStore {
+  /** Persist the device-local identity private key. */
+  storeIdentityPrivateKey(user_id: string, private_key: Uint8Array): Promise<void>;
   /**
-   * Persist the identity keys for a user. The IMPLEMENTATION MUST NOT
-   * persist the private half on the server side; the server row contains
-   * only `public_key`. The in-memory store mirrors this contract by
-   * retaining the private half in a per-store map indexed off the user_id
-   * (test-only) but never threading it into the audit row or any external
-   * sink. The production T07.1 implementation drops the private half on
-   * the floor and writes only the public half.
+   * Read the device-local identity private key. Throws if no private key
+   * is on file for this user — the F-02 self-test must have produced one
+   * via `storeIdentityPrivateKey` first.
    */
-  storeIdentityKeys(
-    user_id: string,
-    keypair: {
-      public_key: Uint8Array;
-      private_key: Uint8Array;
-    }
-  ): Promise<void>;
+  getIdentityPrivateKey(user_id: string): Promise<Uint8Array>;
+}
+
+export interface KeyStore {
+  // -------- Identity keys (PUBLIC half only) --------
+  /**
+   * Persist the PUBLIC half of the identity keypair. Production
+   * (`SupabaseKeyStore`) writes only the public key to the server row;
+   * the private half is handled by `LocalIdentityStore` and never reaches
+   * any method on this interface.
+   */
+  persistIdentityPublicKey(user_id: string, public_key: Uint8Array): Promise<void>;
 
   /**
    * Server-readable public key for the user; used to route wraps. Throws
    * if the user has no identity row yet (F-02 self-test must have run).
    */
   getIdentityPublicKey(user_id: string): Promise<Uint8Array>;
-
-  /**
-   * Test-only — yields the device-local private key. Production
-   * implementations of this interface MUST throw from here. Required by
-   * the F-03 IndexedDB self-test and by `unwrapForSession`.
-   */
-  __getIdentityPrivateKeyLocalOnly(user_id: string): Promise<Uint8Array>;
 
   // -------- Recovery blob --------
   storeRecoveryBlob(opts: {
@@ -183,8 +212,19 @@ export interface KeyStore {
   isActiveMember(user_id: string): Promise<boolean>;
 
   // -------- Audit --------
-  /** Single audit emission path for the 8-event closed enum. */
+  /** Single audit emission path for the 9-event closed enum (8 ADR-0003 Amendment A + 1 Amendment F). */
   recordKeyEvent(event: KeyAuditEmission): Promise<void>;
+
+  /**
+   * G-T07-15 — separate emission path for the non-enum operational signal
+   * `client.identity_selftest_fail`. NOT routed through the closed-enum
+   * `recordKeyEvent`; the structured-log 90-day retention class applies.
+   * Implementations write `event_type: 'client.identity_selftest_fail'`
+   * verbatim (the SQL `audit_emit` accepts arbitrary event_type strings;
+   * the closed-enum is enforced by `scripts/check-audit-enum-coverage.sh`
+   * which lists this value in `EXPECTED_ENUM`).
+   */
+  recordSelftestFail(event: KeySelftestFailEmission): Promise<void>;
 
   // -------- Helpers --------
   pseudonymOf(uid: string): string;
@@ -192,9 +232,9 @@ export interface KeyStore {
   // -------- Rotation lock (F-04) --------
   /**
    * Per-`KeyStore` rotation lock. The in-memory store uses an atomic
-   * compare-and-swap on a boolean flag; production (`SupabaseKeyStore`,
-   * T07.1) uses `pg_try_advisory_xact_lock` as the source of truth and
-   * treats this in-memory mechanism as a redundant test-only mechanism.
+   * compare-and-swap on a boolean flag; production (`SupabaseKeyStore`)
+   * uses `pg_try_advisory_xact_lock` as the source of truth and treats
+   * this in-memory mechanism as a redundant test-only mechanism.
    *
    * Per Amendment pass #5 Decision 3 (`.context/decisions.md`) the lock
    * MUST NOT be module-level — that would couple unrelated KeyStore

@@ -1263,7 +1263,7 @@ class TestSupabaseImpl implements TestSupabase {
     }
     const identity = {
       public_key: enroll.public_key,
-      private_key: await this.keyStoreInst.__getIdentityPrivateKeyLocalOnly(uid)
+      private_key: await this.keyStoreInst.getIdentityPrivateKey(uid)
     };
     return { user_id: uid, credential, identity };
   }
@@ -3094,9 +3094,7 @@ class TestSupabaseImpl implements TestSupabase {
     // derived from that privkey UNLESS opts.reAuth === false, in which
     // case the session is mounted without K_hmac to simulate a remount
     // without re-auth.
-    const privkey = await this.keyStoreInst.__getIdentityPrivateKeyLocalOnly(
-      user.user_id
-    );
+    const privkey = await this.keyStoreInst.getIdentityPrivateKey(user.user_id);
     const dataKey = await this.ensureCommitteeDataKey(user.user_id);
     const actor_pseudonym = this.pseudonymOf(user.user_id);
     const harness = this;

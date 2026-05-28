@@ -36,7 +36,7 @@
  */
 
 import { ready } from './sodium';
-import type { KeyStore } from './key-store';
+import type { KeyStore, LocalIdentityStore } from './key-store';
 import type { RotateCommitteeKeyResult, WrapForMemberResult } from './types';
 
 /**
@@ -60,6 +60,10 @@ export async function initCommitteeDataKey(
   store: KeyStore,
   actor_user_id: string
 ): Promise<{ key_id: string; epoch: number }> {
+  // initCommitteeDataKey wraps the new symmetric key for the actor with
+  // their own pubkey via sealed-box; no private-key access needed (sealed-
+  // box uses the recipient's PUBLIC key on the sender side). So no
+  // LocalIdentityStore parameter is required here.
   // 1) Generate the data key + persist metadata.
   const meta = await store.initCommitteeDataKey({
     actor_user_id,
@@ -114,6 +118,7 @@ export async function initCommitteeDataKey(
  */
 export async function wrapForMember(
   store: KeyStore,
+  localIdentity: LocalIdentityStore,
   actor_user_id: string,
   target_member_id: string
 ): Promise<WrapForMemberResult> {
@@ -148,7 +153,7 @@ export async function wrapForMember(
     }
     const s = await ready();
     const actorPub = await store.getIdentityPublicKey(actor_user_id);
-    const actorPriv = await store.__getIdentityPrivateKeyLocalOnly(actor_user_id);
+    const actorPriv = await localIdentity.getIdentityPrivateKey(actor_user_id);
     dataKey = s.crypto_box_seal_open(actorWrap.wrapped_ciphertext, actorPub, actorPriv);
   }
 
@@ -183,6 +188,7 @@ export async function wrapForMember(
  */
 export async function unwrapForSession(
   store: KeyStore,
+  localIdentity: LocalIdentityStore,
   user_id: string
 ): Promise<{ data_key: Uint8Array; committee_key_id: string } | { error: 'no_wrap' }> {
   const wrap = await store.getCurrentCommitteeKeyWrap(user_id);
@@ -190,7 +196,7 @@ export async function unwrapForSession(
 
   const s = await ready();
   const pub = await store.getIdentityPublicKey(user_id);
-  const priv = await store.__getIdentityPrivateKeyLocalOnly(user_id);
+  const priv = await localIdentity.getIdentityPrivateKey(user_id);
   const dataKey = s.crypto_box_seal_open(wrap.wrapped_ciphertext, pub, priv);
 
   await store.recordKeyEvent({
