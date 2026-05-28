@@ -31,6 +31,8 @@ EXPECTED_ENUM=(
   identity_privkey.recovery_blob.written
   identity_privkey.recovery_blob.restored
   identity_privkey.recovery_blob.viewed
+  recovery_reset.issued
+  panic_wipe.invoked
   committee_data_key.wrapped_for_member
   committee_data_key.unwrap
   committee_data_key.rotation.started

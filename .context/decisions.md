@@ -7909,3 +7909,94 @@ The enum-mirror for `work_refusal.{created,read,update}` + `s51_evidence.{create
 - [ ] Architect ratifies this fold-in (the 7y schedule, the PI rows).
 - [ ] When the library `node:crypto` + photo-reject (G-T14-12) lands, add `s51_evidence.create.rejected` to the enum mirror.
 - [ ] T18 lands the SQL CHECK + retention-schedule rows for the new T14 enum values.
+
+---
+
+## Amendment pass #∞ — T07.1 DB keystone fold-in (2026-05-28)
+
+The T07.1 sibling task lands incrementally per ADR-0002 Amendment H. This PR is **increment 1: the DB keystone** — six tables, eleven SECURITY DEFINER functions, the cross-cutting mirror updates for the new `recovery_reset.issued` enum value (G-T07-8), and the T19-reserved `panic_wipe.invoked` SQL-side fold-in (ADR-0020 Decision 5). The SupabaseKeyStore production wire-up + the Edge Function for the F-02 self-test (G-T07-2 / G-T07-9), the `libsodium-wrappers-sumo` dep swap (G-T07-12), and the KeyStore interface split (G-T07-10 / G-T07-15) are subsequent increments — same shape as T08.1 / T13.1 / T14.1.
+
+### 1. ADR-0016 schedule rows for the six new operational tables (G-T07-4)
+
+| Table | Retention class | Source |
+|---|---|---|
+| `identity_keys` | `membership+7y` | identity is the binding for every audit-log row keyed to the user (F-17) |
+| `recovery_blobs` | `membership+24mo` | blob ciphertext keyed to membership; aligns with `identity_privkey.recovery_blob.*` audit retention |
+| `recovery_blob_resets` | `membership+24mo` | mirrors `recovery_blobs` — the consumed-reset record is part of the same recovery accountability chain |
+| `committee_data_keys` | `7y_from_rotation` | rotation-axis retention so a rotated-out epoch's metadata survives the longest pre-rotation forensic window |
+| `committee_key_wraps` | `7y_from_rotation` | mirrors `committee_data_keys` |
+| `committee_key_wraps_history` | `7y_from_rotation` | mirrors `committee_data_keys` — the archived wrap is the F-05 forensic anchor for member revocation |
+
+The strict CHECK on `audit_log.event_type` + the `audit_log_retention_schedule` row insertions are owned by T18 (same carry-forward as `member.role_changed` / `panic_wipe.invoked`).
+
+### 2. §PI inventory rows (G-T07-5)
+
+Residency ca-central-1. The private-half of any keypair NEVER lands here (Invariant 1); the symmetric committee data key NEVER lands here (Invariant 1). What does land:
+
+| Column | Class | Notes |
+|---|---|---|
+| `identity_keys.user_id` | C1 | binds the row to the user; cross-row pseudonym for forensic correlation goes via `_committee_pseudonym(uid)` |
+| `identity_keys.public_key` (bytea, 32) | C1 | X25519 public half (G-T07-11 relocation of the originally-planned `users.identity_pubkey` column) |
+| `identity_keys.created_at` / `revoked_at` | C1 | lifecycle metadata |
+| `recovery_blobs.user_id` | C1 | binding |
+| `recovery_blobs.blob_ciphertext` (bytea) | **C3** | secretbox of the user's identity privkey under their passphrase — opaque to the server (Invariant 1); KDF-bound floor is Argon2id (F-08) |
+| `recovery_blobs.kdf_params` (jsonb) | C1 | non-secret KDF parameters; needed by the on-device restore path |
+| `recovery_blobs.created_at` / `restored_at` | C1 | lifecycle metadata |
+| `recovery_blob_resets.id` / `target_user_id` / `issued_by` / `issued_at` / `consumed_at` | C1 | co-chair-action accountability surface (G-T07-8); the row is the structural part of the F-12 reset path |
+| `committee_data_keys.key_id` / `epoch` / `created_at` / `rotated_at` | C1 | metadata only; the symmetric key bytes NEVER appear |
+| `committee_key_wraps.user_id` / `key_id` / `wrapped_ciphertext` / `created_at` | **C2** | sealed-box ciphertext addressed to the member's pubkey — only that member's privkey can open; metadata maps the routing for F-01 |
+| `committee_key_wraps_history.*` | **C2** | as `committee_key_wraps`; preserves the wrap-as-it-was for F-05 forensics |
+
+**G-T07-11 relocation note.** Originally the §PI inventory anticipated a `users.identity_pubkey` column. The T07.1 design relocates that to a 1:1 row on `identity_keys.public_key`, mirroring the ADR-0002 Amendment G.3 pattern that moved `committee_membership` off `users`. The audit-log enum gate (`scripts/check-audit-enum-coverage.sh`) is not affected (the gate scans event_type names, not column references); the privacy-review pass should annotate the row-shift on the existing PI inventory entry rather than introduce a new column row.
+
+### 3. Audit-enum mirror — status
+
+Two new enum values land in the closed enum with this keystone PR. Per the standard ADR-0003 Amendment A six-mirror dance:
+
+| Mirror | `recovery_reset.issued` (T07.1) | `panic_wipe.invoked` (T19; ADR-0020 Decision 5) |
+|---|---|---|
+| TS const | [ ] adds in SupabaseKeyStore wire-up PR (no library emitter today) | [x] already in `apps/web/src/lib/lock/wipe-store.ts` |
+| `audit-log.md §1` table | [x] this PR | [x] this PR |
+| `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` | [x] this PR (47 values total) | [x] this PR |
+| SQL `retention_class_for(...)` arm | [x] `membership+24mo` (this PR) | [x] `7y` (this PR) |
+| SQL `audit_log.event_type` CHECK | [ ] **deferred to T18** | [ ] **deferred to T18** |
+| `audit_log_retention_schedule` row | [ ] **deferred to T18** | [ ] **deferred to T18** |
+
+Both deferrals match the precedent set by `member.role_changed` (T06.1 → T18).
+
+### 4. Carry-forward resolutions in this PR
+
+- **G-T07-1** — migration `00000000000007_t07.sql` lands.
+- **G-T07-3** — pgTAP suite `supabase/test/t07_rls.sql` (47 tests) covers every SECURITY DEFINER function + the table-level RLS/grant invariants; wired into both the vanilla-PG CI job and the supabase-live-stack job.
+- **G-T07-4 / G-T07-5 / G-T07-11** — see §1, §2 above; T18 owns the CHECK widening.
+- **G-T07-6** — `recovery_blobs.view_count` column is OMITTED. The per-session reveal count is derived from `audit_log` (`record_recovery_blob_viewed` enforces the cap by querying the log).
+- **G-T07-7** — `record_recovery_blob_viewed` derives the count from `audit_log` and raises `cap_reached` (ERRCODE P0001) when ≥3 reveals already exist in the same `enrollment_session_id`. The client-supplied counter is IGNORED on the trust path (it is a UX hint only).
+- **G-T07-8** — `issue_recovery_blob_reset` gates on `_committee_is_active_co_chair(auth.uid())` (the existing T06.1 helper) + emits the new `recovery_reset.issued` enum value with `actor_id`, `target_user_id`, `reset_id` meta.
+- **G-T07-14** — `rotate_committee_data_key` asserts `(SELECT count(*) FROM committee_membership WHERE active) >= 1` before minting the new epoch; raises `no_active_members` (P0001) otherwise. F-04 advisory lock via `pg_try_advisory_xact_lock(5709437)` — concurrent rotations serialise; the second caller surfaces `rotation_in_progress` (55P03).
+
+### 5. Carry-forward resolutions deferred to subsequent T07.1 increments
+
+- **G-T07-2** — SupabaseKeyStore + Edge Function wire-up (next increment, same shape as `t14-op` / `reprisal-op` / `concern-op` Edge Functions).
+- **G-T07-9** — F-02 server-issued nonce sealed-to-pubkey self-test handshake; lands in the SupabaseKeyStore + Edge Function increment.
+- **G-T07-10** — KeyStore interface split (`persistIdentityPublicKey` server-bound + `LocalIdentityStore` device-local); TS lib increment.
+- **G-T07-12** — `libsodium-wrappers-sumo` dep swap + boot-time assertion + lockfile-lint; TS lib increment.
+- **G-T07-13** — Svelte 5 `@ts-expect-error` cleanup; orthogonal.
+- **G-T07-15** — `client.identity_selftest_fail` audit-emission interface unification; folds with G-T07-10.
+
+### 6. Cross-tier correlation property — server-side hashing posture
+
+`enroll_identity_keypair` and `record_recovery_blob_restored` accept PRE-HASHED fingerprints from the caller (the libsodium BLAKE2b digest the JS lib already computes via `pubkeyFingerprint` / `hashFingerprint`). The SQL functions validate the shape (64 hex chars = BLAKE2b-32-hex) and emit verbatim. Server-side SHA-256 is intentionally avoided here per `.semgrep/no-bare-sha256-in-migrations.yml`; the audit-row identifier is the same primitive on both tiers (cross-tier correlation property).
+
+### Compliance check
+- [x] PIPEDA 4.5 — 7y / membership+24mo retentions match OHSA + the existing membership-bound schedule rows.
+- [x] No new cross-border flow / subprocessor (ca-central-1).
+- [x] ADR-0003 Invariant 1 untouched — neither the identity privkey nor the symmetric committee data key ever traverses this layer.
+- [x] ADR-0003 Invariant 4 untouched (libsodium for client-side derivation; pgcrypto-bf is the established server-side passphrase hash, NOT used here).
+- [ ] **HG-15** user ratification of the six new tables — at this PR's submission.
+
+### Follow-ups
+- [ ] Architect ratifies the new `recovery_reset.issued` enum + retention class + the six schedule rows.
+- [ ] SupabaseKeyStore + Edge Function increment (G-T07-2 / G-T07-9 resolution).
+- [ ] `libsodium-wrappers-sumo` increment (G-T07-12 resolution).
+- [ ] KeyStore interface split + `client.identity_selftest_fail` unification (G-T07-10 / G-T07-15 resolution).
+- [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` rows for `recovery_reset.issued` and `panic_wipe.invoked` (same carry-forward as `member.role_changed`).

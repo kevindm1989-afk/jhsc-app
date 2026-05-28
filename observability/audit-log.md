@@ -25,20 +25,23 @@ and a migration. Adding a value during implementation without that
 amendment is a CI failure (CHECK constraint on the `event_type`
 column).
 
-### Key-material (HG-2 / ADR-0003 Amendment A) — 8 values
+### Key-material (HG-2 / ADR-0003 Amendment A) — 8 values + Amendment F + T07.1 + T19
 
-These are exactly the eight from the ADR. Verbatim.
+The first eight rows are exactly the values from the ADR. `identity_privkey.recovery_blob.viewed` is added by Amendment F. `recovery_reset.issued` is added by T07.1 (G-T07-8 — server-emitted from `issue_recovery_blob_reset`). `panic_wipe.invoked` is reserved by T19 (ADR-0020 Decision 5) and emitted client-side from `WipeStore.emitAudit`.
 
 | Enum value | When emitted | Required `meta` fields |
 |---|---|---|
 | `identity_keypair.created` | First-login enrollment generates user's identity keypair | `ident_pubkey_fingerprint` (hex) |
-| `identity_privkey.recovery_blob.written` | Recovery-passphrase enrollment completes (F-08) | `kdf_params_version` |
+| `identity_privkey.recovery_blob.written` | Recovery-passphrase enrollment completes (F-08) | `kdf_params_version`, `reset_consumed` |
 | `identity_privkey.recovery_blob.restored` | Passphrase-based recovery on a new device | `device_fingerprint` (hashed; no raw UA) |
+| `identity_privkey.recovery_blob.viewed` | Amendment F "show passphrase again" reveal (hold-to-reveal + cap-of-3 per enrollment session, server-enforced per G-T07-7) | `enrollment_session_id`, `reveal_count_in_session` |
+| `recovery_reset.issued` | Co-chair-issued recovery-blob reset (F-12 / G-T07-8) — allows the next `store_recovery_blob` to succeed | `target_user_id`, `reset_id` |
+| `panic_wipe.invoked` | Local-only panic wipe — written BEFORE IndexedDB is cleared (F-53 audit-before-side-effect) | `surface` ∈ {`settings`,`lock_screen`}, `wipe_scope` ∈ {`local_only`}, `completed` (boolean), `partial_failure_classes[]` |
 | `committee_data_key.wrapped_for_member` | Existing member wraps committee privkey for a (new or re-added) member | `target_member_id`, `committee_key_id`, `rotation_id?` |
 | `committee_data_key.unwrap` | A member opens own wrap to recover committee privkey | `committee_key_id` |
 | `committee_data_key.rotation.started` | First step of rotation — advisory lock acquired, new keypair generated | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `trigger` ∈ {`member_removal`,`scheduled`,`incident`} |
 | `committee_data_key.rotation.completed` | Final step of rotation — new wraps for all remaining members, previous in `committee_key_history` | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `members_rewrapped_count` |
-| `committee_data_key.member_revoked` | Removed member's wrap row is deleted (atomic with rotation per Invariant 6) | `removed_member_id`, `committee_key_id`, `rotation_id` |
+| `committee_data_key.member_revoked` | Removed member's wrap row is deleted (paired by `rotation_id` with the surrounding rotation per Invariant 6) | `removed_member_id`, `committee_key_id`, `rotation_id` |
 
 ### Auth + session (T05)
 
