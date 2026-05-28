@@ -28,7 +28,13 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * byte-identical to the previous `node:crypto.createHmac('sha256', key)`.
  */
 export async function hmacSha256(message: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
-  const ck = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const ck = await crypto.subtle.importKey(
+    'raw',
+    key,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
   const sig = await crypto.subtle.sign('HMAC', ck, message);
   return new Uint8Array(sig);
 }
