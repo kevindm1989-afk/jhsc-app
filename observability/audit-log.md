@@ -84,8 +84,22 @@ These are exactly the eight from the ADR. Verbatim.
 | `audit.forensic_reveal.4eyes_completed` | A second member (co-chair + co-chair / co-chair + certified) approves; the target audit row's actor pseudonym is revealed for ≤24h | `reveal_reason`, `proposer_actor_pseudonym`, `approver_actor_pseudonym` |
 
 The same pattern is replicated for `work_refusal` and `s51_evidence`
-in T14; the enum values are not enumerated here (T14 spec extends
-this table).
+in T14, enumerated below.
+
+### Work refusal + s.51 evidence (T14)
+
+| Enum value | When emitted | Required `meta` |
+|---|---|---|
+| `work_refusal.created` | An s.43 work-refusal entry is filed by a certified member (F-21 / F-17) | `created` |
+| `work_refusal.read` | **Server-emitted from `work_refusal_read`** (HG-6) — audit-before-ciphertext; the read is granted to certified members and co-chairs | `read_via` |
+| `work_refusal.update` | A work-refusal entry's text is edited (F-31) | `prev_field_hashes` (object `{title_ct?, notes_ct?}` — SHA-256 hex of each prior ciphertext, server-computed) |
+| `s51_evidence.created` | An s.51 critical-injury evidence record is filed by a certified member; photos sealed client-side and stored as a per-photo blob array | `created`, `photo_count` |
+| `s51_evidence.read` | **Server-emitted from `s51_evidence_read`** (HG-6) — audit-before-ciphertext; returns notes + sealed photos | `read_via` |
+| `s51_evidence.update` | An s.51 evidence entry's text is edited (F-31) | `prev_field_hashes` (object `{title_ct?, notes_ct?}`) |
+
+Wrong-passphrase reads on the T13/T14 surfaces emit the shared
+`sensitive.access_attempt` row (`reason: 'wrong_passphrase'`, plus `table` ∈
+{`work_refusal`, `s51_evidence`}); no plaintext returns.
 
 ### Export (T11 + T12 + RA-1)
 
