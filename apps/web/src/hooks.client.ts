@@ -24,12 +24,27 @@ import type { HandleClientError } from '@sveltejs/kit';
 import { env } from '$env/dynamic/public';
 import { beforeSend, beforeBreadcrumb } from '$lib/observability/sentry-scrub';
 import { log } from '$lib/log';
+import { assertArgon2idAvailable } from '$lib/crypto/recovery-blob';
 
 // Read at runtime (not build time) so the build works without a .env present.
 const PUBLIC_SENTRY_DSN = env.PUBLIC_SENTRY_DSN;
 
 const RELEASE = (import.meta.env.VITE_RELEASE_SHA as string | undefined) ?? 'unknown';
 const ENVIRONMENT = (import.meta.env.MODE as string | undefined) ?? 'development';
+
+// G-T07-12 boot-time fail-fast: if libsodium's Argon2id (`crypto_pwhash`) is
+// unavailable the recovery-blob path would silently fall through to an
+// inferior KDF — fail at boot instead. The assertion is async; we fire it
+// without blocking module load and route any rejection through the
+// structured logger + Sentry (when wired) so the deployment-config bug is
+// loud at first paint, not at first recovery-blob write.
+assertArgon2idAvailable().catch((err) => {
+  const error_class =
+    err && typeof err === 'object' && 'constructor' in err
+      ? (err as { constructor: { name: string } }).constructor.name
+      : 'Error';
+  log.error({ event: 'boot.argon2id_unavailable', error_class });
+});
 
 if (PUBLIC_SENTRY_DSN) {
   Sentry.init({

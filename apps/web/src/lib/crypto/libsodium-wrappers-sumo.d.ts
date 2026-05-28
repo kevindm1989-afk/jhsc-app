@@ -1,11 +1,15 @@
 /**
- * Minimal type declaration for libsodium-wrappers.
+ * Minimal type declaration for libsodium-wrappers-sumo.
  *
- * libsodium-wrappers does not ship .d.ts files. We declare the minimal
- * surface used by the crypto core (T07). Keep this list small and only
- * grow it as new primitives are needed.
+ * libsodium-wrappers-sumo does not ship .d.ts files. We declare the minimal
+ * surface used by the crypto core. The -sumo build (vs the standard
+ * libsodium-wrappers build) exposes the full primitive set — most
+ * importantly `crypto_pwhash` (Argon2id) which the recovery-blob path
+ * requires per ADR-0003 Amendment G + G-T07-12.
+ *
+ * Keep this list small and only grow it as new primitives are needed.
  */
-declare module 'libsodium-wrappers' {
+declare module 'libsodium-wrappers-sumo' {
   const sodium: {
     ready: Promise<void>;
     // KeyPair
@@ -18,7 +22,7 @@ declare module 'libsodium-wrappers' {
     crypto_secretbox_open_easy: (c: Uint8Array, n: Uint8Array, k: Uint8Array) => Uint8Array;
     crypto_secretbox_NONCEBYTES: number;
     crypto_secretbox_KEYBYTES: number;
-    // Password hashing — Argon2id
+    // Password hashing — Argon2id (only present on -sumo)
     crypto_pwhash: (
       outlen: number,
       passwd: Uint8Array | string,
