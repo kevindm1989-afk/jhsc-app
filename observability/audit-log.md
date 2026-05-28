@@ -78,6 +78,10 @@ These are exactly the eight from the ADR. Verbatim.
 | `reprisal.read` | **Server-emitted from the `SECURITY DEFINER` view** (HG-6) — atomic with SELECT. NOT client-cooperative. | `reprisal_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
 | `reprisal.status_changed.4eyes_pending` | A status-flip proposal is filed in `pending_destructive_ops` | `reprisal_id`, `target_status`, `proposer_actor_pseudonym` |
 | `reprisal.status_changed.4eyes_completed` | A second active member approves; status flip executes | `reprisal_id`, `target_status`, `proposer_actor_pseudonym`, `approver_actor_pseudonym` |
+| `reprisal.update` | A reprisal entry's text columns are edited (F-31) | `prev_field_hashes` (object `{title_ct?, body_ct?}` — SHA-256 hex of each prior ciphertext, server-computed) |
+| `sensitive.access_attempt` | A C4 read attempted with a wrong per-record passphrase (G-T13-6) — emitted, no plaintext returned | `reason` |
+| `audit.forensic_reveal.4eyes_pending` | A forensic-reveal proposal is filed (Amendment E) | `reveal_reason`, `audit_log_id`, `pending_id` |
+| `audit.forensic_reveal.4eyes_completed` | A second member (co-chair + co-chair / co-chair + certified) approves; the target audit row's actor pseudonym is revealed for ≤24h | `reveal_reason`, `proposer_actor_pseudonym`, `approver_actor_pseudonym` |
 
 The same pattern is replicated for `work_refusal` and `s51_evidence`
 in T14; the enum values are not enumerated here (T14 spec extends
