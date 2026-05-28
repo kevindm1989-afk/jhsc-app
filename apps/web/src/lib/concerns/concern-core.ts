@@ -15,8 +15,8 @@
  * + design-system §4 Surface B.
  */
 
-import { createHash } from 'node:crypto';
 import { ready } from '../crypto/sodium';
+import { sha256Hex } from '../crypto/hash';
 import type { ConcernStore } from './concern-store';
 import type { ConcernIntake, ConcernListItem, ConcernSourceReveal, ConcernUpdate } from './types';
 
@@ -86,10 +86,6 @@ async function openUtf8(ciphertext: Uint8Array, key: Uint8Array): Promise<string
   const ct = ciphertext.slice(nonceLen);
   const pt = s.crypto_secretbox_open_easy(ct, nonce, key);
   return Buffer.from(pt).toString('utf8');
-}
-
-function sha256Hex(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }
 
 // ---------------------------------------------------------------------------
@@ -208,11 +204,11 @@ export async function updateConcernText(
   } = {};
 
   if (patch.title !== undefined) {
-    prev_field_hashes.title_ct = sha256Hex(prior.title_ct);
+    prev_field_hashes.title_ct = await sha256Hex(prior.title_ct);
     storePatch.title_ct = await sealUtf8(patch.title, committeeKeyBytes);
   }
   if (patch.body !== undefined) {
-    prev_field_hashes.body_ct = sha256Hex(prior.body_ct);
+    prev_field_hashes.body_ct = await sha256Hex(prior.body_ct);
     storePatch.body_ct = await sealUtf8(patch.body, committeeKeyBytes);
   }
   if (patch.hazard_class !== undefined) storePatch.hazard_class = patch.hazard_class;
