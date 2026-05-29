@@ -28,6 +28,7 @@ import {
   issueRecoveryBlobReset,
   recordCommitteeDataKeyUnwrap,
   recordIdentitySelftestFail,
+  recordPanicWipeInvoked,
   recordRecoveryBlobRestored,
   recordRecoveryBlobViewed,
   revokeCommitteeMember,
@@ -74,7 +75,8 @@ type Op =
     }
   | { op: 'revoke_member'; removed_member_id: string; rotation_id: string }
   | { op: 'record_selftest_fail'; meta?: Record<string, unknown> }
-  | { op: 'get_recovery_blob' };
+  | { op: 'get_recovery_blob' }
+  | { op: 'record_panic_wipe'; meta?: Record<string, unknown> };
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -222,6 +224,9 @@ Deno.serve(async (req) => {
       break;
     case 'get_recovery_blob':
       result = await getRecoveryBlob(rpc);
+      break;
+    case 'record_panic_wipe':
+      result = await recordPanicWipeInvoked(rpc, body);
       break;
     default:
       return json({ ok: false, error: 'bad_request' }, 400);

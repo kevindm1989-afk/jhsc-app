@@ -236,6 +236,24 @@ export function recordIdentitySelftestFail(
   });
 }
 
+/**
+ * G-T19-PRIV-3 — emit `panic_wipe.invoked` server-side via the
+ * SECURITY DEFINER `record_panic_wipe_invoked` function (migration 0011).
+ * Same shape as recordIdentitySelftestFail; the CLIENT-supplied meta
+ * (surface / wipe_scope / completed / partial_failure_classes) merges
+ * with the server-derived `actor_id`. F-53 / M-106a contract: the
+ * caller (`BrowserWipeStore.emitAudit`) MUST await this BEFORE any
+ * clear* side-effect lands.
+ */
+export function recordPanicWipeInvoked(
+  rpc: RpcPort,
+  input: { meta?: Record<string, unknown> }
+): Promise<OpResult<null>> {
+  return call<null>(rpc, 'record_panic_wipe_invoked', {
+    p_meta: input.meta ?? {}
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Recovery blob (F-08, F-12, Amendment F)
 // ---------------------------------------------------------------------------

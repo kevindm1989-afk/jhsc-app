@@ -21,6 +21,7 @@ import {
   mapRpcError,
   recordCommitteeDataKeyUnwrap,
   recordIdentitySelftestFail,
+  recordPanicWipeInvoked,
   recordRecoveryBlobRestored,
   recordRecoveryBlobViewed,
   revokeCommitteeMember,
@@ -405,6 +406,45 @@ Deno.test('recordIdentitySelftestFail forwards meta + defaults to empty object',
   const c2: Array<{ fn: string; args: Record<string, unknown> }> = [];
   await recordIdentitySelftestFail(fakeRpc({ data: null, error: null }, c2), {});
   assertEquals(c2[0]?.args, { p_meta: {} });
+});
+
+// ---- G-T19-PRIV-3 panic-wipe server-side emission --------------------------
+
+Deno.test('recordPanicWipeInvoked forwards meta + defaults to empty object', async () => {
+  const c: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  await recordPanicWipeInvoked(fakeRpc({ data: null, error: null }, c), {
+    meta: {
+      surface: 'settings',
+      wipe_scope: 'local_only',
+      completed: true,
+      partial_failure_classes: []
+    }
+  });
+  assertEquals(c[0], {
+    fn: 'record_panic_wipe_invoked',
+    args: {
+      p_meta: {
+        surface: 'settings',
+        wipe_scope: 'local_only',
+        completed: true,
+        partial_failure_classes: []
+      }
+    }
+  });
+
+  const c2: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  await recordPanicWipeInvoked(fakeRpc({ data: null, error: null }, c2), {});
+  assertEquals(c2[0]?.args, { p_meta: {} });
+});
+
+Deno.test('recordPanicWipeInvoked surfaces 403 rls_denied (no session) verbatim', async () => {
+  const r = await recordPanicWipeInvoked(
+    fakeRpc({ data: null, error: { code: '42501', message: 'rls_denied' } }, []),
+    {}
+  );
+  assert(!r.ok);
+  assertEquals(r.reason, 'rls_denied');
+  assertEquals(r.status, 403);
 });
 
 Deno.test('mapRpcError honors message literal first, then ERRCODE fallback', () => {

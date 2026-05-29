@@ -131,6 +131,32 @@ describe('T07.1 / G-T07-2 — SupabaseT07Client wire shapes', () => {
     await client.recordIdentitySelftestFail();
     expect(calls[0]?.body).toEqual({ op: 'record_selftest_fail', meta: {} });
   });
+
+  it('recordPanicWipeInvoked posts { op: record_panic_wipe } with the supplied meta', async () => {
+    const { transport, calls } = mockTransport([{ status: 200, body: { ok: true, data: null } }]);
+    const client = new SupabaseT07Client({ transport });
+    const meta = {
+      surface: 'settings',
+      wipe_scope: 'local_only',
+      completed: true,
+      partial_failure_classes: []
+    };
+    const r = await client.recordPanicWipeInvoked({ meta });
+    expect(r.ok).toBe(true);
+    expect(calls[0]?.body).toEqual({ op: 'record_panic_wipe', meta });
+  });
+
+  it('recordPanicWipeInvoked defaults to empty meta + surfaces 403 rls_denied verbatim', async () => {
+    const { transport } = mockTransport([
+      { status: 403, body: { ok: false, error: 'rls_denied' } }
+    ]);
+    const client = new SupabaseT07Client({ transport });
+    const r = await client.recordPanicWipeInvoked();
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe('rls_denied');
+    expect(r.status).toBe(403);
+  });
 });
 
 describe('T07.1 — SupabaseT07Client.getRecoveryBlob (F-08 restore-flow read)', () => {
