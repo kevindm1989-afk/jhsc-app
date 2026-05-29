@@ -44,12 +44,21 @@ const ENVIRONMENT = (import.meta.env.MODE as string | undefined) ?? 'development
 // without blocking module load and route any rejection through the
 // structured logger + Sentry (when wired) so the deployment-config bug is
 // loud at first paint, not at first recovery-blob write.
+//
+// `Sentry.captureException` is conditional on PUBLIC_SENTRY_DSN being
+// configured (same posture as `handleError` below): without the DSN the
+// init block below is skipped and `captureException` is a no-op anyway,
+// but the explicit guard documents the intent and keeps the call site
+// symmetric with handleError.
 assertArgon2idAvailable().catch((err) => {
   const error_class =
     err && typeof err === 'object' && 'constructor' in err
       ? (err as { constructor: { name: string } }).constructor.name
       : 'Error';
   log.error({ event: 'boot.argon2id_unavailable', error_class });
+  if (PUBLIC_SENTRY_DSN) {
+    Sentry.captureException(err);
+  }
 });
 
 // G-T19-11 production wire-up: register the `panic_wipe.invoked` audit

@@ -108,3 +108,57 @@ describe('T19.1 — hooks.client.ts wires setDefaultStoreAuditEmitter', () => {
     expect(src).toMatch(/onSessionRevoked:\s*clearJwt/);
   });
 });
+
+describe('T19.1 — hooks.client.ts boot-argon2id catch routes through Sentry', () => {
+  // The assertArgon2idAvailable().catch arrow body has nested braces
+  // (the `if (PUBLIC_SENTRY_DSN) { ... }` guard inside), so we walk
+  // from after the `.catch(` open-paren to its matching `)` by hand —
+  // a single regex would either over-match or stop at the inner `}`.
+  function readArgon2idCatchBody(src: string): string {
+    const marker = '.catch(';
+    const catchAt = src.indexOf('assertArgon2idAvailable().catch(');
+    expect(catchAt).toBeGreaterThanOrEqual(0);
+    const openParen = catchAt + 'assertArgon2idAvailable()'.length + marker.length - 1;
+    let depth = 1;
+    let i = openParen + 1;
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        depth--;
+        if (depth === 0) return src.slice(openParen, i + 1);
+      }
+      i++;
+    }
+    throw new Error('unterminated catch arrow');
+  }
+
+  it('the assertArgon2idAvailable catch handler calls Sentry.captureException(err)', () => {
+    const src = readFileSync(HOOKS_PATH, 'utf8');
+    // The catch handler's contract per the header: "route any rejection
+    // through the structured logger + Sentry (when wired)". Before this
+    // contract pin only `log.error` ran, leaving the documented Sentry
+    // hop unimplemented. Defense-in-depth pin against regression.
+    const body = readArgon2idCatchBody(src);
+    expect(body).toMatch(/Sentry\.captureException\s*\(\s*err\s*\)/);
+  });
+
+  it('the Sentry.captureException call is gated on PUBLIC_SENTRY_DSN (no-op in local dev without DSN)', () => {
+    const src = readFileSync(HOOKS_PATH, 'utf8');
+    // Same posture as handleError: the Sentry call sits inside a
+    // PUBLIC_SENTRY_DSN guard so local dev without a DSN doesn't trigger
+    // an attempted SaaS round-trip.
+    const body = readArgon2idCatchBody(src);
+    expect(body).toMatch(
+      /if\s*\(\s*PUBLIC_SENTRY_DSN\s*\)\s*\{[\s\S]*?Sentry\.captureException/
+    );
+  });
+
+  it('log.error still fires (Sentry capture is additive, not a replacement)', () => {
+    const src = readFileSync(HOOKS_PATH, 'utf8');
+    const body = readArgon2idCatchBody(src);
+    // The log.error call is the dev-environment signal (no Sentry DSN
+    // wired locally). Both channels run in production.
+    expect(body).toMatch(/log\.error\(\{\s*event:\s*['"]boot\.argon2id_unavailable['"]/);
+  });
+});
