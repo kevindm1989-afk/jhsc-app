@@ -68,7 +68,7 @@ export interface SupabaseMintSessionClientOptions {
   transport: MintSessionTransport;
 }
 
-interface MintSessionWireOk<T> {
+interface MintSessionWireOk {
   ok: true;
 }
 interface MintSessionWireErr {
@@ -83,7 +83,7 @@ interface MintSessionWireErr {
  */
 function parseOk<T>(payload: unknown): T | null {
   if (!payload || typeof payload !== 'object') return null;
-  const p = payload as Record<string, unknown> & MintSessionWireOk<T>;
+  const p = payload as Record<string, unknown> & MintSessionWireOk;
   if (p.ok !== true) return null;
   const { ok: _ok, ...rest } = p;
   void _ok;
@@ -95,7 +95,7 @@ async function invoke<T>(
   body: Record<string, unknown>
 ): Promise<MintSessionResult<T>> {
   const r = await transport(body);
-  const payload = r.body as Partial<MintSessionWireOk<T>> & Partial<MintSessionWireErr>;
+  const payload = r.body as Partial<MintSessionWireOk> & Partial<MintSessionWireErr>;
   if (payload && payload.ok === true) {
     const data = parseOk<T>(payload);
     if (data === null) return { ok: false, reason: 'unknown', status: r.status };
