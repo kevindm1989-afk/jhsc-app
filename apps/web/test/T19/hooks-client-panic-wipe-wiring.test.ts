@@ -80,4 +80,19 @@ describe('T19.1 — hooks.client.ts wires setDefaultStoreAuditEmitter', () => {
     expect(src).toMatch(/getJwt\s*[,}]/);
     expect(src).not.toMatch(/getJwt:\s*\(\s*\)\s*=>\s*null/);
   });
+
+  it('imports clearJwt from $lib/auth/session-jwt-store (revocation-loop closure)', () => {
+    const src = readFileSync(HOOKS_PATH, 'utf8');
+    expect(src).toMatch(
+      /import\s*{[^}]*clearJwt[^}]*}\s+from\s+['"]\$lib\/auth\/session-jwt-store['"]/
+    );
+  });
+
+  it('passes clearJwt as onSessionRevoked so 401 from t07-op clears the in-memory JWT', () => {
+    const src = readFileSync(HOOKS_PATH, 'utf8');
+    // The factory takes { onSessionRevoked }; we should pass the imported
+    // `clearJwt` directly. Defense-in-depth against a refactor that
+    // accidentally swaps it for `() => {}` or drops the option entirely.
+    expect(src).toMatch(/onSessionRevoked:\s*clearJwt/);
+  });
 });

@@ -166,6 +166,129 @@ describe('T19.1 — createSupabaseT07Client', () => {
 });
 
 // ---------------------------------------------------------------------------
+// onSessionRevoked — F-39 / session-jwt-store contract closure
+// ---------------------------------------------------------------------------
+
+describe('T19.1 — createSupabaseT07Client onSessionRevoked (401 → clearJwt loop)', () => {
+  it('fires onSessionRevoked when the server returns 401 (session_is_live gate denied)', async () => {
+    const { fetchImpl } = stubFetch([{ status: 401, body: { ok: false, error: 'rls_denied' } }]);
+    const onSessionRevoked = vi.fn();
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'stale-jwt',
+      fetchImpl,
+      onSessionRevoked
+    });
+    const r = await client.recordIdentitySelftestFail();
+    expect(r.ok).toBe(false);
+    expect(onSessionRevoked).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT fire onSessionRevoked on 403 (session live, RLS denies this op)', async () => {
+    const { fetchImpl } = stubFetch([{ status: 403, body: { ok: false, error: 'rls_denied' } }]);
+    const onSessionRevoked = vi.fn();
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'valid-jwt',
+      fetchImpl,
+      onSessionRevoked
+    });
+    await client.recordIdentitySelftestFail();
+    expect(onSessionRevoked).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire onSessionRevoked on 200 success', async () => {
+    const { fetchImpl } = stubFetch([{ status: 200, body: { ok: true, data: null } }]);
+    const onSessionRevoked = vi.fn();
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'valid-jwt',
+      fetchImpl,
+      onSessionRevoked
+    });
+    await client.recordIdentitySelftestFail();
+    expect(onSessionRevoked).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire onSessionRevoked on a network error (status 0 — not a server revocation signal)', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+    const onSessionRevoked = vi.fn();
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'valid-jwt',
+      fetchImpl,
+      onSessionRevoked
+    });
+    await client.recordIdentitySelftestFail();
+    expect(onSessionRevoked).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire onSessionRevoked on 500 / other server errors (only 401)', async () => {
+    const { fetchImpl } = stubFetch([{ status: 500, body: { ok: false, error: 'unknown' } }]);
+    const onSessionRevoked = vi.fn();
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'valid-jwt',
+      fetchImpl,
+      onSessionRevoked
+    });
+    await client.recordIdentitySelftestFail();
+    expect(onSessionRevoked).not.toHaveBeenCalled();
+  });
+
+  it('swallows a throwing onSessionRevoked — the caller still sees the 401', async () => {
+    const { fetchImpl } = stubFetch([{ status: 401, body: { ok: false, error: 'rls_denied' } }]);
+    const onSessionRevoked = vi.fn(() => {
+      throw new Error('clearJwt blew up');
+    });
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'stale-jwt',
+      fetchImpl,
+      onSessionRevoked
+    });
+    const r = await client.recordIdentitySelftestFail();
+    expect(onSessionRevoked).toHaveBeenCalledTimes(1);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.status).toBe(401);
+    expect(r.reason).toBe('rls_denied');
+  });
+
+  it('fires onSessionRevoked once per 401 call (not deduplicated across calls)', async () => {
+    const { fetchImpl } = stubFetch([
+      { status: 401, body: { ok: false, error: 'rls_denied' } },
+      { status: 401, body: { ok: false, error: 'rls_denied' } }
+    ]);
+    const onSessionRevoked = vi.fn();
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'stale-jwt',
+      fetchImpl,
+      onSessionRevoked
+    });
+    await client.recordIdentitySelftestFail();
+    await client.recordIdentitySelftestFail();
+    expect(onSessionRevoked).toHaveBeenCalledTimes(2);
+  });
+
+  it('works when onSessionRevoked is undefined (back-compat: 401 still surfaces)', async () => {
+    const { fetchImpl } = stubFetch([{ status: 401, body: { ok: false, error: 'rls_denied' } }]);
+    const client = createSupabaseT07Client({
+      baseUrl: 'https://demo.supabase.co',
+      getJwt: () => 'stale-jwt',
+      fetchImpl
+    });
+    const r = await client.recordIdentitySelftestFail();
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createPanicWipeAuditEmitter
 // ---------------------------------------------------------------------------
 

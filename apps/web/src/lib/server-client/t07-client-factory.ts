@@ -54,6 +54,23 @@ export interface CreateSupabaseT07ClientOptions {
    * `globalThis.fetch`. Production calls leave this undefined.
    */
   fetchImpl?: typeof fetch;
+  /**
+   * Fired exactly when the t07-op Edge Function returns HTTP 401 — the
+   * server-side `session_is_live()` gate's response when the session
+   * was revoked, expired, or never authenticated. The session-jwt-store
+   * header documents the contract: production callers MUST treat 401 as
+   * "session revoked" and call `clearJwt()` so subsequent calls don't
+   * keep posting a stale token. Wiring this callback to `clearJwt` (in
+   * `hooks.client.ts`) closes that loop.
+   *
+   * NOT fired on 403 (session live, RLS denies this op), on 200, or on
+   * network errors (status 0) — those don't imply revocation.
+   *
+   * Errors thrown from this callback are swallowed (a buggy clearJwt
+   * MUST NOT take down the transport response — the caller is already
+   * about to see the 401 itself and handle it).
+   */
+  onSessionRevoked?: () => void;
 }
 
 /**
@@ -92,6 +109,14 @@ export function createSupabaseT07Client(opts: CreateSupabaseT07ClientOptions): S
         headers,
         body: JSON.stringify(body)
       });
+      if (response.status === 401 && opts.onSessionRevoked) {
+        try {
+          opts.onSessionRevoked();
+        } catch {
+          // A throwing onSessionRevoked MUST NOT prevent the caller from
+          // observing the 401 — they're already going to handle it.
+        }
+      }
       let parsed: unknown = null;
       try {
         parsed = await response.json();
