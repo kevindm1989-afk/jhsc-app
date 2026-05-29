@@ -39,6 +39,18 @@ describe('T19.1 — hooks.client.ts wires setDefaultStoreAuditEmitter', () => {
     );
   });
 
+  it('imports setPostWipeCleanup from $lib/lock/panic-wipe (G-T19-14 in-memory JWT teardown)', () => {
+    const src = readFileSync(HOOKS_PATH, 'utf8');
+    expect(src).toMatch(
+      /import\s*{[^}]*setPostWipeCleanup[^}]*}\s+from\s+['"]\$lib\/lock\/panic-wipe['"]/
+    );
+  });
+
+  it('calls setPostWipeCleanup(clearJwt) at top-level so the in-memory JWT is wiped in lockstep', () => {
+    const src = readFileSync(HOOKS_PATH, 'utf8');
+    expect(src).toMatch(/setPostWipeCleanup\s*\(\s*clearJwt\s*\)/);
+  });
+
   it('imports createSupabaseT07Client + createPanicWipeAuditEmitter from $lib/server-client/t07-client-factory', () => {
     const src = readFileSync(HOOKS_PATH, 'utf8');
     expect(src).toMatch(

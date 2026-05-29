@@ -62,6 +62,7 @@ export interface PanicWipeResult {
 const __wipedStores = new WeakSet<WipeStore>();
 let __defaultBrowserStore: BrowserWipeStore | null = null;
 let __defaultAuditEmitter: PanicWipeAuditEmitter | undefined = undefined;
+let __postWipeCleanup: (() => void) | undefined = undefined;
 
 function getDefaultStore(): BrowserWipeStore {
   if (!__defaultBrowserStore) {
@@ -113,6 +114,48 @@ export function setDefaultStoreAuditEmitter(emitter: PanicWipeAuditEmitter | und
  *  same emitter as the prior one — that's the whole point of the seam. */
 export function resetPanicWipeLockout(): void {
   __defaultBrowserStore = null;
+}
+
+/**
+ * G-T19-14 — register a callback the orchestrator runs after a panic-wipe
+ * actually destroys local state, so the integration layer can tear down
+ * any IN-MEMORY state the `WipeStore` interface doesn't cover. The
+ * canonical surviving piece is the `session-jwt-store` singleton: its
+ * `currentJwt` is module-private memory, untouched by `clearIndexedDb` /
+ * `clearCaches` / `clearSessionStorage` / `clearLocalStorage` /
+ * `tearDownSessionCookie`. Wiring this to `clearJwt` (in `hooks.client.ts`)
+ * closes that loop. Future module-scoped caches (e.g. a tokens cache, an
+ * RPC retry queue) wire through the same seam.
+ *
+ * Called on:
+ *   - `completed` — destruction succeeded, audit row committed.
+ *   - `partially_completed` — destruction was attempted, audit row(s)
+ *     committed. The state is "torn down enough that surviving caches
+ *     are forensically meaningless"; clearing the JWT here matches the
+ *     wipe-store's tearDownSessionCookie posture.
+ *
+ * NOT called on:
+ *   - `audit_failed` — destruction did NOT happen (audit-before-side-
+ *     effect contract). Clearing the JWT would falsely advertise a wipe.
+ *   - `no_op` (already_wiped) — the previous call already ran cleanup.
+ *
+ * A throwing cleanup is swallowed: the wipe already destroyed local
+ * state and the audit row committed; a buggy cleanup MUST NOT re-shape
+ * the panic-wipe return.
+ *
+ * Pass `undefined` to clear the registered cleanup. Idempotent.
+ */
+export function setPostWipeCleanup(fn: (() => void) | undefined): void {
+  __postWipeCleanup = fn;
+}
+
+function runPostWipeCleanup(): void {
+  if (!__postWipeCleanup) return;
+  try {
+    __postWipeCleanup();
+  } catch {
+    // Cleanup errors are silent by design — see setPostWipeCleanup docs.
+  }
 }
 
 export async function panicWipe(opts?: {
@@ -200,6 +243,7 @@ export async function panicWipe(opts?: {
       if (typeof hook === 'function') hook();
     }
     __wipedStores.add(store);
+    runPostWipeCleanup();
     return {
       status: 'partially_completed',
       destruction_attempted: true,
@@ -216,6 +260,7 @@ export async function panicWipe(opts?: {
   }
 
   __wipedStores.add(store);
+  runPostWipeCleanup();
   return {
     status: 'completed',
     destruction_attempted: true
