@@ -192,7 +192,19 @@ export const SENSITIVE_PATH_PATTERNS: readonly RegExp[] = [
   /\/api\/inspections\/.+\/photos?(?:\/|$|\?)/i,
   /\/api\/minutes\/.+\/(?:draft|final)(?:\/|$|\?)/i,
   /\/api\/recommendations(?:\/|$|\?)/i,
-  /\/api\/sensitive(?:\/|$|\?)/i
+  /\/api\/sensitive(?:\/|$|\?)/i,
+  // G-T19-7 — Supabase Edge Function endpoints under /functions/v1/*.
+  // The adapter-static app routes every server interaction through one
+  // of these Edge Functions (T07.1 / T08.1 / T13.1 / T14.1 production
+  // clients posted via createSupabaseT07Client and friends), and the
+  // request body / URL can carry passphrase fragments, sealed-box
+  // ciphertext, audit-row meta, and per-record passphrase hashes. The
+  // breadcrumb stream for these calls is dropped entirely; the
+  // application-level audit log (audit_log table) is the canonical
+  // record of what happened. Pattern matches any /functions/v1/<name>
+  // sub-path so future Edge Functions (e.g. retention-sweep, integrity-
+  // check) inherit the protection without a separate update here.
+  /\/functions\/v1\/(?:t07[-_]op|t14[-_]op|reprisal[-_]op|concern[-_]op|committee[-_]op|mint[-_]session)(?:\/|$|\?)/i
 ];
 
 export const BREADCRUMB_CATEGORY_ALLOWLIST: ReadonlySet<string> = new Set([
