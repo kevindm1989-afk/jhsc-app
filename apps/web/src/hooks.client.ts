@@ -25,7 +25,7 @@ import { env } from '$env/dynamic/public';
 import { beforeSend, beforeBreadcrumb } from '$lib/observability/sentry-scrub';
 import { log } from '$lib/log';
 import { assertArgon2idAvailable } from '$lib/crypto/recovery-blob';
-import { getJwt } from '$lib/auth/session-jwt-store';
+import { clearJwt, getJwt } from '$lib/auth/session-jwt-store';
 import {
   createPanicWipeAuditEmitter,
   createSupabaseT07Client
@@ -71,9 +71,17 @@ assertArgon2idAvailable().catch((err) => {
 // server's `session_is_live()` gate denies the call (401 rls_denied) —
 // which surfaces as audit_failed at the wipe site, again preserving the
 // audit-before-side-effect contract.
+//
+// `onSessionRevoked: clearJwt` closes the F-39 jti-revocation loop on the
+// client side: any t07-op that comes back 401 (server saw the jti as
+// revoked / expired / never-authed) immediately clears the in-memory
+// JWT so subsequent calls don't keep posting the stale token. The
+// server-side revocation is authoritative; this is just the client
+// hygiene the session-jwt-store header mandates.
 const __defaultPanicWipeClient = createSupabaseT07Client({
   baseUrl: env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321',
-  getJwt
+  getJwt,
+  onSessionRevoked: clearJwt
 });
 setDefaultStoreAuditEmitter(createPanicWipeAuditEmitter(__defaultPanicWipeClient));
 
