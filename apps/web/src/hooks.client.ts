@@ -30,7 +30,7 @@ import {
   createPanicWipeAuditEmitter,
   createSupabaseT07Client
 } from '$lib/server-client/t07-client-factory';
-import { setDefaultStoreAuditEmitter } from '$lib/lock/panic-wipe';
+import { setDefaultStoreAuditEmitter, setPostWipeCleanup } from '$lib/lock/panic-wipe';
 
 // Read at runtime (not build time) so the build works without a .env present.
 const PUBLIC_SENTRY_DSN = env.PUBLIC_SENTRY_DSN;
@@ -84,6 +84,17 @@ const __defaultPanicWipeClient = createSupabaseT07Client({
   onSessionRevoked: clearJwt
 });
 setDefaultStoreAuditEmitter(createPanicWipeAuditEmitter(__defaultPanicWipeClient));
+
+// G-T19-14 production wire-up: the WipeStore interface only covers
+// browser-managed storage (IDB / Cache Storage / sessionStorage /
+// localStorage / cookies). The session-jwt-store singleton's
+// in-memory `currentJwt` is module-private memory and survives a
+// successful panic-wipe — leaving the stale token behind for any
+// closure that still holds a reference to `getJwt`. Wire `clearJwt`
+// as the post-wipe cleanup so the in-memory JWT is destroyed in
+// lockstep with the rest of the local state. Mirrors the
+// tearDownSessionCookie posture for the in-memory side.
+setPostWipeCleanup(clearJwt);
 
 if (PUBLIC_SENTRY_DSN) {
   Sentry.init({
