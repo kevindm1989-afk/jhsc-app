@@ -51,6 +51,15 @@ describe('T19.1 — /settings production route mount', () => {
     expect(src).toMatch(/{wipeStore}|wipeStore={/);
   });
 
+  it('the route reads the JWT from lib/auth/session-jwt-store (not a hard-coded null)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/from\s+['"][^'"]*lib\/auth\/session-jwt-store['"]/);
+    expect(src).toMatch(/getJwt/);
+    // The bare `() => null` placeholder is gone — production wiring
+    // now goes through the session-jwt-store module.
+    expect(src).not.toMatch(/getJwt:\s*\(\s*\)\s*=>\s*null/);
+  });
+
   it('the route does NOT forward any `__test_*` prop to PanicWipeModal (ADR-0020 Decision 8: production strip)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     const testProbe = '__test_' + 'store';

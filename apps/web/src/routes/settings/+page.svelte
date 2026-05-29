@@ -31,6 +31,7 @@
   import { env } from '$env/dynamic/public';
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
+  import { getJwt } from '../../lib/auth/session-jwt-store';
   import {
     createPanicWipeAuditEmitter,
     createSupabaseT07Client
@@ -41,13 +42,17 @@
   // Read the base URL at runtime (env may be undefined at build time).
   const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
 
-  // No auth session storage yet — JWT provider returns null. The
-  // unauthenticated client still works for the audit-emit transport;
-  // when the server denies (rls_denied / 401) the WipeStore's
-  // fail-closed branch leaves local state intact.
+  // JWT provider reads the in-memory session-jwt store
+  // (`lib/auth/session-jwt-store.ts`). Before the sign-in flow lands
+  // the store is empty (`getJwt()` returns null) — the unauthenticated
+  // client still works for the audit-emit transport: when the server
+  // denies (rls_denied / 401) the WipeStore's fail-closed branch
+  // leaves local state intact. After the sign-in flow lands, `setJwt`
+  // is called once mint-session succeeds; this factory picks up the
+  // value lazily on every call so no client reconstruction is needed.
   const client = createSupabaseT07Client({
     baseUrl,
-    getJwt: () => null
+    getJwt
   });
   const wipeStore = new BrowserWipeStore({
     auditEmitter: createPanicWipeAuditEmitter(client)
