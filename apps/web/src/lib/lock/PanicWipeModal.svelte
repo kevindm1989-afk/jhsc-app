@@ -33,6 +33,19 @@
 
   export let open = false;
   export let surface = 'settings';
+  /**
+   * G-T19-PRIV-3 production wire-up: an explicit WipeStore (typically a
+   * BrowserWipeStore constructed with `auditEmitter: createPanicWipeAuditEmitter(client)`
+   * — see `apps/web/src/lib/server-client/t07-client-factory.ts`). When
+   * provided, the wipe path routes through this store and its audit
+   * emitter — meaning the `panic_wipe.invoked` row commits server-side
+   * before any local destruction happens. When omitted the modal falls
+   * back to `panicWipe`'s internal default store (the bare BrowserWipeStore
+   * with no auditEmitter, which fails-closed on emitAudit) — back-compat
+   * with all existing test renders + with deployments that haven't wired
+   * a Supabase client yet.
+   */
+  export let wipeStore = undefined;
 
   // Focus management refs.
   /** @type {HTMLElement | null} */
@@ -153,7 +166,14 @@
   async function onConfirm() {
     if (!ready || !isPhraseMatched()) return;
     wipeState = 'in_progress';
-    const r = await panicWipe({ store: __test_store ?? undefined, surface });
+    // Precedence: test-only `__test_store` (existing harness contract) wins,
+    // then the production `wipeStore` prop, then panicWipe's internal
+    // default. The test seam is the load-bearing contract for the
+    // existing 50+ d6 / onboarding tests; the production prop is the new
+    // surface this PR adds. Either chain produces a valid `WipeStore | undefined`
+    // for the panicWipe call.
+    const storeOverride = __test_store ?? wipeStore ?? undefined;
+    const r = await panicWipe({ store: storeOverride, surface });
     if (r.status === 'partially_completed') {
       wipeState = 'partial_failure';
       partialFailedClasses = r.partial_failure_classes ?? [];
