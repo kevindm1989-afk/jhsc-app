@@ -1,10 +1,13 @@
 <script lang="ts">
   /**
-   * Placeholder landing page.
+   * Landing page.
    *
-   * Renders the app name + the release tag so a smoke test can confirm
-   * the build succeeded. The implementer of T05 replaces this with the
-   * auth-gated entry flow.
+   * Routes the user to the T19 onboarding wizard. The
+   * already-onboarded ↔ new-device decision is the SupabaseKeyStore
+   * wire-up's responsibility (`localIdentity.getIdentityPrivateKey()`
+   * throws when no privkey is on file → "new device" path; resolves
+   * to a privkey → "already onboarded" path). Until that lands, the
+   * CTA is unconditional and mirrors the cold-boot path.
    */
   import { t } from '$lib/i18n';
 
@@ -13,3 +16,6 @@
 
 <h1>{t('common.app_name')}</h1>
 <p>{t('common.actions.continue')} — release: {release}</p>
+<p>
+  <a href="/onboarding">Start setup</a>
+</p>
