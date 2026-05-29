@@ -1,0 +1,90 @@
+<script>
+  /**
+   * /settings — production mount point for the PanicWipeModal
+   * (T19.1 follow-up; closes the panic-wipe end-to-end loop).
+   *
+   * Wiring:
+   *   1. Construct a SupabaseT07Client over a fetch transport, reading
+   *      the project base URL from PUBLIC_SUPABASE_URL. When the env
+   *      var is missing (local builds without Supabase wired) the
+   *      factory still works — the transport just consistently fails
+   *      with status 0, which the BrowserWipeStore catches as
+   *      {ok: false} and surfaces as `audit_failed`, keeping the
+   *      audit-before-side-effect contract holds even in misconfigured
+   *      deployments.
+   *   2. Wrap the client as a PanicWipeAuditEmitter (one-line adapter
+   *      from `t07-client-factory.ts`).
+   *   3. Construct a BrowserWipeStore with the emitter wired.
+   *   4. Pass the store to PanicWipeModal via the new `wipeStore` prop.
+   *
+   * JWT provider: today returns null (auth session storage lands in a
+   * later increment; the unauthenticated client is fine because
+   * BrowserWipeStore's transport-error fail-closed branch covers the
+   * 401 case identically to the network-down case). When the auth
+   * session store lands, swap `getJwt` for `() => authStore.jwt`.
+   *
+   * NOTE: no `lang="ts"` — same reason as `/onboarding/+page.svelte`:
+   * PanicWipeModal.svelte is a plain-JS Svelte component and svelte-check's
+   * strict implicit-any check rejects importing it from a TS-annotated
+   * parent. The route is a thin wiring shell with no logic of its own.
+   */
+  import { env } from '$env/dynamic/public';
+  import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
+  import { BrowserWipeStore } from '../../lib/lock/wipe-store';
+  import {
+    createPanicWipeAuditEmitter,
+    createSupabaseT07Client
+  } from '../../lib/server-client/t07-client-factory';
+
+  let modalOpen = false;
+
+  // Read the base URL at runtime (env may be undefined at build time).
+  const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
+
+  // No auth session storage yet — JWT provider returns null. The
+  // unauthenticated client still works for the audit-emit transport;
+  // when the server denies (rls_denied / 401) the WipeStore's
+  // fail-closed branch leaves local state intact.
+  const client = createSupabaseT07Client({
+    baseUrl,
+    getJwt: () => null
+  });
+  const wipeStore = new BrowserWipeStore({
+    auditEmitter: createPanicWipeAuditEmitter(client)
+  });
+
+  function openWipeModal() {
+    modalOpen = true;
+  }
+
+  function onWipeRequestClose() {
+    modalOpen = false;
+  }
+</script>
+
+<svelte:head>
+  <title>Settings — JHSC</title>
+  <meta name="robots" content="noindex,nofollow" />
+</svelte:head>
+
+<section>
+  <h1>Settings</h1>
+
+  <h2>Device data</h2>
+  <p>
+    Erase the encrypted local store, your current sign-in, and queued entries on this device. This
+    does <strong>not</strong> sign you out on the server or other devices.
+  </p>
+  <button type="button" on:click={openWipeModal} data-testid="open-panic-wipe">
+    Wipe this device's data…
+  </button>
+</section>
+
+<PanicWipeModal
+  bind:open={modalOpen}
+  surface="settings"
+  {wipeStore}
+  on:cancel={onWipeRequestClose}
+  on:complete={onWipeRequestClose}
+  on:close={onWipeRequestClose}
+/>
