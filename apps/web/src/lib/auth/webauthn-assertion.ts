@@ -97,7 +97,7 @@ export async function webauthnGetAssertion(
         // platform passkey). Discovery is governed by the RP-ID match.
         allowCredentials: [],
         userVerification: 'preferred'
-      } as PublicKeyCredentialRequestOptions
+      }
     });
   } catch {
     // NotAllowedError / AbortError / SecurityError / etc. — treat all as
