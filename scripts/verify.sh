@@ -149,6 +149,26 @@ run_gate_shell "recovery-surface exfil-channel lint" "bash scripts/check-recover
 # variant (Argon2id / F-08 floor); accidental revert to the non-sumo build
 # would make recovery-blob writes fail at runtime.
 run_gate_shell "libsodium-wrappers-sumo lockfile-lint" "bash scripts/check-libsodium-sumo-locked.sh"
+# G-T19-6 — onboarding no-passphrase-leak static lint. Scans the
+# D4RecoveryPassphrase / D6TypeBackVerify / lib/onboarding/recovery
+# surfaces for the closed-allowlist of forbidden affordances
+# (clipboard writeText, TTS, aria-live / role=alert on the passphrase
+# region, autofocus on passphrase-bearing inputs). F-108 M-108b.
+run_gate_shell "onboarding no-passphrase-leak lint" "bash scripts/check-onboarding-no-passphrase-leak.sh"
+# G-T19-5 — onboarding production-bundle test-props strip. NOT wired
+# yet: the script catches real leaks now that PRs #35 (/onboarding)
+# and #38 (/settings) mount OnboardingFlow + PanicWipeModal in the
+# production bundle. Source-side `export let __test_*` declarations
+# emit the literal names in the compiled output even though the
+# runtime values are stripped under MODE === 'production'. Fixing
+# the contract requires component-side refactoring (dynamic-import
+# for MemoryWipeStore so the test-only branch in PanicWipeModal does
+# not pull `__debugForceClearFailure` into the production graph,
+# plus a non-`export let` pattern for the test-only Svelte props).
+# Tracked as a follow-up gap; wire this gate AFTER that refactor.
+# scripts/check-onboarding-test-props-stripped.sh remains callable
+# manually for CI dry-runs (it requires a built bundle at
+# apps/web/build/).
 
 # Sentry-scrub / canary-PII test fixture is part of the Vitest gate below
 # (apps/web/test/T02/sentry-scrub.test.ts); listed here so the verify.sh

@@ -25,6 +25,12 @@ import { env } from '$env/dynamic/public';
 import { beforeSend, beforeBreadcrumb } from '$lib/observability/sentry-scrub';
 import { log } from '$lib/log';
 import { assertArgon2idAvailable } from '$lib/crypto/recovery-blob';
+import { getJwt } from '$lib/auth/session-jwt-store';
+import {
+  createPanicWipeAuditEmitter,
+  createSupabaseT07Client
+} from '$lib/server-client/t07-client-factory';
+import { setDefaultStoreAuditEmitter } from '$lib/lock/panic-wipe';
 
 // Read at runtime (not build time) so the build works without a .env present.
 const PUBLIC_SENTRY_DSN = env.PUBLIC_SENTRY_DSN;
@@ -45,6 +51,31 @@ assertArgon2idAvailable().catch((err) => {
       : 'Error';
   log.error({ event: 'boot.argon2id_unavailable', error_class });
 });
+
+// G-T19-11 production wire-up: register the `panic_wipe.invoked` audit
+// emitter for the default `BrowserWipeStore` singleton in `panic-wipe.ts`
+// so any production `panicWipe()` call that uses the default-store path
+// (today: /onboarding's D.6 panic-wipe modal, plus any future surface
+// that doesn't construct its own `wipeStore`) routes through a real
+// transport instead of fail-closing at the audit precondition.
+//
+// The PUBLIC_SUPABASE_URL env var is read at runtime so a missing var in
+// local dev still boots (the transport then consistently surfaces
+// status 0 / unknown, which BrowserWipeStore's emitAudit catches as
+// `{ok: false}` — preserving the F-53 audit-before-side-effect contract
+// in mis-configured deployments).
+//
+// The JWT provider closure-references the session-jwt-store, so a
+// freshly-minted JWT after sign-in is picked up without rebuilding the
+// client. Before sign-in completes `getJwt()` returns null, and the
+// server's `session_is_live()` gate denies the call (401 rls_denied) —
+// which surfaces as audit_failed at the wipe site, again preserving the
+// audit-before-side-effect contract.
+const __defaultPanicWipeClient = createSupabaseT07Client({
+  baseUrl: env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321',
+  getJwt
+});
+setDefaultStoreAuditEmitter(createPanicWipeAuditEmitter(__defaultPanicWipeClient));
 
 if (PUBLIC_SENTRY_DSN) {
   Sentry.init({

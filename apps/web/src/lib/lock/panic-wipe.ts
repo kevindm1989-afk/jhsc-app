@@ -26,6 +26,7 @@
 
 import {
   BrowserWipeStore,
+  type PanicWipeAuditEmitter,
   type PanicWipeAuditRow,
   type WipeClass,
   type WipeStore
@@ -60,16 +61,56 @@ export interface PanicWipeResult {
 // so the WeakSet pattern applies uniformly.
 const __wipedStores = new WeakSet<WipeStore>();
 let __defaultBrowserStore: BrowserWipeStore | null = null;
+let __defaultAuditEmitter: PanicWipeAuditEmitter | undefined = undefined;
 
 function getDefaultStore(): BrowserWipeStore {
-  if (!__defaultBrowserStore) __defaultBrowserStore = new BrowserWipeStore();
+  if (!__defaultBrowserStore) {
+    __defaultBrowserStore = __defaultAuditEmitter
+      ? new BrowserWipeStore({ auditEmitter: __defaultAuditEmitter })
+      : new BrowserWipeStore();
+  }
   return __defaultBrowserStore;
+}
+
+/**
+ * G-T19-11 — register the audit emitter the default `BrowserWipeStore`
+ * singleton uses for its `panic_wipe.invoked` row. Without this seam,
+ * the default-store path (`panicWipe()` with no explicit `store`) is
+ * fail-closed in production because `BrowserWipeStore` has no
+ * `auditEmitter` wired by default — every wipe surfaces `audit_failed`
+ * and destroys nothing.
+ *
+ * Production wiring lives wherever the app constructs a
+ * `SupabaseT07Client` (typically `hooks.client.ts` or a route's
+ * `+page.svelte`):
+ *   ```ts
+ *   setDefaultStoreAuditEmitter(createPanicWipeAuditEmitter(client));
+ *   ```
+ *
+ * Calling this also clears the existing default singleton (if any) so
+ * the next `panicWipe()` call picks up the new emitter. Pass `undefined`
+ * to restore the bare-no-emitter fail-closed default (useful for tests
+ * that want to assert the pre-wire fail-closed posture).
+ *
+ * NOT idempotent for the lockout — calling this resets the per-singleton
+ * `__wipedStores` membership too (the new singleton is a fresh instance).
+ * That's actually the right behaviour for the re-onboarding case: a
+ * fresh onboarding session installs a fresh emitter and reasonably
+ * expects the lockout to clear with it.
+ */
+export function setDefaultStoreAuditEmitter(emitter: PanicWipeAuditEmitter | undefined): void {
+  __defaultAuditEmitter = emitter;
+  __defaultBrowserStore = null;
 }
 
 /** Reset the default-store panic-wipe lockout (re-issues the singleton so the
  *  WeakSet drops the lockout entry). Production-callable: a fresh onboarding =
  *  a new identity, so a prior identity's panic-wipe lockout must not persist in
- *  the same browser tab. Idempotent and no-throw. */
+ *  the same browser tab. Idempotent and no-throw.
+ *
+ *  Does NOT clear the registered audit emitter (see
+ *  `setDefaultStoreAuditEmitter`). The re-issued singleton picks up the
+ *  same emitter as the prior one — that's the whole point of the seam. */
 export function resetPanicWipeLockout(): void {
   __defaultBrowserStore = null;
 }
