@@ -31,7 +31,7 @@
   import { env } from '$env/dynamic/public';
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
-  import { getJwt } from '../../lib/auth/session-jwt-store';
+  import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
   import {
     createPanicWipeAuditEmitter,
     createSupabaseT07Client
@@ -50,9 +50,17 @@
   // leaves local state intact. After the sign-in flow lands, `setJwt`
   // is called once mint-session succeeds; this factory picks up the
   // value lazily on every call so no client reconstruction is needed.
+  //
+  // `onSessionRevoked: clearJwt` honors the F-39 contract documented in
+  // session-jwt-store: a 401 from t07-op (server's session_is_live
+  // gate denied the request) MUST clear the in-memory JWT so subsequent
+  // calls don't keep posting the stale token. Same wiring as the
+  // default-store client in hooks.client.ts — every t07-client in the
+  // app must honor this loop, not just the central one.
   const client = createSupabaseT07Client({
     baseUrl,
-    getJwt
+    getJwt,
+    onSessionRevoked: clearJwt
   });
   const wipeStore = new BrowserWipeStore({
     auditEmitter: createPanicWipeAuditEmitter(client)

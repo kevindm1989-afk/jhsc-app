@@ -60,6 +60,14 @@ describe('T19.1 — /settings production route mount', () => {
     expect(src).not.toMatch(/getJwt:\s*\(\s*\)\s*=>\s*null/);
   });
 
+  it('the route wires `onSessionRevoked: clearJwt` so a 401 from the audit-emit clears the in-memory JWT (F-39 loop, parity with hooks.client.ts)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Imports clearJwt from the same session-jwt-store module.
+    expect(src).toMatch(/import\s*{[^}]*clearJwt[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-store['"]/);
+    // Passes it as the onSessionRevoked callback so 401 → clearJwt fires.
+    expect(src).toMatch(/onSessionRevoked:\s*clearJwt/);
+  });
+
   it('the route does NOT forward any `__test_*` prop to PanicWipeModal (ADR-0020 Decision 8: production strip)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     const testProbe = '__test_' + 'store';
