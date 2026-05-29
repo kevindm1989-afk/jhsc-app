@@ -214,11 +214,38 @@ export class BrowserWipeStore implements WipeStore {
     return { ok: failed.length === 0, failed };
   }
 
+  /**
+   * G-T19-8 contract: `BrowserWipeStore.clearCaches` enumerates the
+   * Cache Storage API DYNAMICALLY via `caches.keys()` rather than trust
+   * the caller-supplied list as the source of truth. This protects against
+   * the F-109 mitigation hole where a future ADR-0013 service-worker
+   * cache addition lands without the wipe-side allowlist getting
+   * updated in lockstep — a hard-coded `clearCaches(['cache-a'])` would
+   * silently leave the new cache un-wiped on a panic. The dynamic
+   * enumeration captures EVERY cache present at wipe time.
+   *
+   * The `cacheNames` parameter is preserved for the WipeStore interface
+   * contract (MemoryWipeStore still uses it for hermetic test injection)
+   * but is IGNORED here — the production behaviour is "wipe everything
+   * the browser knows about." If `caches.keys()` fails or the Cache
+   * Storage API is absent, we fall back to the caller-supplied list as
+   * a best-effort `failed` signal so the panic-wipe outer audit row's
+   * `partial_failure_classes` carries useful forensic info.
+   */
   async clearCaches(cacheNames: readonly string[]) {
     const failed: string[] = [];
     const c = (globalThis as { caches?: CacheStorage }).caches;
     if (!c) return { ok: false, failed: [...cacheNames] };
-    for (const name of cacheNames) {
+    let dynamicNames: string[];
+    try {
+      dynamicNames = await c.keys();
+    } catch {
+      // Cache Storage API present but enumeration threw. Treat the
+      // caller-supplied list as the failure surface so the audit row
+      // carries something useful.
+      return { ok: false, failed: [...cacheNames] };
+    }
+    for (const name of dynamicNames) {
       try {
         const ok = await c.delete(name);
         if (!ok) failed.push(name);
