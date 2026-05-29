@@ -34,6 +34,22 @@ export interface PanicWipeAuditRow {
   };
 }
 
+/**
+ * G-T19-PRIV-3 — minimal external emitter contract for the production
+ * `panic_wipe.invoked` audit row. `BrowserWipeStore` does NOT directly
+ * import `SupabaseT07Client` (the lock module stays free of crypto /
+ * Supabase coupling); instead, callers construct a thin adapter that
+ * routes `recordPanicWipeInvoked` to whatever transport is wired (today:
+ * the t07-op `record_panic_wipe` op via `SupabaseT07Client`).
+ *
+ * The return shape mirrors `emitAudit`'s `{ok: boolean}` contract so
+ * the adapter is a one-line shim. `false` on the audit emit means
+ * `panicWipe()` MUST abort (F-53 / M-106a audit-before-side-effect).
+ */
+export interface PanicWipeAuditEmitter {
+  recordPanicWipeInvoked(input: { meta: Record<string, unknown> }): Promise<{ ok: boolean }>;
+}
+
 export interface WipeStore {
   clearIndexedDb(
     databaseNames: readonly string[]
@@ -157,8 +173,27 @@ export class MemoryWipeStore implements TestWipeStore {
  * Storage globals. The `clearCaches` implementation does NOT take a
  * hard-coded subset; callers MUST pass the result of `caches.keys()`
  * (see `panicWipe()` for the dynamic enumeration that satisfies G-T19-8).
+ *
+ * Optional `auditEmitter` (G-T19-PRIV-3): when provided, `emitAudit`
+ * forwards the row's meta through the emitter (production wiring routes
+ * to the t07-op `record_panic_wipe` op via `SupabaseT07Client`). When
+ * NOT provided — e.g. an offline-first build that hasn't wired auth yet
+ * — `emitAudit` stays fail-closed (returns `{ok: false}`) so the F-53
+ * audit-before-side-effect contract holds even when the transport is
+ * absent. The constructor signature is back-compat: no-args still works
+ * for callers that wire the emitter later.
  */
+export interface BrowserWipeStoreOptions {
+  auditEmitter?: PanicWipeAuditEmitter;
+}
+
 export class BrowserWipeStore implements WipeStore {
+  private auditEmitter: PanicWipeAuditEmitter | undefined;
+
+  constructor(opts: BrowserWipeStoreOptions = {}) {
+    this.auditEmitter = opts.auditEmitter;
+  }
+
   async clearIndexedDb(databaseNames: readonly string[]) {
     const failed: string[] = [];
     for (const name of databaseNames) {
@@ -229,15 +264,22 @@ export class BrowserWipeStore implements WipeStore {
     }
   }
 
-  async emitAudit(_row: PanicWipeAuditRow): Promise<{ ok: boolean }> {
-    // Stub: production wire-up to T05.1 audit-emit transport pending
-    // G-T19-PRIV-3. Per F-106 M-106a (audit-BEFORE-side-effect): a wipe
-    // that cannot honestly emit its audit row MUST abort rather than
-    // proceed with the destruction, otherwise a wipe could happen with
-    // no audit trail (S-T19-4 / A-T19-4). Returning {ok: false} here
-    // keeps the caller fail-closed (`panicWipe` returns `audit_failed`
-    // and leaves local state intact) until the real emitter ships.
-    return { ok: false };
+  async emitAudit(row: PanicWipeAuditRow): Promise<{ ok: boolean }> {
+    // G-T19-PRIV-3: when an `auditEmitter` is wired, forward the row's
+    // meta verbatim. The SQL function (record_panic_wipe_invoked,
+    // migration 0011) adds the server-derived `actor_id` and stamps
+    // the canonical event_type / retention_class. When no emitter is
+    // wired we stay fail-closed (F-53 / M-106a) so the caller
+    // (`panicWipe`) returns `audit_failed` and leaves local state
+    // intact rather than performing a wipe with no audit trail.
+    if (!this.auditEmitter) return { ok: false };
+    try {
+      return await this.auditEmitter.recordPanicWipeInvoked({ meta: row.meta });
+    } catch {
+      // Network error / transport failure → fail-closed. The user can
+      // retry once connectivity returns.
+      return { ok: false };
+    }
   }
 
   nowMs(): number {

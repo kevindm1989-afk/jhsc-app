@@ -337,4 +337,24 @@ export class SupabaseT07Client {
       meta: input?.meta ?? {}
     });
   }
+
+  // -----------------------------------------------------------------------
+  // G-T19-PRIV-3 server-side emission for panic_wipe.invoked
+  // -----------------------------------------------------------------------
+
+  /**
+   * Emit `panic_wipe.invoked` via `record_panic_wipe_invoked` (migration
+   * 0011). F-53 / M-106a audit-before-side-effect: the
+   * `BrowserWipeStore.emitAudit` caller MUST await this BEFORE any
+   * `clear*` side-effect lands. The CLIENT-supplied `meta` (surface /
+   * wipe_scope / completed / partial_failure_classes) merges with the
+   * server-derived `actor_id`; the server-derived value overrides any
+   * client-smuggled `actor_id`.
+   */
+  recordPanicWipeInvoked(input?: { meta?: Record<string, unknown> }): Promise<T07OpResult<null>> {
+    return invoke<null>(this.opts.transport, {
+      op: 'record_panic_wipe',
+      meta: input?.meta ?? {}
+    });
+  }
 }
