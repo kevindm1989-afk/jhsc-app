@@ -108,6 +108,11 @@
   </button>
   {#if signedOut}
     <p role="status" data-testid="signed-out-confirmation">{t('signOut.signed_out')}</p>
+    <p>
+      <a href="/sign-in" data-testid="signed-out-sign-in-again">
+        {t('signOut.sign_in_again_cta')}
+      </a>
+    </p>
   {/if}
 
   <h2>Device data</h2>

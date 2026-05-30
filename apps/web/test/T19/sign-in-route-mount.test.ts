@@ -136,8 +136,21 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(typeof catalog.signIn.cancelled).toBe('string');
     expect(typeof catalog.signIn.failed).toBe('string');
     expect(typeof catalog.signIn.success).toBe('string');
+    expect(typeof catalog.signIn.go_to_settings_cta).toBe('string');
     // The failed + success strings use {reason} / {sessionId} interpolations.
     expect(catalog.signIn.failed).toMatch(/\{reason\}/);
     expect(catalog.signIn.success).toMatch(/\{sessionId\}/);
+  });
+
+  it('the signed-in state surfaces a /settings link so the user has somewhere to go after sign-in', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The CTA link is rendered ONLY in the signed-in state — it lives
+    // inside the same {#if state === 'signed-in'} block as the success
+    // message. Defense-in-depth against a refactor that surfaces the
+    // link in the idle / failed states (which would let an unauthed
+    // user click through to /settings without any session).
+    expect(src).toMatch(/<a\s+href=["']\/settings["']/);
+    expect(src).toMatch(/data-testid=["']sign-in-go-to-settings["']/);
+    expect(src).toMatch(/t\(['"]signIn\.go_to_settings_cta['"]\)/);
   });
 });
