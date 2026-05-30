@@ -28,18 +28,29 @@
    * strict implicit-any check rejects importing it from a TS-annotated
    * parent. The route is a thin wiring shell with no logic of its own.
    */
+  import { onDestroy } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
-  import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
+  import { clearJwt, getJwt, subscribeToJwt } from '../../lib/auth/session-jwt-store';
   import {
     createPanicWipeAuditEmitter,
     createSupabaseT07Client
   } from '../../lib/server-client/t07-client-factory';
 
   let modalOpen = false;
-  let signedOut = false;
+  // `signedOut` reflects CURRENT JWT state (reactive), not just the
+  // user-initiated sign-out click. So side-channel clears (401
+  // revocation from another tab's call, panic-wipe post-cleanup hook,
+  // a future Settings → Sessions revoke) all flip this UI in real
+  // time. Initialized from `getJwt()` so a not-yet-signed-in user
+  // landing here directly sees the correct state at mount.
+  let signedOut = getJwt() === null;
+  const __unsubscribeJwt = subscribeToJwt((jwt) => {
+    signedOut = jwt === null;
+  });
+  onDestroy(__unsubscribeJwt);
 
   // Read the base URL at runtime (env may be undefined at build time).
   const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
@@ -76,20 +87,22 @@
     modalOpen = false;
   }
 
-  // Sign-out: clear the in-memory JWT. The contract documented in
-  // session-jwt-store.ts header — `Sign out` calls clearJwt() — is
-  // honored here. The server-side jti remains live until natural
-  // expiry (≤300s per F-116) or until a future Edge Function exposes
-  // the auth_admin-only revoke_session RPC to authenticated users.
-  // Until that follow-up lands, this is client-side sign-out only:
-  // the in-memory bearer is gone, so subsequent Edge Function calls
-  // post without Authorization and the server's session_is_live gate
-  // denies them. The next-best-thing to immediate revocation; for
-  // immediate device cleanup the panic-wipe modal below is the
-  // canonical destruction path.
+  // Sign-out: clear the in-memory JWT. The `signedOut` flag flips
+  // reactively via the subscribeToJwt subscriber above, so no manual
+  // `signedOut = true` line is needed here — that lets side-channel
+  // clears (401 revocation from another tab, panic-wipe post-cleanup,
+  // a future Settings → Sessions revoke) reuse the same code path.
+  //
+  // The server-side jti remains live until natural expiry (≤300s per
+  // F-116) or until a future Edge Function exposes the auth_admin-only
+  // revoke_session RPC to authenticated users. Until that follow-up
+  // lands, this is client-side sign-out only: the in-memory bearer is
+  // gone, so subsequent Edge Function calls post without Authorization
+  // and the server's session_is_live gate denies them. The next-best-
+  // thing to immediate revocation; for immediate device cleanup the
+  // panic-wipe modal below is the canonical destruction path.
   function signOut() {
     clearJwt();
-    signedOut = true;
   }
 </script>
 
