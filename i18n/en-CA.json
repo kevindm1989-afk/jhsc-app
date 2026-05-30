@@ -495,6 +495,11 @@
       "heading": "Already enrolled",
       "description": "Sign in with the passkey on this device.",
       "cta": "Sign in"
+    },
+    "signed_in": {
+      "heading": "Welcome back",
+      "description": "You're already signed in on this device.",
+      "cta": "Continue to settings"
     }
   },
 
