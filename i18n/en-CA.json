@@ -480,6 +480,7 @@
     "cancelled": "Sign-in cancelled.",
     "failed": "Sign-in failed: {reason}",
     "success": "Session established (session {sessionId}).",
+    "already_signed_in": "You're already signed in on this device.",
     "go_to_settings_cta": "Go to settings"
   },
 

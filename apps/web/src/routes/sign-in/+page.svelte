@@ -14,9 +14,17 @@
    *      The `setJwt` call here is THE moment all four Edge Function
    *      factories' lazy getJwt() start seeing a real bearer for the
    *      first time in production.
-   *   4. On success, the state machine transitions to `signed-in` and
-   *      the caller can navigate (route nav is a follow-up; the
-   *      MVP surface shows the session_id + a manual nav link).
+   *   4. On success, `setJwt(token)` fires which triggers the
+   *      subscribeToJwt subscriber below — `isSignedIn` flips to true
+   *      and the UI swaps to the success state with a /settings link.
+   *
+   * Reactive JWT state (parity with /settings, PR #58): the route
+   * subscribes to the session-jwt-store at mount, so a user with an
+   * existing session who lands on /sign-in sees the "already signed
+   * in" affordance instead of a second-ceremony button. The same
+   * subscriber also flips back to the idle state if an external
+   * channel (panic-wipe post-cleanup, 401 from another tab's
+   * t07-op call, future server-side revoke) clears the JWT.
    *
    * Origin / rpId resolution: read at click time from `window.location`.
    * SSR is disabled (+page.ts) so window is always defined when the
@@ -32,9 +40,10 @@
    * dropping `lang="ts"` keeps svelte-check's strict implicit-any path
    * uniform with the rest of the route layer.
    */
+  import { onDestroy } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
-  import { setJwt } from '../../lib/auth/session-jwt-store';
+  import { getJwt, setJwt, subscribeToJwt } from '../../lib/auth/session-jwt-store';
   import { signInViaMintSession } from '../../lib/auth/sign-in-flow';
   import { webauthnGetAssertion } from '../../lib/auth/webauthn-assertion';
   import { createSupabaseMintSessionClient } from '../../lib/server-client/mint-session-client-factory';
@@ -42,14 +51,31 @@
   const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
   const client = createSupabaseMintSessionClient({ baseUrl });
 
-  // State machine values:
-  //   'idle' | 'signing-in' | 'cancelled' | 'failed' | 'signed-in'
+  // Local ceremony state machine:
+  //   'idle' | 'signing-in' | 'cancelled' | 'failed'
+  // The "signed-in" terminal state lives in the reactive `isSignedIn`
+  // flag below — derived from the JWT store rather than this local
+  // machine, so any external clear flips back to idle uniformly.
   let state = 'idle';
   let lastError = '';
   let sessionId = '';
 
+  // `isSignedIn` reflects CURRENT JWT state (reactive). Initialised
+  // from `getJwt()` so a returning user with an existing session sees
+  // the correct affordance immediately (no flash of the sign-in
+  // button). When the JWT goes null via any channel, `sessionId` also
+  // resets so a stale success message can't survive a sign-out.
+  let isSignedIn = getJwt() !== null;
+  const __unsubscribeJwt = subscribeToJwt((jwt) => {
+    isSignedIn = jwt !== null;
+    if (jwt === null) {
+      sessionId = '';
+    }
+  });
+  onDestroy(__unsubscribeJwt);
+
   async function signIn() {
-    if (state === 'signing-in') return;
+    if (state === 'signing-in' || isSignedIn) return;
     state = 'signing-in';
     lastError = '';
     sessionId = '';
@@ -66,8 +92,11 @@
     });
 
     if (result.status === 'ok') {
+      // `isSignedIn` flips via the subscribeToJwt subscriber above —
+      // we just capture the session_id so the success message can
+      // distinguish "just signed in" from "already signed in".
       sessionId = result.session_id;
-      state = 'signed-in';
+      state = 'idle';
       return;
     }
     if (result.status === 'cancelled') {
@@ -87,39 +116,42 @@
 
 <section>
   <h1>{t('signIn.title')}</h1>
-  <p>{t('signIn.intro')}</p>
 
-  <button
-    type="button"
-    on:click={signIn}
-    disabled={state === 'signing-in' || state === 'signed-in'}
-    data-testid="sign-in-button"
-  >
-    {#if state === 'signing-in'}
-      {t('signIn.button.signing_in')}
-    {:else if state === 'signed-in'}
-      {t('signIn.button.signed_in')}
+  {#if isSignedIn}
+    {#if sessionId}
+      <p data-testid="sign-in-success">
+        {t('signIn.success', { sessionId })}
+      </p>
     {:else}
-      {t('signIn.button.idle')}
+      <p data-testid="sign-in-already-signed-in">{t('signIn.already_signed_in')}</p>
     {/if}
-  </button>
-
-  {#if state === 'cancelled'}
-    <p role="alert" data-testid="sign-in-cancelled">{t('signIn.cancelled')}</p>
-  {/if}
-
-  {#if state === 'failed'}
-    <p role="alert" data-testid="sign-in-failed">
-      {t('signIn.failed', { reason: lastError })}
-    </p>
-  {/if}
-
-  {#if state === 'signed-in'}
-    <p data-testid="sign-in-success">
-      {t('signIn.success', { sessionId })}
-    </p>
     <p>
       <a href="/settings" data-testid="sign-in-go-to-settings">{t('signIn.go_to_settings_cta')}</a>
     </p>
+  {:else}
+    <p>{t('signIn.intro')}</p>
+
+    <button
+      type="button"
+      on:click={signIn}
+      disabled={state === 'signing-in'}
+      data-testid="sign-in-button"
+    >
+      {#if state === 'signing-in'}
+        {t('signIn.button.signing_in')}
+      {:else}
+        {t('signIn.button.idle')}
+      {/if}
+    </button>
+
+    {#if state === 'cancelled'}
+      <p role="alert" data-testid="sign-in-cancelled">{t('signIn.cancelled')}</p>
+    {/if}
+
+    {#if state === 'failed'}
+      <p role="alert" data-testid="sign-in-failed">
+        {t('signIn.failed', { reason: lastError })}
+      </p>
+    {/if}
   {/if}
 </section>
