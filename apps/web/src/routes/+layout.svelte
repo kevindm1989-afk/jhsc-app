@@ -10,11 +10,19 @@
    * Reduced-motion: the system stylesheet in app.html zeros transition
    * durations when prefers-reduced-motion: reduce. Components that need
    * deliberate motion override locally and document the override.
+   *
+   * Header sign-in indicator: reads `$isSignedIn` from the Svelte
+   * readable wrapper over session-jwt-store. Mirrors the JWT-reactive
+   * pattern that the route mounts (PRs #58 / #59 / #60) hand-rolled,
+   * but via the new Svelte store wrapper — no `subscribeToJwt` +
+   * `onDestroy` boilerplate. Cross-tab sync from PR #61 propagates
+   * naturally because the wrapper subscribes to the same store.
    */
   import { onMount } from 'svelte';
   import { tokens } from '$lib/tokens';
   import { t } from '$lib/i18n';
   import { setupSafetyHandlers } from '$lib/feature-flags';
+  import { isSignedIn } from '$lib/auth/session-jwt-svelte';
 
   // Trigger feature-flag setup (no-op at scaffold; T-feature-flag wires).
   onMount(() => {
@@ -29,6 +37,11 @@
 
 <header>
   <strong>{t('common.app_name')}</strong>
+  {#if $isSignedIn}
+    <span data-testid="header-signed-in-badge">{t('common.header.signed_in_badge')}</span>
+  {:else}
+    <a href="/sign-in" data-testid="header-sign-in-link">{t('common.header.sign_in_link')}</a>
+  {/if}
 </header>
 
 <main>
