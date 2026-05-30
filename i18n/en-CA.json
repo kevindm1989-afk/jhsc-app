@@ -511,6 +511,17 @@
     "sign_in_again_cta": "Sign in again"
   },
 
+  "settings": {
+    "title": "Settings",
+    "device_data": {
+      "heading": "Device data",
+      "intro_before_emphasis": "Erase the encrypted local store, your current sign-in, and queued entries on this device. This does ",
+      "intro_emphasis": "not",
+      "intro_after_emphasis": " sign you out on the server or other devices.",
+      "wipe_button": "Wipe this device's data…"
+    }
+  },
+
   "audit": {
     "page": {
       "title": "Audit log",

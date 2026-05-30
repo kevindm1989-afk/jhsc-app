@@ -173,6 +173,37 @@ describe('T19.1 — /settings production route mount', () => {
     expect(fnMatch).not.toBeNull();
     expect(fnMatch?.[1]).not.toMatch(/signedOut\s*=\s*true/);
   });
+
+  it('the Settings page title, h1 heading, Device-data section + wipe button consume i18n via t()', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Defense-in-depth against the multi-line / under-threshold layout
+    // loophole that lets verify-i18n.sh miss these strings. The route
+    // MUST route every visible string through t() per ADR-0009.
+    expect(src).toMatch(/t\(['"]settings\.title['"]\)/);
+    expect(src).toMatch(/t\(['"]settings\.device_data\.heading['"]\)/);
+    expect(src).toMatch(/t\(['"]settings\.device_data\.wipe_button['"]\)/);
+    expect(src).toMatch(/t\(['"]settings\.device_data\.intro_before_emphasis['"]\)/);
+    expect(src).toMatch(/t\(['"]settings\.device_data\.intro_emphasis['"]\)/);
+    expect(src).toMatch(/t\(['"]settings\.device_data\.intro_after_emphasis['"]\)/);
+    // The hardcoded English literals must NOT survive the refactor.
+    expect(src).not.toMatch(/<h1>\s*Settings\s*<\/h1>/);
+    expect(src).not.toMatch(/<h2>\s*Device data\s*<\/h2>/);
+    expect(src).not.toMatch(/Wipe this device's data/);
+    expect(src).not.toMatch(/<title>Settings\s*—\s*JHSC<\/title>/);
+  });
+
+  it('every settings.* key the route references is present in the root catalog', () => {
+    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
+    expect(existsSync(catalogPath)).toBe(true);
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    expect(catalog.settings).toBeDefined();
+    expect(typeof catalog.settings.title).toBe('string');
+    expect(typeof catalog.settings.device_data.heading).toBe('string');
+    expect(typeof catalog.settings.device_data.intro_before_emphasis).toBe('string');
+    expect(typeof catalog.settings.device_data.intro_emphasis).toBe('string');
+    expect(typeof catalog.settings.device_data.intro_after_emphasis).toBe('string');
+    expect(typeof catalog.settings.device_data.wipe_button).toBe('string');
+  });
 });
 
 describe('T19.1 — PanicWipeModal accepts a production wipeStore prop', () => {

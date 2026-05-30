@@ -107,12 +107,12 @@
 </script>
 
 <svelte:head>
-  <title>Settings — JHSC</title>
+  <title>{t('settings.title')} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
 <section>
-  <h1>Settings</h1>
+  <h1>{t('settings.title')}</h1>
 
   <h2>{t('signOut.heading')}</h2>
   <p>{t('signOut.intro')}</p>
@@ -128,13 +128,14 @@
     </p>
   {/if}
 
-  <h2>Device data</h2>
+  <h2>{t('settings.device_data.heading')}</h2>
   <p>
-    Erase the encrypted local store, your current sign-in, and queued entries on this device. This
-    does <strong>not</strong> sign you out on the server or other devices.
+    {t('settings.device_data.intro_before_emphasis')}<strong
+      >{t('settings.device_data.intro_emphasis')}</strong
+    >{t('settings.device_data.intro_after_emphasis')}
   </p>
   <button type="button" on:click={openWipeModal} data-testid="open-panic-wipe">
-    Wipe this device's data…
+    {t('settings.device_data.wipe_button')}
   </button>
 </section>
 
