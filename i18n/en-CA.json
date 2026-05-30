@@ -482,6 +482,20 @@
     "success": "Session established (session {sessionId})."
   },
 
+  "landing": {
+    "subtitle": "Health and safety, for the people doing the work.",
+    "new_device": {
+      "heading": "New device",
+      "description": "Set up this device for the first time. You'll enrol a passkey and store a recovery passphrase.",
+      "cta": "Start setup"
+    },
+    "returning_device": {
+      "heading": "Already enrolled",
+      "description": "Sign in with the passkey on this device.",
+      "cta": "Sign in"
+    }
+  },
+
   "signOut": {
     "heading": "Session",
     "intro": "Sign out on this device. The server-side session expires within a few minutes; for immediate device cleanup, use Wipe this device's data below.",
