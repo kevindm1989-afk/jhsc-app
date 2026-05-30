@@ -128,39 +128,33 @@ describe('T19.1 — /settings production route mount', () => {
     expect(src).toMatch(/t\(['"]signOut\.sign_in_again_cta['"]\)/);
   });
 
-  it('the route reactively tracks JWT state via subscribeToJwt (side-channel clears flip the UI)', () => {
+  it('the route reactively tracks JWT state via the $isSignedIn store wrapper (side-channel clears flip the UI)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    // The session-jwt-store has exported `subscribeToJwt` since PR #39
-    // but had no production caller. Wiring /settings to it makes the UI
-    // honest about real state — a 401 from another t07-op call, a
-    // panic-wipe post-cleanup hook, or a future server-side revoke all
-    // flip the same `signedOut` state. Defense-in-depth pin against a
-    // refactor that drops the subscription and reverts to one-shot
-    // user-click-only state tracking.
+    // PR #63 introduced `$lib/auth/session-jwt-svelte` as a Svelte
+    // readable wrapper over subscribeToJwt. /settings consumes
+    // `$isSignedIn` from it — a 401 from another t07-op call, a
+    // panic-wipe post-cleanup hook, a cross-tab sign-out broadcast
+    // (PR #61), or a future server-side revoke all flip the UI via
+    // the same store. The wrapper owns the subscribeToJwt + onDestroy
+    // lifecycle so the route doesn't need to.
     expect(src).toMatch(
-      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-store['"]/
+      /import\s*{[^}]*isSignedIn[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-svelte['"]/
     );
-    // The subscriber sets `signedOut` from the JWT value (null = signed out).
-    expect(src).toMatch(/subscribeToJwt\s*\(\s*\(\s*jwt\s*\)\s*=>\s*\{[\s\S]*?signedOut\s*=\s*jwt\s*===\s*null/);
+    // The route uses $isSignedIn to drive the signedOut UI flag via a
+    // reactive declaration (defense against a refactor that drops the
+    // reactivity).
+    expect(src).toMatch(/\$:\s*signedOut\s*=\s*!\$isSignedIn/);
   });
 
-  it('the route initializes signedOut from getJwt() at mount (not a stale `false` default)', () => {
+  it('the route no longer hand-rolls subscribeToJwt + onDestroy (wrapper owns the lifecycle now)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    // The initial value MUST be derived from the actual store, not a
-    // hardcoded `false`. Otherwise a not-yet-signed-in user landing on
-    // /settings would see the sign-out button as enabled until the
-    // first subscriber event — visually-misleading.
-    expect(src).toMatch(/let\s+signedOut\s*=\s*getJwt\(\)\s*===\s*null/);
-  });
-
-  it('the route unsubscribes from subscribeToJwt on destroy (no leaked listener)', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    // The unsubscribe handle returned by subscribeToJwt MUST be
-    // registered with onDestroy so navigating away from /settings
-    // doesn't leak a closure that keeps the page Svelte component
-    // pinned in memory across the JWT store's lifetime.
-    expect(src).toMatch(/import\s*{[^}]*onDestroy[^}]*}\s+from\s+['"]svelte['"]/);
-    expect(src).toMatch(/onDestroy\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/);
+    // After PR #63's wrapper migration, the manual subscriber pattern
+    // is gone. Regression guard against re-adding it (which would
+    // double-subscribe and leak listeners).
+    expect(src).not.toMatch(
+      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*session-jwt-store['"]/
+    );
+    expect(src).not.toMatch(/subscribeToJwt\s*\(/);
   });
 
   it('the signOut handler no longer manually flips `signedOut = true` (the subscriber owns it)', () => {

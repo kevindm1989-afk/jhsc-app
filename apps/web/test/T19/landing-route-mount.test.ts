@@ -70,23 +70,26 @@ describe('T19.1 — landing route (/) mount', () => {
     expect(src).not.toMatch(/—\s*release:/);
   });
 
-  it('the page reactively tracks JWT state via subscribeToJwt (parity with /sign-in PR #59 and /settings PR #58)', () => {
+  it('the page reactively tracks JWT state via the $isSignedIn store wrapper (PR #63 migration)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
+    // PR #63 introduced `$lib/auth/session-jwt-svelte`. The landing
+    // page imports `isSignedIn` from it and branches on the auto-
+    // subscribed `$isSignedIn` — no flash of the two-CTA layout for
+    // returning visitors, and cross-tab sign-outs (PR #61) flip the
+    // UI through the same store.
     expect(src).toMatch(
-      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-store['"]/
+      /import\s*{[^}]*isSignedIn[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-svelte['"]/
     );
-    expect(src).toMatch(/subscribeToJwt\s*\(\s*\(\s*jwt\s*\)\s*=>\s*\{[\s\S]*?isSignedIn\s*=\s*jwt\s*!==\s*null/);
+    expect(src).toMatch(/\{#if\s+\$isSignedIn\}/);
   });
 
-  it('the page initializes isSignedIn from getJwt() at mount (no flash of two-CTA layout for returning visitors)', () => {
+  it('the page no longer hand-rolls subscribeToJwt + onDestroy (wrapper owns the lifecycle now)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/let\s+isSignedIn\s*=\s*getJwt\(\)\s*!==\s*null/);
-  });
-
-  it('the page unsubscribes from subscribeToJwt on destroy (no leaked listener)', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/import\s*{[^}]*onDestroy[^}]*}\s+from\s+['"]svelte['"]/);
-    expect(src).toMatch(/onDestroy\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/);
+    // Regression guard against re-adding the manual subscriber pattern.
+    expect(src).not.toMatch(
+      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*session-jwt-store['"]/
+    );
+    expect(src).not.toMatch(/subscribeToJwt\s*\(/);
   });
 
   it('signed-in branch surfaces a /settings link + landing.signed_in.* copy', () => {
@@ -104,9 +107,9 @@ describe('T19.1 — landing route (/) mount', () => {
   it('signed-in and not-signed-in branches are mutually exclusive (else block, not duplicate sections)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     // The signed-in section + the two-CTA section live in an
-    // {#if isSignedIn}…{:else}…{/if} block. Defense against a refactor
+    // {#if $isSignedIn}…{:else}…{/if} block. Defense against a refactor
     // that surfaces both at the same time (which would let a signed-in
     // user click through to /sign-in or /onboarding by mistake).
-    expect(src).toMatch(/\{#if\s+isSignedIn\}[\s\S]*?\{:else\}[\s\S]*?\{\/if\}/);
+    expect(src).toMatch(/\{#if\s+\$isSignedIn\}[\s\S]*?\{:else\}[\s\S]*?\{\/if\}/);
   });
 });
