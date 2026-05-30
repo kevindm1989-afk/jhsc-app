@@ -117,10 +117,10 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(src).toMatch(/t\(['"]signIn\.intro['"]\)/);
     expect(src).toMatch(/t\(['"]signIn\.button\.idle['"]\)/);
     expect(src).toMatch(/t\(['"]signIn\.button\.signing_in['"]\)/);
-    expect(src).toMatch(/t\(['"]signIn\.button\.signed_in['"]\)/);
     expect(src).toMatch(/t\(['"]signIn\.cancelled['"]\)/);
     expect(src).toMatch(/t\(['"]signIn\.failed['"]/);
     expect(src).toMatch(/t\(['"]signIn\.success['"]/);
+    expect(src).toMatch(/t\(['"]signIn\.already_signed_in['"]\)/);
   });
 
   it('every signIn.* key the route references is present in the root catalog (i18n/en-CA.json)', () => {
@@ -132,10 +132,10 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(typeof catalog.signIn.intro).toBe('string');
     expect(typeof catalog.signIn.button.idle).toBe('string');
     expect(typeof catalog.signIn.button.signing_in).toBe('string');
-    expect(typeof catalog.signIn.button.signed_in).toBe('string');
     expect(typeof catalog.signIn.cancelled).toBe('string');
     expect(typeof catalog.signIn.failed).toBe('string');
     expect(typeof catalog.signIn.success).toBe('string');
+    expect(typeof catalog.signIn.already_signed_in).toBe('string');
     expect(typeof catalog.signIn.go_to_settings_cta).toBe('string');
     // The failed + success strings use {reason} / {sessionId} interpolations.
     expect(catalog.signIn.failed).toMatch(/\{reason\}/);
@@ -145,12 +145,63 @@ describe('T19.1 — /sign-in production route mount', () => {
   it('the signed-in state surfaces a /settings link so the user has somewhere to go after sign-in', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     // The CTA link is rendered ONLY in the signed-in state — it lives
-    // inside the same {#if state === 'signed-in'} block as the success
-    // message. Defense-in-depth against a refactor that surfaces the
-    // link in the idle / failed states (which would let an unauthed
-    // user click through to /settings without any session).
+    // inside the same {#if isSignedIn} block as the success / already-
+    // signed-in messages. Defense-in-depth against a refactor that
+    // surfaces the link in the idle / failed states (which would let an
+    // unauthed user click through to /settings without any session).
     expect(src).toMatch(/<a\s+href=["']\/settings["']/);
     expect(src).toMatch(/data-testid=["']sign-in-go-to-settings["']/);
     expect(src).toMatch(/t\(['"]signIn\.go_to_settings_cta['"]\)/);
+  });
+
+  it('the route reactively tracks JWT state via subscribeToJwt (parity with /settings, PR #58)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Mirrors the /settings PR #58 wiring: a user who lands on /sign-in
+    // with an existing session sees an "already signed in" affordance
+    // instead of a re-ceremony button. The subscriber also flips back
+    // to idle when a side-channel clear (panic-wipe, 401) fires.
+    expect(src).toMatch(
+      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-store['"]/
+    );
+    // The subscriber sets isSignedIn from the JWT value.
+    expect(src).toMatch(/subscribeToJwt\s*\(\s*\(\s*jwt\s*\)\s*=>\s*\{[\s\S]*?isSignedIn\s*=\s*jwt\s*!==\s*null/);
+  });
+
+  it('the route initializes isSignedIn from getJwt() at mount (returning user sees correct state immediately)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The initial value MUST be derived from the actual store, not a
+    // hardcoded `false`. Otherwise a user with an existing session
+    // landing here would see the sign-in button flash for a frame before
+    // the subscriber fires.
+    expect(src).toMatch(/let\s+isSignedIn\s*=\s*getJwt\(\)\s*!==\s*null/);
+  });
+
+  it('the route unsubscribes from subscribeToJwt on destroy (no leaked listener)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/import\s*{[^}]*onDestroy[^}]*}\s+from\s+['"]svelte['"]/);
+    expect(src).toMatch(/onDestroy\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/);
+  });
+
+  it('the signIn handler short-circuits when already signed in (defense against double-ceremony)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The handler must check isSignedIn before kicking off a fresh
+    // ceremony — otherwise a stale button + a race could replace a
+    // valid session with a new one. The UI also hides the button when
+    // isSignedIn, but the handler-level guard is defense-in-depth.
+    expect(src).toMatch(/if\s*\([^)]*isSignedIn[^)]*\)\s*return/);
+  });
+
+  it('clearing the JWT also clears the stale sessionId so a successful sign-in message cannot survive sign-out', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Defense-in-depth: when an external channel clears the JWT, the
+    // subscriber resets sessionId so the success message doesn't
+    // linger past the sign-out.
+    expect(src).toMatch(/jwt\s*===\s*null[\s\S]*?sessionId\s*=\s*['"]['"]/);
+  });
+
+  it('renders an "already signed in" notice when isSignedIn is true at mount but sessionId is empty', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/data-testid=["']sign-in-already-signed-in["']/);
+    expect(src).toMatch(/t\(['"]signIn\.already_signed_in['"]\)/);
   });
 });
