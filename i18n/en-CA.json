@@ -482,6 +482,13 @@
     "success": "Session established (session {sessionId})."
   },
 
+  "signOut": {
+    "heading": "Session",
+    "intro": "Sign out on this device. The server-side session expires within a few minutes; for immediate device cleanup, use Wipe this device's data below.",
+    "button": "Sign out",
+    "signed_out": "Signed out. You can sign back in with your passkey."
+  },
+
   "audit": {
     "page": {
       "title": "Audit log",
