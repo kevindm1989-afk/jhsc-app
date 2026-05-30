@@ -22,15 +22,8 @@
    *
    * All visible text resolves via t() per ADR-0009.
    */
-  import { onDestroy } from 'svelte';
   import { t } from '$lib/i18n';
-  import { getJwt, subscribeToJwt } from '$lib/auth/session-jwt-store';
-
-  let isSignedIn = getJwt() !== null;
-  const __unsubscribeJwt = subscribeToJwt((jwt) => {
-    isSignedIn = jwt !== null;
-  });
-  onDestroy(__unsubscribeJwt);
+  import { isSignedIn } from '$lib/auth/session-jwt-svelte';
 </script>
 
 <svelte:head>
@@ -40,7 +33,7 @@
 <h1>{t('common.app_name')}</h1>
 <p>{t('landing.subtitle')}</p>
 
-{#if isSignedIn}
+{#if $isSignedIn}
   <section data-testid="landing-signed-in">
     <h2>{t('landing.signed_in.heading')}</h2>
     <p>{t('landing.signed_in.description')}</p>

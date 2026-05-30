@@ -154,49 +154,47 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(src).toMatch(/t\(['"]signIn\.go_to_settings_cta['"]\)/);
   });
 
-  it('the route reactively tracks JWT state via subscribeToJwt (parity with /settings, PR #58)', () => {
+  it('the route reactively tracks JWT state via the $isSignedIn store wrapper (PR #63 migration)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    // Mirrors the /settings PR #58 wiring: a user who lands on /sign-in
-    // with an existing session sees an "already signed in" affordance
-    // instead of a re-ceremony button. The subscriber also flips back
-    // to idle when a side-channel clear (panic-wipe, 401) fires.
+    // PR #63 introduced `$lib/auth/session-jwt-svelte` as a Svelte
+    // readable wrapper. /sign-in consumes `$isSignedIn` from it —
+    // a user with an existing session sees the "already signed in"
+    // affordance instead of a re-ceremony button. A side-channel
+    // clear (panic-wipe, 401, cross-tab broadcast) flips back to
+    // the idle sign-in state through the same store.
     expect(src).toMatch(
-      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-store['"]/
+      /import\s*{[^}]*isSignedIn[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-svelte['"]/
     );
-    // The subscriber sets isSignedIn from the JWT value.
-    expect(src).toMatch(/subscribeToJwt\s*\(\s*\(\s*jwt\s*\)\s*=>\s*\{[\s\S]*?isSignedIn\s*=\s*jwt\s*!==\s*null/);
+    // The template branches on the auto-subscribed `$isSignedIn`.
+    expect(src).toMatch(/\{#if\s+\$isSignedIn\}/);
   });
 
-  it('the route initializes isSignedIn from getJwt() at mount (returning user sees correct state immediately)', () => {
+  it('the route no longer hand-rolls subscribeToJwt + onDestroy (wrapper owns the lifecycle now)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    // The initial value MUST be derived from the actual store, not a
-    // hardcoded `false`. Otherwise a user with an existing session
-    // landing here would see the sign-in button flash for a frame before
-    // the subscriber fires.
-    expect(src).toMatch(/let\s+isSignedIn\s*=\s*getJwt\(\)\s*!==\s*null/);
-  });
-
-  it('the route unsubscribes from subscribeToJwt on destroy (no leaked listener)', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/import\s*{[^}]*onDestroy[^}]*}\s+from\s+['"]svelte['"]/);
-    expect(src).toMatch(/onDestroy\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/);
+    // Regression guard against re-adding the manual subscriber pattern,
+    // which would double-subscribe (the wrapper already subscribes) and
+    // leak listeners.
+    expect(src).not.toMatch(
+      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*session-jwt-store['"]/
+    );
+    expect(src).not.toMatch(/subscribeToJwt\s*\(/);
   });
 
   it('the signIn handler short-circuits when already signed in (defense against double-ceremony)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    // The handler must check isSignedIn before kicking off a fresh
+    // The handler must check $isSignedIn before kicking off a fresh
     // ceremony — otherwise a stale button + a race could replace a
     // valid session with a new one. The UI also hides the button when
-    // isSignedIn, but the handler-level guard is defense-in-depth.
-    expect(src).toMatch(/if\s*\([^)]*isSignedIn[^)]*\)\s*return/);
+    // $isSignedIn, but the handler-level guard is defense-in-depth.
+    expect(src).toMatch(/if\s*\([^)]*\$isSignedIn[^)]*\)\s*return/);
   });
 
   it('clearing the JWT also clears the stale sessionId so a successful sign-in message cannot survive sign-out', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    // Defense-in-depth: when an external channel clears the JWT, the
-    // subscriber resets sessionId so the success message doesn't
-    // linger past the sign-out.
-    expect(src).toMatch(/jwt\s*===\s*null[\s\S]*?sessionId\s*=\s*['"]['"]/);
+    // Defense-in-depth: when an external channel clears the JWT, a
+    // reactive `$:` declaration resets sessionId so the success
+    // message doesn't linger past the sign-out.
+    expect(src).toMatch(/\$:\s*if\s*\(\s*!\$isSignedIn\s*\)\s*sessionId\s*=\s*['"]['"]/);
   });
 
   it('renders an "already signed in" notice when isSignedIn is true at mount but sessionId is empty', () => {

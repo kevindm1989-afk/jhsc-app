@@ -28,29 +28,27 @@
    * strict implicit-any check rejects importing it from a TS-annotated
    * parent. The route is a thin wiring shell with no logic of its own.
    */
-  import { onDestroy } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
-  import { clearJwt, getJwt, subscribeToJwt } from '../../lib/auth/session-jwt-store';
+  import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
+  import { isSignedIn } from '../../lib/auth/session-jwt-svelte';
   import {
     createPanicWipeAuditEmitter,
     createSupabaseT07Client
   } from '../../lib/server-client/t07-client-factory';
 
   let modalOpen = false;
-  // `signedOut` reflects CURRENT JWT state (reactive), not just the
-  // user-initiated sign-out click. So side-channel clears (401
-  // revocation from another tab's call, panic-wipe post-cleanup hook,
-  // a future Settings → Sessions revoke) all flip this UI in real
-  // time. Initialized from `getJwt()` so a not-yet-signed-in user
-  // landing here directly sees the correct state at mount.
-  let signedOut = getJwt() === null;
-  const __unsubscribeJwt = subscribeToJwt((jwt) => {
-    signedOut = jwt === null;
-  });
-  onDestroy(__unsubscribeJwt);
+  // `signedOut` is the inverse of the reactive `$isSignedIn` store (from
+  // the Svelte wrapper over session-jwt-store). PR #63 introduced the
+  // wrapper so JWT-reactive routes don't have to hand-roll
+  // subscribeToJwt + onDestroy. The reactive declaration below keeps
+  // the existing template's `signedOut` semantic working while removing
+  // the manual subscriber wiring. Cross-tab sync (PR #61), 401 / panic-
+  // wipe / sign-out clear, and a future server-side revoke all flip
+  // this UI through the same code path.
+  $: signedOut = !$isSignedIn;
 
   // Read the base URL at runtime (env may be undefined at build time).
   const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
