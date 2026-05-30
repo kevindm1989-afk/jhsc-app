@@ -127,6 +127,52 @@ describe('T19.1 — /settings production route mount', () => {
     expect(src).toMatch(/data-testid=["']signed-out-sign-in-again["']/);
     expect(src).toMatch(/t\(['"]signOut\.sign_in_again_cta['"]\)/);
   });
+
+  it('the route reactively tracks JWT state via subscribeToJwt (side-channel clears flip the UI)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The session-jwt-store has exported `subscribeToJwt` since PR #39
+    // but had no production caller. Wiring /settings to it makes the UI
+    // honest about real state — a 401 from another t07-op call, a
+    // panic-wipe post-cleanup hook, or a future server-side revoke all
+    // flip the same `signedOut` state. Defense-in-depth pin against a
+    // refactor that drops the subscription and reverts to one-shot
+    // user-click-only state tracking.
+    expect(src).toMatch(
+      /import\s*{[^}]*subscribeToJwt[^}]*}\s+from\s+['"][^'"]*lib\/auth\/session-jwt-store['"]/
+    );
+    // The subscriber sets `signedOut` from the JWT value (null = signed out).
+    expect(src).toMatch(/subscribeToJwt\s*\(\s*\(\s*jwt\s*\)\s*=>\s*\{[\s\S]*?signedOut\s*=\s*jwt\s*===\s*null/);
+  });
+
+  it('the route initializes signedOut from getJwt() at mount (not a stale `false` default)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The initial value MUST be derived from the actual store, not a
+    // hardcoded `false`. Otherwise a not-yet-signed-in user landing on
+    // /settings would see the sign-out button as enabled until the
+    // first subscriber event — visually-misleading.
+    expect(src).toMatch(/let\s+signedOut\s*=\s*getJwt\(\)\s*===\s*null/);
+  });
+
+  it('the route unsubscribes from subscribeToJwt on destroy (no leaked listener)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The unsubscribe handle returned by subscribeToJwt MUST be
+    // registered with onDestroy so navigating away from /settings
+    // doesn't leak a closure that keeps the page Svelte component
+    // pinned in memory across the JWT store's lifetime.
+    expect(src).toMatch(/import\s*{[^}]*onDestroy[^}]*}\s+from\s+['"]svelte['"]/);
+    expect(src).toMatch(/onDestroy\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/);
+  });
+
+  it('the signOut handler no longer manually flips `signedOut = true` (the subscriber owns it)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Defense-in-depth against a refactor that re-adds the manual flip
+    // — that would mask any side-channel clear and reintroduce the
+    // one-shot-only state tracking. Extract the signOut body and
+    // assert it doesn't contain `signedOut = true`.
+    const fnMatch = src.match(/function\s+signOut\s*\([^)]*\)\s*\{([\s\S]*?)\n\s*\}/);
+    expect(fnMatch).not.toBeNull();
+    expect(fnMatch?.[1]).not.toMatch(/signedOut\s*=\s*true/);
+  });
 });
 
 describe('T19.1 — PanicWipeModal accepts a production wipeStore prop', () => {
