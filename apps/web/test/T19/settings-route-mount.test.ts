@@ -118,6 +118,14 @@ describe('T19.1 — /settings production route mount', () => {
     expect(typeof catalog.signOut.intro).toBe('string');
     expect(typeof catalog.signOut.button).toBe('string');
     expect(typeof catalog.signOut.signed_out).toBe('string');
+    expect(typeof catalog.signOut.sign_in_again_cta).toBe('string');
+  });
+
+  it('after sign-out, the route surfaces a /sign-in link so the user has somewhere to go', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/<a\s+href=["']\/sign-in["']/);
+    expect(src).toMatch(/data-testid=["']signed-out-sign-in-again["']/);
+    expect(src).toMatch(/t\(['"]signOut\.sign_in_again_cta['"]\)/);
   });
 });
 

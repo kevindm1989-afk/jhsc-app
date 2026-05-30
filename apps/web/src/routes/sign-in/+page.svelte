@@ -118,5 +118,8 @@
     <p data-testid="sign-in-success">
       {t('signIn.success', { sessionId })}
     </p>
+    <p>
+      <a href="/settings" data-testid="sign-in-go-to-settings">{t('signIn.go_to_settings_cta')}</a>
+    </p>
   {/if}
 </section>

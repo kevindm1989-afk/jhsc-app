@@ -479,7 +479,8 @@
     },
     "cancelled": "Sign-in cancelled.",
     "failed": "Sign-in failed: {reason}",
-    "success": "Session established (session {sessionId})."
+    "success": "Session established (session {sessionId}).",
+    "go_to_settings_cta": "Go to settings"
   },
 
   "landing": {
@@ -500,7 +501,8 @@
     "heading": "Session",
     "intro": "Sign out on this device. The server-side session expires within a few minutes; for immediate device cleanup, use Wipe this device's data below.",
     "button": "Sign out",
-    "signed_out": "Signed out. You can sign back in with your passkey."
+    "signed_out": "Signed out. You can sign back in with your passkey.",
+    "sign_in_again_cta": "Sign in again"
   },
 
   "audit": {
