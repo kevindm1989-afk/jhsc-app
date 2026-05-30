@@ -89,6 +89,36 @@ describe('T19.1 — /settings production route mount', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
   });
+
+  it('the route renders a Sign-out button wired to clearJwt (user-initiated F-39 clear)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The button is present with the test-id we use to drive it from
+    // higher-level / e2e tests.
+    expect(src).toMatch(/data-testid=["']sign-out-button["']/);
+    // It triggers a signOut handler — the handler's body calls clearJwt
+    // (the imported function from session-jwt-store), NOT a no-op shim
+    // or an alternate route that bypasses the F-39 contract.
+    expect(src).toMatch(/function\s+signOut\s*\([^)]*\)\s*\{[\s\S]*?clearJwt\(\)/);
+  });
+
+  it('the Sign-out section consumes its visible text via t() (ADR-0009 / verify-i18n.sh)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/t\(['"]signOut\.heading['"]\)/);
+    expect(src).toMatch(/t\(['"]signOut\.intro['"]\)/);
+    expect(src).toMatch(/t\(['"]signOut\.button['"]\)/);
+    expect(src).toMatch(/t\(['"]signOut\.signed_out['"]\)/);
+  });
+
+  it('every signOut.* key the route references is present in the root catalog (i18n/en-CA.json)', () => {
+    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
+    expect(existsSync(catalogPath)).toBe(true);
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    expect(catalog.signOut).toBeDefined();
+    expect(typeof catalog.signOut.heading).toBe('string');
+    expect(typeof catalog.signOut.intro).toBe('string');
+    expect(typeof catalog.signOut.button).toBe('string');
+    expect(typeof catalog.signOut.signed_out).toBe('string');
+  });
 });
 
 describe('T19.1 — PanicWipeModal accepts a production wipeStore prop', () => {

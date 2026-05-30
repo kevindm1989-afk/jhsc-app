@@ -29,6 +29,7 @@
    * parent. The route is a thin wiring shell with no logic of its own.
    */
   import { env } from '$env/dynamic/public';
+  import { t } from '$lib/i18n';
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
   import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
@@ -38,6 +39,7 @@
   } from '../../lib/server-client/t07-client-factory';
 
   let modalOpen = false;
+  let signedOut = false;
 
   // Read the base URL at runtime (env may be undefined at build time).
   const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
@@ -73,6 +75,22 @@
   function onWipeRequestClose() {
     modalOpen = false;
   }
+
+  // Sign-out: clear the in-memory JWT. The contract documented in
+  // session-jwt-store.ts header — `Sign out` calls clearJwt() — is
+  // honored here. The server-side jti remains live until natural
+  // expiry (≤300s per F-116) or until a future Edge Function exposes
+  // the auth_admin-only revoke_session RPC to authenticated users.
+  // Until that follow-up lands, this is client-side sign-out only:
+  // the in-memory bearer is gone, so subsequent Edge Function calls
+  // post without Authorization and the server's session_is_live gate
+  // denies them. The next-best-thing to immediate revocation; for
+  // immediate device cleanup the panic-wipe modal below is the
+  // canonical destruction path.
+  function signOut() {
+    clearJwt();
+    signedOut = true;
+  }
 </script>
 
 <svelte:head>
@@ -82,6 +100,15 @@
 
 <section>
   <h1>Settings</h1>
+
+  <h2>{t('signOut.heading')}</h2>
+  <p>{t('signOut.intro')}</p>
+  <button type="button" on:click={signOut} data-testid="sign-out-button" disabled={signedOut}>
+    {t('signOut.button')}
+  </button>
+  {#if signedOut}
+    <p role="status" data-testid="signed-out-confirmation">{t('signOut.signed_out')}</p>
+  {/if}
 
   <h2>Device data</h2>
   <p>
