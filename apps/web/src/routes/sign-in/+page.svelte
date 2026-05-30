@@ -33,6 +33,7 @@
    * uniform with the rest of the route layer.
    */
   import { env } from '$env/dynamic/public';
+  import { t } from '$lib/i18n';
   import { setJwt } from '../../lib/auth/session-jwt-store';
   import { signInViaMintSession } from '../../lib/auth/sign-in-flow';
   import { webauthnGetAssertion } from '../../lib/auth/webauthn-assertion';
@@ -80,13 +81,13 @@
 </script>
 
 <svelte:head>
-  <title>Sign in — JHSC</title>
+  <title>{t('signIn.title')} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
 <section>
-  <h1>Sign in</h1>
-  <p>Use the passkey on this device to sign in to JHSC.</p>
+  <h1>{t('signIn.title')}</h1>
+  <p>{t('signIn.intro')}</p>
 
   <button
     type="button"
@@ -95,27 +96,27 @@
     data-testid="sign-in-button"
   >
     {#if state === 'signing-in'}
-      Signing in…
+      {t('signIn.button.signing_in')}
     {:else if state === 'signed-in'}
-      Signed in
+      {t('signIn.button.signed_in')}
     {:else}
-      Sign in with passkey
+      {t('signIn.button.idle')}
     {/if}
   </button>
 
   {#if state === 'cancelled'}
-    <p role="alert" data-testid="sign-in-cancelled">Sign-in cancelled.</p>
+    <p role="alert" data-testid="sign-in-cancelled">{t('signIn.cancelled')}</p>
   {/if}
 
   {#if state === 'failed'}
     <p role="alert" data-testid="sign-in-failed">
-      Sign-in failed: {lastError}
+      {t('signIn.failed', { reason: lastError })}
     </p>
   {/if}
 
   {#if state === 'signed-in'}
     <p data-testid="sign-in-success">
-      Session established (session_id <code>{sessionId}</code>).
+      {t('signIn.success', { sessionId })}
     </p>
   {/if}
 </section>

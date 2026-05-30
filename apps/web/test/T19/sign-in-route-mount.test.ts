@@ -105,4 +105,39 @@ describe('T19.1 — /sign-in production route mount', () => {
     const testProbe = '__test_';
     expect(src.includes(testProbe)).toBe(false);
   });
+
+  it('the route consumes visible text via t() — no raw English prose in the template (ADR-0009 / verify-i18n.sh)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Import is present.
+    expect(src).toMatch(/import\s*{[^}]*\bt\b[^}]*}\s+from\s+['"]\$lib\/i18n['"]/);
+    // Every state-machine label resolves via t(). Defense-in-depth against
+    // a refactor that re-inlines an English string (which would re-trip
+    // verify-i18n.sh in CI).
+    expect(src).toMatch(/t\(['"]signIn\.title['"]\)/);
+    expect(src).toMatch(/t\(['"]signIn\.intro['"]\)/);
+    expect(src).toMatch(/t\(['"]signIn\.button\.idle['"]\)/);
+    expect(src).toMatch(/t\(['"]signIn\.button\.signing_in['"]\)/);
+    expect(src).toMatch(/t\(['"]signIn\.button\.signed_in['"]\)/);
+    expect(src).toMatch(/t\(['"]signIn\.cancelled['"]\)/);
+    expect(src).toMatch(/t\(['"]signIn\.failed['"]/);
+    expect(src).toMatch(/t\(['"]signIn\.success['"]/);
+  });
+
+  it('every signIn.* key the route references is present in the root catalog (i18n/en-CA.json)', () => {
+    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
+    expect(existsSync(catalogPath)).toBe(true);
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    expect(catalog.signIn).toBeDefined();
+    expect(typeof catalog.signIn.title).toBe('string');
+    expect(typeof catalog.signIn.intro).toBe('string');
+    expect(typeof catalog.signIn.button.idle).toBe('string');
+    expect(typeof catalog.signIn.button.signing_in).toBe('string');
+    expect(typeof catalog.signIn.button.signed_in).toBe('string');
+    expect(typeof catalog.signIn.cancelled).toBe('string');
+    expect(typeof catalog.signIn.failed).toBe('string');
+    expect(typeof catalog.signIn.success).toBe('string');
+    // The failed + success strings use {reason} / {sessionId} interpolations.
+    expect(catalog.signIn.failed).toMatch(/\{reason\}/);
+    expect(catalog.signIn.success).toMatch(/\{sessionId\}/);
+  });
 });
