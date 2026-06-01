@@ -60,4 +60,24 @@ describe('T19 / G-T19-9 — production route mounts OnboardingFlow', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
   });
+
+  it('the <title> resolves via t() — onboarding.page_title + common.app_name, no hardcoded "Set up — JHSC"', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Per ADR-0009 every visible string (including <title>) goes
+    // through the i18n catalog. The other route mounts already follow
+    // this pattern; /onboarding was the last hold-out with a hardcoded
+    // English title.
+    expect(src).toMatch(/import\s*{[^}]*\bt\b[^}]*}\s+from\s+['"]\$lib\/i18n['"]/);
+    expect(src).toMatch(/<title>\{t\(['"]onboarding\.page_title['"]\)\}\s*—\s*\{t\(['"]common\.app_name['"]\)\}<\/title>/);
+    // Defense pin: the hardcoded literal must NOT survive the refactor.
+    expect(src).not.toMatch(/<title>Set up — JHSC<\/title>/);
+  });
+
+  it('onboarding.page_title is present in the root catalog', () => {
+    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
+    expect(existsSync(catalogPath)).toBe(true);
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    expect(catalog.onboarding).toBeDefined();
+    expect(typeof catalog.onboarding.page_title).toBe('string');
+  });
 });

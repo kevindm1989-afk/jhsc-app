@@ -99,6 +99,7 @@
   },
 
   "onboarding": {
+    "page_title": "Set up",
     "device": {
       "heading": "Use a personal device only",
       "body": "If you are reading this on a phone or laptop your employer owns, pays for, or manages, your employer may be able to read what you do here. Stop. Install on a personal phone or laptop and start again.",

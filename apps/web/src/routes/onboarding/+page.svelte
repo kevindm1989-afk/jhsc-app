@@ -27,11 +27,12 @@
    * Adapter-static + ssr=false (see `+page.ts`) — the wizard hydrates
    * client-side; no PI ever lands in SSR HTML.
    */
+  import { t } from '$lib/i18n';
   import OnboardingFlow from '../../lib/onboarding/OnboardingFlow.svelte';
 </script>
 
 <svelte:head>
-  <title>Set up — JHSC</title>
+  <title>{t('onboarding.page_title')} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
