@@ -13,12 +13,16 @@
    *     an async probe + UX decision; the static pair is also robust
    *     to shared-device scenarios.
    *
-   * Reactive JWT state (parity with /sign-in PR #59 and /settings
-   * PR #58): a `subscribeToJwt` subscriber drives `isSignedIn` so any
-   * external clear (panic-wipe, 401 revocation, future server-side
-   * revoke) flips the UI in real time. Initialised from `getJwt()`
-   * so a returning visitor sees the welcome-back state at mount
-   * without a flash of the two-CTA layout.
+   * Reactive JWT state (parity with /sign-in and /settings): consumes
+   * the `$isSignedIn` Svelte readable store from
+   * `$lib/auth/session-jwt-svelte` (introduced PR #63, this route
+   * migrated PR #64). The wrapper subscribes to the underlying
+   * session-jwt-store once and Svelte's `$`-prefix auto-subscribes /
+   * unsubscribes so any external clear (panic-wipe, 401 revocation,
+   * cross-tab sign-out, future server-side revoke) flips the UI in
+   * real time. Initial value comes from the wrapper's seed
+   * (`getJwt() !== null`) so a returning visitor sees the welcome-back
+   * state at mount without a flash of the two-CTA layout.
    *
    * All visible text resolves via t() per ADR-0009.
    */

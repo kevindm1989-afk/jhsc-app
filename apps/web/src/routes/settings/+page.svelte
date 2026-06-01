@@ -86,10 +86,12 @@
   }
 
   // Sign-out: clear the in-memory JWT. The `signedOut` flag flips
-  // reactively via the subscribeToJwt subscriber above, so no manual
+  // reactively via the `$isSignedIn` wrapper subscription above (the
+  // `$: signedOut = !$isSignedIn` derivation), so no manual
   // `signedOut = true` line is needed here — that lets side-channel
   // clears (401 revocation from another tab, panic-wipe post-cleanup,
-  // a future Settings → Sessions revoke) reuse the same code path.
+  // cross-tab sign-out broadcast, a future Settings → Sessions revoke)
+  // reuse the same code path.
   //
   // The server-side jti remains live until natural expiry (≤300s per
   // F-116) or until a future Edge Function exposes the auth_admin-only

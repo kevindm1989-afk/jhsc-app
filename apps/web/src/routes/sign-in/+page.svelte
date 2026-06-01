@@ -14,17 +14,20 @@
    *      The `setJwt` call here is THE moment all four Edge Function
    *      factories' lazy getJwt() start seeing a real bearer for the
    *      first time in production.
-   *   4. On success, `setJwt(token)` fires which triggers the
-   *      subscribeToJwt subscriber below — `isSignedIn` flips to true
-   *      and the UI swaps to the success state with a /settings link.
+   *   4. On success, `setJwt(token)` fires which updates the
+   *      underlying session-jwt-store; the `$isSignedIn` Svelte
+   *      readable store (from `$lib/auth/session-jwt-svelte`) flips
+   *      to true and the UI swaps to the success state with a
+   *      /settings link.
    *
-   * Reactive JWT state (parity with /settings, PR #58): the route
-   * subscribes to the session-jwt-store at mount, so a user with an
-   * existing session who lands on /sign-in sees the "already signed
-   * in" affordance instead of a second-ceremony button. The same
-   * subscriber also flips back to the idle state if an external
-   * channel (panic-wipe post-cleanup, 401 from another tab's
-   * t07-op call, future server-side revoke) clears the JWT.
+   * Reactive JWT state (parity with /settings + landing): consumes
+   * the `$isSignedIn` Svelte readable wrapper (introduced PR #63,
+   * this route migrated PR #64). A user with an existing session who
+   * lands on /sign-in sees the "already signed in" affordance instead
+   * of a second-ceremony button. The same store flips back to the
+   * idle state if an external channel (panic-wipe post-cleanup, 401
+   * from another tab's t07-op call, cross-tab sign-out broadcast,
+   * future server-side revoke) clears the JWT.
    *
    * Origin / rpId resolution: read at click time from `window.location`.
    * SSR is disabled (+page.ts) so window is always defined when the
@@ -89,9 +92,9 @@
 
   // Reset the stale success message when the JWT clears via any
   // channel (panic-wipe post-cleanup, 401 from another tab's t07-op
-  // call, future server-side revoke). Tracks `$isSignedIn` flipping
-  // false; replaces the manual subscribeToJwt branch that did this
-  // imperatively before PR #63's wrapper landed.
+  // call, cross-tab sign-out broadcast, future server-side revoke).
+  // Reactively tracks `$isSignedIn` flipping false through the
+  // session-jwt-svelte wrapper.
   $: if (!$isSignedIn) sessionId = '';
 
   async function signIn() {
@@ -112,9 +115,11 @@
     });
 
     if (result.status === 'ok') {
-      // `isSignedIn` flips via the subscribeToJwt subscriber above —
-      // we just capture the session_id so the success message can
-      // distinguish "just signed in" from "already signed in".
+      // `$isSignedIn` flips via the session-jwt-svelte wrapper above
+      // (setJwt updates the underlying store; the wrapper notifies
+      // the auto-subscribed template). We just capture the session_id
+      // so the success message can distinguish "just signed in" from
+      // "already signed in".
       sessionId = result.session_id;
       state = 'idle';
       return;
