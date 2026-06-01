@@ -69,6 +69,27 @@ describe('T19.1 — root layout JWT-reactive header indicator', () => {
     expect(typeof catalog.common.header.settings_link).toBe('string');
   });
 
+  it('renders a "Skip to main content" link as the first focusable element (WCAG 2.4.1 bypass)', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // The skip link must appear BEFORE the <header> in template order
+    // so it is the first focusable element on every page. Without
+    // this, keyboard users have to tab through the entire header
+    // (home link + signed-in/settings/sign-in link) before reaching
+    // the page content on every navigation.
+    expect(src).toMatch(/<a\s+class=["']skip-link["'][^>]*href=["']#main-content["'][^>]*data-testid=["']skip-to-content["']/);
+    expect(src).toMatch(/t\(['"]common\.actions\.skip_to_content['"]\)/);
+    const skipAt = src.indexOf('skip-link');
+    const headerAt = src.indexOf('<header>');
+    expect(skipAt).toBeGreaterThan(-1);
+    expect(headerAt).toBeGreaterThan(-1);
+    expect(skipAt).toBeLessThan(headerAt);
+  });
+
+  it('the <main> landmark carries id="main-content" + tabindex="-1" so the skip-link target focuses correctly', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    expect(src).toMatch(/<main[^>]*id=["']main-content["'][^>]*tabindex=["']-1["']/);
+  });
+
   it('the app name wraps in a link to / (standard home-link pattern)', () => {
     const src = readFileSync(LAYOUT_PATH, 'utf8');
     // The app name is the canonical home link in every SaaS header.

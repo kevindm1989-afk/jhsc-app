@@ -35,6 +35,10 @@
   void _accent;
 </script>
 
+<a class="skip-link" href="#main-content" data-testid="skip-to-content">
+  {t('common.actions.skip_to_content')}
+</a>
+
 <header>
   <a href="/" data-testid="header-home-link"><strong>{t('common.app_name')}</strong></a>
   {#if $isSignedIn}
@@ -50,7 +54,7 @@
   {/if}
 </header>
 
-<main>
+<main id="main-content" tabindex="-1">
   <slot />
 </main>
 
@@ -60,6 +64,28 @@
    * by the tokens module at boot (designer follow-up). The :where wraps
    * the selector so token-audit's grep doesn't see a hard-coded value.
    */
+  .skip-link {
+    /*
+     * WCAG 2.1.1 / 2.4.1 — the skip-to-content link is visually hidden
+     * by default and becomes visible on keyboard focus so keyboard
+     * users can bypass the repeated header on every page navigation.
+     * Off-screen positioning (not display:none) keeps it focusable.
+     * The :focus rule reveals it inline at the top-left.
+     */
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    transform: translateY(-100%);
+    padding-block: 0.5rem;
+    padding-inline: 1rem;
+    background: var(--color-bg-elevated, transparent);
+    color: var(--color-fg-default, inherit);
+    z-index: 1000;
+  }
+  .skip-link:focus {
+    transform: translateY(0);
+    outline: 2px solid var(--color-state-focus, currentColor);
+  }
   header {
     padding-block: 1rem;
     padding-inline: 1rem;
@@ -68,5 +94,15 @@
   main {
     padding-block: 1rem;
     padding-inline: 1rem;
+  }
+  main:focus {
+    /*
+     * tabindex=-1 makes <main> programmatically focusable so the
+     * skip-link's #main-content hash target moves focus correctly,
+     * but we don't want the default browser focus ring on the main
+     * landmark itself — keyboard users follow up with Tab and
+     * discover the first focusable element inside.
+     */
+    outline: none;
   }
 </style>
