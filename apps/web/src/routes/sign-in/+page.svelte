@@ -40,10 +40,10 @@
    * dropping `lang="ts"` keeps svelte-check's strict implicit-any path
    * uniform with the rest of the route layer.
    */
-  import { onDestroy } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
-  import { getJwt, setJwt, subscribeToJwt } from '../../lib/auth/session-jwt-store';
+  import { setJwt } from '../../lib/auth/session-jwt-store';
+  import { isSignedIn } from '../../lib/auth/session-jwt-svelte';
   import { signInViaMintSession } from '../../lib/auth/sign-in-flow';
   import { webauthnGetAssertion } from '../../lib/auth/webauthn-assertion';
   import { createSupabaseMintSessionClient } from '../../lib/server-client/mint-session-client-factory';
@@ -53,29 +53,23 @@
 
   // Local ceremony state machine:
   //   'idle' | 'signing-in' | 'cancelled' | 'failed'
-  // The "signed-in" terminal state lives in the reactive `isSignedIn`
-  // flag below — derived from the JWT store rather than this local
+  // The "signed-in" terminal state lives in the reactive `$isSignedIn`
+  // store (from the Svelte wrapper over session-jwt-store, introduced
+  // in PR #63) — derived from the JWT store rather than this local
   // machine, so any external clear flips back to idle uniformly.
   let state = 'idle';
   let lastError = '';
   let sessionId = '';
 
-  // `isSignedIn` reflects CURRENT JWT state (reactive). Initialised
-  // from `getJwt()` so a returning user with an existing session sees
-  // the correct affordance immediately (no flash of the sign-in
-  // button). When the JWT goes null via any channel, `sessionId` also
-  // resets so a stale success message can't survive a sign-out.
-  let isSignedIn = getJwt() !== null;
-  const __unsubscribeJwt = subscribeToJwt((jwt) => {
-    isSignedIn = jwt !== null;
-    if (jwt === null) {
-      sessionId = '';
-    }
-  });
-  onDestroy(__unsubscribeJwt);
+  // Reset the stale success message when the JWT clears via any
+  // channel (panic-wipe post-cleanup, 401 from another tab's t07-op
+  // call, future server-side revoke). Tracks `$isSignedIn` flipping
+  // false; replaces the manual subscribeToJwt branch that did this
+  // imperatively before PR #63's wrapper landed.
+  $: if (!$isSignedIn) sessionId = '';
 
   async function signIn() {
-    if (state === 'signing-in' || isSignedIn) return;
+    if (state === 'signing-in' || $isSignedIn) return;
     state = 'signing-in';
     lastError = '';
     sessionId = '';
@@ -117,7 +111,7 @@
 <section>
   <h1>{t('signIn.title')}</h1>
 
-  {#if isSignedIn}
+  {#if $isSignedIn}
     {#if sessionId}
       <p data-testid="sign-in-success">
         {t('signIn.success', { sessionId })}
