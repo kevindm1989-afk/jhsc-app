@@ -68,4 +68,17 @@ describe('T19.1 — root layout JWT-reactive header indicator', () => {
     expect(typeof catalog.common.header.signed_in_badge).toBe('string');
     expect(typeof catalog.common.header.sign_in_link).toBe('string');
   });
+
+  it('the app name wraps in a link to / (standard home-link pattern)', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // The app name is the canonical home link in every SaaS header.
+    // Wrapping it in an <a href="/"> with a stable test-id lets e2e
+    // tests drive header navigation. The link's accessible name is
+    // the rendered app name itself — no aria-label override needed.
+    expect(src).toMatch(/<a\s+href=["']\/["'][^>]*data-testid=["']header-home-link["']/);
+    // The app name still surfaces inside the link so its visible text
+    // continues to come from t('common.app_name') (defense against a
+    // refactor that wraps the link around the wrong element).
+    expect(src).toMatch(/<a\s+href=["']\/["'][^>]*>\s*<strong>\{t\(['"]common\.app_name['"]\)\}<\/strong>\s*<\/a>/);
+  });
 });
