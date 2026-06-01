@@ -68,6 +68,15 @@
       "rate_limit": "You've done this too many times. Try again in {minutes} minutes.",
       "crypto": "Could not decrypt the data on this device. Try locking and signing in again. If this keeps happening, your device may have been tampered with — contact your worker co-chair.",
       "integrity_fail": "The data on this device could not be verified. This entry may have been tampered with and was not saved. Please re-enter it."
+    },
+    "errorPage": {
+      "title": "Something went wrong",
+      "heading_404": "Page not found",
+      "heading_other": "Something went wrong",
+      "body_404": "The page you were looking for doesn't exist. It may have moved, or the link may be wrong.",
+      "body_other": "An unexpected error occurred. Try the action again, or return to the home page.",
+      "status_label": "Status:",
+      "back_to_home_cta": "Back to home"
     }
   },
 
