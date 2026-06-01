@@ -19,6 +19,7 @@
    * naturally because the wrapper subscribes to the same store.
    */
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { tokens } from '$lib/tokens';
   import { t } from '$lib/i18n';
   import { setupSafetyHandlers } from '$lib/feature-flags';
@@ -33,6 +34,20 @@
   // unused-variable warning without disabling lint globally.
   const _accent = tokens.color.state.danger;
   void _accent;
+
+  // `aria-current="page"` annotation for the header nav: standard ARIA
+  // pattern for "you are here" so screen-reader users hear "current
+  // page" when traversing the nav landmark. Reads `$page.url.pathname`
+  // — SvelteKit's page store is reactive across route changes so
+  // navigation between /, /sign-in, /settings updates the annotation
+  // without a page reload.
+  $: currentPath = $page.url.pathname;
+  // `as const` narrows the literal so svelte-check's aria-current
+  // attribute type (a closed union of 'page' | 'step' | … | undefined)
+  // accepts the value.
+  $: ariaCurrentHome = currentPath === '/' ? ('page' as const) : undefined;
+  $: ariaCurrentSettings = currentPath === '/settings' ? ('page' as const) : undefined;
+  $: ariaCurrentSignIn = currentPath === '/sign-in' ? ('page' as const) : undefined;
 </script>
 
 <a class="skip-link" href="#main-content" data-testid="skip-to-content">
@@ -50,7 +65,9 @@
     of N items" announcement instead of two bare siblings.
   -->
   <nav aria-label={t('common.header.primary_nav_aria_label')} data-testid="header-primary-nav">
-    <a href="/" data-testid="header-home-link"><strong>{t('common.app_name')}</strong></a>
+    <a href="/" aria-current={ariaCurrentHome} data-testid="header-home-link">
+      <strong>{t('common.app_name')}</strong>
+    </a>
     {#if $isSignedIn}
       <!--
         When signed in, the header shows a Settings link (one-click access
@@ -58,9 +75,13 @@
         a static "Signed in" badge. Sign-in state is still signalled
         implicitly: the Sign in link only appears when NOT signed in.
       -->
-      <a href="/settings" data-testid="header-settings-link">{t('common.header.settings_link')}</a>
+      <a href="/settings" aria-current={ariaCurrentSettings} data-testid="header-settings-link"
+        >{t('common.header.settings_link')}</a
+      >
     {:else}
-      <a href="/sign-in" data-testid="header-sign-in-link">{t('common.header.sign_in_link')}</a>
+      <a href="/sign-in" aria-current={ariaCurrentSignIn} data-testid="header-sign-in-link"
+        >{t('common.header.sign_in_link')}</a
+      >
     {/if}
   </nav>
 </header>

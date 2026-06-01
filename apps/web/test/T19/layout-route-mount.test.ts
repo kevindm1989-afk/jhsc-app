@@ -118,6 +118,34 @@ describe('T19.1 — root layout JWT-reactive header indicator', () => {
     expect(typeof catalog.common.header.primary_nav_aria_label).toBe('string');
   });
 
+  it('header links carry aria-current="page" based on $page.url.pathname (WCAG 4.1.2 + ARIA "you are here")', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // The layout imports the SvelteKit page store and uses it to
+    // compute per-link aria-current values. Defense against a
+    // refactor that drops the reactive annotation (which would
+    // remove the SR "current page" signal silently).
+    expect(src).toMatch(/import\s*{[^}]*page[^}]*}\s+from\s+['"]\$app\/stores['"]/);
+    // Reactive declarations derive each link's aria-current from the
+    // current pathname.
+    expect(src).toMatch(/\$:\s*currentPath\s*=\s*\$page\.url\.pathname/);
+    // Each reactive declaration sets the value to 'page' (possibly
+    // wrapped in `as const` for svelte-check's union-type narrowing)
+    // when the pathname matches, undefined otherwise.
+    expect(src).toMatch(/\$:\s*ariaCurrentHome\s*=\s*currentPath\s*===\s*['"]\/['"]\s*\?[^;]*['"]page['"][^;]*:\s*undefined/);
+    expect(src).toMatch(/\$:\s*ariaCurrentSettings\s*=\s*currentPath\s*===\s*['"]\/settings['"]\s*\?[^;]*['"]page['"][^;]*:\s*undefined/);
+    expect(src).toMatch(/\$:\s*ariaCurrentSignIn\s*=\s*currentPath\s*===\s*['"]\/sign-in['"]\s*\?[^;]*['"]page['"][^;]*:\s*undefined/);
+  });
+
+  it('each header link wires aria-current to its corresponding reactive value', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // The home link uses ariaCurrentHome.
+    expect(src).toMatch(/<a\s+href=["']\/["']\s+aria-current=\{ariaCurrentHome\}/);
+    // The settings link uses ariaCurrentSettings.
+    expect(src).toMatch(/<a\s+href=["']\/settings["']\s+aria-current=\{ariaCurrentSettings\}/);
+    // The sign-in link uses ariaCurrentSignIn.
+    expect(src).toMatch(/<a\s+href=["']\/sign-in["']\s+aria-current=\{ariaCurrentSignIn\}/);
+  });
+
   it('both the home link and the conditional Sign-in/Settings link live INSIDE the <nav> landmark', () => {
     const src = readFileSync(LAYOUT_PATH, 'utf8');
     // Defense against a refactor that places one of the links outside
