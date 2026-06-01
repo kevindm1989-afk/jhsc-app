@@ -40,18 +40,29 @@
 </a>
 
 <header>
-  <a href="/" data-testid="header-home-link"><strong>{t('common.app_name')}</strong></a>
-  {#if $isSignedIn}
-    <!--
-      When signed in, the header shows a Settings link (one-click access
-      to where the sign-out + panic-wipe affordances live) rather than
-      a static "Signed in" badge. Sign-in state is still signalled
-      implicitly: the Sign in link only appears when NOT signed in.
-    -->
-    <a href="/settings" data-testid="header-settings-link">{t('common.header.settings_link')}</a>
-  {:else}
-    <a href="/sign-in" data-testid="header-sign-in-link">{t('common.header.sign_in_link')}</a>
-  {/if}
+  <!--
+    `<nav aria-label="Primary">` adds a landmark so screen readers can
+    discover the header's top-level navigation (WCAG 2.4.1 "Bypass
+    Blocks" + 1.3.1 "Info and Relationships"). The aria-label is
+    i18n-keyed; it's never visible but is announced when users navigate
+    by landmark. The home link + sign-in/Settings link sit inside it
+    so screen-reader users get the standard "Primary navigation, list
+    of N items" announcement instead of two bare siblings.
+  -->
+  <nav aria-label={t('common.header.primary_nav_aria_label')} data-testid="header-primary-nav">
+    <a href="/" data-testid="header-home-link"><strong>{t('common.app_name')}</strong></a>
+    {#if $isSignedIn}
+      <!--
+        When signed in, the header shows a Settings link (one-click access
+        to where the sign-out + panic-wipe affordances live) rather than
+        a static "Signed in" badge. Sign-in state is still signalled
+        implicitly: the Sign in link only appears when NOT signed in.
+      -->
+      <a href="/settings" data-testid="header-settings-link">{t('common.header.settings_link')}</a>
+    {:else}
+      <a href="/sign-in" data-testid="header-sign-in-link">{t('common.header.sign_in_link')}</a>
+    {/if}
+  </nav>
 </header>
 
 <main id="main-content" tabindex="-1">

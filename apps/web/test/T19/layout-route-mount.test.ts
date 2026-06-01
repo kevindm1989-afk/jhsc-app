@@ -102,4 +102,40 @@ describe('T19.1 — root layout JWT-reactive header indicator', () => {
     // refactor that wraps the link around the wrong element).
     expect(src).toMatch(/<a\s+href=["']\/["'][^>]*>\s*<strong>\{t\(['"]common\.app_name['"]\)\}<\/strong>\s*<\/a>/);
   });
+
+  it('the header navigation links live inside a <nav> landmark with an i18n-keyed aria-label (WCAG 1.3.1 / 2.4.1)', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // The <nav> landmark makes the primary navigation discoverable by
+    // screen-reader users (announced as "Primary navigation, list of N
+    // items" instead of two bare sibling links). The aria-label is
+    // i18n-keyed so localisation propagates to the announcement.
+    expect(src).toMatch(
+      /<nav\s+aria-label=\{t\(['"]common\.header\.primary_nav_aria_label['"]\)\}[^>]*data-testid=["']header-primary-nav["']/
+    );
+    // The catalog key is present.
+    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    expect(typeof catalog.common.header.primary_nav_aria_label).toBe('string');
+  });
+
+  it('both the home link and the conditional Sign-in/Settings link live INSIDE the <nav> landmark', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // Defense against a refactor that places one of the links outside
+    // the <nav> (which would orphan it from the landmark and break the
+    // semantic grouping). String-index check: the <nav> opens before
+    // both <a> links and closes after them.
+    const navOpen = src.indexOf('<nav ');
+    const navClose = src.indexOf('</nav>');
+    const homeLinkAt = src.indexOf('data-testid="header-home-link"');
+    const signInLinkAt = src.indexOf('data-testid="header-sign-in-link"');
+    const settingsLinkAt = src.indexOf('data-testid="header-settings-link"');
+    expect(navOpen).toBeGreaterThan(-1);
+    expect(navClose).toBeGreaterThan(-1);
+    expect(homeLinkAt).toBeGreaterThan(navOpen);
+    expect(homeLinkAt).toBeLessThan(navClose);
+    expect(signInLinkAt).toBeGreaterThan(navOpen);
+    expect(signInLinkAt).toBeLessThan(navClose);
+    expect(settingsLinkAt).toBeGreaterThan(navOpen);
+    expect(settingsLinkAt).toBeLessThan(navClose);
+  });
 });
