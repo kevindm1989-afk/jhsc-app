@@ -175,7 +175,15 @@
     </button>
 
     {#if state === 'cancelled'}
-      <p role="alert" data-testid="sign-in-cancelled">{t('signIn.cancelled')}</p>
+      <!--
+        `role="status"` (polite) — the cancellation was user-initiated
+        (they closed the WebAuthn prompt or hit Escape), not a server
+        error. The user already knows what they did; a polite live-
+        region announcement is enough. role="alert" (assertive) is
+        reserved for the `failed` state below where the system rejects
+        the user's action.
+      -->
+      <p role="status" data-testid="sign-in-cancelled">{t('signIn.cancelled')}</p>
     {/if}
 
     {#if state === 'failed'}
