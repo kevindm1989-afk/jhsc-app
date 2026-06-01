@@ -26,7 +26,8 @@
     "app_name": "JHSC App",
     "header": {
       "signed_in_badge": "Signed in",
-      "sign_in_link": "Sign in"
+      "sign_in_link": "Sign in",
+      "settings_link": "Settings"
     },
     "actions": {
       "cancel": "Cancel",

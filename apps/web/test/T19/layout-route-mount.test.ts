@@ -36,12 +36,12 @@ describe('T19.1 — root layout JWT-reactive header indicator', () => {
     );
   });
 
-  it('renders a "Signed in" badge when $isSignedIn is true', () => {
+  it('renders a Settings link to /settings when $isSignedIn is true (one-click access to sign-out + panic-wipe)', () => {
     const src = readFileSync(LAYOUT_PATH, 'utf8');
     // Svelte auto-subscribes via the `$` prefix.
     expect(src).toMatch(/\{#if\s+\$isSignedIn\}/);
-    expect(src).toMatch(/data-testid=["']header-signed-in-badge["']/);
-    expect(src).toMatch(/t\(['"]common\.header\.signed_in_badge['"]\)/);
+    expect(src).toMatch(/<a\s+href=["']\/settings["'][^>]*data-testid=["']header-settings-link["']/);
+    expect(src).toMatch(/t\(['"]common\.header\.settings_link['"]\)/);
   });
 
   it('renders a /sign-in link when $isSignedIn is false (else branch)', () => {
@@ -65,8 +65,8 @@ describe('T19.1 — root layout JWT-reactive header indicator', () => {
     const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
     expect(catalog.common).toBeDefined();
     expect(catalog.common.header).toBeDefined();
-    expect(typeof catalog.common.header.signed_in_badge).toBe('string');
     expect(typeof catalog.common.header.sign_in_link).toBe('string');
+    expect(typeof catalog.common.header.settings_link).toBe('string');
   });
 
   it('the app name wraps in a link to / (standard home-link pattern)', () => {
