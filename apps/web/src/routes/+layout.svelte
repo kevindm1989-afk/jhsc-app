@@ -36,7 +36,7 @@
 </script>
 
 <header>
-  <strong>{t('common.app_name')}</strong>
+  <a href="/" data-testid="header-home-link"><strong>{t('common.app_name')}</strong></a>
   {#if $isSignedIn}
     <span data-testid="header-signed-in-badge">{t('common.header.signed_in_badge')}</span>
   {:else}
