@@ -61,6 +61,32 @@
   let lastError = '';
   let sessionId = '';
 
+  // Closed allowlist of friendly-reason catalog keys we'll resolve
+  // via t(). Anything outside this set falls through to the generic
+  // `signIn.reason.unknown` message — defends against t() being
+  // handed an attacker-influenced reason code (today the codes come
+  // from the SupabaseMintSessionClient's MintSessionReason union, but
+  // pinning the allowlist makes the contract explicit and dynamic
+  // catalog-key resolution safe).
+  const KNOWN_REASONS = new Set([
+    'bad_request',
+    'assertion_invalid',
+    'unknown_credential',
+    'mint_failed'
+  ]);
+
+  // `friendlyError` resolves the raw `lastError` reason code (e.g.
+  // 'assertion_invalid') through the i18n catalog to a user-facing
+  // sentence like "Your passkey couldn't be verified. Try again…".
+  // Without this mapping, /sign-in's failed state rendered raw
+  // server enum values to end users.
+  $: friendlyError =
+    state === 'failed'
+      ? KNOWN_REASONS.has(lastError)
+        ? t(`signIn.reason.${lastError}`)
+        : t('signIn.reason.unknown')
+      : '';
+
   // Reset the stale success message when the JWT clears via any
   // channel (panic-wipe post-cleanup, 401 from another tab's t07-op
   // call, future server-side revoke). Tracks `$isSignedIn` flipping
@@ -154,7 +180,7 @@
 
     {#if state === 'failed'}
       <p role="alert" data-testid="sign-in-failed">
-        {t('signIn.failed', { reason: lastError })}
+        {friendlyError}
       </p>
     {/if}
   {/if}
