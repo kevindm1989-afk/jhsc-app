@@ -494,6 +494,13 @@
     },
     "cancelled": "Sign-in cancelled.",
     "failed": "Sign-in failed: {reason}",
+    "reason": {
+      "bad_request": "Couldn't process the sign-in request. Try again.",
+      "assertion_invalid": "Your passkey couldn't be verified. Try again, and if the problem continues, set up this device from the home page.",
+      "unknown_credential": "This passkey isn't recognized on this server. If this device is new, choose \"Start setup\" from the home page instead.",
+      "mint_failed": "We couldn't establish your session right now. Try again in a moment.",
+      "unknown": "Something went wrong. Try again, or contact your worker co-chair if the problem continues."
+    },
     "success": "Session established (session {sessionId}).",
     "already_signed_in": "You're already signed in on this device.",
     "go_to_settings_cta": "Go to settings"

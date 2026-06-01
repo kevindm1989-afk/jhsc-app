@@ -118,9 +118,31 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(src).toMatch(/t\(['"]signIn\.button\.idle['"]\)/);
     expect(src).toMatch(/t\(['"]signIn\.button\.signing_in['"]\)/);
     expect(src).toMatch(/t\(['"]signIn\.cancelled['"]\)/);
-    expect(src).toMatch(/t\(['"]signIn\.failed['"]/);
+    // The failed-state surface uses a friendly mapped string from
+    // `signIn.reason.*` (not the raw `signIn.failed` interpolation
+    // that rendered server enum values to end users).
+    expect(src).toMatch(/signIn\.reason\.unknown/);
     expect(src).toMatch(/t\(['"]signIn\.success['"]/);
     expect(src).toMatch(/t\(['"]signIn\.already_signed_in['"]\)/);
+  });
+
+  it('maps raw server reason codes through `signIn.reason.*` catalog keys (no raw enum surfaced)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The route defines a closed allowlist of known reason codes and
+    // resolves them via t() to a friendly sentence. Defense-in-depth
+    // pin against a refactor that re-introduces raw-enum rendering.
+    expect(src).toMatch(/KNOWN_REASONS/);
+    expect(src).toMatch(/['"]bad_request['"]/);
+    expect(src).toMatch(/['"]assertion_invalid['"]/);
+    expect(src).toMatch(/['"]unknown_credential['"]/);
+    expect(src).toMatch(/['"]mint_failed['"]/);
+    // The friendly mapping is reactive on the state machine + the
+    // lastError code.
+    expect(src).toMatch(/\$:\s*friendlyError\s*=/);
+    // The template renders {friendlyError} (not the raw lastError /
+    // signIn.failed interpolation).
+    expect(src).toMatch(/data-testid=["']sign-in-failed["'][\s\S]*?\{friendlyError\}/);
+    expect(src).not.toMatch(/t\(['"]signIn\.failed['"]\s*,/);
   });
 
   it('every signIn.* key the route references is present in the root catalog (i18n/en-CA.json)', () => {
@@ -133,13 +155,18 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(typeof catalog.signIn.button.idle).toBe('string');
     expect(typeof catalog.signIn.button.signing_in).toBe('string');
     expect(typeof catalog.signIn.cancelled).toBe('string');
-    expect(typeof catalog.signIn.failed).toBe('string');
     expect(typeof catalog.signIn.success).toBe('string');
     expect(typeof catalog.signIn.already_signed_in).toBe('string');
     expect(typeof catalog.signIn.go_to_settings_cta).toBe('string');
-    // The failed + success strings use {reason} / {sessionId} interpolations.
-    expect(catalog.signIn.failed).toMatch(/\{reason\}/);
+    // The success string still uses {sessionId} interpolation.
     expect(catalog.signIn.success).toMatch(/\{sessionId\}/);
+    // Each of the five friendly-reason strings is present.
+    expect(catalog.signIn.reason).toBeDefined();
+    expect(typeof catalog.signIn.reason.bad_request).toBe('string');
+    expect(typeof catalog.signIn.reason.assertion_invalid).toBe('string');
+    expect(typeof catalog.signIn.reason.unknown_credential).toBe('string');
+    expect(typeof catalog.signIn.reason.mint_failed).toBe('string');
+    expect(typeof catalog.signIn.reason.unknown).toBe('string');
   });
 
   it('the sign-in success message is a polite live region (role="status") so SR users hear "Session established"', () => {
