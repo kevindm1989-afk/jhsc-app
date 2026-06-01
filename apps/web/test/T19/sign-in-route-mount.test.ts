@@ -142,6 +142,19 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(catalog.signIn.success).toMatch(/\{sessionId\}/);
   });
 
+  it('the sign-in success message is a polite live region (role="status") so SR users hear "Session established"', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The success paragraph announces when the WebAuthn ceremony
+    // resolves OK. role="status" is the polite live-region pattern;
+    // assertive (role="alert") is reserved for cancelled/failed
+    // outcomes that interrupt expected flow. Defense against a
+    // refactor that drops the live region (which would leave SR
+    // users without audio confirmation of sign-in completion).
+    expect(src).toMatch(
+      /<p\s+role=["']status["']\s+data-testid=["']sign-in-success["']/
+    );
+  });
+
   it('the signed-in state surfaces a /settings link so the user has somewhere to go after sign-in', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     // The CTA link is rendered ONLY in the signed-in state — it lives

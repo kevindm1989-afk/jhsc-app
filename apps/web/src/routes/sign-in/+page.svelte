@@ -113,7 +113,17 @@
 
   {#if $isSignedIn}
     {#if sessionId}
-      <p data-testid="sign-in-success">
+      <!--
+        `role="status"` makes the success message a polite live region
+        so screen readers announce "Session established …" when the
+        WebAuthn ceremony resolves OK. Without this, an SR user has
+        to navigate to the paragraph to hear the outcome — the same
+        a11y gap the cancelled / failed paths already avoid via
+        `role="alert"` (assertive). Success uses `status` (polite)
+        instead of `alert` (assertive) because the transition is
+        expected by the user and doesn't need to interrupt.
+      -->
+      <p role="status" data-testid="sign-in-success">
         {t('signIn.success', { sessionId })}
       </p>
     {:else}
