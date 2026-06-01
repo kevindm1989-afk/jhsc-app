@@ -173,12 +173,29 @@ describe('T19.1 — /sign-in production route mount', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     // The success paragraph announces when the WebAuthn ceremony
     // resolves OK. role="status" is the polite live-region pattern;
-    // assertive (role="alert") is reserved for cancelled/failed
-    // outcomes that interrupt expected flow. Defense against a
-    // refactor that drops the live region (which would leave SR
+    // assertive (role="alert") is reserved for the `failed` state
+    // where the server rejects the user's assertion. Defense against
+    // a refactor that drops the live region (which would leave SR
     // users without audio confirmation of sign-in completion).
     expect(src).toMatch(
       /<p\s+role=["']status["']\s+data-testid=["']sign-in-success["']/
+    );
+  });
+
+  it('the sign-in cancelled message is a polite live region (role="status"), not assertive (alert)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Cancellation is user-initiated (the user dismissed the WebAuthn
+    // prompt). The user already knows what they did; per ARIA
+    // conventions, polite is correct. assertive (role="alert") would
+    // interrupt other speech for a non-error outcome. Defense pin
+    // against a refactor that flips this back to role="alert".
+    expect(src).toMatch(
+      /<p\s+role=["']status["']\s+data-testid=["']sign-in-cancelled["']/
+    );
+    // The failed message (genuine server-side rejection) stays
+    // role="alert" — that's an interruption-worthy outcome.
+    expect(src).toMatch(
+      /<p\s+role=["']alert["']\s+data-testid=["']sign-in-failed["']/
     );
   });
 
