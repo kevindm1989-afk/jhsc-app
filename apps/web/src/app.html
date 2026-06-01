@@ -8,6 +8,22 @@
     <meta name="robots" content="noindex, nofollow" />
     <meta name="referrer" content="no-referrer" />
     <!--
+      Disable mobile-browser auto-link detection. Without this, Safari
+      iOS (and other mobile UAs) scan visible text for phone numbers /
+      email addresses / postal addresses / dates / calendar events and
+      auto-convert them into tel:/mailto:/calshow:/maps: links with
+      tooltips + share-menu integration. Worker-side concern / reprisal
+      narratives routinely include phone numbers + employer addresses
+      that the audit-trail handles correctly server-side; we don't
+      want the browser to ALSO surface them as taps in the share menu,
+      hover tooltips, or recent-history overlays — that's a forensic
+      side-channel the threat model doesn't cover. The address +
+      email + date detectors are off by default on most UAs but
+      `telephone=yes` is the Safari iOS default; setting all four to
+      `no` keeps every detector off uniformly.
+    -->
+    <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+    <!--
       System-font stack only. No Google Fonts, no Adobe Fonts, no CDN.
       Per JHSC-APP-PLAN.md §7 "No third-party JS at runtime" and the
       bundle-grep gate in scripts/verify-no-third-party-js.sh.
