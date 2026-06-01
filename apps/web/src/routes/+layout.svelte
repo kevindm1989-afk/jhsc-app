@@ -38,7 +38,13 @@
 <header>
   <a href="/" data-testid="header-home-link"><strong>{t('common.app_name')}</strong></a>
   {#if $isSignedIn}
-    <span data-testid="header-signed-in-badge">{t('common.header.signed_in_badge')}</span>
+    <!--
+      When signed in, the header shows a Settings link (one-click access
+      to where the sign-out + panic-wipe affordances live) rather than
+      a static "Signed in" badge. Sign-in state is still signalled
+      implicitly: the Sign in link only appears when NOT signed in.
+    -->
+    <a href="/settings" data-testid="header-settings-link">{t('common.header.settings_link')}</a>
   {:else}
     <a href="/sign-in" data-testid="header-sign-in-link">{t('common.header.sign_in_link')}</a>
   {/if}
