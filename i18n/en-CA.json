@@ -25,7 +25,6 @@
   "common": {
     "app_name": "JHSC App",
     "header": {
-      "signed_in_badge": "Signed in",
       "sign_in_link": "Sign in",
       "settings_link": "Settings",
       "primary_nav_aria_label": "Primary"
@@ -490,11 +489,9 @@
     "intro": "Use the passkey on this device to sign in to JHSC.",
     "button": {
       "idle": "Sign in with passkey",
-      "signing_in": "Signing in…",
-      "signed_in": "Signed in"
+      "signing_in": "Signing in…"
     },
     "cancelled": "Sign-in cancelled.",
-    "failed": "Sign-in failed: {reason}",
     "reason": {
       "bad_request": "Couldn't process the sign-in request. Try again.",
       "assertion_invalid": "Your passkey couldn't be verified. Try again, and if the problem continues, set up this device from the home page.",
