@@ -1,0 +1,24 @@
+# JHSC PWA — search-engine crawl directive.
+#
+# Every route in the app is also annotated with
+# <meta name="robots" content="noindex,nofollow"> (per-page).
+# This file is the FIRST line: well-behaved crawlers fetch
+# /robots.txt before any other URL on the origin, so the
+# disallow applies even to crawls that never reach a page
+# whose meta tag could surface the noindex.
+#
+# Rationale:
+#   - The app surface contains worker-side concern + reprisal
+#     intake forms. Indexing them is irrelevant for SEO and
+#     could surface unintended deep-link discovery via
+#     well-known PWA URLs.
+#   - The auth surface (/sign-in, /onboarding) does no SEO
+#     work; indexing it is pure noise.
+#   - Crawler hits cost cache fills + bandwidth on the
+#     adapter-static deploy with no return.
+#
+# A future marketing landing page (a separate domain — NOT
+# this app surface) would carry its own robots.txt allowing
+# indexing of marketing routes specifically.
+User-agent: *
+Disallow: /
