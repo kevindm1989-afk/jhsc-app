@@ -16,6 +16,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const PAGE_PATH = resolve(__dirname, '../../src/routes/+page.svelte');
+const PAGE_TS_PATH = resolve(__dirname, '../../src/routes/+page.ts');
 
 describe('T19.1 — landing route (/) mount', () => {
   it('the landing page exists at apps/web/src/routes/+page.svelte', () => {
@@ -111,5 +112,18 @@ describe('T19.1 — landing route (/) mount', () => {
     // that surfaces both at the same time (which would let a signed-in
     // user click through to /sign-in or /onboarding by mistake).
     expect(src).toMatch(/\{#if\s+\$isSignedIn\}[\s\S]*?\{:else\}[\s\S]*?\{\/if\}/);
+  });
+
+  it('the route sets prerender=true + ssr=false (adapter-static + no SSR for PI safety; per-route pin, parity with /onboarding /sign-in /settings)', () => {
+    // The other three routes (/onboarding, /sign-in, /settings) each
+    // carry a +page.ts that re-affirms the layout's posture. Before
+    // this pin, the landing page inherited from +layout.ts only —
+    // a future change to the layout would silently flip SSR on for
+    // the front door without breaking any test. The per-route +page.ts
+    // is the defense-in-depth pin that closes that gap.
+    expect(existsSync(PAGE_TS_PATH)).toBe(true);
+    const src = readFileSync(PAGE_TS_PATH, 'utf8');
+    expect(src).toMatch(/export\s+const\s+prerender\s*=\s*true/);
+    expect(src).toMatch(/export\s+const\s+ssr\s*=\s*false/);
   });
 });
