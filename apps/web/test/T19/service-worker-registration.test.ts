@@ -72,15 +72,42 @@ describe('T19.1 / G-T19-14 — src/service-worker.ts scaffold', () => {
     expect(src).toMatch(/\.clients\.claim\s*\(\s*\)/);
   });
 
-  it('does NOT register a `fetch` event handler (defense pin against premature scope expansion)', () => {
+  it('registers a `fetch` event handler that intercepts allowlisted requests (ADR-0013 cache policy)', () => {
     const src = readFileSync(SW_PATH, 'utf8');
-    // The cache-policy fetch handler (per ADR-0013) is the follow-up
-    // PR's responsibility. Pinning the absence here ensures the
-    // minimal-scaffold scope is intentional — a premature add (e.g.,
-    // copy-paste from another SvelteKit project) would silently change
-    // the network-interception behaviour without an architecture
-    // conversation.
-    expect(src).not.toMatch(/addEventListener\s*\(\s*['"]fetch['"]/);
+    expect(src).toMatch(/addEventListener\s*\(\s*['"]fetch['"]/);
+  });
+
+  it('imports bucketForUrl + handleFetchResponse + clearStaleVersionCaches from $lib/sw', () => {
+    const src = readFileSync(SW_PATH, 'utf8');
+    // Defense pin: the SW must use the library helpers, not
+    // re-implement the bucket logic. The token-audit + the cache-
+    // module unit tests defend the library helpers' correctness; the
+    // SW's job is to wire them.
+    expect(src).toMatch(/bucketForUrl\b/);
+    expect(src).toMatch(/handleFetchResponse\b/);
+    expect(src).toMatch(/clearStaleVersionCaches\b/);
+  });
+
+  it('fetch handler passes through non-GET requests (no cache for Edge Function POSTs)', () => {
+    const src = readFileSync(SW_PATH, 'utf8');
+    // Caching POST/PUT/DELETE responses would risk replaying state-
+    // changing requests. The handler must early-return on non-GET.
+    expect(src).toMatch(/req\.method\s*!==\s*['"]GET['"]/);
+  });
+
+  it('fetch handler passes through non-allowlisted URLs (bucketForUrl === null)', () => {
+    const src = readFileSync(SW_PATH, 'utf8');
+    expect(src).toMatch(/bucket\s*===\s*null/);
+  });
+
+  it('activate handler calls clearStaleVersionCaches (ADR-0013 rule 5 — version-bump invalidation)', () => {
+    const src = readFileSync(SW_PATH, 'utf8');
+    // The activate block must purge prior-build caches before
+    // clients.claim() so the next fetch repopulates against the
+    // current build hashes. The call passes `self.caches` (possibly
+    // through a type cast bridging native CacheStorage → the library's
+    // CachesLike shape) — allow whitespace + the cast wrapper.
+    expect(src).toMatch(/clearStaleVersionCaches\s*\([\s\S]{0,200}?self\.caches\b/);
   });
 });
 
