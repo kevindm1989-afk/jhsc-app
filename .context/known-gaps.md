@@ -1245,11 +1245,12 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 
 ### G-T19-13 — PWA manifest ships with placeholder SVG icon; designer pass owes final brand iconography + PNG rasters
 **Source:** T19.1 PWA-manifest scaffolding PR (this entry recording the gap at landing).
-**Finding:** `apps/web/static/manifest.webmanifest` + `apps/web/static/icon.svg` + the `app.html` PWA wire-up ship the install-prompt scaffolding so the app is installable today. The SVG icon is a deliberately minimal text-based placeholder ("JHSC" on slate-indigo) — NOT the final brand mark. Three follow-up items remain:
+**Finding:** `apps/web/static/manifest.webmanifest` + `apps/web/static/icon.svg` + the `app.html` PWA wire-up ship the install-prompt scaffolding so the app is installable today. The SVG icon is a deliberately minimal text-based placeholder ("JHSC" on slate-indigo) — NOT the final brand mark. Two follow-up items remain:
   1. **Final brand iconography.** A designer pass replaces `icon.svg` with the final mark (logo lockup, geometric mark, or similar — design decision).
   2. **Rasterized PNG sources.** Legacy iOS (<14) and some Android UAs prefer PNG. Add `icon-192.png`, `icon-512.png`, and an `icon-512-maskable.png` (with a `purpose: "maskable"` entry alongside the SVG in the manifest) to cover the install-prompt requirement under those UAs.
-  3. **Dark-mode `theme-color` variant.** The current single `<meta name="theme-color">` paints the OS chrome with the light-mode accent on every UA, regardless of `prefers-color-scheme`. Once a dark brand accent token lands, split via `media=(prefers-color-scheme: dark)`.
-**Resolution scope:** designer pass (1 + 2) + token-pass (3). The scaffolding tests (`apps/web/test/T19/pwa-manifest.test.ts`) already pin the structural contract, so the designer's icon swap is constrained — the SVG must stay at `/icon.svg`, keep the `#2d3a8c` brand color (or update tokens + this file in lockstep), and carry the `aria-label="JHSC"` for SR fallback.
+**Resolved sub-items:**
+  - ~~Dark-mode `theme-color` variant.~~ **Closed in follow-up PR:** `app.html` now ships two media-keyed `<meta name="theme-color">` tags — light = `#2d3a8c` (brand accent), dark = `#0c0e12` (matches dark body background). The asymmetry is documented inline; the surface-matched dark value avoids the "glare strip" effect that the dark brand-accent (`#a9b3f0`) would produce as a status-bar tint.
+**Resolution scope:** designer pass (1 + 2). The scaffolding tests (`apps/web/test/T19/pwa-manifest.test.ts`) already pin the structural contract, so the designer's icon swap is constrained — the SVG must stay at `/icon.svg`, keep the `#2d3a8c` brand color (or update tokens + this file in lockstep), and carry the `aria-label="JHSC"` for SR fallback.
 **Blocker for:** none for v1 ship — the placeholder is functional. Real brand iconography is launch-polish for the marketing surface, not a launch-blocker for committee use.
 
 ### G-T19-14 — Service-worker registration not wired (cache module exists library-only)

@@ -115,10 +115,31 @@ describe('T19.1 — app.html wires the manifest + brand chrome', () => {
     );
   });
 
-  it('declares the theme-color meta tag matching the design-token accent (#2d3a8c)', () => {
+  it('declares a light-mode theme-color meta tag matching the design-token accent (#2d3a8c)', () => {
+    // The light variant carries `media="(prefers-color-scheme: light)"`.
+    // Order matters: UAs that don't understand media-keyed theme-color
+    // pick the FIRST tag, so the light variant must appear before the
+    // dark one (verified by string-index in the next test).
     expect(src).toMatch(
-      /<meta\s+name=["']theme-color["']\s+content=["']#2d3a8c["']\s*\/?>/
+      /<meta\s+name=["']theme-color["']\s+content=["']#2d3a8c["']\s+media=["']\(prefers-color-scheme:\s*light\)["']\s*\/?>/
     );
+  });
+
+  it('declares a dark-mode theme-color meta tag matching the dark body background (#0c0e12)', () => {
+    // The dark variant uses the body-matched value, not the dark
+    // brand-accent (`#a9b3f0` — too light for a status-bar tint). The
+    // asymmetry vs the light variant is documented inline in app.html.
+    expect(src).toMatch(
+      /<meta\s+name=["']theme-color["']\s+content=["']#0c0e12["']\s+media=["']\(prefers-color-scheme:\s*dark\)["']\s*\/?>/
+    );
+  });
+
+  it('the light-mode theme-color tag appears BEFORE the dark variant (UA back-compat ordering)', () => {
+    const lightAt = src.search(/<meta\s+name=["']theme-color["']\s+content=["']#2d3a8c["']/);
+    const darkAt = src.search(/<meta\s+name=["']theme-color["']\s+content=["']#0c0e12["']/);
+    expect(lightAt).toBeGreaterThan(-1);
+    expect(darkAt).toBeGreaterThan(-1);
+    expect(lightAt).toBeLessThan(darkAt);
   });
 
   it('links the SVG icon (replacing the data:, no-op favicon)', () => {

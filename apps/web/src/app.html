@@ -22,13 +22,31 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <!--
       theme-color drives the OS chrome (URL bar on Android, status bar
-      tint on iOS standalone). Slate-indigo `accent.default` from
-      design-tokens.json. Light/dark variants would split this via
-      `media=(prefers-color-scheme: ...)` once a dark brand token lands;
-      shipping the single light-mode value first so the chrome is
-      branded today.
+      tint on iOS standalone). Two media-keyed variants so the chrome
+      tracks `prefers-color-scheme`:
+
+        - Light mode: `#2d3a8c` (design-tokens.json `accent.default`).
+          The brand-accent splash — high contrast on a light surface so
+          the chrome reads as branded rather than blending into the
+          status bar.
+
+        - Dark mode: `#0c0e12` (matches the actual body background
+          painted in dark mode by the boot stylesheet below). A
+          surface-matched value rather than the dark brand-accent
+          (`#a9b3f0` — too light to read as a status-bar tint without
+          looking like a glare strip). The asymmetry is deliberate:
+          brand-forward in light mode where contrast supports it,
+          surface-matched in dark mode where it doesn't.
+
+      Order matters: UAs that don't support media-keyed theme-color
+      pick the first tag, so the light variant ships first as the
+      back-compat default. The manifest's `theme_color` field carries
+      a single value (W3C spec — no media-key support yet); it stays
+      at `#2d3a8c` and serves as the per-install fallback when neither
+      meta tag matches the runtime color-scheme.
     -->
-    <meta name="theme-color" content="#2d3a8c" />
+    <meta name="theme-color" content="#2d3a8c" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c0e12" media="(prefers-color-scheme: dark)" />
     <!--
       iOS standalone-mode hints (Safari-only — Android ignores these in
       favor of the manifest's display:standalone). `apple-mobile-web-app-
