@@ -52,6 +52,25 @@ describe('T19.1 — <html lang> attribute on app.html', () => {
     expect(src).not.toMatch(/<html\b[^>]*\blang=["']en["'][^>]*>/);
     expect(src).not.toMatch(/<html\b[^>]*\blang=["']en-US["'][^>]*>/);
   });
+
+  it('declares explicit dir="ltr" on <html> (WCAG / a11y screen-reader correctness)', () => {
+    // Per WCAG 3.1.1 + screen-reader best practice the `dir` attribute
+    // should be explicit, not relied on via UA's lang→dir default.
+    // For en-CA the value is ltr; future fr-CA stays ltr. RTL locales
+    // (Arabic / Hebrew — not in scope today) would require flipping
+    // this value to `rtl` in lockstep with the lang change.
+    const src = readFileSync(APP_HTML_PATH, 'utf8');
+    expect(src).toMatch(/<html\b[^>]*\bdir=["']ltr["'][^>]*>/);
+  });
+
+  it('does NOT use dir="rtl" or dir="auto" (regression guard)', () => {
+    const src = readFileSync(APP_HTML_PATH, 'utf8');
+    // Defense pin: `dir="auto"` lets the UA infer from content, which
+    // produces mixed-direction text on multi-locale pages — exactly
+    // what the future fr-CA build wants to avoid. `dir="rtl"` would
+    // mirror the whole UI; both are wrong for en-CA / fr-CA.
+    expect(src).not.toMatch(/<html\b[^>]*\bdir=["'](?:rtl|auto)["'][^>]*>/);
+  });
 });
 
 describe('T19.1 — html lang ↔ manifest lang drift guard', () => {
