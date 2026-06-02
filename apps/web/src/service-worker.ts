@@ -1,34 +1,42 @@
 /**
- * Service worker — minimal lifecycle scaffold (G-T19-14 partial close).
+ * Service worker — cache-policy fetch handler (G-T19-14 close).
  *
  * SvelteKit auto-detects `src/service-worker.ts` and compiles it as a
  * separate `/service-worker.js` bundle in the adapter-static output.
  * The registration call lives in `hooks.client.ts` (gated on
  * `'serviceWorker' in navigator` + `import.meta.env.PROD`).
  *
- * Scope of this PR: register the SW + own the lifecycle. There is
- * INTENTIONALLY no `fetch` event handler in this file — without one,
- * the SW installs and activates but does not intercept any network
- * requests, so it can't break Edge Function calls, Supabase asset
- * loads, or anything else while we ship the registration path
- * first.
+ * Scope: per ADR-0013 the SW caches only allowlisted URLs (static /
+ * locales / dynamic buckets). The fetch handler implements:
  *
- * The full cache-policy fetch handler (per ADR-0013 / lib/sw/index.ts
- * `bucketForUrl` + `handleFetchResponse`) lands in a follow-up PR
- * with its own focused test surface.
+ *   - **Pass-through for non-GET** — POST / PUT / DELETE bypass the
+ *     cache entirely (Edge Function calls, audit emissions).
+ *   - **Pass-through for non-allowlisted URLs** — `bucketForUrl()`
+ *     returns null and the SW lets the browser handle the request
+ *     directly. /api/** is never cached (ADR-0013 rule 2).
+ *   - **Cache-first for static + locales** — these are immutable
+ *     across a deploy (build hash in the URL for static; locale
+ *     files turn over at the locale-pass cadence, not per page). On
+ *     a cache hit, serve from cache and trigger a stale-while-
+ *     revalidate refresh in the background.
+ *   - **Network-first for dynamic** — the dynamic bucket carries
+ *     low-PI items (feature-flags, public library content) that may
+ *     change between requests. Prefer the network; fall back to
+ *     cache on network failure.
+ *   - **X-Data-Class C3/C4 reject** — handled inside
+ *     `handleFetchResponse`: responses tagged C3/C4 are forwarded to
+ *     the page but never cached, and a `client.cache_policy_violation`
+ *     audit row is queued (consumed by the next online audit drain).
  *
- * Why skipWaiting + clients.claim:
+ * The `activate` handler also calls `clearStaleVersionCaches` so a
+ * new deploy's SW purges every prior-build cache, forcing fresh
+ * population against the new build.
  *
- *   The default SW lifecycle puts a new SW version into a "waiting"
- *   state until every open tab is closed. For a no-fetch-handler SW
- *   that's an awkward UX — users would see a stale SW version banner
- *   for hours. `skipWaiting()` activates the new SW immediately;
- *   `clients.claim()` takes control of every open client so they
- *   pick up the new version on the next navigation. Both are safe
- *   here BECAUSE we have no fetch handler that could conflict with
- *   the previous SW version's behaviour. When the follow-up PR adds
- *   fetch interception, the skipWaiting trade-off needs re-evaluation
- *   (a fetch handler swap mid-page-load can break in-flight requests).
+ * Clear-on-lock messaging (BroadcastChannel/postMessage from the
+ * page-side panic-wipe / lock to the SW so it calls
+ * `clearDynamicCachesOnLock`) is the one remaining ADR-0013 wire-up;
+ * deferred to a focused follow-up because it requires its own
+ * cross-thread protocol design.
  */
 
 /// <reference types="@sveltejs/kit" />
@@ -41,7 +49,15 @@
 /* global ServiceWorkerGlobalScope */
 
 import { version } from '$service-worker';
-import { setServiceWorkerVersion } from '$lib/sw';
+import {
+  bucketForUrl,
+  clearStaleVersionCaches,
+  dynamicCacheName,
+  handleFetchResponse,
+  localesCacheName,
+  setServiceWorkerVersion,
+  staticCacheName
+} from '$lib/sw';
 
 // `self` in a service-worker context is a `ServiceWorkerGlobalScope`,
 // not a `Window`. The `lib="webworker"` reference above brings the
@@ -66,14 +82,108 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  // Take control of every open client so they pick up the new SW
-  // immediately on the next navigation. Without `clients.claim()`,
-  // existing tabs would keep talking to the previous SW until they
-  // close + reopen.
-  event.waitUntil(self.clients.claim());
+  // Two activate-time obligations:
+  //   1. Take control of every open client so they pick up the new
+  //      SW immediately on the next navigation. Without
+  //      `clients.claim()`, existing tabs would keep talking to the
+  //      previous SW until they close + reopen.
+  //   2. Purge every cache whose name doesn't carry the new build
+  //      version. ADR-0013 rule 5: a SW version bump invalidates
+  //      every prior-build cache so the next fetch repopulates
+  //      against the current build's hashes.
+  event.waitUntil(
+    (async () => {
+      // Cast: native CacheStorage is structurally compatible with the
+      // library's narrower `CachesLike` (the test-friendly interface
+      // uses `{ url: string }[]` for keys, which native `Request[]`
+      // satisfies value-wise but doesn't match TS-shape variance).
+      await clearStaleVersionCaches(
+        self.caches as unknown as Parameters<typeof clearStaleVersionCaches>[0]
+      );
+      await self.clients.claim();
+    })()
+  );
 });
 
-// NOTE: no `fetch` event handler. This is intentional for the
-// minimal-scaffold scope (G-T19-14 partial close). The follow-up
-// PR wires `bucketForUrl` + `handleFetchResponse` from $lib/sw to
-// realize ADR-0013's closed-allowlist cache policy.
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+
+  // Pass-through for non-GET — POST/PUT/DELETE bypass the cache
+  // entirely (Edge Function calls, audit emissions, mint-session).
+  // Caching those would risk replaying state-changing requests.
+  if (req.method !== 'GET') return;
+
+  // Pass-through for non-allowlisted URLs. The browser handles them
+  // directly; the SW does not intercept. ADR-0013 rule 2: /api/**
+  // is never cached, which `bucketForUrl` enforces by returning null.
+  const bucket = bucketForUrl(new URL(req.url).pathname);
+  if (bucket === null) return;
+
+  // Cache strategy per bucket (see the file header).
+  if (bucket === 'static' || bucket === 'locales') {
+    event.respondWith(cacheFirst(req, bucket));
+  } else {
+    event.respondWith(networkFirst(req));
+  }
+});
+
+function cacheNameFor(bucket: 'static' | 'locales' | 'dynamic'): string {
+  return bucket === 'static'
+    ? staticCacheName()
+    : bucket === 'locales'
+      ? localesCacheName()
+      : dynamicCacheName();
+}
+
+async function cacheFirst(req: Request, bucket: 'static' | 'locales'): Promise<Response> {
+  // Try cache first. On hit, fire a background refresh (stale-while-
+  // revalidate) so the next request gets the fresher copy without
+  // delaying THIS request. On miss, fetch + cache + return.
+  const cache = await caches.open(cacheNameFor(bucket));
+  const pathname = new URL(req.url).pathname;
+  const cached = await cache.match(pathname);
+  if (cached) {
+    // Stale-while-revalidate. Ignore failures — the cached copy is
+    // already returned; the refresh is best-effort.
+    fetch(req)
+      .then((fresh) =>
+        handleFetchResponse(
+          { url: req.url },
+          fresh,
+          caches as unknown as Parameters<typeof handleFetchResponse>[2]
+        )
+      )
+      .catch(() => undefined);
+    return cached as Response;
+  }
+  const fresh = await fetch(req);
+  // Defer the cache decision to handleFetchResponse so the
+  // X-Data-Class C3/C4 reject path runs uniformly.
+  await handleFetchResponse(
+    { url: req.url },
+    fresh.clone(),
+    caches as unknown as Parameters<typeof handleFetchResponse>[2]
+  );
+  return fresh;
+}
+
+async function networkFirst(req: Request): Promise<Response> {
+  // Prefer the network so the dynamic bucket carries fresh data
+  // (feature-flags, library content). Fall back to cache only if
+  // the network throws (offline / DNS failure / timeout).
+  try {
+    const fresh = await fetch(req);
+    await handleFetchResponse(
+      { url: req.url },
+      fresh.clone(),
+      caches as unknown as Parameters<typeof handleFetchResponse>[2]
+    );
+    return fresh;
+  } catch (err) {
+    const cache = await caches.open(cacheNameFor('dynamic'));
+    const pathname = new URL(req.url).pathname;
+    const cached = await cache.match(pathname);
+    if (cached) return cached as Response;
+    throw err;
+  }
+}
