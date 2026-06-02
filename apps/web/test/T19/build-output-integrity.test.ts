@@ -57,6 +57,14 @@ describe.skipIf(!buildPresent)('T19.1 — built-output integrity', () => {
     expect(existsSync(resolve(BUILD_DIR, 'service-worker.js'))).toBe(true);
   });
 
+  it('build/.well-known/security.txt is copied through adapter-static (RFC 9116)', () => {
+    // The deployed origin must serve /.well-known/security.txt at
+    // the canonical path. adapter-static preserves nested directory
+    // structure under static/ — drift here would mean the file is
+    // unreachable at the published URL.
+    expect(existsSync(resolve(BUILD_DIR, '.well-known/security.txt'))).toBe(true);
+  });
+
   it('all four routes emit prerendered HTML files (per-route ssr=false pin contract)', () => {
     // Per the route-mount tests' `prerender = true` pin, every route
     // must produce a static HTML file in build/. A drift to

@@ -1,0 +1,3 @@
+Contact: https://github.com/kevindm1989-afk/jhsc-app/security/advisories/new
+Expires: 2027-06-02T00:00:00Z
+Preferred-Languages: en-CA, en
