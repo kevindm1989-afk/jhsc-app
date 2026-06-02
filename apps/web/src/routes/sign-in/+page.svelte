@@ -139,7 +139,19 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section>
+<section aria-busy={state === 'signing-in' ? 'true' : 'false'}>
+  <!--
+    `aria-busy` mirrors the form-level pattern from ConcernIntakeForm
+    + ReprisalIntakeForm: while the WebAuthn ceremony is in flight
+    (state === 'signing-in'), the section announces itself as busy so
+    AT users get a "loading" announcement on update. There is no
+    <form> element on this route (the ceremony is a single button
+    click that opens the OS WebAuthn modal), so the <section> is the
+    nearest analog. The aria-busy attribute only meaningfully applies
+    while the {:else} branch (the button + status messages) is
+    rendered; in the signed-in branch ($isSignedIn === true) the
+    state machine is back to 'idle' so aria-busy reads 'false'.
+  -->
   <h1>{t('signIn.title')}</h1>
 
   {#if $isSignedIn}

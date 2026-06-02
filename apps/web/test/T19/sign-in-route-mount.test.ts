@@ -259,4 +259,16 @@ describe('T19.1 — /sign-in production route mount', () => {
     expect(src).toMatch(/data-testid=["']sign-in-already-signed-in["']/);
     expect(src).toMatch(/t\(['"]signIn\.already_signed_in['"]\)/);
   });
+
+  it('the <section> carries aria-busy that tracks the signing-in state (form-level a11y pattern)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // Mirrors the form-level pattern used by ConcernIntakeForm +
+    // ReprisalIntakeForm: while the WebAuthn ceremony is in flight,
+    // AT users get an aria-busy announcement on the wrapping
+    // container. The /sign-in route has no <form> element so the
+    // <section> is the nearest analog.
+    expect(src).toMatch(
+      /<section\s+aria-busy=\{\s*state\s*===\s*['"]signing-in['"]\s*\?\s*['"]true['"]\s*:\s*['"]false['"]\s*\}/
+    );
+  });
 });

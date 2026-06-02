@@ -1265,6 +1265,21 @@ The register call MUST gate on `'serviceWorker' in navigator` to avoid hard-fail
 **Remaining:** the fetch handler that realizes ADR-0013's cache policy (`bucketForUrl` + `handleFetchResponse` + the X-Data-Class C3/C4 reject path + the cache-policy-violation audit row + the clear-on-lock invocation). The skipWaiting + clients.claim choices in the scaffold may need re-evaluation when the fetch handler lands (a fetch-handler swap mid-page-load can break in-flight requests).
 **Blocker for:** offline support per ADR-0013. The PWA installs and works online today; the SW registers and activates but doesn't yet cache.
 
+### G-T19-15 — CSP `connect-src 'self'` blocks cross-origin Supabase Edge Function calls (needs architect adjudication)
+**Source:** T19.1 launch-readiness review (this entry recording the question at landing).
+**Finding:** `apps/web/svelte.config.js` declares `connect-src: ['self']`. SvelteKit's auto-CSP pass emits this into the prerendered `<meta http-equiv="content-security-policy">` tag — verified in `build/index.html`. Every browser-side `fetch` to a Supabase Edge Function (`createSupabaseT07Client`, `createSupabaseMintSessionClient`, etc.) posts to `${PUBLIC_SUPABASE_URL}/functions/v1/<op>`. The typical Supabase deployment URL is `https://<project>.supabase.co/functions/v1/*` — cross-origin to the app's deploy domain. The browser CSP enforcer would BLOCK every such fetch, breaking the auth ceremony (mint-session), the panic-wipe audit emitter (t07-op), and every other Edge Function consumer.
+
+`.context/decisions.md` §4 says: *"`@supabase/supabase-js` added server-only (Edge Functions / never the browser bundle; CSP `connect-src 'self'` + the bundle gate keep it out of `build/`)."* That comment frames `connect-src 'self'` as a bundle-isolation defense for the JS SDK — not as a runtime fetch restriction. The runtime calls still need to reach Supabase.
+
+**Possible resolutions (need architect input):**
+  1. **Custom domain.** Production deploys Supabase Edge Functions under the app's own domain (e.g., `https://app.jhsc.example/functions/v1/*` via a reverse proxy or Supabase custom domain). Makes the calls same-origin; CSP unchanged. Most likely intent.
+  2. **Deploy-time CDN header override.** The CDN sets a different `Content-Security-Policy` HTTP header that includes the Supabase origin in `connect-src`, overriding the `<meta>` tag. Common pattern but invisible in this repo.
+  3. **Add Supabase origin to `connect-src` in svelte.config.js.** Would require a wildcard or env-driven config since `PUBLIC_SUPABASE_URL` is runtime-resolved. Awkward but explicit.
+  4. **CSP `mode: 'auto-report'` in dev / `auto` in prod, or report-only meta.** Lets violations be observed without blocking — but defers the real fix.
+
+**Resolution scope:** architect adjudication on which posture is intended. If (1) or (2), document the deployment-config dependency in `svelte.config.js` + a deploy-runbook entry. If (3), implement + add a test pin that scans the built CSP for the Supabase origin allowlist. The svelte-config-csp.test.ts pin in PR #91 currently asserts `connect-src 'self'` is the value; that test needs to evolve with whichever resolution lands.
+**Blocker for:** production launch — every Edge Function call breaks under the current meta CSP unless an external (deployment-config) override is in place. Local dev with `PUBLIC_SUPABASE_URL=http://localhost:54321` is ALSO blocked by the same CSP if dev mode emits the meta tag.
+
 ---
 
 ## How to use this file
