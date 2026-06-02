@@ -1280,6 +1280,26 @@ The register call MUST gate on `'serviceWorker' in navigator` to avoid hard-fail
 **Resolution scope:** architect adjudication on which posture is intended. If (1) or (2), document the deployment-config dependency in `svelte.config.js` + a deploy-runbook entry. If (3), implement + add a test pin that scans the built CSP for the Supabase origin allowlist. The svelte-config-csp.test.ts pin in PR #91 currently asserts `connect-src 'self'` is the value; that test needs to evolve with whichever resolution lands.
 **Blocker for:** production launch — every Edge Function call breaks under the current meta CSP unless an external (deployment-config) override is in place. Local dev with `PUBLIC_SUPABASE_URL=http://localhost:54321` is ALSO blocked by the same CSP if dev mode emits the meta tag.
 
+### G-T19-16 — CODEOWNERS file does not exist
+**Source:** T19.1 polish-bundle review — `.github/CODEOWNERS` is absent.
+**Finding:** GitHub branch-protection rules can require review from "code owners" but no `CODEOWNERS` file declares ownership. Without one, anyone with write access can approve their own PRs (subject to other branch-protection rules), and per-area expertise (auth, crypto, audit-log, panic-wipe) doesn't auto-route review to the right reviewer.
+**Resolution scope:** create `.github/CODEOWNERS` with at least the security-critical paths assigned to a maintainer GitHub handle. Suggested structure:
+```
+# Global default reviewer
+*                                       @<maintainer>
+
+# Auth + crypto + audit-log — security-critical
+/apps/web/src/lib/auth/                 @<security-reviewer>
+/apps/web/src/lib/crypto/               @<security-reviewer>
+/apps/web/src/lib/audit-integrity/      @<security-reviewer>
+/apps/web/src/lib/lock/                 @<security-reviewer>
+/supabase/migrations/                   @<security-reviewer>
+/supabase/functions/                    @<security-reviewer>
+/.context/decisions.md                  @<architect>
+```
+The `@<handle>` placeholders need an architect/owner decision — this gap is intentionally NOT filled unilaterally because GitHub-handle assignments have governance implications.
+**Blocker for:** branch-protection "code owners" enforcement. Standard PR review still works without it; this is process polish, not a launch-functional blocker.
+
 ---
 
 ## How to use this file
