@@ -51,6 +51,7 @@
 import { version } from '$service-worker';
 import {
   bucketForUrl,
+  clearDynamicCachesOnLock,
   clearStaleVersionCaches,
   dynamicCacheName,
   handleFetchResponse,
@@ -187,3 +188,31 @@ async function networkFirst(req: Request): Promise<Response> {
     throw err;
   }
 }
+
+// ----------------------------------------------------------------------------
+// page → SW control-channel (G-T19-14 close)
+// ----------------------------------------------------------------------------
+//
+// The page sends `{ type: 'clear-dynamic-caches' }` via
+// `navigator.serviceWorker.controller.postMessage` to invoke the
+// selective cache clear that keeps static assets. This is distinct
+// from panicWipe(), which already clears EVERY cache via the page-
+// side `caches.keys()` iteration in `lib/lock/panic-wipe.ts` — that
+// path doesn't need the SW message because the page and SW share
+// Cache Storage.
+//
+// The handler is wired now so the future lock-on-idle implementation
+// (currently a no-op in `lib/feature-flags.ts setupSafetyHandlers`)
+// can drop the page-side helper call into its event hook without
+// touching the SW.
+self.addEventListener('message', (event) => {
+  const data = event.data as { type?: unknown } | null;
+  if (!data || typeof data !== 'object') return;
+  if (data.type === 'clear-dynamic-caches') {
+    event.waitUntil(
+      clearDynamicCachesOnLock(
+        self.caches as unknown as Parameters<typeof clearDynamicCachesOnLock>[0]
+      )
+    );
+  }
+});
