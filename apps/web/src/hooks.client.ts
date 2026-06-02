@@ -123,6 +123,47 @@ if (PUBLIC_SENTRY_DSN) {
   });
 }
 
+// G-T19-14 — service-worker registration.
+//
+// SvelteKit compiles `src/service-worker.ts` into `/service-worker.js`
+// in the adapter-static output. This block hands that bundle to the
+// browser's SW registry so the SW's `install` + `activate` handlers
+// fire on first page load.
+//
+// Gating posture (production-only):
+//   - `'serviceWorker' in navigator` — UA support probe. Onboarding
+//     D.2 browser-baseline gates on the same property; this register
+//     call short-circuits via the same probe to avoid a hard-fail on
+//     UAs without SW support.
+//   - `import.meta.env.PROD` — in dev (vite dev) the SW caches stale
+//     dev builds, which produces "why does my code change not show
+//     up?" puzzlers. Registering only in production keeps the dev
+//     loop snappy AND defers SW interactions until the build output
+//     reflects what would ship.
+//
+// `type: 'module'` matches the SvelteKit-compiled SW bundle (ESM by
+// default). `scope: '/'` claims the entire origin so future fetch
+// handlers can intercept any route's requests.
+//
+// Errors route through the structured logger (Sentry conditionally
+// when the DSN is wired) — a registration failure in production is
+// a real signal worth observability, since the cache-policy gains
+// of ADR-0013 don't realize without it.
+if (import.meta.env.PROD && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker
+    .register('/service-worker.js', { scope: '/', type: 'module' })
+    .catch((err) => {
+      const error_class =
+        err && typeof err === 'object' && 'constructor' in err
+          ? (err as { constructor: { name: string } }).constructor.name
+          : 'Error';
+      log.error({ event: 'sw.register_failed', error_class });
+      if (PUBLIC_SENTRY_DSN) {
+        Sentry.captureException(err);
+      }
+    });
+}
+
 export const handleError: HandleClientError = ({ error, event }) => {
   const error_class =
     error && typeof error === 'object' && 'constructor' in error
