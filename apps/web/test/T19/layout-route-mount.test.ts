@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const LAYOUT_PATH = resolve(__dirname, '../../src/routes/+layout.svelte');
+const LAYOUT_TS_PATH = resolve(__dirname, '../../src/routes/+layout.ts');
 
 describe('T19.1 — root layout JWT-reactive header indicator', () => {
   it('the layout exists at apps/web/src/routes/+layout.svelte', () => {
@@ -165,5 +166,39 @@ describe('T19.1 — root layout JWT-reactive header indicator', () => {
     expect(signInLinkAt).toBeLessThan(navClose);
     expect(settingsLinkAt).toBeGreaterThan(navOpen);
     expect(settingsLinkAt).toBeLessThan(navClose);
+  });
+});
+
+describe('T19.1 — root layout (+layout.ts) prerender + ssr posture', () => {
+  // The per-route +page.ts files (PR #79 + earlier landed `/onboarding`,
+  // `/sign-in`, `/settings`, `/`) each re-affirm `prerender=true` +
+  // `ssr=false` so a future change to the layout can't silently flip
+  // the contract underneath them. But the +layout.ts itself — the
+  // upstream source of these settings + the default any FUTURE route
+  // inherits — was never structurally pinned. Without this guard, a
+  // refactor that drops or flips the posture in +layout.ts would
+  // silently re-enable SSR on every new route that doesn't add its
+  // own +page.ts (i.e. the layout becomes the only line of defense
+  // for new routes, and that line is unenforced).
+  //
+  // This block closes the gap with the same defense-in-depth pattern
+  // the per-route pins use.
+
+  it('the +layout.ts exists at apps/web/src/routes/+layout.ts', () => {
+    expect(existsSync(LAYOUT_TS_PATH)).toBe(true);
+  });
+
+  it('declares `prerender = true` (adapter-static needs the prerender flag on every route the build emits)', () => {
+    const src = readFileSync(LAYOUT_TS_PATH, 'utf8');
+    expect(src).toMatch(/export\s+const\s+prerender\s*=\s*true/);
+  });
+
+  it('declares `ssr = false` (no SSR — the app boots client-side; PI never lands in SSR HTML)', () => {
+    const src = readFileSync(LAYOUT_TS_PATH, 'utf8');
+    // The ssr=false posture is the load-bearing PI-safety guarantee
+    // for adapter-static deployments: without it, any future route
+    // that loads from $page.data on the server side could render PI
+    // into the prerendered HTML (which then sits in CDN cache).
+    expect(src).toMatch(/export\s+const\s+ssr\s*=\s*false/);
   });
 });
