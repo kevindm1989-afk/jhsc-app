@@ -1261,8 +1261,9 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
   2. Calls `navigator.serviceWorker.register('/sw.js', { scope: '/' })` after page load.
   3. Wires `setServiceWorkerVersion(...)` to the SvelteKit build version so cache-busting on deploy works.
 The register call MUST gate on `'serviceWorker' in navigator` to avoid hard-failing on UAs without SW support (the onboarding D.2 browser-baseline already probes this; the register call can short-circuit on the same probe).
-**Resolution scope decision:** deferred — SW registration is a separate small focused PR (or a designer/architect handoff if the cache contract evolves).
-**Blocker for:** offline support per ADR-0013. The PWA installs and works online today.
+**Status (partial close):** the registration scaffold landed in a follow-up PR. `apps/web/src/service-worker.ts` ships the minimal `install` + `activate` handlers (`skipWaiting()` + `clients.claim()`) and calls `setServiceWorkerVersion(version)` from the `$service-worker` virtual module. `hooks.client.ts` calls `navigator.serviceWorker.register('/service-worker.js', { scope: '/', type: 'module' })` gated on `import.meta.env.PROD` + `'serviceWorker' in navigator`. Errors route through the structured logger + Sentry. The SW intentionally has NO `fetch` event handler in this scope — it registers and owns the lifecycle but doesn't intercept network requests.
+**Remaining:** the fetch handler that realizes ADR-0013's cache policy (`bucketForUrl` + `handleFetchResponse` + the X-Data-Class C3/C4 reject path + the cache-policy-violation audit row + the clear-on-lock invocation). The skipWaiting + clients.claim choices in the scaffold may need re-evaluation when the fetch handler lands (a fetch-handler swap mid-page-load can break in-flight requests).
+**Blocker for:** offline support per ADR-0013. The PWA installs and works online today; the SW registers and activates but doesn't yet cache.
 
 ---
 
