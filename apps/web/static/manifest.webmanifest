@@ -2,6 +2,7 @@
   "name": "JHSC App",
   "short_name": "JHSC",
   "description": "Health and safety, for the people doing the work.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -11,6 +12,7 @@
   "theme_color": "#2d3a8c",
   "background_color": "#fbfbfa",
   "categories": ["productivity", "utilities"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon.svg",
