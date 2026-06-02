@@ -1261,13 +1261,13 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
   2. Calls `navigator.serviceWorker.register('/sw.js', { scope: '/' })` after page load.
   3. Wires `setServiceWorkerVersion(...)` to the SvelteKit build version so cache-busting on deploy works.
 The register call MUST gate on `'serviceWorker' in navigator` to avoid hard-failing on UAs without SW support (the onboarding D.2 browser-baseline already probes this; the register call can short-circuit on the same probe).
-**Status (substantially closed):** the registration scaffold + the cache-policy fetch handler both landed in follow-up PRs.
+**Status (fully closed):** the registration scaffold, the cache-policy fetch handler, AND the page→SW control-channel messaging all landed.
 
-  - `apps/web/src/service-worker.ts` registers `install` (skipWaiting), `activate` (clearStaleVersionCaches + clients.claim), and `fetch` (cache-first for static/locales, network-first for dynamic, pass-through for non-allowlisted URLs + non-GET methods). The X-Data-Class C3/C4 reject path + cache-policy-violation audit queueing run inside the library's `handleFetchResponse`.
+  - `apps/web/src/service-worker.ts` registers `install` (skipWaiting), `activate` (clearStaleVersionCaches + clients.claim), `fetch` (cache-first for static/locales, network-first for dynamic, pass-through for non-allowlisted URLs + non-GET methods), and `message` (handles `{ type: 'clear-dynamic-caches' }` → `clearDynamicCachesOnLock`). The X-Data-Class C3/C4 reject path + cache-policy-violation audit queueing run inside the library's `handleFetchResponse`.
   - `hooks.client.ts` calls `navigator.serviceWorker.register('/service-worker.js', { scope: '/', type: 'module' })` gated on `import.meta.env.PROD` + `'serviceWorker' in navigator`. Errors route through the structured logger + Sentry.
+  - `apps/web/src/lib/sw/sw-control.ts` exports `clearDynamicCachesViaServiceWorker()` for any future lock-on-idle implementation to fire when the user-lock event arrives. `panicWipe()` does NOT use this path — its page-side `caches.keys()` iteration in `lib/lock/panic-wipe.ts` reaches the SW's caches directly (page + SW share Cache Storage), which is correct for the most aggressive surface (intentional device wipe; no static-asset preservation).
 
-**Remaining:** the clear-on-lock messaging protocol. ADR-0013 mandates that a page-side `panicWipe()` or session-lock event causes the SW to call `clearDynamicCachesOnLock`. The wire-up requires a cross-thread protocol (BroadcastChannel or `postMessage` from the page to the SW); not in scope here because the protocol design needs its own focused conversation.
-**Blocker for:** the lock-side cache cleanup. Online offline-support per ADR-0013 (cache-first asset serving, network-first dynamic content, X-Data-Class enforcement) is in place today.
+**Status note:** the page-side helper has no in-tree caller yet — it's scaffolded for the future lock-on-idle event (the `setupSafetyHandlers` no-op in `lib/feature-flags.ts`). When that feature lands, its idle-event hook calls `clearDynamicCachesViaServiceWorker()` and the SW receives + dispatches the message via the listener pinned by `sw-control-channel.test.ts`.
 
 ### G-T19-15 — CSP `connect-src 'self'` blocks cross-origin Supabase Edge Function calls (needs architect adjudication)
 **Source:** T19.1 launch-readiness review (this entry recording the question at landing).
