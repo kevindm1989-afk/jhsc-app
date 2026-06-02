@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Placeholder app icon — text-based mark on the slate-indigo brand accent.
+  Designed to render legibly at home-screen sizes (typically 60–180px on
+  iOS, 48–192px on Android) AND in the install-prompt at 512px.
+
+  Designer follow-up: final brand iconography + maskable safe-area mark +
+  rasterized PNG sources (192/512 minimum; 1024 for high-density).
+  Tracked under the manifest known-gap entry.
+
+  The viewBox uses the standard 512×512 PWA icon canvas; the inner mark
+  sits inside the W3C maskable "safe zone" (centered 80% of the canvas)
+  so a future `purpose: "maskable"` icon can adopt the same SVG without
+  re-layout. No vector text fallback dependency: the `JHSC` letters are
+  rendered with explicit font-family + a generic-sans fallback chain
+  identical to app.html so a missing system font degrades gracefully.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="JHSC">
+  <rect width="512" height="512" rx="96" ry="96" fill="#2d3a8c"/>
+  <text
+    x="256"
+    y="305"
+    text-anchor="middle"
+    fill="#ffffff"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif"
+    font-size="160"
+    font-weight="700"
+    letter-spacing="-4"
+  >JHSC</text>
+</svg>
