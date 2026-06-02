@@ -34,6 +34,12 @@
 /// <reference types="@sveltejs/kit" />
 /// <reference lib="webworker" />
 
+// eslint-config: the project's flat config wires `globals.browser` +
+// `globals.node` but not `globals.serviceworker`. Declaring the SW-only
+// global names this file uses keeps the `no-undef` rule off while
+// avoiding a config-wide change that would affect every other file.
+/* global ServiceWorkerGlobalScope */
+
 import { version } from '$service-worker';
 import { setServiceWorkerVersion } from '$lib/sw';
 
