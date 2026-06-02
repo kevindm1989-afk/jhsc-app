@@ -92,6 +92,27 @@ describe('T19.1 — manifest required fields (W3C PWA installability)', () => {
     expect(manifest.lang).toBe('en-CA');
   });
 
+  it('declares `id: "/"` (explicit app identity — stable across future start_url changes)', () => {
+    // W3C: without an explicit `id`, the manifest's identity is derived
+    // from `start_url`. Changing `start_url` later would orphan every
+    // already-installed instance — the OS treats the new manifest as a
+    // distinct app, and the user has to reinstall to pick up the change.
+    // Pinning `id: "/"` decouples identity from `start_url` so a future
+    // landing-route refactor doesn't break existing installs.
+    expect(manifest.id).toBe('/');
+  });
+
+  it('declares `prefer_related_applications: false` (defense against native-app upsell drift)', () => {
+    // `false` is the W3C default, but pinning it makes the contract
+    // explicit. A future change that flips this to `true` would invite
+    // the OS to surface a "Get the native app" banner alongside the
+    // install prompt — JHSC's posture (per JHSC-APP-PLAN.md T10) is
+    // PWA-installable WITHOUT an app-store account; native-app upsell
+    // contradicts that and exposes a forced-disclosure side channel
+    // (app-store account records).
+    expect(manifest.prefer_related_applications).toBe(false);
+  });
+
   it('declares at least one icon (W3C installability requires icons)', () => {
     expect(Array.isArray(manifest.icons)).toBe(true);
     expect(manifest.icons.length).toBeGreaterThan(0);
