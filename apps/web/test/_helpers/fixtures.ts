@@ -21,6 +21,13 @@ export const CANARY_PII_X = 'CANARY_PII_X';
 export const CANARY_PHONE_E164 = '+15555550100';
 export const CANARY_EMAIL = 'canary.user@example.test';
 export const CANARY_PRIVKEY_SHAPE = 'CANARY_PRIVKEY_SHAPE_FIXTURE';
+// G-T19-7 / F-110 M-110c — passphrase + TOTP shape canaries. Stand-ins
+// for raw recovery-passphrase fragments and TOTP codes that would
+// originate from `lib/onboarding/*` / `lib/lock/*` if a code-path bug
+// fed them to a breadcrumb-emitting sink. The scrubber treats either
+// literal in any captured event as a P0 incident.
+export const CANARY_PASSPHRASE = 'CANARY_PASSPHRASE_FIXTURE';
+export const CANARY_TOTP = 'CANARY_TOTP_FIXTURE';
 
 // ============================================================================
 // Synthetic personal data — clearly labeled as fixtures.

@@ -220,6 +220,14 @@ export const CANARIES: readonly string[] = [
   '+15555550100',               // synthetic E.164 phone
   'canary.user@example.test',   // synthetic email
   'CANARY_PRIVKEY_SHAPE_FIXTURE', // stand-in for the 32-byte privkey canary
+  // G-T19-7 / F-110 M-110c — passphrase + TOTP canaries. Neither shape is
+  // caught by the free-text regexes below (passphrase is just words; TOTP
+  // is below the phone-regex 8-digit floor). The static lint
+  // `scripts/check-onboarding-no-passphrase-leak.sh` prevents these
+  // surfaces from feeding raw material to breadcrumb / console / TTS
+  // sinks; these literals are the runtime tripwire for any escape.
+  'CANARY_PASSPHRASE_FIXTURE',
+  'CANARY_TOTP_FIXTURE',
 ];
 
 // ----------------------------------------------------------------------------
