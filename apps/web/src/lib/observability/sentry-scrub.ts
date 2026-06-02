@@ -222,7 +222,20 @@ export const CANARIES: readonly string[] = [
   'CANARY_PII_X',
   '+15555550100',
   'canary.user@example.test',
-  'CANARY_PRIVKEY_SHAPE_FIXTURE'
+  'CANARY_PRIVKEY_SHAPE_FIXTURE',
+  // G-T19-7 / F-110 M-110c — canary fixtures for passphrase + TOTP fragments
+  // that may originate from breadcrumbs emitted under `lib/onboarding/*` or
+  // `lib/lock/*`. Neither shape is caught by the scrubFreeText regexes (a
+  // BIP39-style passphrase is just words; a TOTP is six digits — both below
+  // the phone-regex floor of eight digits). The defense is per-call: code
+  // paths in those surfaces MUST NEVER feed raw passphrase / TOTP material
+  // to console / breadcrumb / TTS sinks (statically enforced by
+  // scripts/check-onboarding-no-passphrase-leak.sh). These canary literals
+  // are the runtime tripwire — if either string surfaces in any captured
+  // event, the panicSink fires 'canary' and the event is dropped, exactly
+  // like the existing 4 canaries.
+  'CANARY_PASSPHRASE_FIXTURE',
+  'CANARY_TOTP_FIXTURE'
 ];
 
 /**
@@ -233,7 +246,19 @@ export const CANARIES: readonly string[] = [
  * regex; those leave the event intact and the marker survives only the
  * keyed channels (`tags`, etc.) caught by the final byte-level scan.
  */
-const MARKER_CANARIES: readonly string[] = ['CANARY_PII_X', 'CANARY_PRIVKEY_SHAPE_FIXTURE'];
+const MARKER_CANARIES: readonly string[] = [
+  'CANARY_PII_X',
+  'CANARY_PRIVKEY_SHAPE_FIXTURE',
+  // G-T19-7 / F-110 M-110c — same scalar-channel first-pass coverage
+  // for the passphrase + TOTP canaries. Without entry in MARKER_CANARIES
+  // they'd only be caught by the final byte-level scan in beforeSend —
+  // which still drops the event, but the first-pass check fires BEFORE
+  // the redactInPlace deep-copy + scrubFreeText pass and so reports the
+  // P0 with less work + on the original payload's exception/message
+  // channels.
+  'CANARY_PASSPHRASE_FIXTURE',
+  'CANARY_TOTP_FIXTURE'
+];
 
 // ----------------------------------------------------------------------------
 // 4. Size threshold
