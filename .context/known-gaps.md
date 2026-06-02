@@ -1243,6 +1243,26 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Status (2026-05-25): packet regeneration DONE** (tech-writer pass, commit recording this gap). Counts corrected to 151 + 26 + 1 = 178; A11y summary updated 18→26 with the new SR categories. Substantive-delta audit of the +17 `onboarding.*` keys found all operational EXCEPT `panic_wipe_d6.error.audit_emit_failed` — a duress-context safety claim ("we did not wipe anything … nothing has been deleted yet") that the RR-1 fix made user-reachable; folded into HG-10 packet Paragraph 5(e) so it gets per-paragraph counsel ratification. **Remaining: external labour-lawyer ratification (HG-10) — out of agent scope.**
 **Blocker for:** HG-10 ratification → T19 merge. (T19 merge is already gated on HG-10; this expands the packet, it does not add a new gate.)
 
+### G-T19-13 — PWA manifest ships with placeholder SVG icon; designer pass owes final brand iconography + PNG rasters
+**Source:** T19.1 PWA-manifest scaffolding PR (this entry recording the gap at landing).
+**Finding:** `apps/web/static/manifest.webmanifest` + `apps/web/static/icon.svg` + the `app.html` PWA wire-up ship the install-prompt scaffolding so the app is installable today. The SVG icon is a deliberately minimal text-based placeholder ("JHSC" on slate-indigo) — NOT the final brand mark. Three follow-up items remain:
+  1. **Final brand iconography.** A designer pass replaces `icon.svg` with the final mark (logo lockup, geometric mark, or similar — design decision).
+  2. **Rasterized PNG sources.** Legacy iOS (<14) and some Android UAs prefer PNG. Add `icon-192.png`, `icon-512.png`, and an `icon-512-maskable.png` (with a `purpose: "maskable"` entry alongside the SVG in the manifest) to cover the install-prompt requirement under those UAs.
+  3. **Dark-mode `theme-color` variant.** The current single `<meta name="theme-color">` paints the OS chrome with the light-mode accent on every UA, regardless of `prefers-color-scheme`. Once a dark brand accent token lands, split via `media=(prefers-color-scheme: dark)`.
+**Resolution scope:** designer pass (1 + 2) + token-pass (3). The scaffolding tests (`apps/web/test/T19/pwa-manifest.test.ts`) already pin the structural contract, so the designer's icon swap is constrained — the SVG must stay at `/icon.svg`, keep the `#2d3a8c` brand color (or update tokens + this file in lockstep), and carry the `aria-label="JHSC"` for SR fallback.
+**Blocker for:** none for v1 ship — the placeholder is functional. Real brand iconography is launch-polish for the marketing surface, not a launch-blocker for committee use.
+
+### G-T19-14 — Service-worker registration not wired (cache module exists library-only)
+**Source:** T19.1 PWA-manifest scaffolding PR (this entry recording the gap at landing).
+**Finding:** `apps/web/src/lib/sw/index.ts` implements the T10 / ADR-0013 cache-policy module (closed allowlist + X-Data-Class sanity check + clear-on-lock + version-bump invalidation), but no production code path calls `navigator.serviceWorker.register(...)`. Consequence: the cache policy is unit-tested but not active in production — the app installs cleanly via the PWA manifest, but the offline / app-shell caching behaviour the module promises does not engage. The browser still functions; the offline-supported routes from ADR-0013 are not cacheable until the register call lands.
+**Resolution scope:** an `onMount` (or `hooks.client.ts` boot block) that:
+  1. Builds the SW entry file (Vite/SvelteKit pattern: `import.meta.url` + `?worker` import OR a separate static SW file under `apps/web/static/sw.js`).
+  2. Calls `navigator.serviceWorker.register('/sw.js', { scope: '/' })` after page load.
+  3. Wires `setServiceWorkerVersion(...)` to the SvelteKit build version so cache-busting on deploy works.
+The register call MUST gate on `'serviceWorker' in navigator` to avoid hard-failing on UAs without SW support (the onboarding D.2 browser-baseline already probes this; the register call can short-circuit on the same probe).
+**Resolution scope decision:** deferred — SW registration is a separate small focused PR (or a designer/architect handoff if the cache contract evolves).
+**Blocker for:** offline support per ADR-0013. The PWA installs and works online today.
+
 ---
 
 ## How to use this file

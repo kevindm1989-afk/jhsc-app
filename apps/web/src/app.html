@@ -2,7 +2,45 @@
 <html lang="en-CA" %sveltekit.theme%>
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="data:," />
+    <!--
+      Favicon + home-screen icon. The SVG mark serves both the desktop
+      tab favicon and the iOS `apple-touch-icon` role (iOS 14+ accepts
+      SVG; older versions fall back to the favicon). Designer follow-up
+      replaces the placeholder mark with the final brand iconography
+      and adds rasterized PNG sources (192/512 minimum) for any UA that
+      doesn't support SVG icons.
+    -->
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <!--
+      PWA manifest — declares name / scope / display / brand colors so
+      "Add to Home Screen" produces an installable, app-shell-like
+      surface (per JHSC-APP-PLAN.md threat T10: installable without an
+      app-store account). The manifest itself is the only required wire-
+      up; the service-worker register call is a separate follow-up.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!--
+      theme-color drives the OS chrome (URL bar on Android, status bar
+      tint on iOS standalone). Slate-indigo `accent.default` from
+      design-tokens.json. Light/dark variants would split this via
+      `media=(prefers-color-scheme: ...)` once a dark brand token lands;
+      shipping the single light-mode value first so the chrome is
+      branded today.
+    -->
+    <meta name="theme-color" content="#2d3a8c" />
+    <!--
+      iOS standalone-mode hints (Safari-only — Android ignores these in
+      favor of the manifest's display:standalone). `apple-mobile-web-app-
+      capable=yes` lets a user Add to Home Screen and launch into a
+      chrome-less app surface (no Safari address bar). The status-bar
+      style is set to default so iOS picks tint by surface background;
+      `black-translucent` would let body content paint under the notch
+      and is reserved for a deliberate full-bleed pass.
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="JHSC" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <meta name="robots" content="noindex, nofollow" />
