@@ -202,3 +202,46 @@ describe('T19.1 — root layout (+layout.ts) prerender + ssr posture', () => {
     expect(src).toMatch(/export\s+const\s+ssr\s*=\s*false/);
   });
 });
+
+describe('T19.1 — root layout (+layout.svelte) feature-flag boot wiring', () => {
+  // `setupSafetyHandlers` from `$lib/feature-flags` is the load-bearing
+  // import that future panic-wipe / lock-on-idle / visibility-change
+  // handlers will plug into (per the feature-flags module's documented
+  // header: "Reserved for future panic-wipe / lock-on-idle / visibility-
+  // change handlers; no-op now."). The function is a no-op at scaffold
+  // time, so removing the import + onMount call would silently pass
+  // every existing test — but the day someone wires the lock-on-idle
+  // handler into `setupSafetyHandlers`, that wiring would never fire
+  // because the layout no longer calls it.
+  //
+  // Pin the wiring contract: the layout imports the function AND calls
+  // it from onMount. Drift on either side leaves a load-bearing hook
+  // dangling.
+
+  it('imports setupSafetyHandlers from $lib/feature-flags', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    expect(src).toMatch(
+      /import\s*{[^}]*setupSafetyHandlers[^}]*}\s+from\s+['"]\$lib\/feature-flags['"]/
+    );
+  });
+
+  it('calls setupSafetyHandlers() from inside an onMount block', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // Match the canonical Svelte pattern: `onMount(() => { setupSafetyHandlers(); })`
+    // OR the explicit-body version with newlines. Allow either form so
+    // a minor refactor (e.g., adding a second handler call alongside it)
+    // doesn't break the pin.
+    expect(src).toMatch(/onMount\s*\(\s*\(\s*\)\s*=>\s*\{[\s\S]*?setupSafetyHandlers\s*\(\s*\)/);
+  });
+
+  it('imports onMount from svelte (defense pin against accidentally dropping the boot lifecycle entry point)', () => {
+    const src = readFileSync(LAYOUT_PATH, 'utf8');
+    // Defense pin: a refactor that removes the onMount import would
+    // break the call above with a clear error, but pinning the import
+    // separately catches the case where someone refactors the call to
+    // a different lifecycle hook without removing the onMount import
+    // (e.g., to afterUpdate, which would fire on every reactive
+    // change instead of once at mount).
+    expect(src).toMatch(/import\s*{[^}]*onMount[^}]*}\s+from\s+['"]svelte['"]/);
+  });
+});
