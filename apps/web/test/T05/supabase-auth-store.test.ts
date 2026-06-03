@@ -169,10 +169,6 @@ describe('T05.1 / G-T05-1 — SupabaseAuthStoreNotImplementedError on deferred m
     ).toThrow(SupabaseAuthStoreNotImplementedError);
   });
 
-  it('revokeSession throws', () => {
-    expect(() => store.revokeSession('x', 0)).toThrow(SupabaseAuthStoreNotImplementedError);
-  });
-
   it('revokeAllForUser throws', () => {
     expect(() => store.revokeAllForUser('x', 0)).toThrow(SupabaseAuthStoreNotImplementedError);
   });
@@ -331,5 +327,45 @@ describe('T05.1 — SupabaseAuthStore.listCredentialsForUser (read-only by user)
     const { transport } = captureTransport(200, { ok: true, data: 'not-an-array' });
     const out = await new SupabaseAuthStore({ transport }).listCredentialsForUser(userId);
     expect(out).toEqual([]);
+  });
+});
+
+describe('T05.1 — SupabaseAuthStore.revokeSession (UPDATE via revoke_my_session wrapper)', () => {
+  const sessionId = 'aaaaaaaa-0000-4000-8000-000000000001';
+
+  it('emits { op: "revoke_session", session_id }', async () => {
+    const { transport, calls } = captureTransport(200, { ok: true, data: null });
+    await new SupabaseAuthStore({ transport }).revokeSession(sessionId, 0);
+    expect(calls).toEqual([{ op: 'revoke_session', session_id: sessionId }]);
+  });
+
+  it('returns void on 200 { ok: true }', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: null });
+    const out = await new SupabaseAuthStore({ transport }).revokeSession(sessionId, 0);
+    expect(out).toBeUndefined();
+  });
+
+  it('returns void on 403 rls_denied (caller does not own the session OR id does not exist)', async () => {
+    // The wrapper collapses both cases to rls_denied to avoid leaking
+    // which session_ids are valid. AuthStore.revokeSession contract
+    // returns void on success; the caller can't distinguish "already
+    // gone" from "not yours" — both leave the surface unchanged.
+    const { transport } = captureTransport(403, { ok: false, reason: 'rls_denied' });
+    const out = await new SupabaseAuthStore({ transport }).revokeSession('not-yours', 0);
+    expect(out).toBeUndefined();
+  });
+
+  it('returns void on network error (status 0) — call is best-effort', async () => {
+    const { transport } = captureTransport(0, null);
+    const out = await new SupabaseAuthStore({ transport }).revokeSession(sessionId, 0);
+    expect(out).toBeUndefined();
+  });
+
+  it('drops the `now` parameter silently (server uses now() — F-39 timestamp authority)', async () => {
+    const { transport, calls } = captureTransport(200, { ok: true, data: null });
+    await new SupabaseAuthStore({ transport }).revokeSession(sessionId, 9_999_999_999);
+    // The op-dispatch body must NOT carry the client-supplied timestamp.
+    expect(calls[0]).not.toHaveProperty('now');
+    expect(calls[0]).not.toHaveProperty('revoked_at');
   });
 });

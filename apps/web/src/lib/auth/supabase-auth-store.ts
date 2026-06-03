@@ -232,8 +232,27 @@ export class SupabaseAuthStore implements AuthStore {
     return [];
   }
 
-  revokeSession(_session_id: string, _now: number): Promise<void> {
-    throw new SupabaseAuthStoreNotImplementedError('revokeSession');
+  async revokeSession(session_id: string, _now: number): Promise<void> {
+    // The `_now` parameter is part of the AuthStore contract (the
+    // MemoryAuthStore uses it as the timestamp on the in-memory
+    // session row). The Supabase wire-up doesn't need it — the
+    // SECURITY DEFINER `revoke_my_session` function uses `now()`
+    // server-side so the timestamp comes from Postgres, not the
+    // client. Drop the parameter silently for parity with the
+    // interface.
+    const { status, body } = await this.transport({ op: 'revoke_session', session_id });
+    // 200 → success. The body's `data` is null per the dispatcher
+    // contract; we don't read it.
+    if (status === 200) {
+      const parsed = body as { ok?: boolean } | null;
+      if (parsed && parsed.ok === true) return;
+    }
+    // 0 = network error; 403 = rls_denied (caller doesn't own session,
+    // OR session_id does not exist — the wrapper collapses both cases
+    // to avoid leaking validity). Both surface as a void return for
+    // AuthStore contract parity (no exceptions on revoke; the
+    // session_id was either invalidated or wasn't valid to begin with).
+    return;
   }
 
   revokeAllForUser(_user_id: string, _now: number): Promise<string[]> {

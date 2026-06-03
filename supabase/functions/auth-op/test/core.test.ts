@@ -21,6 +21,10 @@ function depsWith(opts: {
   sessions?: Record<string, SessionRow>;
   userSessions?: Record<string, SessionRow[]>;
   userCredentials?: Record<string, CredentialRow[]>;
+  /** Sessions the caller is allowed to revoke. Anything else → rls_denied. */
+  revocableSessions?: Set<string>;
+  /** Sessions actually revoked (for assertion). */
+  revoked?: Set<string>;
 }): AuthOpDeps {
   return {
     async getUserById(user_id: string): Promise<UserRow | null> {
@@ -34,6 +38,13 @@ function depsWith(opts: {
     },
     async listCredentialsForUser(user_id: string): Promise<CredentialRow[]> {
       return opts.userCredentials?.[user_id] ?? [];
+    },
+    async revokeMySession(session_id: string) {
+      if (!opts.revocableSessions?.has(session_id)) {
+        return { ok: false as const, reason: 'rls_denied' as const, status: 403 };
+      }
+      opts.revoked?.add(session_id);
+      return { ok: true as const };
     }
   };
 }
@@ -247,6 +258,42 @@ Deno.test('handleAuthOp — list_credentials_for_user returns {ok:true, data:[]}
 
 Deno.test('handleAuthOp — list_credentials_for_user with no user_id returns bad_request (400)', async () => {
   const result = await handleAuthOp({ op: 'list_credentials_for_user' }, depsWith({}));
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.reason, 'bad_request');
+});
+
+// ----------------------------------------------------------------------------
+// revoke_session — calls revoke_my_session SECURITY DEFINER wrapper
+// ----------------------------------------------------------------------------
+
+Deno.test('handleAuthOp — revoke_session calls revokeMySession and returns ok on success', async () => {
+  const revoked = new Set<string>();
+  const result = await handleAuthOp(
+    { op: 'revoke_session', session_id: sessionId },
+    depsWith({ revocableSessions: new Set([sessionId]), revoked })
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) assertEquals(result.data, null);
+  assertEquals(revoked.has(sessionId), true);
+});
+
+Deno.test('handleAuthOp — revoke_session returns rls_denied (403) for non-owned session', async () => {
+  // The wrapper collapses "session not found" + "session belongs to
+  // someone else" into the same rls_denied error to avoid leaking
+  // which session_ids are valid.
+  const result = await handleAuthOp(
+    { op: 'revoke_session', session_id: 'cccccccc-0000-4000-8000-000000000000' },
+    depsWith({ revocableSessions: new Set() })
+  );
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.reason, 'rls_denied');
+    assertEquals(result.status, 403);
+  }
+});
+
+Deno.test('handleAuthOp — revoke_session with no session_id returns bad_request (400)', async () => {
+  const result = await handleAuthOp({ op: 'revoke_session' }, depsWith({}));
   assertEquals(result.ok, false);
   if (!result.ok) assertEquals(result.reason, 'bad_request');
 });

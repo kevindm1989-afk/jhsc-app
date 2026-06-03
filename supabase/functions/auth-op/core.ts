@@ -50,6 +50,7 @@ export interface AuthOpDeps {
   getSessionById(session_id: string): Promise<SessionRow | null>;
   listActiveSessionsForUser(user_id: string): Promise<SessionRow[]>;
   listCredentialsForUser(user_id: string): Promise<CredentialRow[]>;
+  revokeMySession(session_id: string): Promise<{ ok: true } | { ok: false; reason: AuthOpReason; status: number }>;
 }
 
 /**
@@ -95,6 +96,21 @@ export async function handleAuthOp(
       // user with no active sessions is a normal state (e.g., right
       // after logout-everywhere), not an error.
       return { ok: true, data: rows };
+    }
+
+    case 'revoke_session': {
+      // Invokes the `revoke_my_session` SECURITY DEFINER wrapper that
+      // verifies auth.uid() = session.user_id internally. The
+      // dispatcher passes session_id through; ownership enforcement
+      // happens inside the SQL function (G-T05-3 partial close).
+      const session_id = typeof input.session_id === 'string' ? input.session_id : '';
+      if (!session_id) return { ok: false, reason: 'bad_request', status: 400 };
+      const r = await deps.revokeMySession(session_id);
+      if (!r.ok) return r;
+      // The AuthStore.revokeSession contract returns void on success.
+      // Return null in the data slot so the wire shape stays
+      // `{ok:true, data:...}`.
+      return { ok: true, data: null };
     }
 
     case 'list_credentials_for_user': {
