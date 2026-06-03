@@ -18,7 +18,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { handleAuthOp, type AuthOpInput } from './core.ts';
-import type { SessionRow, UserRow } from './types.ts';
+import type { CredentialRow, SessionRow, UserRow } from './types.ts';
 
 // Convert a Postgres timestamptz (ISO 8601 string) to ms-epoch as the
 // AuthStore interface expects. `null` and `undefined` pass through.
@@ -128,6 +128,38 @@ Deno.serve(async (req) => {
         exp: tsToMs(row.expires_at as string | null) ?? 0,
         device_fingerprint: (row.device_fingerprint as string | null) ?? undefined,
         revoked_at: tsToMs(row.revoked_at as string | null)
+      }));
+    },
+
+    async listCredentialsForUser(user_id: string): Promise<CredentialRow[]> {
+      // RLS policy `webauthn_credentials_select_self` enforces
+      // auth.uid() = user_id. The query selects the snake_case
+      // columns and renames them to the PasskeyCredential camelCase
+      // form so the browser-side AuthStore can consume the response
+      // without further mapping.
+      const { data, error } = await supabase
+        .from('webauthn_credentials')
+        .select('credential_id, user_id, public_key, counter, aaguid, transports, device_label, rp_id')
+        .eq('user_id', user_id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        log.error({ event: 'auth.list_credentials_for_user.query_failed', error_class: error.code });
+        return [];
+      }
+      if (!data) return [];
+      return data.map((row) => ({
+        credentialId: row.credential_id as string,
+        user_id: row.user_id as string,
+        rpId: row.rp_id as string,
+        // PostgREST returns bytea as `\x<hex>`; the browser-side
+        // doesn't validate the key cryptographically (mint-session
+        // does that), so the hex form passes through.
+        publicKey: row.public_key as string,
+        counter: Number(row.counter ?? 0),
+        aaguid: (row.aaguid as string | null) ?? '',
+        transports: (row.transports as string[] | null) ?? [],
+        device_label: (row.device_label as string | null) ?? ''
       }));
     }
   });

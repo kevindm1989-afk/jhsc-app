@@ -141,15 +141,40 @@ export class SupabaseAuthStore implements AuthStore {
   }
 
   // ---------------------------------------------------------------------------
-  // Passkeys — all deferred
+  // Passkeys — listCredentialsForUser wired (read-only on
+  // webauthn_credentials; RLS policy webauthn_credentials_select_self
+  // enforces caller-scope).
+  //
+  // getCredential remains deferred: lookup by credential_id requires
+  // visiting a row before auth.uid() is resolved (the credential is the
+  // basis for the eventual session). That cross-row lookup is mint-
+  // session's job — it runs server-side via the mint_writer-scoped
+  // path with the credential_id as input and resolves the user_id
+  // before any JWT is issued (F-117). Exposing the same lookup as a
+  // browser AuthStore method would either need a SECURITY DEFINER
+  // function (with careful access controls) or a separate Edge
+  // Function — both deferred to a focused PR.
+  //
+  // saveCredential / deleteCredential require INSERT/DELETE on the
+  // table, which RLS doesn't permit for `authenticated` today. They
+  // ride on the enrollment / revocation SQL paths.
   // ---------------------------------------------------------------------------
 
   getCredential(_credentialId: string): Promise<PasskeyCredential | null> {
     throw new SupabaseAuthStoreNotImplementedError('getCredential');
   }
 
-  listCredentialsForUser(_user_id: string): Promise<PasskeyCredential[]> {
-    throw new SupabaseAuthStoreNotImplementedError('listCredentialsForUser');
+  async listCredentialsForUser(user_id: string): Promise<PasskeyCredential[]> {
+    const { status, body } = await this.transport({
+      op: 'list_credentials_for_user',
+      user_id
+    });
+    if (status === 0) return [];
+    const parsed = body as { ok?: boolean; data?: PasskeyCredential[] } | null;
+    if (parsed && parsed.ok === true && Array.isArray(parsed.data)) {
+      return parsed.data;
+    }
+    return [];
   }
 
   saveCredential(_cred: PasskeyCredential): Promise<void> {

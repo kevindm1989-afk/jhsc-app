@@ -18,6 +18,28 @@ export interface UserRow {
 }
 
 /**
+ * Server-side PasskeyCredential shape — mirrors `PasskeyCredential` in
+ * apps/web/src/lib/auth/types.ts, with field-name conversion for the
+ * snake_case ↔ camelCase boundary handled by the dispatcher serializer
+ * (NOT by the SQL query, which uses the table's snake_case columns).
+ *
+ * `publicKey` is the hex-shaped form Postgres returns for a `bytea`
+ * column via PostgREST (e.g., `\x04abcd...`). The browser-side
+ * AuthStore doesn't validate the key cryptographically — that
+ * happens server-side in mint-session — so the hex form is fine.
+ */
+export interface CredentialRow {
+  credentialId: string;
+  user_id: string;
+  rpId: string;
+  publicKey: string;
+  counter: number;
+  aaguid: string;
+  transports: string[];
+  device_label: string;
+}
+
+/**
  * Server-side AuthSession shape returned by `get_session` /
  * `list_active_sessions`. Mirrors the AuthStore.AuthSession interface
  * with one production-realistic difference: `access_token` is the

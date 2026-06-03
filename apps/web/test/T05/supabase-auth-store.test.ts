@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AuthStore, UserRow } from '../../src/lib/auth/store';
-import type { AuthSession } from '../../src/lib/auth/types';
+import type { AuthSession, PasskeyCredential } from '../../src/lib/auth/types';
 import {
   SupabaseAuthStore,
   SupabaseAuthStoreNotImplementedError,
@@ -155,10 +155,6 @@ describe('T05.1 / G-T05-1 — SupabaseAuthStoreNotImplementedError on deferred m
     expect(() => store.getCredential('x')).toThrow(SupabaseAuthStoreNotImplementedError);
   });
 
-  it('listCredentialsForUser throws', () => {
-    expect(() => store.listCredentialsForUser('x')).toThrow(SupabaseAuthStoreNotImplementedError);
-  });
-
   it('saveCredential throws', () => {
     expect(() => store.saveCredential({} as never)).toThrow(SupabaseAuthStoreNotImplementedError);
   });
@@ -288,6 +284,52 @@ describe('T05.1 — SupabaseAuthStore.listActiveSessions (read-only by user)', (
   it('returns [] when the body is malformed (non-array data)', async () => {
     const { transport } = captureTransport(200, { ok: true, data: { not: 'an array' } });
     const out = await new SupabaseAuthStore({ transport }).listActiveSessions(userId);
+    expect(out).toEqual([]);
+  });
+});
+
+describe('T05.1 — SupabaseAuthStore.listCredentialsForUser (read-only by user)', () => {
+  const userId = '00000000-0000-4000-8000-000000000001';
+  const credentials: PasskeyCredential[] = [
+    {
+      credentialId: 'cred-abc',
+      user_id: userId,
+      rpId: 'jhsc.example',
+      publicKey: '\\xdeadbeef',
+      counter: 5,
+      aaguid: 'd548b250-0000-4000-8000-000000000000',
+      transports: ['internal'],
+      device_label: 'iPhone (work)'
+    }
+  ];
+
+  it('emits { op: "list_credentials_for_user", user_id }', async () => {
+    const { transport, calls } = captureTransport(200, { ok: true, data: credentials });
+    await new SupabaseAuthStore({ transport }).listCredentialsForUser(userId);
+    expect(calls).toEqual([{ op: 'list_credentials_for_user', user_id: userId }]);
+  });
+
+  it('returns the array on success', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: credentials });
+    const out = await new SupabaseAuthStore({ transport }).listCredentialsForUser(userId);
+    expect(out).toEqual(credentials);
+  });
+
+  it('returns [] when the user has no credentials (200 with empty array)', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: [] });
+    const out = await new SupabaseAuthStore({ transport }).listCredentialsForUser(userId);
+    expect(out).toEqual([]);
+  });
+
+  it('returns [] on network error', async () => {
+    const { transport } = captureTransport(0, null);
+    const out = await new SupabaseAuthStore({ transport }).listCredentialsForUser(userId);
+    expect(out).toEqual([]);
+  });
+
+  it('returns [] when the body is malformed (non-array data)', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: 'not-an-array' });
+    const out = await new SupabaseAuthStore({ transport }).listCredentialsForUser(userId);
     expect(out).toEqual([]);
   });
 });
