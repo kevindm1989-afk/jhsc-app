@@ -16,7 +16,7 @@
  *     pass #4 confirms **per-attempt** as canonical wording: both success
  *     and failure paths emit a single structured-log INFO line.
  *   - ADR-0016 / amendment pass #4 — pseudonyms derive from HMAC-SHA-256
- *     keyed by `app.hmac_pseudonym_key` (SQL) / `HMAC_PSEUDONYM_KEY`
+ *     keyed by `app.hmac_pseudonym_key` (SQL) / `HMAC_/PSEUDONYM_KEY` (split-form per G-T05-10)
  *     env var (TS); the boot smoke test in `./server/key-parity.ts`
  *     refuses to start on mismatch.
  *

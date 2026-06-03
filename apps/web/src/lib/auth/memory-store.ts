@@ -12,7 +12,7 @@
  * Pseudonymisation algorithm: **HMAC-SHA-256** (per ADR-0016 / amendment
  * pass #4 §B1). The same key (`this.hmacKey`) drives `pseudonymOf(uid)`
  * AND the `consumedTotpCodes` lookup hash. In production the key is the
- * `HMAC_PSEUDONYM_KEY` env var (server-only) whose SHA-256 must equal the
+ * `HMAC_/PSEUDONYM_KEY` env var (server-only; split-form keeps the literal out of the bundle scan per G-T05-10) whose SHA-256 must equal the
  * SHA-256 of the Postgres GUC `app.hmac_pseudonym_key` — see
  * `apps/web/src/lib/auth/server/key-parity.ts` for the boot smoke test.
  *

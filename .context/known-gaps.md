@@ -37,7 +37,12 @@ The wire shape is the same op-dispatch pattern used by t07-op / concern-op / rep
 **Source:** second-opinion-reviewer on T05.
 **Finding:** `supabase/migrations/00000000000001_auth.sql:458-540` — `revoke_session`, `revoke_all_sessions`, `revoke_passkey` enforce the privilege boundary via `GRANT EXECUTE TO supabase_auth_admin` only. They do not constrain by `auth.uid()`. If the Edge Function wrapper is forgotten or buggy, a logged-in attacker who can call the RPC could revoke arbitrary sessions or delete arbitrary credentials by guessing UUIDs (UUID unguessability is the practical mitigation).
 **Resolution scope (T05.1):** add `IF v_session.user_id != auth.uid() THEN RAISE EXCEPTION ...` (or equivalent) inside each function. Defense in depth.
-**Status (partial close):** migration `00000000000012_t05_revoke_my_session.sql` introduces `public.revoke_my_session(p_session_id)` — an `authenticated`-grantable wrapper that verifies `auth.uid() = session.user_id` INSIDE its SECURITY DEFINER body before delegating to the canonical `revoke_session`. Demonstrates the in-function defense-in-depth posture and lets the T05.1 AuthStore wire-up call it directly without a service-role admin client. The original `revoke_session` / `revoke_all_sessions` / `revoke_passkey` functions still rely on their caller (the `supabase_auth_admin`-granted wrapper) to enforce ownership; bringing the check inside those functions per the original recommendation is a follow-up. Sibling wrappers (`revoke_all_my_sessions`, `revoke_my_passkey`) ride the same pattern when their AuthStore methods land.
+**Status (closed):** the in-function `auth.uid()` defense-in-depth has now landed across both call paths:
+
+  - **Migrations 12 + 13** added the `revoke_my_*` authenticated-grantable wrappers (`revoke_my_session`, `revoke_all_my_sessions`, `revoke_my_passkey`) that verify ownership BEFORE delegating to the canonical functions.
+  - **Migration 14** adds the in-function check INSIDE `revoke_session` + `revoke_all_sessions` themselves: `IF auth.uid() IS NOT NULL AND target_uid IS DISTINCT FROM auth.uid() THEN RAISE rls_denied`. The check is conditional on `auth.uid() IS NOT NULL` so service-role / supabase_auth_admin callers (which have NULL auth.uid()) bypass it as expected.
+
+`revoke_passkey` has no uid arg in its signature — its defense lives in the `revoke_my_passkey` wrapper that queries `webauthn_credentials.user_id` and matches against `auth.uid()` before delegating. A future refactor that wants in-function defense for revoke_passkey would need to add the lookup inside the SECURITY DEFINER body, duplicating what `revoke_my_passkey` already does.
 **Blocker for:** production deploy. T07 / T08 unaffected.
 
 ### G-T05-4 — INFO logs go to `/dev/null` in production (second-opinion C8)
@@ -73,14 +78,12 @@ The wire shape is the same op-dispatch pattern used by t07-op / concern-op / rep
 ### G-T05-9 — Semgrep pattern coverage for `digest()` (security A3)
 **Source:** security-reviewer T05 re-review.
 **Finding:** `.semgrep/no-bare-sha256-in-migrations.yml` uses `digest($X, 'sha256')` in generic mode. Won't catch uppercase `DIGEST(...)`, double-quoted `"sha256"`, or `pgcrypto.digest(...)`. Not idiomatic in Postgres SQL, but defense-in-depth.
-**Resolution scope:** add sibling pattern OR move to `language: sql` if available.
-**Blocker for:** none. Cleanup.
+**Status (closed):** rule expanded to `pattern-either` covering 8 spellings: `digest`/`DIGEST` × `'sha256'`/`"sha256"` × bare/`pgcrypto.`/`extensions.` schema-qualified. Severity remains `ERROR`.
 
 ### G-T05-10 — `HMAC_PSEUDONYM_KEY` literal in TS source comments (security A1)
 **Source:** security-reviewer T05 re-review.
 **Finding:** Source comments at `apps/web/src/lib/auth/memory-store.ts:15`, `apps/web/src/lib/auth/auth-core.ts:19`, `apps/web/src/lib/observability/sentry-scrub.ts:23` contain the literal `HMAC_PSEUDONYM_KEY`. Current build pipeline strips comments; bundle stays clean. Risk: future bundler config regression (sourcemaps, comment-preserving minifier) would leak the env-var name.
-**Resolution scope:** convert to the split form used in `key-parity.ts:45` (`'HMAC_' + 'PSEUDONYM_KEY'`) or use a non-identical descriptor.
-**Blocker for:** none. Defense in depth.
+**Status (closed):** the three source comments now use the slash-broken form `HMAC_/PSEUDONYM_KEY` so a bundle-scan grep for the canonical env-var name finds zero matches in `src/`. The runtime `key-parity.ts:45` already uses the precedent split form `'HMAC_' + 'PSEUDONYM_KEY'` for the value itself; the comments adopt the same posture descriptively.
 
 ### G-T05-11 — `enrollFirstDevice` returns 410/401 differential not collapsed (security A2)
 **Source:** security-reviewer T05 re-review.
