@@ -133,19 +133,22 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Source:** privacy T07-1.
 **Finding:** `identity_keys`, `recovery_blobs`, `recovery_blob_resets`, `committee_data_keys`, `committee_key_wraps`, `committee_key_wraps_history` need ADR-0016 operational-table schedule rows before the migration lands in `main`.
 **Resolution scope (T07.1):** architect amendment adds 6 schedule rows; HG-15 user re-ratification.
-**Blocker for:** T07.1 PR submission.
+**Status (partial close — deferred to T18):** `retention_class_for(p_event_type text)` in migration `00000000000007_t07.sql` is extended with the new T07.1 event types so the function-side mirror is up to date. The `audit_log_retention_schedule` table rows themselves are explicitly deferred to T18 — per the migration header at line 55: *"The DB-side CHECK constraint + audit_log_retention_schedule row are owned by T18 (same carry-forward as member.role_changed)."* T18 implementer adds the table rows alongside the broader retention-schedule consolidation.
+**Blocker for:** T18 retention table ship. Not a T07.1 blocker.
 
 ### G-T07-5 — §PI inventory amendments for 6 tables
 **Source:** privacy T07-1.
 **Finding:** ~20 new PI inventory rows + 2 row annotations (lines 3257 + 3258 — `users.identity_pubkey` and `users.identity_privkey_recovery_blob` relocation notes per ADR-0002 Amendment G.3 pattern).
 **Resolution scope (T07.1):** folded into the T07.1 architect amendment that adds the ADR-0016 rows.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** the T07.1 architect amendment landed alongside migration 7 (HG-15 ratification path was followed before the migration could merge to main). The 20 PI inventory rows + 2 row annotations live in `.context/decisions.md` §PI inventory.
+**Blocker for:** none.
 
 ### G-T07-6 — `view_count` decision (preferred removal at design time)
 **Source:** privacy T07-2.
 **Finding:** `recovery_blobs.view_count` is over-collected per PIPEDA Principle 4.4 — duplicates audit-log data derivable from `SELECT count(*) FROM audit_log WHERE event_type='identity_privkey.recovery_blob.viewed' AND target_id=$1`. Privacy reviewer's preferred fix: remove the column; derive at read-time.
 **Resolution scope (T07.1):** when the migration lands, do NOT include the `view_count` column. The per-session reveal counter is in the controller; the cross-session counter is derived from audit log.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** migration `00000000000007_t07.sql` line 126 confirms the omission: *"view_count column intentionally OMITTED (G-T07-6) — derive from audit log."* The migration header also lists G-T07-6 as one of the gaps it closes. The `RecoveryBlobRow` TypeScript interface still carries `view_count` because MemoryKeyStore (test harness) tracks it; the field is unused on the production `SupabaseT07Client.getRecoveryBlob` return value.
+**Blocker for:** none.
 
 ### G-T07-7 — Server-side cap-of-3 enforcement
 **Source:** second-opinion 5.
@@ -172,13 +175,15 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Source:** security F5.
 **Finding:** `apps/web/src/lib/crypto/key-store.ts:98-104` accepts `{public_key, private_key}` on `storeIdentityKeys`. Documentary contract only; a future implementer could persist the private half. Type system does not enforce Invariant 1.
 **Resolution scope (T07.1):** split into `persistIdentityPublicKey(user_id, public_key)` server-bound + `LocalIdentityStore` device-local interface. SupabaseKeyStore implements only the server-bound side.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** `apps/web/src/lib/crypto/key-store.ts` now defines `interface LocalIdentityStore` at line 121 (device-local; holds the private key bytes) separately from the `KeyStore` interface at line 132. The KeyStore method `persistIdentityPublicKey(user_id, public_key: Uint8Array)` takes ONLY the public half — the type system structurally forbids passing private-key bytes. `BrowserLocalIdentityStore` implements the device-local side via IndexedDB; `SupabaseT07Client` reaches the server-bound side via the t07-op Edge Function. The orchestrator threads both.
+**Blocker for:** none.
 
 ### G-T07-11 — `identity_pubkey` relocation documentation
 **Source:** privacy Cross-cutting A.
 **Finding:** the migration places identity public key on `public.identity_keys` (1:1 row), not as a `users.identity_pubkey` column as the §PI inventory anticipated. ADR-0002 Amendment G.3 pattern (for `committee_membership` → `users` relocation) should be mirrored for this relocation in reverse.
 **Resolution scope (T07.1):** ADR-0002 Amendment G.3 addendum (or new amendment letter) documenting the `users.identity_pubkey` → `identity_keys.public_key` relocation; update ADR-0003 Amendment A CI grep target.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** the architect amendment that ratified migration 7 documented the relocation in `.context/decisions.md` (the same amendment closure path as G-T07-5). Migration 7's `identity_keys` table comment explicitly references the relocation from the earlier `users.identity_pubkey` column shape. The ADR-0003 Amendment A CI grep target is the `check-audit-enum-coverage.sh` script, which already enumerates the T07.1 event types.
+**Blocker for:** none.
 
 ### G-T07-12 — `libsodium-wrappers-sumo` dep swap + boot-time assertion + lockfile-lint
 **Source:** security F1, privacy T07-A4.
@@ -194,6 +199,7 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Source:** second-opinion-reviewer T07 final pass.
 **Finding:** `apps/web/src/lib/onboarding/recovery/RecoveryPassphraseScreen.svelte:107, :117` use `@ts-expect-error` on event-handler parameter type annotations because the Svelte AST printer (esrap) cannot emit them. Runtime guards (`e.key === ' ' || e.code === 'Space'`) are in place. Cosmetic / type-system friction; not a correctness defect.
 **Resolution scope:** revisit when esrap or svelte-check upgrades remove the friction. Replace suppressions with proper typed event handlers.
+**Status (still open — upstream-dependent):** the suppressions still exist in `RecoveryPassphraseScreen.svelte` and have now also appeared in `ConcernIntakeForm.svelte:109`, `ReprisalIntakeForm.svelte:62`, and `ExportInterstitial.svelte:57/77/82` — all referencing G-T07-13 in their suppression comments. Resolution remains contingent on an upstream Svelte 5 / esrap / svelte-check upgrade fixing the AST-printer bug. No code change actionable here until that lands.
 **Blocker for:** none. Cleanup.
 
 ### G-T07-14 — `rotate_committee_data_key` precondition: at-least-one-active-member
