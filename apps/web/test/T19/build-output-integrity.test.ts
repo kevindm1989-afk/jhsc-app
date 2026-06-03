@@ -117,5 +117,10 @@ describe.skipIf(!buildPresent)('T19.1 — built index.html head injection', () =
     expect(src).toMatch(/<meta\s+http-equiv=["']content-security-policy["']/i);
     expect(src).toContain("default-src 'self'");
     expect(src).toContain("base-uri 'self'");
+    // G-T19-15: the prerendered CSP must allow Supabase Edge Function
+    // calls. Without the wildcard the meta CSP would block every
+    // browser-side fetch to *.supabase.co at runtime.
+    expect(src).toContain('connect-src');
+    expect(src).toMatch(/connect-src[^;]*https:\/\/\*\.supabase\.co/);
   });
 });

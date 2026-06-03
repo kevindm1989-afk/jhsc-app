@@ -56,6 +56,18 @@ describe('T19.1 — CSP directives: required shapes (presence + value)', () => {
     expect(src).toMatch(/['"]default-src['"]\s*:\s*\[\s*['"]self['"]\s*\]/);
   });
 
+  it('connect-src includes \'self\' AND https://*.supabase.co (G-T19-15 close)', () => {
+    // Per the G-T19-15 resolution: the prerendered <meta CSP> must
+    // allow Edge Function fetches to *.supabase.co — the standard
+    // Supabase deploy origin. Without the wildcard the auth ceremony,
+    // panic-wipe audit emitter, and every other Edge Function
+    // consumer would be blocked at runtime. 'self' stays for same-
+    // origin assets + future custom-domain Supabase deploys.
+    expect(src).toMatch(
+      /['"]connect-src['"]\s*:\s*\[\s*['"]self['"]\s*,\s*['"]https:\/\/\*\.supabase\.co['"]\s*\]/
+    );
+  });
+
   it('script-src is set to [\'self\'] (no third-party JS at runtime per ADR-0010)', () => {
     // ADR-0010 / JHSC-APP-PLAN.md §7 forbids third-party JS. SvelteKit
     // augments this at build time with a sha256-hash entry for its

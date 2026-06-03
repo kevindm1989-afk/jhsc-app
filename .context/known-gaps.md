@@ -1269,30 +1269,22 @@ The register call MUST gate on `'serviceWorker' in navigator` to avoid hard-fail
 
 **Status note:** the page-side helper has no in-tree caller yet — it's scaffolded for the future lock-on-idle event (the `setupSafetyHandlers` no-op in `lib/feature-flags.ts`). When that feature lands, its idle-event hook calls `clearDynamicCachesViaServiceWorker()` and the SW receives + dispatches the message via the listener pinned by `sw-control-channel.test.ts`.
 
-### G-T19-15 — CSP `connect-src 'self'` blocks cross-origin Supabase Edge Function calls (needs architect adjudication)
-**Source:** T19.1 launch-readiness review (this entry recording the question at landing).
-**Finding:** `apps/web/svelte.config.js` declares `connect-src: ['self']`. SvelteKit's auto-CSP pass emits this into the prerendered `<meta http-equiv="content-security-policy">` tag — verified in `build/index.html`. Every browser-side `fetch` to a Supabase Edge Function (`createSupabaseT07Client`, `createSupabaseMintSessionClient`, etc.) posts to `${PUBLIC_SUPABASE_URL}/functions/v1/<op>`. The typical Supabase deployment URL is `https://<project>.supabase.co/functions/v1/*` — cross-origin to the app's deploy domain. The browser CSP enforcer would BLOCK every such fetch, breaking the auth ceremony (mint-session), the panic-wipe audit emitter (t07-op), and every other Edge Function consumer.
+### G-T19-15 — CSP `connect-src 'self'` blocks cross-origin Supabase Edge Function calls
+**Source:** T19.1 launch-readiness review.
+**Finding:** `apps/web/svelte.config.js` declared `connect-src: ['self']`. SvelteKit's auto-CSP pass emits this into the prerendered `<meta http-equiv="content-security-policy">` tag. Every browser-side `fetch` to a Supabase Edge Function posts to `${PUBLIC_SUPABASE_URL}/functions/v1/<op>` — typically `https://<project>.supabase.co/functions/v1/*` — cross-origin to the app's deploy domain. Under the original CSP every such fetch was blocked.
+**Status (closed):** `connect-src` now includes `https://*.supabase.co` alongside `'self'`. The wildcard scope is the standard Supabase deploy posture; tightening to the exact project URL requires either env-driven CSP synthesis at build time (deferred — adds build-config plumbing without changing the security bound meaningfully) OR a custom Supabase domain (deploy-config, not changeable from svelte.config.js). The bundle-isolation defense for `@supabase/supabase-js` is intact: the SDK is server-only (per decisions.md §4) and the bundle gate keeps it out of `build/`. `connect-src` controls runtime fetches, NOT bundle inclusion.
 
-`.context/decisions.md` §4 says: *"`@supabase/supabase-js` added server-only (Edge Functions / never the browser bundle; CSP `connect-src 'self'` + the bundle gate keep it out of `build/`)."* That comment frames `connect-src 'self'` as a bundle-isolation defense for the JS SDK — not as a runtime fetch restriction. The runtime calls still need to reach Supabase.
+The svelte-config-csp.test.ts pin was updated to assert the new value; build-output-integrity.test.ts asserts the wildcard survives into the prerendered HTML.
 
-**Possible resolutions (need architect input):**
-  1. **Custom domain.** Production deploys Supabase Edge Functions under the app's own domain (e.g., `https://app.jhsc.example/functions/v1/*` via a reverse proxy or Supabase custom domain). Makes the calls same-origin; CSP unchanged. Most likely intent.
-  2. **Deploy-time CDN header override.** The CDN sets a different `Content-Security-Policy` HTTP header that includes the Supabase origin in `connect-src`, overriding the `<meta>` tag. Common pattern but invisible in this repo.
-  3. **Add Supabase origin to `connect-src` in svelte.config.js.** Would require a wildcard or env-driven config since `PUBLIC_SUPABASE_URL` is runtime-resolved. Awkward but explicit.
-  4. **CSP `mode: 'auto-report'` in dev / `auto` in prod, or report-only meta.** Lets violations be observed without blocking — but defers the real fix.
-
-**Resolution scope:** architect adjudication on which posture is intended. If (1) or (2), document the deployment-config dependency in `svelte.config.js` + a deploy-runbook entry. If (3), implement + add a test pin that scans the built CSP for the Supabase origin allowlist. The svelte-config-csp.test.ts pin in PR #91 currently asserts `connect-src 'self'` is the value; that test needs to evolve with whichever resolution lands.
-**Blocker for:** production launch — every Edge Function call breaks under the current meta CSP unless an external (deployment-config) override is in place. Local dev with `PUBLIC_SUPABASE_URL=http://localhost:54321` is ALSO blocked by the same CSP if dev mode emits the meta tag.
+**Future tightening (optional):** if a deploy adopts a custom Supabase domain (e.g., `api.jhsc.example`), the wildcard can be replaced by the exact origin. Track in a follow-up if the deploy team picks that route.
 
 ### G-T19-16 — CODEOWNERS file does not exist
-**Source:** T19.1 polish-bundle review — `.github/CODEOWNERS` is absent.
-**Finding:** GitHub branch-protection rules can require review from "code owners" but no `CODEOWNERS` file declares ownership. Without one, anyone with write access can approve their own PRs (subject to other branch-protection rules), and per-area expertise (auth, crypto, audit-log, panic-wipe) doesn't auto-route review to the right reviewer.
-**Resolution scope:** create `.github/CODEOWNERS` with at least the security-critical paths assigned to a maintainer GitHub handle. Suggested structure:
-```
-# Global default reviewer
-*                                       @<maintainer>
+**Source:** T19.1 polish-bundle review.
+**Finding:** GitHub branch-protection rules can require review from "code owners" but no `CODEOWNERS` file declared ownership. Without one, the "Require review from Code Owners" branch-protection setting is inert.
+**Status (scaffold close):** `.github/CODEOWNERS` now declares `* @kevindm1989-afk` as the global default reviewer. Per-area routing for security-critical surfaces (auth, crypto, audit-log, panic-wipe, migrations, decisions.md) is sketched in the file's header comment but intentionally not enabled — those assignments need dedicated security-reviewer / architect GitHub handles that a follow-up can layer in once those reviewers are identified.
 
-# Auth + crypto + audit-log — security-critical
+**Future refinement (optional):** add per-path lines once security-reviewer / architect handles are designated. Suggested template:
+```
 /apps/web/src/lib/auth/                 @<security-reviewer>
 /apps/web/src/lib/crypto/               @<security-reviewer>
 /apps/web/src/lib/audit-integrity/      @<security-reviewer>
@@ -1301,8 +1293,6 @@ The register call MUST gate on `'serviceWorker' in navigator` to avoid hard-fail
 /supabase/functions/                    @<security-reviewer>
 /.context/decisions.md                  @<architect>
 ```
-The `@<handle>` placeholders need an architect/owner decision — this gap is intentionally NOT filled unilaterally because GitHub-handle assignments have governance implications.
-**Blocker for:** branch-protection "code owners" enforcement. Standard PR review still works without it; this is process polish, not a launch-functional blocker.
 
 ---
 
