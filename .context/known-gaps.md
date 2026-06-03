@@ -17,6 +17,7 @@ Each entry: source review → finding → resolution scope → blocker for.
 - RPC client wrapping `enroll_first_passkey`, `revoke_session`, `revoke_all_sessions`, `revoke_passkey`.
 - Session middleware validating JWTs against `auth_sessions.revoked_at` (≤5s propagation per F-39).
 - Wire-up of real `HMAC_PSEUDONYM_KEY` env var ↔ Postgres GUC parity (replaces the `KEY_PARITY_SERVER_SHA_HEX` staging shim — see G-T05-2).
+**Status (scaffold landed):** the SupabaseAuthStore class + the `auth-op` Edge Function dispatcher both exist with `getUser` wired end-to-end. Other ~17 AuthStore methods throw `SupabaseAuthStoreNotImplementedError` carrying the op name; each lands incrementally in follow-up PRs adding a dispatcher case + RPC binding + paired tests. The wire shape is the same op-dispatch pattern used by t07-op / concern-op / reprisal-op / t14-op so the shared `createEdgeFnFetchTransport` handles the F-39 401 revocation loop for free.
 **Blocker for:** production deploy with real PI. NOT a blocker for T07 / T08 / library tasks.
 
 ### G-T05-2 — `KEY_PARITY_SERVER_SHA_HEX` is the production code path (second-opinion C3)
