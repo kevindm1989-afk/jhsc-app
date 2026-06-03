@@ -131,6 +131,33 @@ Deno.serve(async (req) => {
       }));
     },
 
+    async revokeMySession(
+      session_id: string
+    ): Promise<{ ok: true } | { ok: false; reason: 'rls_denied' | 'unknown'; status: number }> {
+      // `revoke_my_session` is the authenticated-grantable wrapper
+      // added in migration 12. It verifies caller ownership (auth.uid()
+      // = session.user_id) inside the SECURITY DEFINER body and
+      // delegates the UPDATE + audit emission to the canonical
+      // `revoke_session` function.
+      const { error } = await supabase.rpc('revoke_my_session', {
+        p_session_id: session_id
+      });
+      if (error) {
+        // 42501 maps to rls_denied / 403 — the wrapper raises this for
+        // both "session does not exist" AND "session belongs to a
+        // different user" (avoids leaking which session_ids are valid).
+        if (error.code === '42501') {
+          return { ok: false, reason: 'rls_denied', status: 403 };
+        }
+        log.error({
+          event: 'auth.revoke_my_session.rpc_failed',
+          error_class: error.code
+        });
+        return { ok: false, reason: 'unknown', status: 500 };
+      }
+      return { ok: true };
+    },
+
     async listCredentialsForUser(user_id: string): Promise<CredentialRow[]> {
       // RLS policy `webauthn_credentials_select_self` enforces
       // auth.uid() = user_id. The query selects the snake_case
