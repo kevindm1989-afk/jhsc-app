@@ -161,9 +161,20 @@ export class SupabaseAuthStore implements AuthStore {
   }
 
   // ---------------------------------------------------------------------------
-  // Sessions — all deferred (the mint-session Edge Function handles
-  // createSession on the sign-in path today; the AuthStore.createSession
-  // contract is wider and stays deferred until the matching ops land)
+  // Sessions — getSession + listActiveSessions wired (read-only on
+  // existing auth_sessions table; RLS enforces caller-scope).
+  //
+  // createSession is the responsibility of the mint-session Edge
+  // Function on the sign-in path today (ADR-0023 / F-117 — token
+  // emission is mint-only). The AuthStore.createSession contract is
+  // wider than what mint-session does and stays deferred until the
+  // matching dispatcher op lands.
+  //
+  // Note on access_token: F-117 forbids the server from re-emitting a
+  // previously-minted token, so getSession / listActiveSessions return
+  // an empty `access_token` string. Callers using these methods for
+  // revocation checks or for the sessions UI don't need the token; the
+  // metadata is what matters.
   // ---------------------------------------------------------------------------
 
   createSession(_opts: {
@@ -175,12 +186,25 @@ export class SupabaseAuthStore implements AuthStore {
     throw new SupabaseAuthStoreNotImplementedError('createSession');
   }
 
-  getSession(_session_id: string): Promise<AuthSession | null> {
-    throw new SupabaseAuthStoreNotImplementedError('getSession');
+  async getSession(session_id: string): Promise<AuthSession | null> {
+    const { status, body } = await this.transport({ op: 'get_session', session_id });
+    if (status === 0) return null;
+    if (status === 404) return null;
+    const parsed = body as { ok?: boolean; data?: AuthSession } | null;
+    if (parsed && parsed.ok === true && parsed.data) {
+      return parsed.data;
+    }
+    return null;
   }
 
-  listActiveSessions(_user_id: string): Promise<AuthSession[]> {
-    throw new SupabaseAuthStoreNotImplementedError('listActiveSessions');
+  async listActiveSessions(user_id: string): Promise<AuthSession[]> {
+    const { status, body } = await this.transport({ op: 'list_active_sessions', user_id });
+    if (status === 0) return [];
+    const parsed = body as { ok?: boolean; data?: AuthSession[] } | null;
+    if (parsed && parsed.ok === true && Array.isArray(parsed.data)) {
+      return parsed.data;
+    }
+    return [];
   }
 
   revokeSession(_session_id: string, _now: number): Promise<void> {

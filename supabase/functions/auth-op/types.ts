@@ -16,3 +16,24 @@ export interface UserRow {
   role?: string;
   active: boolean;
 }
+
+/**
+ * Server-side AuthSession shape returned by `get_session` /
+ * `list_active_sessions`. Mirrors the AuthStore.AuthSession interface
+ * with one production-realistic difference: `access_token` is the
+ * empty string because the table doesn't store the minted JWT (F-117 —
+ * the server never re-emits a previously-minted token).
+ *
+ * Callers using `getSession` for revocation checks (the F-116 path)
+ * or for listing the user's active sessions (UI) don't need the
+ * token; the metadata is enough.
+ */
+export interface SessionRow {
+  session_id: string;
+  user_id: string;
+  access_token: '';
+  iat: number;
+  exp: number;
+  device_fingerprint?: string;
+  revoked_at: number | null;
+}

@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AuthStore, UserRow } from '../../src/lib/auth/store';
+import type { AuthSession } from '../../src/lib/auth/types';
 import {
   SupabaseAuthStore,
   SupabaseAuthStoreNotImplementedError,
@@ -172,14 +173,6 @@ describe('T05.1 / G-T05-1 — SupabaseAuthStoreNotImplementedError on deferred m
     ).toThrow(SupabaseAuthStoreNotImplementedError);
   });
 
-  it('getSession throws', () => {
-    expect(() => store.getSession('x')).toThrow(SupabaseAuthStoreNotImplementedError);
-  });
-
-  it('listActiveSessions throws', () => {
-    expect(() => store.listActiveSessions('x')).toThrow(SupabaseAuthStoreNotImplementedError);
-  });
-
   it('revokeSession throws', () => {
     expect(() => store.revokeSession('x', 0)).toThrow(SupabaseAuthStoreNotImplementedError);
   });
@@ -204,5 +197,97 @@ describe('T05.1 / G-T05-1 — SupabaseAuthStoreNotImplementedError on deferred m
     // Defense pin: returning the raw uid would silently break C2
     // pseudonymity. The throw is the load-bearing behaviour.
     expect(() => store.pseudonymOf('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+  });
+});
+
+describe('T05.1 — SupabaseAuthStore.getSession (read-only session by id)', () => {
+  const sessionId = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const sessionRow: AuthSession = {
+    session_id: sessionId,
+    user_id: '00000000-0000-4000-8000-000000000001',
+    access_token: '', // F-117: server never re-emits the minted token
+    iat: 1_700_000_000_000,
+    exp: 1_700_000_900_000,
+    device_fingerprint: 'fp-hashed',
+    revoked_at: null
+  };
+
+  it('emits the op-dispatch body { op: "get_session", session_id }', async () => {
+    const { transport, calls } = captureTransport(200, { ok: true, data: sessionRow });
+    const store = new SupabaseAuthStore({ transport });
+    await store.getSession(sessionId);
+    expect(calls).toEqual([{ op: 'get_session', session_id: sessionId }]);
+  });
+
+  it('returns the AuthSession on success', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: sessionRow });
+    const store = new SupabaseAuthStore({ transport });
+    const out = await store.getSession(sessionId);
+    expect(out).toEqual(sessionRow);
+  });
+
+  it('returns null on 404', async () => {
+    const { transport } = captureTransport(404, { ok: false, reason: 'not_found' });
+    const store = new SupabaseAuthStore({ transport });
+    expect(await store.getSession('unknown')).toBeNull();
+  });
+
+  it('returns null on network error / malformed body', async () => {
+    const { transport: t1 } = captureTransport(0, null);
+    expect(await new SupabaseAuthStore({ transport: t1 }).getSession(sessionId)).toBeNull();
+    const { transport: t2 } = captureTransport(200, { ok: false });
+    expect(await new SupabaseAuthStore({ transport: t2 }).getSession(sessionId)).toBeNull();
+  });
+});
+
+describe('T05.1 — SupabaseAuthStore.listActiveSessions (read-only by user)', () => {
+  const userId = '00000000-0000-4000-8000-000000000001';
+  const rows: AuthSession[] = [
+    {
+      session_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      user_id: userId,
+      access_token: '',
+      iat: 1_700_000_000_000,
+      exp: 1_700_000_900_000,
+      revoked_at: null
+    },
+    {
+      session_id: 'aaaaaaaa-0000-4000-8000-000000000002',
+      user_id: userId,
+      access_token: '',
+      iat: 1_700_000_100_000,
+      exp: 1_700_001_000_000,
+      revoked_at: null
+    }
+  ];
+
+  it('emits { op: "list_active_sessions", user_id }', async () => {
+    const { transport, calls } = captureTransport(200, { ok: true, data: rows });
+    await new SupabaseAuthStore({ transport }).listActiveSessions(userId);
+    expect(calls).toEqual([{ op: 'list_active_sessions', user_id: userId }]);
+  });
+
+  it('returns the array on success', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: rows });
+    const out = await new SupabaseAuthStore({ transport }).listActiveSessions(userId);
+    expect(out).toEqual(rows);
+  });
+
+  it('returns [] when the server reports no active sessions (200 with empty array)', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: [] });
+    const out = await new SupabaseAuthStore({ transport }).listActiveSessions(userId);
+    expect(out).toEqual([]);
+  });
+
+  it('returns [] on network error', async () => {
+    const { transport } = captureTransport(0, null);
+    const out = await new SupabaseAuthStore({ transport }).listActiveSessions(userId);
+    expect(out).toEqual([]);
+  });
+
+  it('returns [] when the body is malformed (non-array data)', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: { not: 'an array' } });
+    const out = await new SupabaseAuthStore({ transport }).listActiveSessions(userId);
+    expect(out).toEqual([]);
   });
 });

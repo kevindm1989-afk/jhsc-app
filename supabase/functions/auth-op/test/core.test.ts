@@ -14,12 +14,22 @@
 
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import { handleAuthOp, type AuthOpDeps } from '../core.ts';
-import type { UserRow } from '../types.ts';
+import type { SessionRow, UserRow } from '../types.ts';
 
-function depsWith(rows: Record<string, UserRow>): AuthOpDeps {
+function depsWith(opts: {
+  users?: Record<string, UserRow>;
+  sessions?: Record<string, SessionRow>;
+  userSessions?: Record<string, SessionRow[]>;
+}): AuthOpDeps {
   return {
     async getUserById(user_id: string): Promise<UserRow | null> {
-      return rows[user_id] ?? null;
+      return opts.users?.[user_id] ?? null;
+    },
+    async getSessionById(session_id: string): Promise<SessionRow | null> {
+      return opts.sessions?.[session_id] ?? null;
+    },
+    async listActiveSessionsForUser(user_id: string): Promise<SessionRow[]> {
+      return opts.userSessions?.[user_id] ?? [];
     }
   };
 }
@@ -34,7 +44,7 @@ Deno.test('handleAuthOp — get_user returns the row for an existing user', asyn
   };
   const result = await handleAuthOp(
     { op: 'get_user', user_id: userId },
-    depsWith({ [userId]: row })
+    depsWith({ users: { [userId]: row } })
   );
   assertEquals(result.ok, true);
   if (result.ok) {
@@ -105,4 +115,88 @@ Deno.test('handleAuthOp — empty / malformed input returns bad_request (400)', 
     assertEquals(r2.reason, 'bad_request');
     assertEquals(r2.status, 400);
   }
+});
+
+// ----------------------------------------------------------------------------
+// get_session — read-only by session_id
+// ----------------------------------------------------------------------------
+
+const sessionId = 'aaaaaaaa-0000-4000-8000-000000000001';
+const sessionRow: SessionRow = {
+  session_id: sessionId,
+  user_id: '00000000-0000-4000-8000-000000000001',
+  access_token: '',
+  iat: 1_700_000_000_000,
+  exp: 1_700_000_900_000,
+  device_fingerprint: 'fp-hashed',
+  revoked_at: null
+};
+
+Deno.test('handleAuthOp — get_session returns the row for an existing session', async () => {
+  const result = await handleAuthOp(
+    { op: 'get_session', session_id: sessionId },
+    depsWith({ sessions: { [sessionId]: sessionRow } })
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.data, sessionRow);
+  }
+});
+
+Deno.test('handleAuthOp — get_session returns not_found for unknown id (404)', async () => {
+  const result = await handleAuthOp(
+    { op: 'get_session', session_id: 'zzzzzzzz-0000-4000-8000-000000000000' },
+    depsWith({})
+  );
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.reason, 'not_found');
+    assertEquals(result.status, 404);
+  }
+});
+
+Deno.test('handleAuthOp — get_session with no session_id returns bad_request (400)', async () => {
+  const result = await handleAuthOp({ op: 'get_session' }, depsWith({}));
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.reason, 'bad_request');
+});
+
+// ----------------------------------------------------------------------------
+// list_active_sessions — by user_id, empty list is a normal state
+// ----------------------------------------------------------------------------
+
+Deno.test('handleAuthOp — list_active_sessions returns the rows for the user', async () => {
+  const userId = '00000000-0000-4000-8000-000000000001';
+  const rows: SessionRow[] = [
+    sessionRow,
+    { ...sessionRow, session_id: 'aaaaaaaa-0000-4000-8000-000000000002' }
+  ];
+  const result = await handleAuthOp(
+    { op: 'list_active_sessions', user_id: userId },
+    depsWith({ userSessions: { [userId]: rows } })
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.data, rows);
+  }
+});
+
+Deno.test('handleAuthOp — list_active_sessions returns {ok:true, data:[]} when the user has no active sessions', async () => {
+  // Empty result is NOT not_found — it's a normal state (e.g., right
+  // after logout-everywhere). The dispatcher must return the empty
+  // array, not 404.
+  const result = await handleAuthOp(
+    { op: 'list_active_sessions', user_id: '00000000-0000-4000-8000-000000000099' },
+    depsWith({})
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.data, []);
+  }
+});
+
+Deno.test('handleAuthOp — list_active_sessions with no user_id returns bad_request (400)', async () => {
+  const result = await handleAuthOp({ op: 'list_active_sessions' }, depsWith({}));
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.reason, 'bad_request');
 });
