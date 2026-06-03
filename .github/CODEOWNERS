@@ -1,0 +1,15 @@
+# GitHub CODEOWNERS — review-routing for jhsc-app.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-
+# settings-and-security/customizing-your-repository/about-code-owners
+#
+# The repo maintainer is the global default reviewer (G-T19-16 close —
+# scaffold with the canonical owner handle; per-area refinement
+# requires additional GitHub-handle assignments which a follow-up
+# can layer in).
+#
+# Path-specific routing (security-critical surfaces) is sketched out
+# in known-gaps.md G-T19-16 and intentionally not enabled here
+# pending dedicated security-reviewer / architect handles.
+
+* @kevindm1989-afk
