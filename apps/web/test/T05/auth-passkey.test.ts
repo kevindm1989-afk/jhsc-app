@@ -363,14 +363,20 @@ describe('T05 / ADR-0003 Amendment A extension — auth.passkey.assert is volume
     expect(chainRows.rows[0].n).toBe(0);
   });
 
-  it('T05 — 100 successful WebAuthn assertions DO produce 100 structured-log lines at INFO level', async () => {
+  it('T05 — 100 successful WebAuthn assertions DO produce 100 structured-log lines at WARN level (G-T05-4 reclassification)', async () => {
+    // G-T05-4: the assert lines were originally emitted at INFO. The
+    // structured logger's prod-console transport drops INFO; bumping
+    // to WARN keeps the per-attempt volumetric signal visible until
+    // T02's /api/log/ingest path ships. The line is still volumetric
+    // (NOT chain-participating); only the transport classification
+    // changed.
     const enrolled = await supa.enrollUser(SYNTHETIC_USER_A);
     supa.startLogCapture();
     for (let i = 0; i < 100; i++) {
       await loginPasskey(auth, enrolled.credential);
     }
     const lines = supa.stopLogCapture();
-    const assertLines = lines.filter((l) => l.event === 'auth.passkey.assert' && l.level === 'INFO');
+    const assertLines = lines.filter((l) => l.event === 'auth.passkey.assert' && l.level === 'WARN');
     expect(assertLines.length).toBe(100);
   });
 });

@@ -31,6 +31,7 @@ The wire shape is the same op-dispatch pattern used by t07-op / concern-op / rep
 **Source:** second-opinion-reviewer on T05.
 **Finding:** `hooks.server.ts:94-104` uses a deploy-time env var `KEY_PARITY_SERVER_SHA_HEX` instead of a live Postgres `SELECT encode(digest(current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex')` round-trip. An operator who fat-fingers the GUC but correctly mirrors the SHA in the env var will pass the smoke test and produce mismatched pseudonyms.
 **Resolution scope (T05.1):** replace the shim with a live Postgres query against `current_setting('app.hmac_pseudonym_key')`. The fetcher is server-only; the response is the SHA-of-key only (never the key value).
+**Status (deferred — adapter-static reframe needed):** the original gap framing assumed `hooks.server.ts` runs at request time. With the project's adapter-static + ssr=false posture, `hooks.server.ts` only runs at prerender (build time) and the key-parity check at that point is against the BUILDER's env, not the deployed runtime's. The proper fix needs a different home — either (a) a key-parity check emitted by each Edge Function on cold-start (Deno-side), or (b) a deploy-time CI assertion that compares the GUC's SHA to the env var's SHA via a `supabase db query` call. Both options reach beyond a single-file refactor and need an architect note about which surface owns the runtime check. Tracked here pending that decision.
 **Blocker for:** production deploy. T07 / T08 unaffected.
 
 ### G-T05-3 — `revoke_*` fns lack `auth.uid()` defense-in-depth (second-opinion C7)
@@ -48,31 +49,32 @@ The wire shape is the same op-dispatch pattern used by t07-op / concern-op / rep
 ### G-T05-4 — INFO logs go to `/dev/null` in production (second-opinion C8)
 **Source:** second-opinion-reviewer on T05.
 **Finding:** `apps/web/src/lib/log/index.ts:147-155` — structured logger's production transport is "scaffolding": only ERROR / FATAL / WARN to console; INFO is dropped unless a sink is installed. Every `log.info({ event: 'auth.passkey.assert', ... })` from auth-core silently disappears in prod until T02's POST `/api/log/ingest` lands. Per ADR-0003 Amendment A G.5, this is the only observability for passkey-assert volumetrics.
-**Resolution scope:** T02's log-ingest path must land before T05.1 production wire-up. Alternatively, reclassify the assert lines as WARN.
-**Blocker for:** production deploy. The `alert.fired` row IS emitted to `audit_log`, so the burst-alert path remains observable; only the per-attempt assert line is dark.
+**Status (closed via alternative resolution):** the gap text named two paths — (a) ship T02's `/api/log/ingest` OR (b) reclassify the assert lines as WARN. T02's log-ingest is its own scope; this PR takes path (b). The three `log.info({ event: 'auth.passkey.assert', ... })` calls in `apps/web/src/lib/auth/auth-core.ts` are bumped to `log.warn`. The structured logger's prod console transport emits WARN, so the per-attempt volumetric signal is now visible in production. The `auth-passkey.test.ts` level pin is updated from `'INFO'` to `'WARN'` in lockstep. The line is still volumetric (NOT chain-participating); only the transport classification changed. T02's eventual log-ingest path remains the proper long-term home — switching back to INFO when that lands is a one-line revert.
 
 ### G-T05-5 — Bundle-scan source-fallback false-positive risk (privacy R1)
 **Source:** privacy-reviewer T05 re-review.
 **Finding:** `scripts/verify-no-third-party-js.sh:36-44` falls back to `SRC_DIR` scan when `BUILD_DIR` is absent; three comment-only occurrences of `HMAC_PSEUDONYM_KEY` in source files would false-positive. CI runs `pnpm build` first so production CI is unaffected.
-**Resolution scope:** exclude comment lines from source-fallback scan, OR downgrade source-fallback to a warning. Defense in depth.
-**Blocker for:** none. Cleanup.
+**Status (closed by G-T05-10's resolution):** the three comment-only occurrences are now in slash-broken form (`HMAC_/PSEUDONYM_KEY`) per G-T05-10's closure. A bundle-scan grep for the canonical env-var name finds zero matches in `src/`, so the source-fallback path no longer has false-positive material to trip on. No script change required.
 
 ### G-T05-6 — `retention_class_for()` vs ADR-0015 drift check (privacy R2)
 **Source:** privacy-reviewer T05 re-review.
 **Finding:** `00000000000001_auth.sql:117-150` `retention_class_for()` is a hand-typed mirror of ADR-0015 + ADR-0016 retention values. Currently aligned (22 rows match), but no test asserts the mirror. Future ADR amendment that adds an event_type without updating the function silently falls through to `'24mo'` default.
 **Resolution scope (test-writer carry-forward to T16):** drift-check test enumerating `event_type` values across (a) `audit_log_retention_schedule` table (per ADR-0015 §Schema Requirements #2) and (b) `retention_class_for()` output, asserting equality.
+**Status (deferred to T16 — original scope):** the gap text explicitly carries this forward to T16 ("Resolution scope (test-writer carry-forward to T16)"). T05.1 doesn't ship the test; T16 owns it.
 **Blocker for:** T16 retention job ship.
 
 ### G-T05-7 — T16 retention sweep is the enforcer for `auth_totp_consumed_log` (privacy R3)
 **Source:** privacy-reviewer T05 re-review.
 **Finding:** ADR-0016 documents 24h retention for `auth_totp_consumed_log` but T05 ships no sweep job; T16 owns it. PIPEDA Principle 4.5 is satisfied only by an enforced retention.
 **Resolution scope:** T16 implementer adds the sweep.
+**Status (deferred to T16 — original scope):** explicitly out-of-scope per the gap text. T05.1 cannot promote without T16, but writing the sweep is T16's responsibility.
 **Blocker for:** first production deploy with real PI. T05.1 should not promote without T16.
 
 ### G-T05-8 — Boot smoke test gate could miss misconfigured staging (privacy R4)
 **Source:** privacy-reviewer T05 re-review.
 **Finding:** `hooks.server.ts:82-88` boot smoke test runs only when `_isProduction === true` (derived from `import.meta.env.MODE`). A staging deploy with `MODE !== 'production'` but real PI in flight would skip the parity check.
 **Resolution scope:** either (a) tighten the activation rule (any presence of `HMAC_PSEUDONYM_KEY` env var triggers the check regardless of MODE — defense in depth), or (b) document explicitly that `MODE=production` is a deploy-time requirement for any deploy touching real PI. Architect-level decision.
+**Status (deferred — architect adjudication):** the gap explicitly names this as architect-level. Picking between (a) and (b) is a deploy-config posture decision that affects how staging environments are operated; out of scope for the autonomous T05.1 work. Also: `hooks.server.ts` doesn't actually run at request time under the current adapter-static + ssr=false posture (it only runs at prerender), so the urgency is lower than the original gap framing assumed.
 **Blocker for:** none directly. Deploy-runbook item.
 
 ### G-T05-9 — Semgrep pattern coverage for `digest()` (security A3)
@@ -89,6 +91,7 @@ The wire shape is the same op-dispatch pattern used by t07-op / concern-op / rep
 **Source:** security-reviewer T05 re-review.
 **Finding:** `enrollFirstDevice` still returns 410 for `reason='expired'` and `reason='consumed'`, bound by the F-38 test at line 137. An attacker with an intercepted TOTP code can probe `enrollFirstDevice` with synthetic user_ids and observe the 410/401 differential. Architect amendment pass #4 §A4 intended LOGIN probe surface collapse, not enrollment ceremony.
 **Resolution scope:** architect pass #5 disposition — either accept the residual (track here) or extend the collapse to `enrollFirstDevice`. Tests would need amendment.
+**Status (deferred — architect adjudication):** the gap explicitly names architect pass #5 as the decision point. Either path requires reasoning about the enrollment-probe attack model that's broader than autonomous T05.1 work; not closed here.
 **Blocker for:** none directly. Architect adjudication when convenient.
 
 ---
