@@ -51,6 +51,18 @@ export interface AuthOpDeps {
   listActiveSessionsForUser(user_id: string): Promise<SessionRow[]>;
   listCredentialsForUser(user_id: string): Promise<CredentialRow[]>;
   revokeMySession(session_id: string): Promise<{ ok: true } | { ok: false; reason: AuthOpReason; status: number }>;
+  revokeAllMySessions(): Promise<{ ok: true; data: { revoked_count: number } } | { ok: false; reason: AuthOpReason; status: number }>;
+  revokeMyPasskey(credential_id: string): Promise<{ ok: true } | { ok: false; reason: AuthOpReason; status: number }>;
+  /**
+   * The caller's `auth.uid()` from the JWT. Used by the dispatcher to
+   * enforce that AuthStore.revokeAllForUser's `user_id` argument
+   * matches the caller — the SQL wrapper ignores any client-supplied
+   * user_id and derives from auth.uid(), but the dispatcher rejects
+   * impersonation attempts up-front (clearer error than letting the
+   * wrapper silently revoke a different user's sessions than the
+   * caller intended).
+   */
+  callerUid(): Promise<string | null>;
 }
 
 /**
@@ -110,6 +122,42 @@ export async function handleAuthOp(
       // The AuthStore.revokeSession contract returns void on success.
       // Return null in the data slot so the wire shape stays
       // `{ok:true, data:...}`.
+      return { ok: true, data: null };
+    }
+
+    case 'revoke_all_for_user': {
+      // The AuthStore.revokeAllForUser signature takes a user_id, but
+      // the Supabase wrapper restricts to self-revoke. Verify that the
+      // requested user_id matches the caller's auth.uid() up-front; if
+      // not, return rls_denied immediately so the client sees a clear
+      // error rather than silently revoking nothing (the wrapper
+      // ignores client-supplied user_id and derives from auth.uid()).
+      const user_id = typeof input.user_id === 'string' ? input.user_id : '';
+      if (!user_id) return { ok: false, reason: 'bad_request', status: 400 };
+      const callerUid = await deps.callerUid();
+      if (!callerUid || callerUid !== user_id) {
+        return { ok: false, reason: 'rls_denied', status: 403 };
+      }
+      const r = await deps.revokeAllMySessions();
+      if (!r.ok) return r;
+      // AuthStore.revokeAllForUser returns the array of session_ids
+      // revoked. We can't enumerate them from a bulk UPDATE without
+      // adding RETURNING — so we return the count for now and the
+      // browser-side AuthStore returns an empty array (the contract
+      // doesn't depend on the exact session_ids; callers use it for
+      // logging). A future PR can extend the SQL function to RETURNING
+      // session_id[] if a consumer needs the list.
+      return { ok: true, data: r.data };
+    }
+
+    case 'revoke_passkey': {
+      // Invokes the `revoke_my_passkey` SECURITY DEFINER wrapper.
+      // Collapsed rls_denied on both "not yours" and "not found".
+      const credential_id =
+        typeof input.credential_id === 'string' ? input.credential_id : '';
+      if (!credential_id) return { ok: false, reason: 'bad_request', status: 400 };
+      const r = await deps.revokeMyPasskey(credential_id);
+      if (!r.ok) return r;
       return { ok: true, data: null };
     }
 

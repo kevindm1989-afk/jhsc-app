@@ -158,6 +158,55 @@ Deno.serve(async (req) => {
       return { ok: true };
     },
 
+    async revokeAllMySessions() {
+      // `revoke_all_my_sessions` is the migration-13 sibling wrapper:
+      // bulk-revokes every active session for the caller, returns the
+      // count. The RPC returns a single integer; supabase-js gives it
+      // back as `data` on success.
+      const { data, error } = await supabase.rpc('revoke_all_my_sessions');
+      if (error) {
+        if (error.code === '42501') {
+          return { ok: false as const, reason: 'rls_denied' as const, status: 403 };
+        }
+        log.error({
+          event: 'auth.revoke_all_my_sessions.rpc_failed',
+          error_class: error.code
+        });
+        return { ok: false as const, reason: 'unknown' as const, status: 500 };
+      }
+      return { ok: true as const, data: { revoked_count: Number(data ?? 0) } };
+    },
+
+    async revokeMyPasskey(credential_id: string) {
+      // `revoke_my_passkey` is the migration-13 sibling wrapper:
+      // verifies caller ownership of the credential, DELETEs it,
+      // emits an `auth.passkey.revoked` audit row.
+      const { error } = await supabase.rpc('revoke_my_passkey', {
+        p_credential_id: credential_id
+      });
+      if (error) {
+        if (error.code === '42501') {
+          return { ok: false as const, reason: 'rls_denied' as const, status: 403 };
+        }
+        log.error({
+          event: 'auth.revoke_my_passkey.rpc_failed',
+          error_class: error.code
+        });
+        return { ok: false as const, reason: 'unknown' as const, status: 500 };
+      }
+      return { ok: true as const };
+    },
+
+    async callerUid(): Promise<string | null> {
+      // Resolves the caller's auth.uid() from the JWT. Used by the
+      // dispatcher to enforce that the AuthStore.revokeAllForUser
+      // `user_id` argument matches the caller — defense-in-depth on
+      // top of the SQL wrapper's own auth.uid() derivation.
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data?.user) return null;
+      return data.user.id;
+    },
+
     async listCredentialsForUser(user_id: string): Promise<CredentialRow[]> {
       // RLS policy `webauthn_credentials_select_self` enforces
       // auth.uid() = user_id. The query selects the snake_case

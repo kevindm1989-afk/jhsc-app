@@ -181,8 +181,16 @@ export class SupabaseAuthStore implements AuthStore {
     throw new SupabaseAuthStoreNotImplementedError('saveCredential');
   }
 
-  deleteCredential(_credentialId: string): Promise<void> {
-    throw new SupabaseAuthStoreNotImplementedError('deleteCredential');
+  async deleteCredential(credentialId: string): Promise<void> {
+    // Calls the `revoke_my_passkey` SECURITY DEFINER wrapper which
+    // verifies auth.uid() = credential.user_id internally + DELETEs
+    // the credential + emits the `auth.passkey.revoked` audit row.
+    // 403 rls_denied (caller doesn't own credential OR credential
+    // doesn't exist) and network errors both surface as a void
+    // return — the AuthStore.deleteCredential contract returns void
+    // on success and the caller can't distinguish the failure modes.
+    await this.transport({ op: 'revoke_passkey', credential_id: credentialId });
+    return;
   }
 
   // ---------------------------------------------------------------------------
@@ -255,8 +263,30 @@ export class SupabaseAuthStore implements AuthStore {
     return;
   }
 
-  revokeAllForUser(_user_id: string, _now: number): Promise<string[]> {
-    throw new SupabaseAuthStoreNotImplementedError('revokeAllForUser');
+  async revokeAllForUser(user_id: string, _now: number): Promise<string[]> {
+    // The Supabase wrapper enforces self-revoke only: the dispatcher
+    // verifies user_id === auth.uid() before invoking the SQL function.
+    // A caller passing a different user_id gets back rls_denied + an
+    // empty array (defense-in-depth — the SQL function would also
+    // ignore the client-supplied user_id, but the early-deny is a
+    // clearer contract).
+    //
+    // The AuthStore.revokeAllForUser contract returns the array of
+    // session_ids revoked. The SQL wrapper currently returns the
+    // count, not the array (a future PR can extend the function to
+    // RETURNING session_id[] if a consumer needs the list). For now
+    // we return an empty array on success — callers that need the
+    // exact session_ids should listAllForUser before + after.
+    const { status, body } = await this.transport({
+      op: 'revoke_all_for_user',
+      user_id
+    });
+    if (status !== 200) return [];
+    const parsed = body as { ok?: boolean; data?: { revoked_count?: number } } | null;
+    if (parsed && parsed.ok === true) {
+      return [];
+    }
+    return [];
   }
 
   // ---------------------------------------------------------------------------

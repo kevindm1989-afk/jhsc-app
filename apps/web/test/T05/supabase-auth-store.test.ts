@@ -159,18 +159,10 @@ describe('T05.1 / G-T05-1 — SupabaseAuthStoreNotImplementedError on deferred m
     expect(() => store.saveCredential({} as never)).toThrow(SupabaseAuthStoreNotImplementedError);
   });
 
-  it('deleteCredential throws', () => {
-    expect(() => store.deleteCredential('x')).toThrow(SupabaseAuthStoreNotImplementedError);
-  });
-
   it('createSession throws', () => {
     expect(() =>
       store.createSession({ user_id: 'x', now: 0, ttl_ms: 1000 })
     ).toThrow(SupabaseAuthStoreNotImplementedError);
-  });
-
-  it('revokeAllForUser throws', () => {
-    expect(() => store.revokeAllForUser('x', 0)).toThrow(SupabaseAuthStoreNotImplementedError);
   });
 
   it('emitAudit throws', () => {
@@ -367,5 +359,70 @@ describe('T05.1 — SupabaseAuthStore.revokeSession (UPDATE via revoke_my_sessio
     // The op-dispatch body must NOT carry the client-supplied timestamp.
     expect(calls[0]).not.toHaveProperty('now');
     expect(calls[0]).not.toHaveProperty('revoked_at');
+  });
+});
+
+describe('T05.1 — SupabaseAuthStore.revokeAllForUser (bulk via revoke_all_my_sessions)', () => {
+  const userId = '00000000-0000-4000-8000-000000000001';
+
+  it('emits { op: "revoke_all_for_user", user_id }', async () => {
+    const { transport, calls } = captureTransport(200, {
+      ok: true,
+      data: { revoked_count: 3 }
+    });
+    await new SupabaseAuthStore({ transport }).revokeAllForUser(userId, 0);
+    expect(calls).toEqual([{ op: 'revoke_all_for_user', user_id: userId }]);
+  });
+
+  it('returns [] on 200 success (the SQL wrapper returns count, not the array — see method comment)', async () => {
+    const { transport } = captureTransport(200, {
+      ok: true,
+      data: { revoked_count: 3 }
+    });
+    const out = await new SupabaseAuthStore({ transport }).revokeAllForUser(userId, 0);
+    expect(out).toEqual([]);
+  });
+
+  it('returns [] on 403 rls_denied (impersonation attempt)', async () => {
+    const { transport } = captureTransport(403, { ok: false, reason: 'rls_denied' });
+    const out = await new SupabaseAuthStore({ transport }).revokeAllForUser(
+      'someone-else',
+      0
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('returns [] on network error', async () => {
+    const { transport } = captureTransport(0, null);
+    const out = await new SupabaseAuthStore({ transport }).revokeAllForUser(userId, 0);
+    expect(out).toEqual([]);
+  });
+});
+
+describe('T05.1 — SupabaseAuthStore.deleteCredential (DELETE via revoke_my_passkey)', () => {
+  const credId = 'cred-abc';
+
+  it('emits { op: "revoke_passkey", credential_id }', async () => {
+    const { transport, calls } = captureTransport(200, { ok: true, data: null });
+    await new SupabaseAuthStore({ transport }).deleteCredential(credId);
+    expect(calls).toEqual([{ op: 'revoke_passkey', credential_id: credId }]);
+  });
+
+  it('returns void on success', async () => {
+    const { transport } = captureTransport(200, { ok: true, data: null });
+    const out = await new SupabaseAuthStore({ transport }).deleteCredential(credId);
+    expect(out).toBeUndefined();
+  });
+
+  it('returns void on 403 rls_denied (caller doesn\'t own credential OR id does not exist)', async () => {
+    const { transport } = captureTransport(403, { ok: false, reason: 'rls_denied' });
+    const out = await new SupabaseAuthStore({ transport }).deleteCredential('not-yours');
+    expect(out).toBeUndefined();
+  });
+
+  it('returns void on network error', async () => {
+    const { transport } = captureTransport(0, null);
+    const out = await new SupabaseAuthStore({ transport }).deleteCredential(credId);
+    expect(out).toBeUndefined();
   });
 });

@@ -25,6 +25,14 @@ function depsWith(opts: {
   revocableSessions?: Set<string>;
   /** Sessions actually revoked (for assertion). */
   revoked?: Set<string>;
+  /** Credentials the caller is allowed to revoke. Anything else → rls_denied. */
+  revocableCredentials?: Set<string>;
+  /** Credentials actually revoked (for assertion). */
+  revokedCredentials?: Set<string>;
+  /** Number of sessions to report revoked by revoke_all_my_sessions. */
+  revokeAllCount?: number;
+  /** Caller's resolved auth.uid() — used by the dispatcher's revoke_all guard. */
+  callerUid?: string | null;
 }): AuthOpDeps {
   return {
     async getUserById(user_id: string): Promise<UserRow | null> {
@@ -45,6 +53,22 @@ function depsWith(opts: {
       }
       opts.revoked?.add(session_id);
       return { ok: true as const };
+    },
+    async revokeAllMySessions() {
+      return {
+        ok: true as const,
+        data: { revoked_count: opts.revokeAllCount ?? 0 }
+      };
+    },
+    async revokeMyPasskey(credential_id: string) {
+      if (!opts.revocableCredentials?.has(credential_id)) {
+        return { ok: false as const, reason: 'rls_denied' as const, status: 403 };
+      }
+      opts.revokedCredentials?.add(credential_id);
+      return { ok: true as const };
+    },
+    async callerUid() {
+      return opts.callerUid ?? null;
     }
   };
 }
@@ -294,6 +318,91 @@ Deno.test('handleAuthOp — revoke_session returns rls_denied (403) for non-owne
 
 Deno.test('handleAuthOp — revoke_session with no session_id returns bad_request (400)', async () => {
   const result = await handleAuthOp({ op: 'revoke_session' }, depsWith({}));
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.reason, 'bad_request');
+});
+
+// ----------------------------------------------------------------------------
+// revoke_all_for_user — bulk revoke with self-only guard
+// ----------------------------------------------------------------------------
+
+const ownerUid = '00000000-0000-4000-8000-000000000001';
+
+Deno.test('handleAuthOp — revoke_all_for_user returns count when user_id matches the caller', async () => {
+  const result = await handleAuthOp(
+    { op: 'revoke_all_for_user', user_id: ownerUid },
+    depsWith({ callerUid: ownerUid, revokeAllCount: 3 })
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.data, { revoked_count: 3 });
+  }
+});
+
+Deno.test('handleAuthOp — revoke_all_for_user rejects when user_id != caller (403)', async () => {
+  // Defense-in-depth: the SQL wrapper would also ignore the client-
+  // supplied user_id, but the dispatcher's up-front rejection gives
+  // the client a clear error rather than a silent 0-count revoke.
+  const result = await handleAuthOp(
+    { op: 'revoke_all_for_user', user_id: 'someone-else' },
+    depsWith({ callerUid: ownerUid, revokeAllCount: 0 })
+  );
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.reason, 'rls_denied');
+    assertEquals(result.status, 403);
+  }
+});
+
+Deno.test('handleAuthOp — revoke_all_for_user rejects when caller is unauthenticated (403)', async () => {
+  const result = await handleAuthOp(
+    { op: 'revoke_all_for_user', user_id: ownerUid },
+    depsWith({ callerUid: null })
+  );
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.reason, 'rls_denied');
+});
+
+Deno.test('handleAuthOp — revoke_all_for_user with no user_id returns bad_request (400)', async () => {
+  const result = await handleAuthOp({ op: 'revoke_all_for_user' }, depsWith({}));
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.reason, 'bad_request');
+});
+
+// ----------------------------------------------------------------------------
+// revoke_passkey — DELETE credential with self-only guard
+// ----------------------------------------------------------------------------
+
+Deno.test('handleAuthOp — revoke_passkey deletes the caller-owned credential', async () => {
+  const credId = 'cred-abc';
+  const revokedCredentials = new Set<string>();
+  const result = await handleAuthOp(
+    { op: 'revoke_passkey', credential_id: credId },
+    depsWith({
+      revocableCredentials: new Set([credId]),
+      revokedCredentials
+    })
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) assertEquals(result.data, null);
+  assertEquals(revokedCredentials.has(credId), true);
+});
+
+Deno.test('handleAuthOp — revoke_passkey returns rls_denied (403) for non-owned credential', async () => {
+  // Wrapper collapses "not found" + "not yours" to avoid leakage.
+  const result = await handleAuthOp(
+    { op: 'revoke_passkey', credential_id: 'cred-not-yours' },
+    depsWith({ revocableCredentials: new Set() })
+  );
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.reason, 'rls_denied');
+    assertEquals(result.status, 403);
+  }
+});
+
+Deno.test('handleAuthOp — revoke_passkey with no credential_id returns bad_request (400)', async () => {
+  const result = await handleAuthOp({ op: 'revoke_passkey' }, depsWith({}));
   assertEquals(result.ok, false);
   if (!result.ok) assertEquals(result.reason, 'bad_request');
 });
