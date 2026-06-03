@@ -14,7 +14,9 @@
  *   - ADR-0003 Amendment A extension — `auth.passkey.assert` is
  *     structured-log-only (no audit_log row). Amendment G.5 / amendment
  *     pass #4 confirms **per-attempt** as canonical wording: both success
- *     and failure paths emit a single structured-log INFO line.
+ *     and failure paths emit a single structured-log line (WARN per
+ *     G-T05-4 reclassification so it survives the prod console
+ *     transport until T02's log-ingest lands).
  *   - ADR-0016 / amendment pass #4 — pseudonyms derive from HMAC-SHA-256
  *     keyed by `app.hmac_pseudonym_key` (SQL) / `HMAC_/PSEUDONYM_KEY` (split-form per G-T05-10)
  *     env var (TS); the boot smoke test in `./server/key-parity.ts`
@@ -185,10 +187,18 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     const attempts = rateLimitStore.recordWebAuthnAttempt(actorKey, tNow);
 
     // Per ADR-0003 Amendment A (per-attempt canonical wording, ratified
-    // by amendment pass #4 G.5): emit a structured-log INFO line on
-    // every attempt (success + failure), NOT an audit_log row. The line
+    // by amendment pass #4 G.5): emit a structured-log line on every
+    // attempt (success + failure), NOT an audit_log row. The line
     // carries `auth.method` + `auth.result` only; no PI.
-    log.info({
+    //
+    // G-T05-4 reclassification: emit at WARN instead of INFO so the
+    // line is visible in the production console transport. The
+    // structured logger drops INFO until T02's `/api/log/ingest`
+    // path lands; the WARN reclassification is the gap's explicit
+    // alternative resolution. The level is purely a transport
+    // signal — the line is still per-attempt volumetric, not a
+    // chain-participating audit row.
+    log.warn({
       event: 'auth.passkey.assert',
       outcome: 'fail',
       attributes: {
@@ -250,9 +260,11 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     const actorKey = store.pseudonymOf(user_id);
 
     // Per ADR-0003 Amendment A (per-attempt canonical wording, ratified
-    // by amendment pass #4 G.5): emit a structured-log INFO line on
-    // every attempt, NOT an audit_log row.
-    log.info({
+    // by amendment pass #4 G.5): emit a structured-log line on every
+    // attempt, NOT an audit_log row. G-T05-4 reclassification: WARN
+    // instead of INFO so the line is visible in production until
+    // T02's `/api/log/ingest` path lands.
+    log.warn({
       event: 'auth.passkey.assert',
       outcome: 'fail',
       attributes: {
@@ -482,10 +494,18 @@ export function makeAuthClient(deps: CoreDeps): AuthClient {
     opts?: { device_fingerprint?: string }
   ): Promise<LoginResult> {
     // Per ADR-0003 Amendment A (per-attempt canonical wording, ratified
-    // by amendment pass #4 G.5): emit a structured-log INFO line on
-    // every attempt (success + failure), NOT an audit_log row. The line
+    // by amendment pass #4 G.5): emit a structured-log line on every
+    // attempt (success + failure), NOT an audit_log row. The line
     // carries `auth.method` + `auth.result` only; no PI.
-    log.info({
+    //
+    // G-T05-4 reclassification: emit at WARN instead of INFO so the
+    // line is visible in the production console transport. The
+    // structured logger drops INFO until T02's `/api/log/ingest`
+    // path lands; the WARN reclassification is the gap's explicit
+    // alternative resolution. The level is purely a transport
+    // signal — the line is still per-attempt volumetric, not a
+    // chain-participating audit row.
+    log.warn({
       event: 'auth.passkey.assert',
       outcome: 'ok',
       attributes: {
