@@ -226,108 +226,126 @@ All eight are ratified under ADR-0002 Amendment H + ADR-0007 + the T08 four-revi
 **Source:** ADR-0002 Amendment H (sibling-task pattern, mirrors G-T07-1).
 **Finding:** the `concerns` table + `is_active_member()` RLS gate + `concern_rate_limit_consume()` SECURITY DEFINER function + `concerns_list_default_projection()` view (F-18 default-list payload) ship in T08.1, not T08. T08's library tests run against `MemoryConcernStore` exclusively.
 **Resolution scope (T08.1):** ship `supabase/migrations/00000000000003_concerns.sql` with the `concerns` table, RLS policies for INSERT/UPDATE/SELECT, `concerns_default_view` (omitting `source_name_ct` per F-18), rate-limit table + `consume_concern_rate_budget` function, and pgTAP integration tests covering F-15/F-16/F-17/F-18/F-20.
-**Blocker for:** first production deploy carrying real PI.
+**Status (closed):** `supabase/migrations/00000000000004_concerns.sql` ships the full SQL surface (concerns table, RLS policies, `consume_concern_rate_budget`, `concerns_default_view`, etc.). pgTAP coverage at `supabase/test/concerns_rls.sql` runs under the "Committee DB tests (pgTAP)" CI job.
+**Blocker for:** none.
 
 ### G-T08-2 — SupabaseConcernStore production wire-up
 **Source:** ADR-0002 Amendment H.
 **Finding:** Only `MemoryConcernStore implements ConcernStore`. No Edge Function call, no RPC binding to T08's SQL functions, no JWT-validating active-membership check.
 **Resolution scope (T08.1):** wire `SupabaseConcernStore` against the live Postgres schema; route handler at `/api/concerns` validates JWT, calls `is_active_member()`, enforces rate limit via SECURITY DEFINER function, emits audit row in same transaction as INSERT.
-**Blocker for:** production deploy with real PI.
+**Status (closed via different architecture):** the production path is `apps/web/src/lib/concerns/supabase-concern-client.ts` (`SupabaseConcernClient`) + `supabase/functions/concern-op/` Edge Function — same op-dispatch posture as T07's `SupabaseT07Client`. The original gap framing assumed a SvelteKit `+server.ts` route handler; the project's adapter-static + ssr=false posture (pinned by `+layout.ts` + route mount tests) means every server-side path goes through Edge Functions instead. JWT validation + `is_active_member()` check happen inside the Edge Function via RLS-bound queries.
+**Blocker for:** none.
 
 ### G-T08-3 — Real Supabase integration tests for T08 SQL functions
 **Source:** ADR-0002 Amendment H + privacy-review-t07 pattern.
 **Finding:** every adminQuery in the T08 test file resolves through the in-memory MemoryConcernStore via the test harness's mini-parser. The SECURITY DEFINER functions + RLS policies in the deferred migration have zero automated test coverage.
 **Resolution scope (T08.1):** pgTAP suite covering `is_active_member()` for INSERT/UPDATE/SELECT; `consume_concern_rate_budget` (20/hr, 200/24h); `concerns_default_view` projection (no source_name_ct); per-record reveal flow with audit-emit-before-return ordering.
-**Blocker for:** T08.1 PR submission.
+**Status (closed):** `supabase/test/concerns_rls.sql` covers the SQL surface (matched by the Committee DB tests pgTAP CI job).
+**Blocker for:** none.
 
 ### G-T08-4 — ADR-0016 schedule row for `concerns` table
 **Source:** ADR-0016 hard rule "every operational table touching PI MUST appear in this schedule before the table ships in any migration that lands in `main`".
 **Finding:** `concerns` (C3 body + C4 source_name + C1 hazard/severity/location + actor anchor) needs an ADR-0016 operational-table schedule row before the T08.1 migration lands.
 **Resolution scope (T08.1):** architect amendment adds the schedule row; HG-15 user re-ratification covers the new table.
-**Blocker for:** T08.1 PR submission.
+**Status (partial close — deferred to T18):** same posture as G-T07-4. The `retention_class_for()` function-side mirror was extended with the T08 event types when migration 4 shipped; the `audit_log_retention_schedule` TABLE row is deferred to T18 (the same carry-forward the T07 migration header documented).
+**Blocker for:** T18 retention table ship.
 
 ### G-T08-5 — §PI inventory amendment for `concerns` columns
 **Source:** privacy-review pattern (mirror of G-T07-5).
 **Finding:** new PI inventory rows for `concerns.id`, `concerns.actor_id`, `concerns.title_ct`, `concerns.body_ct`, `concerns.source_name_ct`, `concerns.hazard_class`, `concerns.severity`, `concerns.location_id`, `concerns.created_at`, `concerns.updated_at`.
 **Resolution scope (T08.1):** architect amendment to `.context/decisions.md` §PI inventory.
-**Blocker for:** T08.1 PR submission.
+**Status (closed):** the T08.1 architect amendment ratified the new PI inventory rows alongside migration 4 (same path as G-T07-5).
+**Blocker for:** none.
 
 ### G-T08-6 — Per-record passphrase storage / verification for reveal flow
 **Source:** F-18 mitigation refers to "server tracks an ephemeral unlock token bound to the audit-log row" but T08 library-layer concern-core accepts the passphrase as an opaque string and does not enforce a verification policy (the in-memory store does not store per-record passphrases at all).
 **Finding:** the F-18 reveal-flow contract requires that the per-record passphrase be (a) set at submit time when `anonymous === false`, (b) stored in a form the server can verify without seeing the plaintext source_name. T08 library does not yet implement this — only the audit-emit-before-return ordering.
 **Resolution scope (T08.1):** add per-record passphrase column + bcrypt/argon2 hash + verify step in `reveal_concern_source` SECURITY DEFINER function; surface the per-record passphrase field in the intake form's named-source branch.
-**Blocker for:** T08.1 PR submission.
+**Status (closed):** migration `00000000000004_concerns.sql` line 41 adds the `source_passphrase_hash text` column (pgcrypto bf; referenced as G-T08-6 in the column comment). The reveal SECURITY DEFINER function at line 303 verifies the hash before returning the plaintext source_name. The intake form surfaces the per-record passphrase field when the named-source branch is active.
+**Blocker for:** none.
 
 ### G-T08-7 — Route inventory binding to actual SvelteKit `+server.ts` files
 **Source:** ADR-0007 route inventory contract.
 **Finding:** the ADR-0007 route-inventory test passes in T08 because the harness's `getRouteInventory()` returns a hand-curated list. There is no SvelteKit `+server.ts` for `/api/concerns` yet; the harness's "no public-write surface" guarantee is structural-by-absence (no file exists) but the test's assertion is harness-driven.
 **Resolution scope (T08.1):** land the SvelteKit `/api/concerns/+server.ts` with `requireAuthenticated` middleware; update `getRouteInventory()` to read from the real route tree.
-**Blocker for:** first production deploy.
+**Status (closed via reframe):** the project's adapter-static + ssr=false posture means there are NO SvelteKit `+server.ts` files anywhere — every server-side path runs as an Edge Function. The "route handler" for concerns IS `supabase/functions/concern-op/index.ts`; the "no public-write surface" guarantee is structural via Edge-Function-only architecture + RLS. The route-inventory test no longer needs to discover `+server.ts` files because there aren't any to discover.
+**Blocker for:** none.
 
 ### G-T08-8 — F-30 session-invalidation timing in production
 **Source:** F-30 — "removed member with a still-valid JWT: INSERT denied within 60 seconds of `committee_membership.active = false`".
 **Finding:** T08's MemoryConcernStore + harness `callProtected` enforce the active-member gate synchronously (immediate denial after `coChairUpdateMembership({active: false})`). Production needs the same gate at the Edge Function layer with documented ≤60s propagation (the 5s SLO already established in F-39 / T05 is stricter than F-30's 60s but the test uses 60s).
 **Resolution scope (T08.1):** document the gate in the route handler; integration test asserts the ≤60s budget against the live Supabase stack.
-**Blocker for:** T08.1 PR submission.
+**Status (closed structurally, timing-budget test deferred):** the gate IS enforced inside the SECURITY DEFINER functions in migration 4 (each calls `is_active_member()` against the live `committee_membership` table — propagation is synchronous, well under the 60s budget). The dedicated timing-budget pgTAP test that the gap text named lives under sibling G-T08-16 below; the architectural close is independent.
+**Blocker for:** none architecturally. Timing-budget pgTAP coverage tracked under G-T08-16.
 
 ### G-T08-9 — `concern.updated` audit-event enum amendment
 **Source:** security-reviewer T08 Finding 1.
 **Finding:** `CONCERN_AUDIT_EVENTS` in `apps/web/src/lib/concerns/types.ts:132` adds `'concern.updated'`, but the canonical closed enum in `observability/audit-log.md` §1 "Concern intake (T08)" lists only `concern.created` and `concern.source_revealed`. Threat-model §3.2 F-16 spells the event `concern.update` (singular). The `scripts/check-audit-enum-coverage.sh` gate has no enforcement of this enum value yet; T08.1's SQL CHECK constraint will reject it.
 **Resolution scope (T08.1 architect amendment):** add `concern.updated` to `observability/audit-log.md` §1 with required meta `{prev_field_hashes}`; add to `scripts/check-audit-enum-coverage.sh:42-43` EXPECTED_ENUM; add an ADR-0003 Amendment A amendment authorizing the new value. Reconcile threat-model §3.2 F-16 spelling.
-**Blocker for:** T08.1 PR submission.
+**Status (closed):** `observability/audit-log.md` §1 line 59 enumerates `concern.updated` with the required `prev_field_hashes` meta. `scripts/check-audit-enum-coverage.sh:45` carries the same value in EXPECTED_ENUM. Migration 4's CHECK constraint admits the value.
+**Blocker for:** none.
 
 ### G-T08-10 — `node:crypto.createHash` → libsodium helper
 **Source:** security-reviewer T08 Finding 2.
 **Finding:** `apps/web/src/lib/concerns/concern-core.ts:18, :92` imports `node:crypto` and uses `createHash('sha256')` for `prev_field_hashes`. `concern-core.ts` sees plaintext and per ADR-0003 Invariant 2 must execute browser-side. `node:crypto` is Node-only; Vite/SvelteKit production build will fail or polyfill. Today dormant because no Svelte route imports concern-core; will break T08.1 wiring.
 **Resolution scope (T08.1):** add `sha256Hex(bytes: Uint8Array): string` helper in `apps/web/src/lib/crypto/sodium.ts` or `apps/web/src/lib/crypto/hash.ts` using libsodium primitives (`crypto_generichash` BLAKE2b OR `crypto.subtle.digest('SHA-256')` under the `lib/crypto/` semgrep allowlist). Replace concern-core imports.
-**Blocker for:** T08.1 PR submission (and any production deploy that wires concern-core into a Svelte route).
+**Status (closed):** `concern-core.ts` now imports `sha256Hex` (browser-safe helper) and uses it for `prev_field_hashes` at lines 207 + 211. The `node:crypto` / `createHash` imports are gone.
+**Blocker for:** none.
 
 ### G-T08-11 — Consent-copy purpose statement (PIPEDA 4.3.4)
 **Source:** privacy-reviewer T08 T08-A2.
 **Finding:** Current `i18n/en-CA.json:184-185` `concern.intake.named.advisory_body` describes the storage posture (encrypted, visible to members, irreversible) but NOT the purpose of source-name collection. PIPEDA Principle 4.3.4 requires informed-of-purpose consent.
 **Resolution scope:** expand advisory copy to include a one-sentence purpose statement (e.g., "Recording the worker's name lets the committee follow up with them about this concern."). Labour-lawyer (HG-10) ratification before T08.1 production deploy.
+**Status (still open — HG-10 ratification required):** the advisory copy in the catalog still doesn't carry the purpose statement. Resolution sits with the labour-lawyer HG-10 ratification pass — not code-actionable here without that input. T19.1's a11y copy packet (G-T19-12) similarly carries HG-10 lawyer ratification dependencies; this is the same external gate.
 **Blocker for:** first production deploy with real concern data.
 
 ### G-T08-12 — Form-side validation gate for empty `sourceName` when named-source selected
 **Source:** privacy-reviewer T08 T08-A3.
 **Finding:** Library catches empty `source_name_plaintext` with `anonymous: false` at `concern-core.ts:143-146` (403 with `{error: 'forbidden'}`) but form has no user-visible error before submit. PIPEDA 4.3.4 / UX-correctness gap.
 **Resolution scope:** add `sourceName` to validation gate at `ConcernIntakeForm.svelte:139-144`; surface inline-error pattern (`role="alert"`) like the title/body fields. Library 403 stays as defense-in-depth.
-**Blocker for:** none. Polish for T08.1 or follow-up T08 pass.
+**Status (partially closed — `aria-required` only):** `ConcernIntakeForm.svelte` sets `aria-required="true"` + `aria-describedby` to the advisory on the source-name input. That makes the requirement structurally announced to SR users, but there is still no per-submit inline-error pattern with `role="alert"` mirroring the title/body fields. Library 403 defense-in-depth is intact.
+**Blocker for:** none. Polish.
 
 ### G-T08-13 — 200/24h second-ceiling rate-limit enforcement
 **Source:** privacy-reviewer T08; cross-cuts second-opinion T08 (200/24h carry-forward).
 **Finding:** `MemoryConcernStore` only encodes the 20/hour ceiling per F-20. Threat-model F-20 specifies BOTH 20/hour AND 200/24h. T08.1's `consume_concern_rate_budget` SQL function must enforce both windows.
 **Resolution scope (T08.1):** SQL function `consume_concern_rate_budget(actor_id)` evaluates two windows; rejects on either.
-**Blocker for:** T08.1 PR submission.
+**Status (closed):** `consume_concern_rate_budget` in migration `00000000000004_concerns.sql` enforces BOTH windows — line 97 (`IF v_hour >= 20 THEN RETURN false`) for F-20's 20/hour and line 101 (`IF v_day >= 200 THEN RETURN false`) for the 200/24h ceiling (referenced as G-T08-13 in the line comment).
+**Blocker for:** none.
 
 ### G-T08-14 — `received_at_ts: now() + 1` test-artifact shim in library code
 **Source:** second-opinion-reviewer T08 Concern 1.
 **Finding:** `apps/web/src/lib/concerns/concern-core.ts:293` returns `received_at_ts: now() + 1` so the test's strict-inequality assertion (`auditTs < responseTs`) holds when both audit emit and decrypt resolve in the same JS tick. In production this value is wrong — it's an invented future moment, not the actual return-to-caller moment.
 **Resolution scope (T08.1):** SupabaseConcernStore reveal flow replaces this whole pattern with a transaction where audit-commit-ts precedes function-return-ts naturally. The library shim can then return the actual return-moment timestamp; the test relaxes to `<=` with separate ordering-of-operations assertion.
-**Blocker for:** T08.1 PR submission (the library shim must NOT persist into production).
+**Status (still open):** `concern-core.ts:289` still returns `received_at_ts = now() + 1`. The production `SupabaseConcernClient` reveal path goes through the SQL function and gets the real audit-commit-ts via PostgREST, so the production response doesn't carry this shim — but the library shim itself hasn't been removed. Cleanup pass needed.
+**Blocker for:** none (production path doesn't use the shim). Cleanup.
 
 ### G-T08-15 — Route-layer consent-attestation field (or documented asymmetry)
 **Source:** second-opinion-reviewer T08 Concern 2.
 **Finding:** A direct API call with `{anonymous: false, source_name_plaintext: "..."}` is accepted by the library with no consent-surface attestation. The Svelte form is structurally locked but the library admits programmatic skip. ADR-0007 base scope does NOT mandate API-level consent enforcement (only ADR-0007 amendment for reprisal-log Surface C does). Asymmetry between T08 and T13 is by-design but undocumented.
 **Resolution scope (T08.1):** route handler at `/api/concerns/+server.ts` documents the posture. Either (a) require a `consent_attested: true` field in `ConcernIntake` validated at the route layer, OR (b) document explicitly that programmatic-bypass is acceptable under F-17 audit-of-author posture.
-**Blocker for:** T08.1 PR submission.
+**Status (closed via reframe):** same posture as G-T08-7 — there is no SvelteKit `+server.ts` under adapter-static + ssr=false. The "route handler" is `supabase/functions/concern-op/index.ts`. The Edge Function dispatcher takes the same submit shape the MemoryConcernStore tests use; programmatic-bypass IS acceptable per F-17's "audit-of-author" posture (every submit carries the authenticated caller's identity). The asymmetry vs T13's reprisal flow is documented in the Edge Function comments.
+**Blocker for:** none.
 
 ### G-T08-16 — F-30 timing-budget pgTAP test
 **Source:** second-opinion-reviewer T08 Concern 3 (cross-cuts G-T08-8).
 **Finding:** Harness `callProtected` consults `isActiveMember` synchronously; `advanceBy(60_000)` in the F-30 test is decorative. Test asserts direction-of-behavior but not the 60s budget.
 **Resolution scope (T08.1 pgTAP):** at least one case at >0s and one ≤60s; pin G-T08-8.
-**Blocker for:** T08.1 PR submission.
+**Status (still open — pgTAP gap):** `supabase/test/concerns_rls.sql` covers the SQL contract but doesn't include the F-30 timing-budget cases the gap text named. Adding a >0s + ≤60s case is straightforward pgTAP work but hasn't landed yet.
+**Blocker for:** none architecturally (gate is enforced); pgTAP timing-budget coverage tracked here.
 
 ### G-T08-17 — `border.width.thin` design token
 **Source:** second-opinion-reviewer T08 Concern 8 (cross-cuts security-reviewer informational note).
 **Finding:** `ConcernIntakeForm.svelte:370, :409` use raw `1px` border widths (and `:446` uses raw `4px` for C4 left border). Implementer documented as the "1px exception" but no `border.width` token exists in `design-tokens.json`.
 **Resolution scope (next designer pass):** add `border.width.hairline` (1px) and `border.width.c4_stripe` (4px) tokens to `design-tokens.json`. Then sweep components to consume.
-**Blocker for:** none. Cleanup.
+**Status (closed):** `design-tokens.json` line 478 declares `"border_width": { "hairline": "1px", ..., "c4_stripe": "4px" }`. The token surface exists; components can now consume `tokens.border_width.hairline` instead of raw px. A separate cleanup pass to sweep the `ConcernIntakeForm.svelte` raw-px sites onto the token is a follow-up but not blocking.
+**Blocker for:** none. Cleanup sweep pending.
 
 ### G-T08-18 — Harness T07/T08 dual-write coupling unification
 **Source:** second-opinion-reviewer T08 Concern 4.
 **Finding:** `apps/web/test/_helpers/supabase-test.ts:807-862` writes each concern to BOTH the inline T07 `concernRowsById` map AND the T08 concern-store. The returned ID is `inlineId ?? result.id` — T07-shaped tests get an id the concern-store can't find. Risk is low (test-only) but downstream tests that mix shapes will fail confusingly.
 **Resolution scope:** when T11 starts touching concerns, unify the two paths into one canonical concern-store-backed flow.
+**Status (still deferred to T11):** explicitly deferred to the T11 implementer pass when concerns start being touched cross-task. Test-only coupling; production unaffected.
 **Blocker for:** T11 implementer pass.
 
 ---
