@@ -28,7 +28,7 @@
  *     in the browser bundle.
  */
 
-import type { SessionRow, UserRow } from './types.ts';
+import type { CredentialRow, SessionRow, UserRow } from './types.ts';
 
 export type AuthOpReason =
   | 'bad_request'
@@ -49,6 +49,7 @@ export interface AuthOpDeps {
   getUserById(user_id: string): Promise<UserRow | null>;
   getSessionById(session_id: string): Promise<SessionRow | null>;
   listActiveSessionsForUser(user_id: string): Promise<SessionRow[]>;
+  listCredentialsForUser(user_id: string): Promise<CredentialRow[]>;
 }
 
 /**
@@ -93,6 +94,18 @@ export async function handleAuthOp(
       // Empty result is `{ok: true, data: []}`, NOT `not_found` — a
       // user with no active sessions is a normal state (e.g., right
       // after logout-everywhere), not an error.
+      return { ok: true, data: rows };
+    }
+
+    case 'list_credentials_for_user': {
+      // Lists the caller's WebAuthn credentials. RLS enforces row-
+      // scope via `webauthn_credentials_select_self` (auth.uid() =
+      // user_id), so a caller can only see their own credentials.
+      // Empty result is a normal state (e.g., a freshly-revoked
+      // account); returns `{ok: true, data: []}`, NOT 404.
+      const user_id = typeof input.user_id === 'string' ? input.user_id : '';
+      if (!user_id) return { ok: false, reason: 'bad_request', status: 400 };
+      const rows = await deps.listCredentialsForUser(user_id);
       return { ok: true, data: rows };
     }
 

@@ -14,12 +14,13 @@
 
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import { handleAuthOp, type AuthOpDeps } from '../core.ts';
-import type { SessionRow, UserRow } from '../types.ts';
+import type { CredentialRow, SessionRow, UserRow } from '../types.ts';
 
 function depsWith(opts: {
   users?: Record<string, UserRow>;
   sessions?: Record<string, SessionRow>;
   userSessions?: Record<string, SessionRow[]>;
+  userCredentials?: Record<string, CredentialRow[]>;
 }): AuthOpDeps {
   return {
     async getUserById(user_id: string): Promise<UserRow | null> {
@@ -30,6 +31,9 @@ function depsWith(opts: {
     },
     async listActiveSessionsForUser(user_id: string): Promise<SessionRow[]> {
       return opts.userSessions?.[user_id] ?? [];
+    },
+    async listCredentialsForUser(user_id: string): Promise<CredentialRow[]> {
+      return opts.userCredentials?.[user_id] ?? [];
     }
   };
 }
@@ -197,6 +201,52 @@ Deno.test('handleAuthOp — list_active_sessions returns {ok:true, data:[]} when
 
 Deno.test('handleAuthOp — list_active_sessions with no user_id returns bad_request (400)', async () => {
   const result = await handleAuthOp({ op: 'list_active_sessions' }, depsWith({}));
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.reason, 'bad_request');
+});
+
+// ----------------------------------------------------------------------------
+// list_credentials_for_user — read-only by user_id
+// ----------------------------------------------------------------------------
+
+const credUserId = '00000000-0000-4000-8000-000000000001';
+const credentialRow: CredentialRow = {
+  credentialId: 'cred-abc',
+  user_id: credUserId,
+  rpId: 'jhsc.example',
+  publicKey: '\\xdeadbeef',
+  counter: 5,
+  aaguid: 'd548b250-0000-4000-8000-000000000000',
+  transports: ['internal'],
+  device_label: 'iPhone (work)'
+};
+
+Deno.test('handleAuthOp — list_credentials_for_user returns the rows for the user', async () => {
+  const result = await handleAuthOp(
+    { op: 'list_credentials_for_user', user_id: credUserId },
+    depsWith({ userCredentials: { [credUserId]: [credentialRow] } })
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.data, [credentialRow]);
+  }
+});
+
+Deno.test('handleAuthOp — list_credentials_for_user returns {ok:true, data:[]} for a user with no credentials', async () => {
+  // A user mid-enrollment or post-revocation has zero credentials —
+  // this is a normal state, NOT 404.
+  const result = await handleAuthOp(
+    { op: 'list_credentials_for_user', user_id: '00000000-0000-4000-8000-000000000099' },
+    depsWith({})
+  );
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.data, []);
+  }
+});
+
+Deno.test('handleAuthOp — list_credentials_for_user with no user_id returns bad_request (400)', async () => {
+  const result = await handleAuthOp({ op: 'list_credentials_for_user' }, depsWith({}));
   assertEquals(result.ok, false);
   if (!result.ok) assertEquals(result.reason, 'bad_request');
 });
