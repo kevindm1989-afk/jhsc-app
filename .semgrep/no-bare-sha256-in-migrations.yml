@@ -9,5 +9,17 @@ rules:
     paths:
       include:
         - "supabase/migrations/**.sql"
-    pattern: digest($X, 'sha256')
+    pattern-either:
+      # G-T05-9: cover lowercase + uppercase, single + double-quoted, and
+      # the schema-qualified pgcrypto.digest() form. The original rule
+      # only caught the lowercase single-quoted spelling — three sibling
+      # spellings would have slipped through identical bug.
+      - pattern: digest($X, 'sha256')
+      - pattern: digest($X, "sha256")
+      - pattern: DIGEST($X, 'sha256')
+      - pattern: DIGEST($X, "sha256")
+      - pattern: pgcrypto.digest($X, 'sha256')
+      - pattern: pgcrypto.digest($X, "sha256")
+      - pattern: extensions.digest($X, 'sha256')
+      - pattern: extensions.digest($X, "sha256")
     severity: ERROR

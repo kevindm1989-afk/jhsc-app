@@ -20,7 +20,7 @@
  *   3. Breadcrumb stream denied-by-default for xhr/fetch to sensitive paths.
  *   4. Any event > MAX_EVENT_BYTES is dropped (oversize protection).
  *   5. A canary appearing in ANY captured event → P0.
- *   6. The browser bundle MUST NOT contain HMAC_PSEUDONYM_KEY.
+ *   6. The browser bundle MUST NOT contain the HMAC_/PSEUDONYM_KEY env var name.
  */
 
 // ----------------------------------------------------------------------------
