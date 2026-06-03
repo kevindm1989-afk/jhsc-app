@@ -21,6 +21,7 @@ import type { AuthSession, PasskeyCredential } from '../../src/lib/auth/types';
 import {
   SupabaseAuthStore,
   SupabaseAuthStoreNotImplementedError,
+  SupabaseAuthStoreServerOnlyError,
   type AuthOpTransport
 } from '../../src/lib/auth/supabase-auth-store';
 
@@ -100,73 +101,82 @@ describe('T05.1 / G-T05-1 — SupabaseAuthStore.getUser (the one wired op)', () 
   });
 });
 
-describe('T05.1 / G-T05-1 — SupabaseAuthStoreNotImplementedError on deferred methods', () => {
+describe('T05.1 / G-T05-1 — SupabaseAuthStoreServerOnlyError on server-only methods', () => {
   const { transport } = captureTransport(200, { ok: true, data: null });
   const store = new SupabaseAuthStore({ transport });
 
-  // Single helper: every deferred method MUST throw the structured
-  // error carrying its op name. The fan-out below is one test per
-  // method so a failure pinpoints the regressed op rather than the
-  // whole suite.
+  // All 11 reclassified methods throw SupabaseAuthStoreServerOnlyError
+  // carrying the op name + a rationale. The fan-out below is one test
+  // per method so a failure pinpoints the regressed op rather than
+  // the whole suite. Each `.op` assertion guards the structured-error
+  // contract that the call site reads.
 
-  it('ensureUser throws', () => {
-    expect(() => store.ensureUser('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+  function expectsServerOnly(op: string, run: () => unknown): void {
+    expect(run).toThrow(SupabaseAuthStoreServerOnlyError);
     try {
-      store.ensureUser('x');
+      run();
     } catch (err) {
-      expect((err as SupabaseAuthStoreNotImplementedError).op).toBe('ensureUser');
+      const e = err as SupabaseAuthStoreServerOnlyError;
+      expect(e.op).toBe(op);
+      // The message must mention the op + carry a rationale (the "why"
+      // string). Defense pin: a stub that re-uses the same boilerplate
+      // for every method would lose the per-method explanation.
+      expect(e.message).toContain(op);
+      expect(e.message.length).toBeGreaterThan(80);
     }
+  }
+
+  it('ensureUser throws server-only', () => {
+    expectsServerOnly('ensureUser', () => store.ensureUser('x'));
   });
 
-  it('issueTotpBootstrap throws', () => {
-    expect(() => store.issueTotpBootstrap('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+  it('issueTotpBootstrap throws server-only', () => {
+    expectsServerOnly('issueTotpBootstrap', () => store.issueTotpBootstrap('x'));
   });
 
-  it('getTotpBootstrap throws', () => {
-    expect(() => store.getTotpBootstrap('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+  it('getTotpBootstrap throws server-only', () => {
+    expectsServerOnly('getTotpBootstrap', () => store.getTotpBootstrap('x'));
   });
 
-  it('wasTotpCodeConsumed throws', () => {
-    expect(() => store.wasTotpCodeConsumed('x', 'y')).toThrow(
-      SupabaseAuthStoreNotImplementedError
-    );
+  it('wasTotpCodeConsumed throws server-only', () => {
+    expectsServerOnly('wasTotpCodeConsumed', () => store.wasTotpCodeConsumed('x', 'y'));
   });
 
-  it('recordTotpWrong throws', () => {
-    expect(() => store.recordTotpWrong('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+  it('recordTotpWrong throws server-only', () => {
+    expectsServerOnly('recordTotpWrong', () => store.recordTotpWrong('x'));
   });
 
-  it('lockTotpBootstrap throws', () => {
-    expect(() => store.lockTotpBootstrap('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+  it('lockTotpBootstrap throws server-only', () => {
+    expectsServerOnly('lockTotpBootstrap', () => store.lockTotpBootstrap('x'));
   });
 
-  it('consumeTotpAndEnrollPasskey throws', () => {
-    expect(() =>
+  it('consumeTotpAndEnrollPasskey throws server-only', () => {
+    expectsServerOnly('consumeTotpAndEnrollPasskey', () =>
       store.consumeTotpAndEnrollPasskey({
         user_id: 'x',
         totp_code: 'y',
         credential: {} as never,
         now: 0
       })
-    ).toThrow(SupabaseAuthStoreNotImplementedError);
+    );
   });
 
-  it('getCredential throws', () => {
-    expect(() => store.getCredential('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+  it('getCredential throws server-only (RLS posture forbids browser cred-by-id lookup)', () => {
+    expectsServerOnly('getCredential', () => store.getCredential('x'));
   });
 
-  it('saveCredential throws', () => {
-    expect(() => store.saveCredential({} as never)).toThrow(SupabaseAuthStoreNotImplementedError);
+  it('saveCredential throws server-only', () => {
+    expectsServerOnly('saveCredential', () => store.saveCredential({} as never));
   });
 
-  it('createSession throws', () => {
-    expect(() =>
+  it('createSession throws server-only (mint-session is the canonical path)', () => {
+    expectsServerOnly('createSession', () =>
       store.createSession({ user_id: 'x', now: 0, ttl_ms: 1000 })
-    ).toThrow(SupabaseAuthStoreNotImplementedError);
+    );
   });
 
-  it('emitAudit throws', () => {
-    expect(() =>
+  it('emitAudit throws server-only', () => {
+    expectsServerOnly('emitAudit', () =>
       store.emitAudit({
         event_type: 'auth.test',
         actor_pseudonym: 'p',
@@ -174,13 +184,23 @@ describe('T05.1 / G-T05-1 — SupabaseAuthStoreNotImplementedError on deferred m
         severity: 'info',
         meta: {}
       })
-    ).toThrow(SupabaseAuthStoreNotImplementedError);
+    );
   });
 
-  it('pseudonymOf throws (browser MUST NOT compute the HMAC pseudonym)', () => {
+  it('pseudonymOf throws server-only (browser MUST NOT compute the HMAC pseudonym)', () => {
     // Defense pin: returning the raw uid would silently break C2
-    // pseudonymity. The throw is the load-bearing behaviour.
-    expect(() => store.pseudonymOf('x')).toThrow(SupabaseAuthStoreNotImplementedError);
+    // pseudonymity. The server-only throw is the load-bearing behaviour.
+    expectsServerOnly('pseudonymOf', () => store.pseudonymOf('x'));
+  });
+
+  it('SupabaseAuthStoreNotImplementedError is still exported (back-compat for a future wire-up PR)', () => {
+    // The class stays even though no method currently throws it —
+    // keeps the import path stable for the hypothetical future PR
+    // that re-wires one of these ops as a real Edge Function call.
+    expect(SupabaseAuthStoreNotImplementedError).toBeDefined();
+    expect(new SupabaseAuthStoreNotImplementedError('x')).toBeInstanceOf(
+      SupabaseAuthStoreNotImplementedError
+    );
   });
 });
 
