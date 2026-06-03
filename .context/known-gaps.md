@@ -104,19 +104,30 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Source:** second-opinion 2, security findings 1+3, privacy T07-1/2/3.
 **Finding:** `supabase/migrations/00000000000002_identity.sql` was shipped without integration tests (the test harness was a parallel in-memory implementation; SQL functions had zero test call-sites). The migration is dropped from T07.
 **Resolution scope (T07.1):** ship the migration with pgTAP / real-Supabase integration tests covering every SECURITY DEFINER function.
-**Blocker for:** first production deploy carrying real PI.
+**Status (closed):** four T07 migrations now live in `supabase/migrations/`:
+  - `00000000000007_t07.sql` (identity + committee key + recovery blob primary)
+  - `00000000000008_t07_f02.sql` (F-02 sealed-box challenge)
+  - `00000000000009_t07_selftest_fail.sql` (identity selftest-fail audit)
+  - `00000000000010_t07_recovery_blob_get.sql` (recovery blob read path)
+
+  Plus pgTAP coverage in `supabase/test/t07_rls.sql`, `t07_f02_rls.sql`, `t07_recovery_blob_get_rls.sql`, `t07_selftest_fail_rls.sql`.
+**Blocker for:** none — production deploy unaffected.
 
 ### G-T07-2 — SupabaseKeyStore production wire-up
 **Source:** ADR-0002 Amendment H (canonical sibling-task pattern; mirrors G-T05-1).
 **Finding:** Only `MemoryKeyStore implements KeyStore`. No Edge Function call, no RPC binding to T07's SQL functions, no JWT-validating committee membership checks.
 **Resolution scope (T07.1):** wire SupabaseKeyStore + Edge Functions for the wrap/unwrap/rotate paths.
-**Blocker for:** production deploy with real PI.
+**Status (closed via different architecture):** the production path is `apps/web/src/lib/crypto/supabase-t07-client.ts` (`SupabaseT07Client`), NOT a `SupabaseKeyStore implements KeyStore`. The class header documents the architectural reframe verbatim: *"the KeyStore interface designed for the test orchestrator (MemoryKeyStore) decomposes a single high-level operation (e.g. rotate the committee data key) into many small steps; the PRODUCTION architecture folds these steps into one SECURITY DEFINER SQL function per high-level operation — atomicity is the point."*
+
+  The client exposes 14 high-level operations 1:1 with the t07-op Edge Function ops + the corresponding SECURITY DEFINER SQL functions: `enrollIdentityViaChallenge`, `storeRecoveryBlob`, `getRecoveryBlob`, `recordRecoveryBlobRestored`, `recordRecoveryBlobViewed`, `issueRecoveryBlobReset`, `initCommitteeDataKey`, `wrapCommitteeDataKeyForMember`, `recordCommitteeDataKeyUnwrap`, `rotateCommitteeDataKey`, `finalizeCommitteeDataKeyRotation`, `revokeCommitteeMember`, `recordIdentitySelftestFail`, `recordPanicWipeInvoked`. `BrowserLocalIdentityStore` handles the device-local private-key reads via the LocalIdentityStore split.
+**Blocker for:** none — production deploy unaffected.
 
 ### G-T07-3 — Real Supabase integration tests for T07 SQL functions
 **Source:** second-opinion 2.
 **Finding:** every adminQuery in the T07 test file resolves through `apps/web/test/_helpers/supabase-test.ts`'s in-memory mini-parser. The 11 SQL SECURITY DEFINER functions in the deferred migration have zero automated test coverage.
 **Resolution scope (T07.1):** pgTAP suite covering `enroll_identity_keypair`, `store_recovery_blob`, `record_recovery_blob_restored`, `record_recovery_blob_viewed`, `issue_recovery_blob_reset`, `init_committee_data_key`, `wrap_committee_data_key_for_member`, `record_committee_data_key_unwrap`, `rotate_committee_data_key`, `finalize_committee_data_key_rotation`, `revoke_committee_member`.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** pgTAP files live at `supabase/test/t07_rls.sql`, `supabase/test/t07_f02_rls.sql`, `supabase/test/t07_recovery_blob_get_rls.sql`, `supabase/test/t07_selftest_fail_rls.sql`. These run under the "Committee DB tests (pgTAP)" CI job alongside the committee + concerns + reprisal suites.
+**Blocker for:** none.
 
 ### G-T07-4 — ADR-0016 schedule rows for 6 tables
 **Source:** privacy T07-1.
@@ -140,19 +151,22 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Source:** second-opinion 5.
 **Finding:** `record_recovery_blob_viewed` (in the deferred migration at lines 386-391) explicitly trusted client-supplied `reveal_count_in_session`. M-54c exists because the client is not trusted in F-54 threat model. The SQL must enforce the cap server-side.
 **Resolution scope (T07.1):** server-side counter (column on `recovery_blobs` keyed on `enrollment_session_id` OR derived count from `audit_log`); reject INSERT if cap reached.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** `record_recovery_blob_viewed` in migration `00000000000007_t07.sql` (referenced as G-T07-7 in the migration header) enforces the cap-of-3 server-side. The browser-side `recordRecoveryBlobViewed` on `SupabaseT07Client` calls the function and surfaces `cap_reached` as a 409.
+**Blocker for:** none.
 
 ### G-T07-8 — `issue_recovery_blob_reset` authz + audit emission
 **Source:** security F3, second-opinion 3, privacy T07-A2.
 **Finding:** the deferred SQL function had no co-chair role check on `p_issued_by` and emitted no audit_log row. F-12's mitigation requires "co-chair-issued, audit-logged."
 **Resolution scope (T07.1):** add `SELECT 1 FROM users WHERE id = p_issued_by AND role = 'worker_co_chair' AND active = true` precondition; emit interim audit row via closest existing enum until T06's `recovery_reset.issued` enum lands.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** `issue_recovery_blob_reset` in migration `00000000000007_t07.sql` (referenced as G-T07-8 in the migration header) enforces the co-chair-role precondition and emits the audit row. The browser-side `issueRecoveryBlobReset` on `SupabaseT07Client` surfaces a 42501 from the SQL function as `rls_denied/403` for non-co-chair callers.
+**Blocker for:** none.
 
 ### G-T07-9 — Server-issued nonce for F-02 self-test
 **Source:** security F6.
 **Finding:** F-02's mitigation says "server returns a nonce sealed to the just-posted ident_pub; client must unseal and return; if unseal fails, enrollment is rolled back." The current `selfTestKeypair` runs entirely on the client. A hostile client cannot be caught.
 **Resolution scope (T07.1):** Edge Function emits a sealed-to-pubkey nonce on enroll; client unseals; server verifies before committing the row.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** migration `00000000000008_t07_f02.sql` ships the sealed-box challenge handshake (header explicitly cites G-T07-9). The browser-side `SupabaseT07Client.enrollIdentityViaChallenge` drives the full flow: client posts pubkey → Edge Function returns sealed nonce → client unseals → posts cleartext → server verifies before committing. The unseal step uses an injected `unsealNonce` callback so the client class stays libsodium-agnostic.
+**Blocker for:** none.
 
 ### G-T07-10 — KeyStore interface split (read API must not surface private_key)
 **Source:** security F5.
@@ -170,7 +184,11 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Source:** security F1, privacy T07-A4.
 **Finding:** standard `libsodium-wrappers` lacks `crypto_pwhash`. Production deploy needs the `-sumo` build for Argon2id. ADR-0003 Amendment G makes `encryptRecoveryBlob` fail-closed when `crypto_pwhash` absent, so the data-integrity bomb is prevented in code — but production usability requires the dep swap.
 **Resolution scope (T07.1):** swap `libsodium-wrappers` → `libsodium-wrappers-sumo` in `apps/web/package.json`; boot-time assertion in `apps/web/src/lib/crypto/recovery-blob.ts` that throws if `crypto_pwhash` is missing and `NODE_ENV !== 'test'`; pnpm `lockfile-lint` rule asserting `libsodium-wrappers-sumo` is the resolved dep in production builds.
-**Blocker for:** production deploy with real PI.
+**Status (closed):** all three resolution items shipped:
+  - `apps/web/package.json` now lists `libsodium-wrappers-sumo` as the dep (pinned by `test/T19/package-json-deps.test.ts` PR #93).
+  - `assertArgon2idAvailable()` lives at `apps/web/src/lib/crypto/recovery-blob.ts:45`; wired into `hooks.client.ts` to fire at boot with errors routed through the structured logger + Sentry.
+  - `scripts/check-libsodium-sumo-locked.sh` enforces the lockfile-lint contract under the hardening-gates job.
+**Blocker for:** none.
 
 ### G-T07-13 — Svelte 5 + TS `@ts-expect-error` suppressions on event handlers
 **Source:** second-opinion-reviewer T07 final pass.
@@ -182,13 +200,15 @@ All twelve are ratified under ADR-0002 Amendment H + ADR-0003 Amendment G + Amen
 **Source:** second-opinion-reviewer T07 final pass (advisory 8).
 **Finding:** The rotation path does not enforce "at least one active member exists" before `finalize_committee_data_key_rotation`. If `rotateCommitteeDataKey` is called when `revoke_committee_member` has emptied the active set, the new epoch has no wraps and the data key under that epoch is unrecoverable — data-loss risk on a corner case the in-memory tests don't exercise.
 **Resolution scope (T07.1):** add a `SELECT count(*) FROM users WHERE active = true >= 1` precondition inside `rotate_committee_data_key` SQL function; raise on zero. Fold into G-T07-3's pgTAP integration test plan.
-**Blocker for:** T07.1 PR submission.
+**Status (closed):** `rotate_committee_data_key` in migration `00000000000007_t07.sql` (referenced as G-T07-14 in the migration header) raises `no_active_members` (P0001 → 422) when no active members exist. Browser-side `SupabaseT07Client.rotateCommitteeDataKey` surfaces the error.
+**Blocker for:** none.
 
 ### G-T07-15 — `client.identity_selftest_fail` audit-emission interface unification
 **Source:** second-opinion-reviewer T07 final pass (advisory 10).
 **Finding:** `apps/web/src/lib/crypto/index.ts:382` emits `client.identity_selftest_fail` via the `recordKeyEvent` path with an `as unknown as never` cast because the closed enum forbids the value at the type level. The CI gate `check-audit-enum-coverage.sh` enforces the closed enum at build time, so the cast is structurally safe — but the cast itself is type-uglyness that should disappear in T07.1.
 **Resolution scope (T07.1):** either widen the audit-emission interface to admit a structured-log-shaped emission path that doesn't go through the closed enum, OR route this event through a separate AuthStore-style emission method. Folds with G-T07-10 (KeyStore interface split).
-**Blocker for:** none. Cleanup.
+**Status (closed):** migration `00000000000009_t07_selftest_fail.sql` adds a dedicated `record_identity_selftest_fail` SECURITY DEFINER function. Browser-side `SupabaseT07Client.recordIdentitySelftestFail` (line 332, marked `G-T07-15 server-side emission for client.identity_selftest_fail`) emits via that op directly — no `as unknown as never` cast in the production path. The legacy `recordKeyEvent` cast at `apps/web/src/lib/crypto/index.ts:382` lives in the memory-store-backed flow and stays as test-only ugliness; production never touches it.
+**Blocker for:** none.
 
 ---
 
