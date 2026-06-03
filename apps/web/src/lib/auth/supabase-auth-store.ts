@@ -1,31 +1,41 @@
 /**
- * SupabaseAuthStore — T05.1 production wire-up scaffold (G-T05-1 begin).
+ * SupabaseAuthStore — T05.1 production wire-up (G-T05-1 substantial close).
  *
- * Closes G-T05-1 INCREMENTALLY. The browser-side `AuthStore` interface
- * (`store.ts`) has ~30 methods spanning users / TOTP bootstrap /
- * passkeys / sessions / audit. Each one needs:
+ * Closes G-T05-1 across two passes:
  *
- *   - A corresponding Edge Function op (in `supabase/functions/auth-op/`).
- *   - A migration / RPC binding for the SQL side (most methods reach
- *     the SECURITY DEFINER functions in
- *     `supabase/migrations/00000000000001_auth.sql`).
- *   - A unit test pair (this file's vitest counterpart + the Edge
- *     Function's deno test).
+ *   - **Browser-callable ops** (wired end-to-end via auth-op Edge
+ *     Function + SECURITY DEFINER SQL wrappers per migrations 12 + 13):
  *
- * Shipping that all in one PR would be a 1500+ line drop. This PR
- * stages the architecture:
+ *       getUser, getSession, listActiveSessions, listCredentialsForUser,
+ *       revokeSession, revokeAllForUser, deleteCredential
  *
- *   - `getUser` is wired end-to-end (real op, real Edge Function
- *     handler, real test on both sides). Proves the dispatcher
- *     contract.
- *   - Every other method throws `SupabaseAuthStoreNotImplementedError`,
- *     a structured error that names the missing op and references
- *     G-T05-1. Future PRs replace each throw with a transport call.
+ *   - **Server-only ops** (intentionally NOT browser-callable; throw
+ *     `SupabaseAuthStoreServerOnlyError`):
  *
- * Consumers can already start migrating from `MemoryAuthStore` to
- * `SupabaseAuthStore` for code paths that only need `getUser` (the
- * route layer + the session-jwt-store; the `consumeTotpAndEnrollPasskey`
- * path waits for its own wire-up).
+ *       ensureUser, createSession, getCredential, saveCredential,
+ *       emitAudit, pseudonymOf, plus the six TOTP-bootstrap methods
+ *       (issueTotpBootstrap / getTotpBootstrap / wasTotpCodeConsumed /
+ *       recordTotpWrong / lockTotpBootstrap / consumeTotpAndEnrollPasskey).
+ *
+ * Why "server-only" vs "not yet implemented":
+ *
+ *   The AuthStore interface was authored for the in-memory test
+ *   harness (`MemoryAuthStore`) which implements ALL of its methods
+ *   because the test scenarios exercise both the user-side and the
+ *   server-side roles in one process. Production splits that role:
+ *
+ *     - The browser only ever calls the user-side ops (read its own
+ *       row / list its own sessions / revoke its own credentials).
+ *     - The server-side enrollment / session-mint paths run inside
+ *       Edge Functions that use the service-role admin client + the
+ *       canonical SECURITY DEFINER functions in
+ *       supabase/migrations/00000000000001_auth.sql directly. They
+ *       do NOT use SupabaseAuthStore.
+ *
+ *   Throwing a structured server-only error from the browser-side
+ *   class makes that contract explicit: "the AuthStore interface lists
+ *   this method, but production browsers should never call it; if you
+ *   need this on the server, use the Edge Function directly."
  *
  * Wire shape (same as t07-op / concern-op / reprisal-op / t14-op):
  *
@@ -68,6 +78,34 @@ export class SupabaseAuthStoreNotImplementedError extends Error {
   }
 }
 
+/**
+ * Thrown by AuthStore methods that the production browser path is
+ * NOT designed to call. These are server-only operations (enrollment
+ * ceremony, admin-emit-audit, raw-credential lookup, etc.) — they
+ * exist on the AuthStore interface because MemoryAuthStore implements
+ * the FULL split-role contract for tests. In production, the
+ * corresponding code paths run inside Edge Functions that use the
+ * service-role admin client + the SECURITY DEFINER functions
+ * directly, not via SupabaseAuthStore.
+ *
+ * If a browser caller hits this error, they're almost certainly
+ * misusing the interface; the right fix is to invoke the relevant
+ * server-side Edge Function (mint-session for sign-in, the future
+ * enrollment Edge Function for first-passkey-bind, etc.) instead.
+ */
+export class SupabaseAuthStoreServerOnlyError extends Error {
+  readonly op: string;
+  constructor(op: string, why: string) {
+    super(
+      `SupabaseAuthStore.${op}: server-only by design. ${why} ` +
+        `If you reached this from the browser, you're in the wrong code path; ` +
+        `the production replacement runs inside the matching Edge Function.`
+    );
+    this.name = 'SupabaseAuthStoreServerOnlyError';
+    this.op = op;
+  }
+}
+
 export interface SupabaseAuthStoreOptions {
   transport: AuthOpTransport;
 }
@@ -101,31 +139,61 @@ export class SupabaseAuthStore implements AuthStore {
   }
 
   ensureUser(_user_id: string, _opts?: { role?: string; active?: boolean }): Promise<UserRow> {
-    throw new SupabaseAuthStoreNotImplementedError('ensureUser');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'ensureUser',
+      'The users row is written server-side during the first-passkey enrollment ceremony ' +
+        'inside `public.enroll_first_passkey` (migration 0001). The browser never creates user rows.'
+    );
   }
 
   // ---------------------------------------------------------------------------
-  // TOTP bootstrap — all deferred
+  // TOTP bootstrap — server-only by design. The TOTP issue / wrong-
+  // attempt / lock paths all live inside SECURITY DEFINER functions
+  // whose grants exclude `authenticated`. The user-facing enrollment
+  // flow (consumeTotpAndEnrollPasskey below) runs inside an Edge
+  // Function that holds the service-role admin client; the browser
+  // posts the TOTP code TO that Edge Function rather than reading /
+  // writing the TOTP tables through the AuthStore.
   // ---------------------------------------------------------------------------
 
   issueTotpBootstrap(_user_id: string): Promise<TotpBootstrap> {
-    throw new SupabaseAuthStoreNotImplementedError('issueTotpBootstrap');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'issueTotpBootstrap',
+      'TOTP bootstraps are issued by a co-chair via a server-side admin flow, ' +
+        'not by the enrolling user. The authoritative path runs in the co-chair Edge Function.'
+    );
   }
 
   getTotpBootstrap(_user_id: string): Promise<TotpBootstrap | null> {
-    throw new SupabaseAuthStoreNotImplementedError('getTotpBootstrap');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'getTotpBootstrap',
+      'The auth_totp_bootstraps table REVOKEs SELECT from `authenticated`. The bootstrap ' +
+        'is consulted only by the SECURITY DEFINER enrollment function inside its transaction.'
+    );
   }
 
   wasTotpCodeConsumed(_user_id: string, _code: string): Promise<boolean> {
-    throw new SupabaseAuthStoreNotImplementedError('wasTotpCodeConsumed');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'wasTotpCodeConsumed',
+      'The auth_totp_consumed_log table is server-managed; F-38 reuse detection runs inside ' +
+        '`public.enroll_first_passkey`, not via a browser query.'
+    );
   }
 
   recordTotpWrong(_user_id: string): Promise<TotpBootstrap | null> {
-    throw new SupabaseAuthStoreNotImplementedError('recordTotpWrong');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'recordTotpWrong',
+      '`public.enroll_first_passkey` increments wrong_attempts (and locks at 5) atomically ' +
+        'as part of its own transaction; the browser never increments the counter directly.'
+    );
   }
 
   lockTotpBootstrap(_user_id: string): Promise<void> {
-    throw new SupabaseAuthStoreNotImplementedError('lockTotpBootstrap');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'lockTotpBootstrap',
+      'Locking happens inside `public.enroll_first_passkey` when wrong_attempts hits 5; ' +
+        'the lock-row write is server-only.'
+    );
   }
 
   consumeTotpAndEnrollPasskey(_opts: {
@@ -137,7 +205,14 @@ export class SupabaseAuthStore implements AuthStore {
     | { ok: true; credential_id: string }
     | { ok: false; status: number; reason: 'expired' | 'wrong_code' | 'locked' | 'consumed' }
   > {
-    throw new SupabaseAuthStoreNotImplementedError('consumeTotpAndEnrollPasskey');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'consumeTotpAndEnrollPasskey',
+      'The F-43 atomic enrollment transaction lives inside `public.enroll_first_passkey` ' +
+        '(migration 0001). The browser-side enrollment ceremony posts the TOTP + WebAuthn ' +
+        'response to a dedicated enrollment Edge Function (separate from auth-op) which calls ' +
+        'that SECURITY DEFINER function via the service-role admin client. SupabaseAuthStore ' +
+        'is not on that path.'
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -161,7 +236,13 @@ export class SupabaseAuthStore implements AuthStore {
   // ---------------------------------------------------------------------------
 
   getCredential(_credentialId: string): Promise<PasskeyCredential | null> {
-    throw new SupabaseAuthStoreNotImplementedError('getCredential');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'getCredential',
+      'Cred-by-id lookup before `auth.uid()` is resolved is blocked by the ' +
+        '`webauthn_credentials_select_self` RLS policy (auth.uid() = user_id). The ' +
+        'mint-session Edge Function does cred → user resolution server-side via the ' +
+        'mint_writer-scoped path; the browser never performs this lookup.'
+    );
   }
 
   async listCredentialsForUser(user_id: string): Promise<PasskeyCredential[]> {
@@ -178,7 +259,12 @@ export class SupabaseAuthStore implements AuthStore {
   }
 
   saveCredential(_cred: PasskeyCredential): Promise<void> {
-    throw new SupabaseAuthStoreNotImplementedError('saveCredential');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'saveCredential',
+      'INSERT into webauthn_credentials happens server-side inside ' +
+        '`public.enroll_first_passkey` (migration 0001) atomically with TOTP consumption. ' +
+        'The browser never directly writes the credentials table.'
+    );
   }
 
   async deleteCredential(credentialId: string): Promise<void> {
@@ -216,7 +302,12 @@ export class SupabaseAuthStore implements AuthStore {
     ttl_ms: number;
     device_fingerprint?: string;
   }): Promise<AuthSession> {
-    throw new SupabaseAuthStoreNotImplementedError('createSession');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'createSession',
+      'The mint-session Edge Function is the canonical session creation path on sign-in ' +
+        '(ADR-0023 / F-117 — token emission is mint-only). AuthStore.createSession is the ' +
+        'wider in-memory contract; production browsers never call this directly.'
+    );
   }
 
   async getSession(session_id: string): Promise<AuthSession | null> {
@@ -296,7 +387,13 @@ export class SupabaseAuthStore implements AuthStore {
   // ---------------------------------------------------------------------------
 
   emitAudit(_event: AuditEmission): Promise<void> {
-    throw new SupabaseAuthStoreNotImplementedError('emitAudit');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'emitAudit',
+      'audit_emit is granted to supabase_auth_admin only; browser callers cannot invoke it ' +
+        'directly. Each user-facing operation that needs an audit row (panic_wipe, revoke_session, ' +
+        'enroll_first_passkey, etc.) emits its own row server-side via the matching SECURITY ' +
+        'DEFINER function — the browser never composes raw AuditEmission objects.'
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -310,6 +407,11 @@ export class SupabaseAuthStore implements AuthStore {
     // read the pseudonym from server-emitted audit rows, not derive
     // it. We throw rather than returning the raw uid (which would
     // silently break the C2 pseudonymity contract).
-    throw new SupabaseAuthStoreNotImplementedError('pseudonymOf');
+    throw new SupabaseAuthStoreServerOnlyError(
+      'pseudonymOf',
+      'The HMAC pseudonym is computed against `app.hmac_pseudonym_key`, which is ' +
+        'server-side only. Returning the raw uid would silently break C2 pseudonymity. ' +
+        'Read pseudonyms from server-emitted audit rows instead of deriving them.'
+    );
   }
 }
