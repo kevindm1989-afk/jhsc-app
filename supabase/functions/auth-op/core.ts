@@ -28,7 +28,7 @@
  *     in the browser bundle.
  */
 
-import type { UserRow } from './types.ts';
+import type { SessionRow, UserRow } from './types.ts';
 
 export type AuthOpReason =
   | 'bad_request'
@@ -47,6 +47,8 @@ export type AuthOpResult<T = unknown> =
  */
 export interface AuthOpDeps {
   getUserById(user_id: string): Promise<UserRow | null>;
+  getSessionById(session_id: string): Promise<SessionRow | null>;
+  listActiveSessionsForUser(user_id: string): Promise<SessionRow[]>;
 }
 
 /**
@@ -74,6 +76,24 @@ export async function handleAuthOp(
       const row = await deps.getUserById(user_id);
       if (row === null) return { ok: false, reason: 'not_found', status: 404 };
       return { ok: true, data: row };
+    }
+
+    case 'get_session': {
+      const session_id = typeof input.session_id === 'string' ? input.session_id : '';
+      if (!session_id) return { ok: false, reason: 'bad_request', status: 400 };
+      const row = await deps.getSessionById(session_id);
+      if (row === null) return { ok: false, reason: 'not_found', status: 404 };
+      return { ok: true, data: row };
+    }
+
+    case 'list_active_sessions': {
+      const user_id = typeof input.user_id === 'string' ? input.user_id : '';
+      if (!user_id) return { ok: false, reason: 'bad_request', status: 400 };
+      const rows = await deps.listActiveSessionsForUser(user_id);
+      // Empty result is `{ok: true, data: []}`, NOT `not_found` — a
+      // user with no active sessions is a normal state (e.g., right
+      // after logout-everywhere), not an error.
+      return { ok: true, data: rows };
     }
 
     // Every other AuthStore method is staged-not-implemented; each one

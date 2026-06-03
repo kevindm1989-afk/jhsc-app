@@ -18,7 +18,15 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { handleAuthOp, type AuthOpInput } from './core.ts';
-import type { UserRow } from './types.ts';
+import type { SessionRow, UserRow } from './types.ts';
+
+// Convert a Postgres timestamptz (ISO 8601 string) to ms-epoch as the
+// AuthStore interface expects. `null` and `undefined` pass through.
+function tsToMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
 
 withFunctionName('auth-op');
 
@@ -69,6 +77,58 @@ Deno.serve(async (req) => {
       }
       if (!data) return null;
       return data as UserRow;
+    },
+
+    async getSessionById(session_id: string): Promise<SessionRow | null> {
+      // RLS policy `auth_sessions_select_self` enforces caller-scoped
+      // visibility: `auth.uid() = user_id`. A row owned by another
+      // user surfaces as null rather than a permission error.
+      const { data, error } = await supabase
+        .from('auth_sessions')
+        .select('session_id, user_id, device_fingerprint, created_at, expires_at, revoked_at')
+        .eq('session_id', session_id)
+        .maybeSingle();
+
+      if (error) {
+        log.error({ event: 'auth.get_session.query_failed', error_class: error.code });
+        return null;
+      }
+      if (!data) return null;
+      return {
+        session_id: data.session_id as string,
+        user_id: data.user_id as string,
+        access_token: '', // F-117: server never re-emits the minted token
+        iat: tsToMs(data.created_at as string | null) ?? 0,
+        exp: tsToMs(data.expires_at as string | null) ?? 0,
+        device_fingerprint: (data.device_fingerprint as string | null) ?? undefined,
+        revoked_at: tsToMs(data.revoked_at as string | null)
+      };
+    },
+
+    async listActiveSessionsForUser(user_id: string): Promise<SessionRow[]> {
+      // `revoked_at IS NULL` filters server-side; RLS still enforces
+      // the caller can only see their own rows (auth.uid() = user_id).
+      const { data, error } = await supabase
+        .from('auth_sessions')
+        .select('session_id, user_id, device_fingerprint, created_at, expires_at, revoked_at')
+        .eq('user_id', user_id)
+        .is('revoked_at', null)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        log.error({ event: 'auth.list_active_sessions.query_failed', error_class: error.code });
+        return [];
+      }
+      if (!data) return [];
+      return data.map((row) => ({
+        session_id: row.session_id as string,
+        user_id: row.user_id as string,
+        access_token: '' as const,
+        iat: tsToMs(row.created_at as string | null) ?? 0,
+        exp: tsToMs(row.expires_at as string | null) ?? 0,
+        device_fingerprint: (row.device_fingerprint as string | null) ?? undefined,
+        revoked_at: tsToMs(row.revoked_at as string | null)
+      }));
     }
   });
 
