@@ -51,6 +51,8 @@
   $: ariaCurrentHome = currentPath === '/' ? ('page' as const) : undefined;
   $: ariaCurrentSettings = currentPath === '/settings' ? ('page' as const) : undefined;
   $: ariaCurrentSignIn = currentPath === '/sign-in' ? ('page' as const) : undefined;
+  $: ariaCurrentConcerns = currentPath === '/concerns' ? ('page' as const) : undefined;
+  $: ariaCurrentReprisal = currentPath === '/reprisal' ? ('page' as const) : undefined;
 </script>
 
 <a class="skip-link" href="#main-content" data-testid="skip-to-content">
@@ -76,6 +78,18 @@
         <strong>{t('common.app_name')}</strong>
       </a>
       {#if $isSignedIn}
+        <a
+          href="/concerns"
+          aria-current={ariaCurrentConcerns}
+          data-testid="header-concerns-link"
+          class="navlink">{t('common.header.concerns_link')}</a
+        >
+        <a
+          href="/reprisal"
+          aria-current={ariaCurrentReprisal}
+          data-testid="header-reprisal-link"
+          class="navlink">{t('common.header.reprisal_link')}</a
+        >
         <a
           href="/settings"
           aria-current={ariaCurrentSettings}
