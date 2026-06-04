@@ -28,12 +28,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
+import { screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
 import { existsSync, readFileSync } from 'node:fs';
 import nodePath from 'node:path';
 import { WEB_ROOT } from '../_helpers/paths';
-import PanicWipeModal from '../../src/lib/lock/PanicWipeModal.svelte';
+import { renderPanicWipe, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 
 const PANIC_WIPE_SOURCE = nodePath.join(WEB_ROOT, 'src/lib/lock/panic-wipe.ts');
@@ -44,6 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
 });
 
 // ============================================================================
@@ -290,7 +291,7 @@ describe('T19 / F-115 M-115 — panic-wipe modal copy four-regex contract', () =
   });
 
   it('rendered PanicWipeModal body composes all four catalog clauses (regex applied to rendered DOM)', async () => {
-    render(PanicWipeModal, { props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 } });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0 });
     const modal = screen.getByRole('dialog', { name: /wipe this device/i });
     const text = modal.textContent ?? '';
     expect(text).toMatch(/irreversible|cannot be undone/i);
@@ -306,9 +307,7 @@ describe('T19 / F-115 M-115 — panic-wipe modal copy four-regex contract', () =
 
 describe('T19 / Designer §G — panic-wipe state matrix', () => {
   it('ready-delay-pending — primary button is aria-disabled and literal-phrase input is keystroke-gated', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 200 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 200 });
     const primary = screen.getByRole('button', { name: t('onboarding.panic_wipe_d6.primary_button_destructive') });
     expect(primary.getAttribute('aria-disabled')).toBe('true');
     // Type into the literal-phrase input — value should NOT update.
@@ -318,9 +317,7 @@ describe('T19 / Designer §G — panic-wipe state matrix', () => {
   });
 
   it('ready (awaiting phrase + click) — after ready resolves, the input accepts keystrokes; primary enables when phrase matches', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 200 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 200 });
     advanceBy(210);
     const input = screen.getByRole('textbox', { name: /type WIPE/i });
     fireEvent.input(input, { target: { value: 'WIPE' } });
@@ -330,13 +327,11 @@ describe('T19 / Designer §G — panic-wipe state matrix', () => {
   });
 
   it('in-progress overlay — role="alert" announces the wipe; spinner OR static-text per reduced-motion', async () => {
-    render(PanicWipeModal, {
-      props: {
-        open: true,
-        surface: 'settings',
-        __test_ready_delay_ms: 0,
-        __test_force_wipe_in_progress: true
-      }
+    renderPanicWipe({
+      open: true,
+      surface: 'settings',
+      readyDelayMs: 0,
+      forceWipeInProgress: true
     });
     const overlay = screen.getByTestId('panic-wipe-in-progress-overlay');
     expect(overlay.getAttribute('aria-busy')).toBe('true');
@@ -344,14 +339,12 @@ describe('T19 / Designer §G — panic-wipe state matrix', () => {
   });
 
   it('partial-failure — overlay transitions to error_state with the enumerated failed classes', async () => {
-    render(PanicWipeModal, {
-      props: {
-        open: true,
-        surface: 'settings',
-        __test_ready_delay_ms: 0,
-        __test_force_clear_failure: 'caches',
-        __test_auto_submit: true
-      }
+    renderPanicWipe({
+      open: true,
+      surface: 'settings',
+      readyDelayMs: 0,
+      forceClearFailure: 'caches',
+      autoSubmit: true
     });
     advanceBy(50);
     await waitFor(() => {
@@ -369,13 +362,11 @@ describe('T19 / Designer §G — panic-wipe state matrix', () => {
 
 describe('T19 / Designer §G — inverted focus ring on panic-overlay', () => {
   it('the in-progress overlay focus ring inner layer is bound to color.{mode}.onboarding.panic_overlay_fg (NOT border.focus)', async () => {
-    render(PanicWipeModal, {
-      props: {
-        open: true,
-        surface: 'settings',
-        __test_ready_delay_ms: 0,
-        __test_force_wipe_in_progress: true
-      }
+    renderPanicWipe({
+      open: true,
+      surface: 'settings',
+      readyDelayMs: 0,
+      forceWipeInProgress: true
     });
     const overlay = screen.getByTestId('panic-wipe-in-progress-overlay');
     // The overlay carries a data-attribute or CSS variable referencing the
@@ -417,13 +408,11 @@ describe('T19 / A-T19-RR-1 — audit_failed UI branch', () => {
     const { MemoryWipeStore } = await import('../../src/lib/lock/wipe-store');
     const store = new MemoryWipeStore();
     store.__debugForceAuditFailure();
-    render(PanicWipeModal, {
-      props: {
-        open: true,
-        surface: 'settings',
-        __test_ready_delay_ms: 0,
-        __test_store: store
-      }
+    renderPanicWipe({
+      open: true,
+      surface: 'settings',
+      readyDelayMs: 0,
+      store
     });
     const input = screen.getByRole('textbox', { name: /type WIPE/i });
     fireEvent.input(input, { target: { value: 'WIPE' } });
@@ -509,9 +498,7 @@ describe('T19 / A-T19-RR-1 — audit_failed UI branch', () => {
 
 describe('T19 / A-T19-RR-2 — Cancel: close, focus restore, announcement', () => {
   it('(a) clicking Cancel removes the role="dialog" from the DOM', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0 });
     expect(screen.queryByRole('dialog')).not.toBeNull();
     const cancel = screen.getByRole('button', {
       name: t('onboarding.panic_wipe_d6.cancel_button')
@@ -526,9 +513,7 @@ describe('T19 / A-T19-RR-2 — Cancel: close, focus restore, announcement', () =
   });
 
   it('(a) clicking Cancel dispatches a `close` CustomEvent', async () => {
-    const { component } = render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
-    });
+    const { component } = renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0 });
     let closeFired = false;
     component.$on('close', () => {
       closeFired = true;
@@ -549,9 +534,7 @@ describe('T19 / A-T19-RR-2 — Cancel: close, focus restore, announcement', () =
     trigger.focus();
     expect(document.activeElement).toBe(trigger);
 
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0 });
     // Opening moves focus into the dialog (away from the trigger).
     await waitFor(() => {
       expect(document.activeElement).not.toBe(trigger);
@@ -572,9 +555,7 @@ describe('T19 / A-T19-RR-2 — Cancel: close, focus restore, announcement', () =
   });
 
   it('(c) after Cancel, an aria-live region (surviving unmount) announces the close', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0 });
     const cancel = screen.getByRole('button', {
       name: t('onboarding.panic_wipe_d6.cancel_button')
     });
@@ -591,9 +572,7 @@ describe('T19 / A-T19-RR-2 — Cancel: close, focus restore, announcement', () =
   });
 
   it('(regression guard) pressing Escape does NOT close the dialog (§3.5 — Escape is inert)', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0 });
     const dialog = screen.getByRole('dialog');
     await fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(
@@ -623,9 +602,7 @@ describe('T19 / A11Y-T19-2 — focus trap wraps Tab / Shift+Tab', () => {
   // initial focus onto the first focusable (the type-back input). Doing this
   // first prevents that late .focus() from stealing focus mid-test.
   async function mountReady(): Promise<HTMLElement[]> {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0 });
     const dialog = screen.getByRole('dialog');
     await waitFor(() => expect(focusablesIn(dialog).length).toBeGreaterThanOrEqual(2));
     const focusables = focusablesIn(dialog);

@@ -34,7 +34,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
 import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
-import PanicWipeModal from '../../src/lib/lock/PanicWipeModal.svelte';
+import { renderPanicWipe, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 
 beforeEach(() => {
@@ -43,6 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
 });
 
 // ============================================================================
@@ -285,27 +286,21 @@ describe('T19 / D.T19.h — completion summary state matrix', () => {
 
 describe('T19 / Surface G — PanicWipeModal state matrix', () => {
   it('ready-delay-pending — modal body has aria-busy=true; role=alert is NOT yet attached', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 200 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 200 });
     const body = screen.getByTestId('panic-wipe-modal-body');
     expect(body.getAttribute('aria-busy')).toBe('true');
     expect(body.getAttribute('role')).not.toBe('alert');
   });
 
   it('Escape during ready-delay does NOT dismiss the modal (§3.2 protected variant)', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 200 }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 200 });
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     // Modal still in DOM.
     expect(screen.queryByRole('dialog', { name: /wipe this device/i })).not.toBeNull();
   });
 
   it('complete — page redirects to a fresh login surface; success toast role=status', async () => {
-    render(PanicWipeModal, {
-      props: { open: true, surface: 'settings', __test_ready_delay_ms: 0, __test_force_complete: true }
-    });
+    renderPanicWipe({ open: true, surface: 'settings', readyDelayMs: 0, forceComplete: true });
     advanceBy(50);
     const toast = document.querySelector('[role="status"][data-testid="panic-wipe-complete-toast"]');
     expect(toast).not.toBeNull();

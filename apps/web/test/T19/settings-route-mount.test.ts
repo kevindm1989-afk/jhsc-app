@@ -211,8 +211,11 @@ describe('T19.1 — PanicWipeModal accepts a production wipeStore prop', () => {
     // The non-test path now uses `wipeStore` somewhere in the chain
     // before calling panicWipe.
     expect(src).toMatch(/wipeStore/);
-    // Specifically: the panicWipe call's store argument falls back through
-    // the `__test_store ?? wipeStore ?? undefined` chain.
-    expect(src).toMatch(/__test_store\s*\?\?\s*wipeStore/);
+    // Specifically: the panicWipe call's store argument falls back through the
+    // chain `<test-only seam override> ?? wipeStore ?? undefined`. The test
+    // override now comes from the production-stripped panic-wipe-test-config
+    // seam (issue #120) instead of a `__test_store` prop, but the production
+    // `wipeStore` half of the chain — the contract this test guards — is intact.
+    expect(src).toMatch(/\?\?\s*wipeStore\s*\?\?\s*undefined/);
   });
 });

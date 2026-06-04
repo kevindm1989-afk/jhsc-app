@@ -20,6 +20,7 @@
   import { flushSync, tick, onDestroy, createEventDispatcher } from 'svelte';
   import { panicWipe } from './panic-wipe';
   import { MemoryWipeStore } from './wipe-store';
+  import { getPanicWipeTestConfig } from './panic-wipe-test-config';
 
   const dispatch = createEventDispatcher();
 
@@ -89,25 +90,16 @@
     if (priorFocus) restoreFocus();
   });
 
-  export let __test_ready_delay_ms = undefined;
-  export let __test_force_wipe_in_progress = undefined;
-  export let __test_force_clear_failure = undefined;
-  export let __test_auto_submit = undefined;
-  export let __test_force_complete = undefined;
-  export let __test_store = undefined;
+  // Test-only config read from a production-stripped seam (issue #120 /
+  // A-T19-RR-4). Every read below is guarded by `!import.meta.env.PROD`, so
+  // Vite DCE drops them in production → the seam import is unused → Rollup
+  // tree-shakes the side-effect-free seam out and NO `__test_*` prop names
+  // compile into the production bundle. In tests (MODE !== production) `__pc`
+  // carries the per-render config set via `setPanicWipeTestConfig` before render.
+  /** @type {import('./panic-wipe-test-config').PanicWipeTestConfig} */
+  const __pc = !import.meta.env.PROD ? getPanicWipeTestConfig() : {};
 
-  const __probe_test_ready = '__test_' + 'ready_delay_ms';
-  if (import.meta.env.MODE === 'production') {
-    __test_ready_delay_ms = undefined;
-    __test_force_wipe_in_progress = undefined;
-    __test_force_clear_failure = undefined;
-    __test_auto_submit = undefined;
-    __test_force_complete = undefined;
-    __test_store = undefined;
-  }
-  void __probe_test_ready;
-
-  const readyDelayMs = __test_ready_delay_ms ?? 200;
+  const readyDelayMs = (!import.meta.env.PROD ? __pc.readyDelayMs : undefined) ?? 200;
   let ready = readyDelayMs === 0;
   let typedPhrase = '';
   let wipeState = 'idle';
@@ -125,8 +117,8 @@
     }, readyDelayMs);
   }
 
-  if (__test_force_wipe_in_progress) wipeState = 'in_progress';
-  if (__test_force_complete) wipeState = 'complete';
+  if (!import.meta.env.PROD && __pc.forceWipeInProgress) wipeState = 'in_progress';
+  if (!import.meta.env.PROD && __pc.forceComplete) wipeState = 'complete';
   // `import.meta.env.PROD` guard so Vite/Rollup DCE removes this entire
   // test-only block in a production build. It is the sole reference to
   // `MemoryWipeStore`; without the static guard the runtime test-prop check
@@ -136,11 +128,11 @@
   // so this branch never executed there — the guard just lets the bundler
   // prove it. In tests (MODE !== production) PROD is false, so behaviour is
   // unchanged.
-  if (!import.meta.env.PROD && __test_force_clear_failure && __test_auto_submit) {
+  if (!import.meta.env.PROD && __pc.forceClearFailure && __pc.autoSubmit) {
     setTimeout(async () => {
       const store = new MemoryWipeStore();
       if (typeof store.__debugForceClearFailure === 'function') {
-        store.__debugForceClearFailure(__test_force_clear_failure);
+        store.__debugForceClearFailure(__pc.forceClearFailure);
       }
       wipeState = 'in_progress';
       const r = await panicWipe({ store, surface });
@@ -175,13 +167,14 @@
   async function onConfirm() {
     if (!ready || !isPhraseMatched()) return;
     wipeState = 'in_progress';
-    // Precedence: test-only `__test_store` (existing harness contract) wins,
-    // then the production `wipeStore` prop, then panicWipe's internal
-    // default. The test seam is the load-bearing contract for the
-    // existing 50+ d6 / onboarding tests; the production prop is the new
-    // surface this PR adds. Either chain produces a valid `WipeStore | undefined`
-    // for the panicWipe call.
-    const storeOverride = __test_store ?? wipeStore ?? undefined;
+    // Precedence: the test-only store override (from the production-stripped
+    // panic-wipe-test-config seam) wins, then the production `wipeStore` prop,
+    // then panicWipe's internal default. The seam is the load-bearing contract
+    // for the existing d6 / onboarding tests; the production prop is the wired
+    // surface. The `!import.meta.env.PROD` guard keeps the seam read out of the
+    // prod bundle, so production always resolves to `wipeStore ?? undefined`.
+    const storeOverride =
+      (!import.meta.env.PROD ? __pc.store : undefined) ?? wipeStore ?? undefined;
     const r = await panicWipe({ store: storeOverride, surface });
     if (r.status === 'partially_completed') {
       wipeState = 'partial_failure';
