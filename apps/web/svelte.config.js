@@ -45,7 +45,21 @@ const config = {
       mode: 'auto',
       directives: {
         'default-src': ['self'],
-        'script-src': ['self'],
+        // `wasm-unsafe-eval` is required for `WebAssembly.instantiate` — the
+        // locked-in `libsodium-wrappers-sumo` build (Argon2id `crypto_pwhash`,
+        // G-T07-12) is WebAssembly, and the strict CSP otherwise blocks it at
+        // runtime ("Refused to compile or instantiate WebAssembly module
+        // because 'unsafe-eval' is not an allowed source"), which currently
+        // breaks every crypto-using route (onboarding D.3/D.4, sign-in) in a
+        // production build.
+        //
+        // SECURITY: `wasm-unsafe-eval` is NOT `unsafe-eval`. It permits
+        // WebAssembly compilation ONLY; it does NOT re-enable JS `eval()` /
+        // `new Function(...)`. The bare `unsafe-eval` and `unsafe-inline`
+        // tokens remain forbidden (svelte-config-csp.test.ts pins both), so
+        // the JS-eval XSS posture from ADR-0010 is unchanged. This is the
+        // W3C-recommended minimal grant for running WASM under CSP.
+        'script-src': ['self', 'wasm-unsafe-eval'],
         'style-src': ['self', 'unsafe-inline'],
         'img-src': ['self', 'data:', 'blob:'],
         'font-src': ['self'],
