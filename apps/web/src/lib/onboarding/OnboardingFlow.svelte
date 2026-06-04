@@ -613,6 +613,13 @@
 </section>
 
 <style>
+  /*
+   * Onboarding chrome — worker-hub visual language, CSS-only (no markup,
+   * script, or text changes; the passphrase-leak / test-prop / recovery
+   * gates are untouched). Colours flow through the --color-* tokens so the
+   * surface is dark-mode aware and verify-tokens stays green. The two-layer
+   * AODA focus ring is preserved.
+   */
   .sr-only {
     position: absolute;
     width: 1px;
@@ -624,33 +631,110 @@
     white-space: nowrap;
     border-width: 0;
   }
-  /* Onboarding token bindings (A11Y-T19-7). The chrome consumes the
-     light-mode tokens by default; dark-mode swaps via prefers-color-scheme. */
-  section {
-    color: var(--color-light-onboarding-fg, var(--color-fg, #222));
-    background: var(--color-light-onboarding-bg, var(--color-bg, #fff));
+
+  section[data-testid='onboarding-wizard'] {
+    color: var(--color-fg);
   }
-  [data-testid='step-indicator'] li[aria-current='step'] {
-    color: var(--color-light-onboarding-step-active-fg, currentColor);
+
+  /* Step progress rail — horizontal pill row keyed off data-state. */
+  [data-testid='step-indicator'] {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+  }
+  [data-testid='step-indicator'] li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    background: var(--color-bg-elevated);
+    color: var(--color-fg-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  [data-testid='step-indicator'] li[data-state='active'] {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-accent-fg);
+    font-weight: 600;
   }
   [data-testid='step-indicator'] li[data-state='complete'] {
-    color: var(--color-light-onboarding-step-complete-fg, currentColor);
+    border-color: var(--color-status-resolved);
+    color: var(--color-status-resolved);
   }
+  [data-testid='step-indicator'] li[aria-disabled='true'] {
+    opacity: 0.65;
+  }
+  [data-testid='step-indicator'] svg {
+    flex: none;
+  }
+
+  /* Step body — elevated card. */
+  [data-testid='wizard-step-body'] {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 1.5rem;
+  }
+  [data-testid='wizard-step-body'] > :first-child {
+    margin-block-start: 0;
+  }
+
+  /* Device fingerprint — monospace evidence block. */
+  [data-testid='device-fingerprint'] {
+    margin-block: 1rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-muted);
+    color: var(--color-fg-muted);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    word-break: break-all;
+  }
+
+  /* Consent checkbox row. */
+  [data-testid='wizard-step-body'] label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-block: 1rem;
+    cursor: pointer;
+  }
+  [data-testid='wizard-step-body'] label input[type='checkbox'] {
+    margin-block-start: 0.15rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    flex: none;
+    accent-color: var(--color-accent);
+  }
+
+  /* Action buttons — spacing within the card (colour comes from app.css). */
+  [data-testid='wizard-step-body'] button {
+    margin-block-start: 0.75rem;
+    margin-inline-end: 0.5rem;
+  }
+
+  /* Two-layer AODA focus ring (preserved). */
   h1:focus-visible,
   h1:focus {
-    outline: 2px solid var(--color-border-focus, #0066cc);
+    outline: 2px solid var(--color-focus-inner);
     outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--color-focus-outer);
   }
   button:focus-visible {
-    outline: 2px solid var(--color-border-focus, #0066cc);
+    outline: 2px solid var(--color-focus-inner);
     outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--color-focus-outer);
   }
-  @media (prefers-color-scheme: dark) {
-    section {
-      color: var(--color-dark-onboarding-fg, #eee);
-      background: var(--color-dark-onboarding-bg, #111);
-    }
-  }
+
   @media (prefers-reduced-motion: reduce) {
     * {
       transition-duration: var(--motion-duration-instant, 0s) !important;
