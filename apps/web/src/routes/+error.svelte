@@ -34,7 +34,12 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section data-testid="error-page">
+<section class="card error-card" data-testid="error-page">
+  <p class="error-status-badge" data-testid="error-status">
+    <span class="sr-only">{t('common.errorPage.status_label')}</span>
+    <code>{status}</code>
+  </p>
+
   <h1>
     {#if is404}
       {t('common.errorPage.heading_404')}
@@ -51,12 +56,60 @@
     {/if}
   </p>
 
-  <p data-testid="error-status">
-    <strong>{t('common.errorPage.status_label')}</strong>
-    <code>{status}</code>
-  </p>
-
-  <p>
-    <a href="/" data-testid="error-back-to-home">{t('common.errorPage.back_to_home_cta')}</a>
+  <p class="error-cta-row">
+    <a href="/" class="cta" data-testid="error-back-to-home">
+      {t('common.errorPage.back_to_home_cta')}
+    </a>
   </p>
 </section>
+
+<style>
+  /*
+   * Error page — centered hero with the status code rendered as a large
+   * monospace badge so the user can see "404" or "500" at a glance and
+   * quote it to support. The status code carries the `error-status`
+   * test-id (pinned by error-route-mount.test.ts) plus a screen-reader
+   * label so AT announces "Status code 404" rather than just "404". The
+   * heading + body follow the badge; the back-to-home link renders as
+   * a primary CTA so a stranded user is funneled back to the app shell.
+   *
+   * The ADR-0010 PI-leak contract (no runtime error message rendered
+   * in the template) is preserved — only the status code is shown.
+   */
+  .error-card {
+    margin-block-start: 1.5rem;
+    text-align: center;
+  }
+  .error-status-badge {
+    display: flex;
+    justify-content: center;
+    margin-block: 0 1rem;
+  }
+  .error-status-badge code {
+    display: inline-block;
+    padding: 0.375rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-muted);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 2rem;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: 0.02em;
+  }
+  .error-cta-row {
+    margin-block-start: 1.5rem;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+</style>
