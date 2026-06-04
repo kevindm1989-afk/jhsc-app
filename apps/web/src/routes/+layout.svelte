@@ -1,22 +1,25 @@
 <script lang="ts">
   /**
-   * Root layout.
+   * Root layout — app shell.
    *
-   * Token consumption convention: every color / spacing / motion value
-   * is read from `$lib/tokens` (a typed accessor over design-tokens.json).
-   * Components NEVER hard-code hex / px / rgba. The token-audit gate
-   * (scripts/verify-tokens.sh) enforces this.
+   * Visual language ported from jhsc-worker-hub: a sticky top bar carrying
+   * the brand mark, the primary nav, and the theme toggle, with a mobile
+   * bottom tab bar for primary navigation (hidden at md+). Colours come from
+   * the `--color-*` tokens defined in app.html and consumed via app.css —
+   * no raw values here (verify-tokens gate).
    *
-   * Reduced-motion: the system stylesheet in app.html zeros transition
-   * durations when prefers-reduced-motion: reduce. Components that need
-   * deliberate motion override locally and document the override.
+   * The header nav structure (skip-link → <header> → <nav> with the home +
+   * conditional settings/sign-in links → <main id="main-content">) is the
+   * pinned accessibility + JWT-reactive contract from the route tests; it is
+   * preserved verbatim and only restyled.
    *
-   * Header sign-in indicator: reads `$isSignedIn` from the Svelte
-   * readable wrapper over session-jwt-store. Mirrors the JWT-reactive
-   * pattern that the route mounts (PRs #58 / #59 / #60) hand-rolled,
-   * but via the new Svelte store wrapper — no `subscribeToJwt` +
-   * `onDestroy` boilerplate. Cross-tab sync from PR #61 propagates
-   * naturally because the wrapper subscribes to the same store.
+   * Token consumption convention: components read colour/spacing from CSS
+   * variables, never hard-coded literals (scripts/verify-tokens.sh).
+   * Reduced-motion: the boot stylesheet in app.html zeros transition
+   * durations when prefers-reduced-motion: reduce.
+   *
+   * Header sign-in indicator reads `$isSignedIn` from the Svelte readable
+   * wrapper over session-jwt-store; cross-tab sync propagates naturally.
    */
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
@@ -24,6 +27,10 @@
   import { t } from '$lib/i18n';
   import { setupSafetyHandlers } from '$lib/feature-flags';
   import { isSignedIn } from '$lib/auth/session-jwt-svelte';
+  import Icon from '$lib/ui/Icon.svelte';
+  import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
+  import BottomTabBar from '$lib/ui/BottomTabBar.svelte';
+  import '../app.css';
 
   // Trigger feature-flag setup (no-op at scaffold; T-feature-flag wires).
   onMount(() => {
@@ -35,16 +42,12 @@
   const _accent = tokens.color.state.danger;
   void _accent;
 
-  // `aria-current="page"` annotation for the header nav: standard ARIA
-  // pattern for "you are here" so screen-reader users hear "current
-  // page" when traversing the nav landmark. Reads `$page.url.pathname`
-  // — SvelteKit's page store is reactive across route changes so
-  // navigation between /, /sign-in, /settings updates the annotation
-  // without a page reload.
+  // `aria-current="page"` annotation for the header nav: reads
+  // `$page.url.pathname` — SvelteKit's page store is reactive across route
+  // changes so navigation updates the annotation without a page reload.
   $: currentPath = $page.url.pathname;
-  // `as const` narrows the literal so svelte-check's aria-current
-  // attribute type (a closed union of 'page' | 'step' | … | undefined)
-  // accepts the value.
+  // `as const` narrows the literal so svelte-check's aria-current attribute
+  // type (a closed union of 'page' | 'step' | … | undefined) accepts it.
   $: ariaCurrentHome = currentPath === '/' ? ('page' as const) : undefined;
   $: ariaCurrentSettings = currentPath === '/settings' ? ('page' as const) : undefined;
   $: ariaCurrentSignIn = currentPath === '/sign-in' ? ('page' as const) : undefined;
@@ -55,86 +58,79 @@
 </a>
 
 <header>
-  <!--
-    `<nav aria-label="Primary">` adds a landmark so screen readers can
-    discover the header's top-level navigation (WCAG 2.4.1 "Bypass
-    Blocks" + 1.3.1 "Info and Relationships"). The aria-label is
-    i18n-keyed; it's never visible but is announced when users navigate
-    by landmark. The home link + sign-in/Settings link sit inside it
-    so screen-reader users get the standard "Primary navigation, list
-    of N items" announcement instead of two bare siblings.
-  -->
-  <nav aria-label={t('common.header.primary_nav_aria_label')} data-testid="header-primary-nav">
-    <a href="/" aria-current={ariaCurrentHome} data-testid="header-home-link">
-      <strong>{t('common.app_name')}</strong>
-    </a>
-    {#if $isSignedIn}
-      <!--
-        When signed in, the header shows a Settings link (one-click access
-        to where the sign-out + panic-wipe affordances live) rather than
-        a static "Signed in" badge. Sign-in state is still signalled
-        implicitly: the Sign in link only appears when NOT signed in.
-      -->
-      <a href="/settings" aria-current={ariaCurrentSettings} data-testid="header-settings-link"
-        >{t('common.header.settings_link')}</a
-      >
-    {:else}
-      <a href="/sign-in" aria-current={ariaCurrentSignIn} data-testid="header-sign-in-link"
-        >{t('common.header.sign_in_link')}</a
-      >
-    {/if}
-  </nav>
+  <div class="topbar">
+    <span class="brand-mark" aria-hidden="true">
+      <Icon name="shield" size={16} strokeWidth={2.25} />
+    </span>
+    <!--
+      `<nav aria-label="Primary">` adds a landmark so screen readers can
+      discover the header's top-level navigation. The home link + the
+      conditional sign-in/Settings link sit inside it.
+    -->
+    <nav
+      aria-label={t('common.header.primary_nav_aria_label')}
+      class="topnav"
+      data-testid="header-primary-nav"
+    >
+      <a href="/" aria-current={ariaCurrentHome} data-testid="header-home-link">
+        <strong>{t('common.app_name')}</strong>
+      </a>
+      {#if $isSignedIn}
+        <a
+          href="/settings"
+          aria-current={ariaCurrentSettings}
+          data-testid="header-settings-link"
+          class="navlink">{t('common.header.settings_link')}</a
+        >
+      {:else}
+        <a
+          href="/sign-in"
+          aria-current={ariaCurrentSignIn}
+          data-testid="header-sign-in-link"
+          class="navlink">{t('common.header.sign_in_link')}</a
+        >
+      {/if}
+    </nav>
+    <div class="topbar-actions">
+      <ThemeToggle />
+    </div>
+  </div>
 </header>
 
 <main id="main-content" tabindex="-1">
-  <slot />
+  <div class="container">
+    <slot />
+  </div>
 </main>
+
+<BottomTabBar />
 
 <style>
   /*
-   * No raw color or px here. Style hooks read from CSS variables emitted
-   * by the tokens module at boot (designer follow-up). The :where wraps
-   * the selector so token-audit's grep doesn't see a hard-coded value.
+   * The skip-to-content link is visually hidden by default and revealed on
+   * keyboard focus (WCAG 2.1.1 / 2.4.1). Off-screen positioning (not
+   * display:none) keeps it focusable. Colours via tokens.
    */
   .skip-link {
-    /*
-     * WCAG 2.1.1 / 2.4.1 — the skip-to-content link is visually hidden
-     * by default and becomes visible on keyboard focus so keyboard
-     * users can bypass the repeated header on every page navigation.
-     * Off-screen positioning (not display:none) keeps it focusable.
-     * The :focus rule reveals it inline at the top-left.
-     */
     position: absolute;
     inset-block-start: 0;
     inset-inline-start: 0;
     transform: translateY(-100%);
     padding-block: 0.5rem;
     padding-inline: 1rem;
-    background: var(--color-bg-elevated, transparent);
-    color: var(--color-fg-default, inherit);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    border-radius: var(--radius-sm);
     z-index: 1000;
   }
   .skip-link:focus {
     transform: translateY(0);
-    outline: 2px solid var(--color-state-focus, currentColor);
-  }
-  header {
-    padding-block: 1rem;
-    padding-inline: 1rem;
-    border-block-end: 1px solid var(--color-border-default, transparent);
-  }
-  main {
-    padding-block: 1rem;
-    padding-inline: 1rem;
+    outline: 2px solid var(--color-focus-inner);
+    box-shadow: 0 0 0 4px var(--color-focus-outer);
   }
   main:focus {
-    /*
-     * tabindex=-1 makes <main> programmatically focusable so the
-     * skip-link's #main-content hash target moves focus correctly,
-     * but we don't want the default browser focus ring on the main
-     * landmark itself — keyboard users follow up with Tab and
-     * discover the first focusable element inside.
-     */
+    /* tabindex=-1 makes <main> programmatically focusable for the skip-link
+       target; suppress the default ring on the landmark itself. */
     outline: none;
   }
 </style>

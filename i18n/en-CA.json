@@ -29,6 +29,15 @@
       "settings_link": "Settings",
       "primary_nav_aria_label": "Primary"
     },
+    "nav": {
+      "aria_label": "Primary",
+      "home": "Home"
+    },
+    "theme": {
+      "toggle_light": "Theme: light. Switch to dark.",
+      "toggle_dark": "Theme: dark. Switch to system.",
+      "toggle_system": "Theme: system. Switch to light."
+    },
     "actions": {
       "cancel": "Cancel",
       "continue": "Continue",

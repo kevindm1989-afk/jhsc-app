@@ -111,12 +111,20 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section>
+<div class="page-head">
   <h1>{t('settings.title')}</h1>
+</div>
 
+<section class="card">
   <h2>{t('signOut.heading')}</h2>
-  <p>{t('signOut.intro')}</p>
-  <button type="button" on:click={signOut} data-testid="sign-out-button" disabled={signedOut}>
+  <p class="muted">{t('signOut.intro')}</p>
+  <button
+    type="button"
+    class="btn-outline"
+    on:click={signOut}
+    data-testid="sign-out-button"
+    disabled={signedOut}
+  >
     {t('signOut.button')}
   </button>
   {#if signedOut}
@@ -127,14 +135,21 @@
       </a>
     </p>
   {/if}
+</section>
 
+<section class="card">
   <h2>{t('settings.device_data.heading')}</h2>
-  <p>
+  <p class="muted">
     {t('settings.device_data.intro_before_emphasis')}<strong
       >{t('settings.device_data.intro_emphasis')}</strong
     >{t('settings.device_data.intro_after_emphasis')}
   </p>
-  <button type="button" on:click={openWipeModal} data-testid="open-panic-wipe">
+  <button
+    type="button"
+    class="btn-destructive"
+    on:click={openWipeModal}
+    data-testid="open-panic-wipe"
+  >
     {t('settings.device_data.wipe_button')}
   </button>
 </section>

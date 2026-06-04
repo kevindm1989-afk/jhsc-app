@@ -5,56 +5,31 @@
     <!--
       Favicon + home-screen icon. The SVG mark serves both the desktop
       tab favicon and the iOS `apple-touch-icon` role (iOS 14+ accepts
-      SVG; older versions fall back to the favicon). Designer follow-up
-      replaces the placeholder mark with the final brand iconography
-      and adds rasterized PNG sources (192/512 minimum) for any UA that
-      doesn't support SVG icons.
+      SVG; older versions fall back to the favicon).
     -->
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <!--
       PWA manifest — declares name / scope / display / brand colors so
-      "Add to Home Screen" produces an installable, app-shell-like
-      surface (per JHSC-APP-PLAN.md threat T10: installable without an
-      app-store account). The manifest itself is the only required wire-
-      up; the service-worker register call is a separate follow-up.
+      "Add to Home Screen" produces an installable, app-shell-like surface.
     -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <!--
       theme-color drives the OS chrome (URL bar on Android, status bar
       tint on iOS standalone). Two media-keyed variants so the chrome
       tracks `prefers-color-scheme`:
-
-        - Light mode: `#2d3a8c` (design-tokens.json `accent.default`).
-          The brand-accent splash — high contrast on a light surface so
-          the chrome reads as branded rather than blending into the
-          status bar.
-
-        - Dark mode: `#0c0e12` (matches the actual body background
-          painted in dark mode by the boot stylesheet below). A
-          surface-matched value rather than the dark brand-accent
-          (`#a9b3f0` — too light to read as a status-bar tint without
-          looking like a glare strip). The asymmetry is deliberate:
-          brand-forward in light mode where contrast supports it,
-          surface-matched in dark mode where it doesn't.
-
-      Order matters: UAs that don't support media-keyed theme-color
-      pick the first tag, so the light variant ships first as the
-      back-compat default. The manifest's `theme_color` field carries
-      a single value (W3C spec — no media-key support yet); it stays
-      at `#2d3a8c` and serves as the per-install fallback when neither
-      meta tag matches the runtime color-scheme.
+        - Light: `#2d3a8c` (brand accent — high contrast on a light surface).
+        - Dark:  `#0c0e12` (surface-matched to the dark body background
+          painted by the boot stylesheet below).
+      Order matters: UAs without media-keyed theme-color support pick the
+      first tag, so the light variant ships first as the back-compat default.
     -->
     <meta name="theme-color" content="#2d3a8c" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0c0e12" media="(prefers-color-scheme: dark)" />
     <!--
-      iOS standalone-mode hints (Safari-only — Android ignores these in
-      favor of the manifest's display:standalone). `apple-mobile-web-app-
-      capable=yes` lets a user Add to Home Screen and launch into a
-      chrome-less app surface (no Safari address bar). The status-bar
-      style is set to default so iOS picks tint by surface background;
-      `black-translucent` would let body content paint under the notch
-      and is reserved for a deliberate full-bleed pass.
+      iOS standalone-mode hints (Safari-only). `apple-mobile-web-app-capable`
+      lets a user Add to Home Screen and launch into a chrome-less surface;
+      the status-bar style is `default` so iOS picks tint by surface bg.
     -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -64,25 +39,35 @@
     <meta name="robots" content="noindex, nofollow" />
     <meta name="referrer" content="no-referrer" />
     <!--
-      Disable mobile-browser auto-link detection. Without this, Safari
-      iOS (and other mobile UAs) scan visible text for phone numbers /
-      email addresses / postal addresses / dates / calendar events and
-      auto-convert them into tel:/mailto:/calshow:/maps: links with
-      tooltips + share-menu integration. Worker-side concern / reprisal
-      narratives routinely include phone numbers + employer addresses
-      that the audit-trail handles correctly server-side; we don't
-      want the browser to ALSO surface them as taps in the share menu,
-      hover tooltips, or recent-history overlays — that's a forensic
-      side-channel the threat model doesn't cover. The address +
-      email + date detectors are off by default on most UAs but
-      `telephone=yes` is the Safari iOS default; setting all four to
-      `no` keeps every detector off uniformly.
+      Disable mobile-browser auto-link detection. Without this, Safari iOS
+      (and other mobile UAs) scan visible text for phone numbers / email
+      addresses / postal addresses / dates and auto-convert them into
+      tel:/mailto:/maps: links — a forensic side-channel the threat model
+      doesn't cover. All four detectors are set to `no`.
     -->
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
     <!--
-      System-font stack only. No Google Fonts, no Adobe Fonts, no CDN.
-      Per JHSC-APP-PLAN.md §7 "No third-party JS at runtime" and the
-      bundle-grep gate in scripts/verify-no-third-party-js.sh.
+      Theme bootstrap — applies the persisted light/dark choice to
+      <html data-theme> BEFORE first paint so an explicit override that
+      differs from the OS preference does not flash the wrong palette.
+      Served same-origin → covered by `script-src 'self'` (no inline
+      script, no third-party JS — ADR-0010 / svelte.config.js CSP).
+    -->
+    <script src="%sveltekit.assets%/theme-init.js"></script>
+    <!--
+      Boot stylesheet — the design-token palette + base paint, inline so it
+      applies from the first frame (before the component CSS bundle loads).
+
+      System-font stack only: no Google Fonts, no Adobe Fonts, no CDN. Per
+      JHSC-APP-PLAN.md §7 "No third-party JS at runtime" and the bundle-grep
+      gate in scripts/verify-no-third-party-js.sh. The colour tokens carry
+      the worker-hub visual language (cool-slate surfaces + a single blue
+      accent + status semantics); the two-layer focus ring (amber halo +
+      dark inner) is preserved from jhsc-app's AODA contrast baseline.
+
+      Light tokens live in :root; dark tokens are applied either by the
+      `prefers-color-scheme: dark` media query (system default) or the
+      `data-theme="dark"` attribute set by theme-init.js (explicit override).
     -->
     <style>
       :root {
@@ -90,18 +75,196 @@
           Arial, 'Liberation Sans', sans-serif;
         font-size: 16px;
         line-height: 1.5;
+
+        --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Helvetica Neue',
+          Arial, 'Liberation Sans', sans-serif;
+        --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono',
+          monospace;
+        --font-serif: Georgia, Cambria, 'Times New Roman', serif;
+
+        /* Surfaces (cool slate) */
+        --color-bg: #f8fafc;
+        --color-bg-elevated: #ffffff;
+        --color-fg: #0f172a;
+        --color-fg-muted: #64748b;
+        --color-fg-subtle: #94a3b8;
+        --color-border: #e2e8f0;
+        --color-border-strong: #cbd5e1;
+
+        --color-primary: #0f172a;
+        --color-primary-fg: #f8fafc;
+        --color-secondary: #f1f5f9;
+        --color-secondary-fg: #0f172a;
+        --color-muted: #f1f5f9;
+
+        /* Single blue accent (worker-hub) */
+        --color-accent: #2563eb;
+        --color-accent-fg: #ffffff;
+        --color-accent-hover: #1d4ed8;
+
+        --color-destructive: #dc2626;
+        --color-destructive-fg: #ffffff;
+
+        /* Two-layer focus ring (jhsc-app AODA baseline, preserved) */
+        --color-focus-outer: #f59e0b;
+        --color-focus-inner: #0f172a;
+
+        /* Status semantics */
+        --color-status-open: #dc2626;
+        --color-status-pending: #d97706;
+        --color-status-resolved: #059669;
+        --color-status-info: #2563eb;
+        --color-status-neutral: #64748b;
+
+        /* Tinted status badges (light) */
+        --color-tint-red-bg: #fef2f2;
+        --color-tint-red-fg: #b91c1c;
+        --color-tint-red-border: #fee2e2;
+        --color-tint-amber-bg: #fffbeb;
+        --color-tint-amber-fg: #b45309;
+        --color-tint-amber-border: #fef3c7;
+        --color-tint-green-bg: #ecfdf5;
+        --color-tint-green-fg: #047857;
+        --color-tint-green-border: #d1fae5;
+        --color-tint-blue-bg: #eff6ff;
+        --color-tint-blue-fg: #1d4ed8;
+        --color-tint-blue-border: #dbeafe;
+        --color-tint-neutral-bg: #f1f5f9;
+        --color-tint-neutral-fg: #475569;
+        --color-tint-neutral-border: #e2e8f0;
+
+        /* Radius (8pt grid) */
+        --radius: 0.5rem;
+        --radius-md: 0.375rem;
+        --radius-sm: 0.25rem;
+        --radius-lg: 0.75rem;
+
+        /* Elevation */
+        --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.06);
+        --shadow-md: 0 4px 12px -2px rgb(15 23 42 / 0.1);
+        --shadow-lg: 0 12px 28px -6px rgb(15 23 42 / 0.18);
       }
+
       body {
         margin: 0;
-        background: #fbfbfa;
-        color: #16181d;
+        background: var(--color-bg);
+        color: var(--color-fg);
       }
+
+      /*
+        Dark-mode body paint (system preference). The background MUST stay
+        `#0c0e12` to match the dark `theme-color` meta tag above — a drift
+        produces a visible seam between the OS status bar and the page in
+        standalone PWA mode. Pinned by app-html-boot-css.test.ts.
+      */
       @media (prefers-color-scheme: dark) {
         body {
           background: #0c0e12;
           color: #f4f5f7;
         }
       }
+
+      /*
+        Dark token palette. `data-theme="light"` forces the light :root
+        tokens regardless of OS; `data-theme="dark"` forces dark; with no
+        attribute the prefers-color-scheme query governs (the default).
+      */
+      :root[data-theme='light'] {
+        color-scheme: light;
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --color-bg: #0c0e12;
+        --color-bg-elevated: #161a22;
+        --color-fg: #f1f5f9;
+        --color-fg-muted: #94a3b8;
+        --color-fg-subtle: #64748b;
+        --color-border: #1e293b;
+        --color-border-strong: #334155;
+        --color-primary: #f1f5f9;
+        --color-primary-fg: #0f172a;
+        --color-secondary: #1e293b;
+        --color-secondary-fg: #f1f5f9;
+        --color-muted: #1e293b;
+        --color-accent: #60a5fa;
+        --color-accent-fg: #0f172a;
+        --color-accent-hover: #93c5fd;
+        --color-destructive: #f87171;
+        --color-destructive-fg: #0f172a;
+        --color-focus-outer: #fbbf24;
+        --color-focus-inner: #f1f5f9;
+        --color-status-open: #f87171;
+        --color-status-pending: #fbbf24;
+        --color-status-resolved: #34d399;
+        --color-status-info: #60a5fa;
+        --color-status-neutral: #94a3b8;
+        --color-tint-red-bg: #3b1418;
+        --color-tint-red-fg: #fca5a5;
+        --color-tint-red-border: #7f1d1d;
+        --color-tint-amber-bg: #3a2a12;
+        --color-tint-amber-fg: #fcd34d;
+        --color-tint-amber-border: #78350f;
+        --color-tint-green-bg: #0f2e22;
+        --color-tint-green-fg: #6ee7b7;
+        --color-tint-green-border: #065f46;
+        --color-tint-blue-bg: #172554;
+        --color-tint-blue-fg: #93c5fd;
+        --color-tint-blue-border: #1e3a8a;
+        --color-tint-neutral-bg: #1e293b;
+        --color-tint-neutral-fg: #cbd5e1;
+        --color-tint-neutral-border: #334155;
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+        --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.5);
+        --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.6);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          color-scheme: dark;
+          --color-bg: #0c0e12;
+          --color-bg-elevated: #161a22;
+          --color-fg: #f1f5f9;
+          --color-fg-muted: #94a3b8;
+          --color-fg-subtle: #64748b;
+          --color-border: #1e293b;
+          --color-border-strong: #334155;
+          --color-primary: #f1f5f9;
+          --color-primary-fg: #0f172a;
+          --color-secondary: #1e293b;
+          --color-secondary-fg: #f1f5f9;
+          --color-muted: #1e293b;
+          --color-accent: #60a5fa;
+          --color-accent-fg: #0f172a;
+          --color-accent-hover: #93c5fd;
+          --color-destructive: #f87171;
+          --color-destructive-fg: #0f172a;
+          --color-focus-outer: #fbbf24;
+          --color-focus-inner: #f1f5f9;
+          --color-status-open: #f87171;
+          --color-status-pending: #fbbf24;
+          --color-status-resolved: #34d399;
+          --color-status-info: #60a5fa;
+          --color-status-neutral: #94a3b8;
+          --color-tint-red-bg: #3b1418;
+          --color-tint-red-fg: #fca5a5;
+          --color-tint-red-border: #7f1d1d;
+          --color-tint-amber-bg: #3a2a12;
+          --color-tint-amber-fg: #fcd34d;
+          --color-tint-amber-border: #78350f;
+          --color-tint-green-bg: #0f2e22;
+          --color-tint-green-fg: #6ee7b7;
+          --color-tint-green-border: #065f46;
+          --color-tint-blue-bg: #172554;
+          --color-tint-blue-fg: #93c5fd;
+          --color-tint-blue-border: #1e3a8a;
+          --color-tint-neutral-bg: #1e293b;
+          --color-tint-neutral-fg: #cbd5e1;
+          --color-tint-neutral-border: #334155;
+          --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+          --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.5);
+          --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.6);
+        }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
@@ -111,17 +274,46 @@
           transition-duration: 0.001ms !important;
         }
       }
+
+      /*
+        Print stylesheet — evidence-grade output. Hide the app chrome (top
+        bar, mobile tab bar, theme toggle, skip-link, and anything marked
+        data-print="hide"); force dark-on-white; switch the body to the
+        serif stack for long-form printed records.
+      */
+      @media print {
+        :root,
+        body {
+          background: #ffffff !important;
+          color: #000000 !important;
+          font-family: var(--font-serif) !important;
+        }
+        header,
+        .tabbar,
+        .skip-link,
+        .theme-toggle,
+        [data-print='hide'] {
+          display: none !important;
+        }
+        main {
+          padding: 0 !important;
+        }
+        .card {
+          border-color: #999999 !important;
+          box-shadow: none !important;
+          break-inside: avoid;
+        }
+        @page {
+          margin: 0.75in;
+        }
+      }
     </style>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
     <!--
-      JS-disabled fallback. The app uses adapter-static with ssr=false,
-      so a JS-disabled browser receives a blank shell. Without this
-      block, the user sees no explanation. The catalog isn't usable
-      here (t() is a runtime call); the message is static en-CA. A
-      future fr-CA build can produce a duplicate fr-CA app.html via
-      the build pipeline.
+      JS-disabled fallback. The app uses adapter-static with ssr=false, so a
+      JS-disabled browser receives a blank shell; this block explains why.
     -->
     <noscript>
       <main>
