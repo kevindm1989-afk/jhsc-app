@@ -127,7 +127,16 @@
 
   if (__test_force_wipe_in_progress) wipeState = 'in_progress';
   if (__test_force_complete) wipeState = 'complete';
-  if (__test_force_clear_failure && __test_auto_submit) {
+  // `import.meta.env.PROD` guard so Vite/Rollup DCE removes this entire
+  // test-only block in a production build. It is the sole reference to
+  // `MemoryWipeStore`; without the static guard the runtime test-prop check
+  // alone can't be tree-shaken, so the whole MemoryWipeStore class (and its
+  // __debug* error-injection seams) leaks into the production panic-wipe
+  // chunk. The test props are already runtime-stripped to undefined in prod,
+  // so this branch never executed there — the guard just lets the bundler
+  // prove it. In tests (MODE !== production) PROD is false, so behaviour is
+  // unchanged.
+  if (!import.meta.env.PROD && __test_force_clear_failure && __test_auto_submit) {
     setTimeout(async () => {
       const store = new MemoryWipeStore();
       if (typeof store.__debugForceClearFailure === 'function') {
