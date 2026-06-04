@@ -227,89 +227,125 @@
 </script>
 
 {#if open}
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <!-- The keydown listener implements the WAI-ARIA modal focus trap (Tab/Shift+Tab
-       wrap); the dialog role + tabindex=-1 is the correct pattern. The listener is
-       focus management, not a click affordance. -->
-  <div
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="panic-wipe-heading"
-    tabindex="-1"
-    bind:this={dialogRoot}
-    on:keydown={onKeyDown}
-  >
-    <h1 id="panic-wipe-heading">{t('onboarding.panic_wipe_d6.modal_heading')}</h1>
-    <!-- SR-only announcers: modal_open + destructive_confirm + (when
+  <div class="panic-backdrop">
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- The keydown listener implements the WAI-ARIA modal focus trap (Tab/Shift+Tab
+         wrap); the dialog role + tabindex=-1 is the correct pattern. The listener is
+         focus management, not a click affordance. -->
+    <div
+      class="panic-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="panic-wipe-heading"
+      tabindex="-1"
+      bind:this={dialogRoot}
+      on:keydown={onKeyDown}
+    >
+      <h1 id="panic-wipe-heading" class="panic-heading">
+        <svg
+          class="panic-heading-icon"
+          aria-hidden="true"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+        >
+          <path
+            d="M12 2L2 21h20L12 2z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linejoin="round"
+          />
+          <path d="M12 9v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <circle cx="12" cy="17.5" r="1" fill="currentColor" />
+        </svg>
+        {t('onboarding.panic_wipe_d6.modal_heading')}
+      </h1>
+      <!-- SR-only announcers: modal_open + destructive_confirm + (when
          applicable) panic_wipe_* state transitions. The visible heading
          carries the same information for sighted users. -->
-    <span class="sr-only"
-      >{t('a11y.onboarding.modal_open_announcement', {
-        modal_name: t('onboarding.panic_wipe_d6.modal_heading')
-      })}</span
-    >
-    <span class="sr-only">{t('a11y.onboarding.destructive_confirm_announcement')}</span>
-    {#if wipeState === 'in_progress'}
-      <div
-        data-testid="panic-wipe-in-progress-overlay"
-        aria-busy="true"
-        role="alert"
-        data-focus-ring-inner-token="color.light.onboarding.panic_overlay_fg"
+      <span class="sr-only"
+        >{t('a11y.onboarding.modal_open_announcement', {
+          modal_name: t('onboarding.panic_wipe_d6.modal_heading')
+        })}</span
       >
-        <span>{t('onboarding.panic_wipe_d6.state.wiping')}</span>
-        <span class="sr-only">{t('a11y.onboarding.panic_wipe_in_progress_announcement')}</span>
-      </div>
-    {:else if wipeState === 'partial_failure'}
-      <div role="alert" data-testid="panic-wipe-partial-failure">
-        <span class="sr-only">{t('a11y.onboarding.panic_wipe_partial_failure_announcement')}</span>
-        {t('onboarding.panic_wipe_d6.error.partial_wipe', {
-          failed_systems: partialFailedClasses.join(', ')
-        })}
-      </div>
-    {:else if wipeState === 'complete'}
-      <div role="status" data-testid="panic-wipe-complete-toast">
-        <span class="sr-only">{t('a11y.onboarding.panic_wipe_complete_announcement')}</span>
-        {t('onboarding.panic_wipe_d6.state.complete')}
-      </div>
-    {:else if wipeState === 'audit_failed'}
-      <!-- A-T19-RR-1: audit-emit failed BEFORE any side-effect. Surface the
+      <span class="sr-only">{t('a11y.onboarding.destructive_confirm_announcement')}</span>
+      {#if wipeState === 'in_progress'}
+        <div
+          data-testid="panic-wipe-in-progress-overlay"
+          aria-busy="true"
+          role="alert"
+          data-focus-ring-inner-token="color.light.onboarding.panic_overlay_fg"
+        >
+          <span>{t('onboarding.panic_wipe_d6.state.wiping')}</span>
+          <span class="sr-only">{t('a11y.onboarding.panic_wipe_in_progress_announcement')}</span>
+        </div>
+      {:else if wipeState === 'partial_failure'}
+        <div class="panic-alert" role="alert" data-testid="panic-wipe-partial-failure">
+          <span class="sr-only">{t('a11y.onboarding.panic_wipe_partial_failure_announcement')}</span
+          >
+          {t('onboarding.panic_wipe_d6.error.partial_wipe', {
+            failed_systems: partialFailedClasses.join(', ')
+          })}
+        </div>
+      {:else if wipeState === 'complete'}
+        <div class="panic-status" role="status" data-testid="panic-wipe-complete-toast">
+          <span class="sr-only">{t('a11y.onboarding.panic_wipe_complete_announcement')}</span>
+          {t('onboarding.panic_wipe_d6.state.complete')}
+        </div>
+      {:else if wipeState === 'audit_failed'}
+        <!-- A-T19-RR-1: audit-emit failed BEFORE any side-effect. Surface the
            recoverable error and keep the modal escapable (RR-2 Cancel). No
            in-progress overlay, no complete toast — nothing was destroyed. -->
-      <div role="alert" data-testid="panic-wipe-audit-failed">
-        {t('onboarding.panic_wipe_d6.error.audit_emit_failed')}
-      </div>
-      <button type="button" bind:this={auditFailedCancelRef} on:click={onCancel}>
-        {t('onboarding.panic_wipe_d6.cancel_button')}
-      </button>
-    {:else}
-      <div data-testid="panic-wipe-modal-body" aria-busy={!ready ? 'true' : null}>
-        <p>{t('onboarding.panic_wipe_d6.modal_body_what_happens')}</p>
-        <p>{t('onboarding.panic_wipe_d6.modal_body_what_doesnt')}</p>
-        <p>{t('onboarding.panic_wipe_d6.modal_residual_risk_callout')}</p>
-        <p>{t('onboarding.panic_wipe_d6.modal_recovery_reminder')}</p>
-        <label for="panic-phrase-input">{t('onboarding.panic_wipe_d6.type_back_label')}</label>
-        <input
-          id="panic-phrase-input"
-          type="text"
-          bind:this={typeBackInputRef}
-          aria-label={t('a11y.onboarding.panic_wipe_type_back_label')}
-          aria-required="true"
-          placeholder={t('onboarding.panic_wipe_d6.type_back_placeholder')}
-          on:input={onPhraseInput}
-        />
-      </div>
-      <button
-        type="button"
-        aria-disabled={primaryDisabled ? 'true' : 'false'}
-        on:click={onConfirm}
-        aria-label={t('onboarding.panic_wipe_d6.primary_button_destructive')}
-      >
-        {t('onboarding.panic_wipe_d6.primary_button_destructive')}
-      </button>
-      <button type="button" on:click={onCancel}>
-        {t('onboarding.panic_wipe_d6.cancel_button')}
-      </button>
-    {/if}
+        <div class="panic-alert" role="alert" data-testid="panic-wipe-audit-failed">
+          {t('onboarding.panic_wipe_d6.error.audit_emit_failed')}
+        </div>
+        <div class="panic-action-row">
+          <button
+            type="button"
+            class="panic-cancel"
+            bind:this={auditFailedCancelRef}
+            on:click={onCancel}
+          >
+            {t('onboarding.panic_wipe_d6.cancel_button')}
+          </button>
+        </div>
+      {:else}
+        <div data-testid="panic-wipe-modal-body" aria-busy={!ready ? 'true' : null}>
+          <p>{t('onboarding.panic_wipe_d6.modal_body_what_happens')}</p>
+          <p>{t('onboarding.panic_wipe_d6.modal_body_what_doesnt')}</p>
+          <p>{t('onboarding.panic_wipe_d6.modal_residual_risk_callout')}</p>
+          <p>{t('onboarding.panic_wipe_d6.modal_recovery_reminder')}</p>
+          <label class="panic-phrase-label" for="panic-phrase-input">
+            {t('onboarding.panic_wipe_d6.type_back_label')}
+          </label>
+          <input
+            id="panic-phrase-input"
+            class="panic-phrase-input"
+            type="text"
+            bind:this={typeBackInputRef}
+            aria-label={t('a11y.onboarding.panic_wipe_type_back_label')}
+            aria-required="true"
+            placeholder={t('onboarding.panic_wipe_d6.type_back_placeholder')}
+            on:input={onPhraseInput}
+          />
+        </div>
+        <div class="panic-action-row">
+          <button
+            type="button"
+            class="panic-primary"
+            aria-disabled={primaryDisabled ? 'true' : 'false'}
+            on:click={onConfirm}
+            aria-label={t('onboarding.panic_wipe_d6.primary_button_destructive')}
+          >
+            {t('onboarding.panic_wipe_d6.primary_button_destructive')}
+          </button>
+          <button type="button" class="panic-cancel" on:click={onCancel}>
+            {t('onboarding.panic_wipe_d6.cancel_button')}
+          </button>
+        </div>
+      {/if}
+    </div>
   </div>
 {/if}
 
@@ -329,6 +365,142 @@
     white-space: nowrap;
     border-width: 0;
   }
+
+  /*
+   * Modal scrim — fixed-position viewport overlay that darkens the
+   * background behind the dialog. Reuses the existing panic-overlay-bg
+   * token (the near-black 92% alpha surface used by the in-progress
+   * overlay) so the scrim and the wipe state surface share a palette.
+   * The dialog inside is centered with grid; vertical scroll is allowed
+   * for short viewports.
+   */
+  .panic-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    overflow-y: auto;
+    background: var(--color-light-onboarding-panic-overlay-bg, rgba(22, 24, 29, 0.7));
+  }
+  @media (prefers-color-scheme: dark) {
+    .panic-backdrop {
+      background: var(--color-dark-onboarding-panic-overlay-bg, rgba(0, 0, 0, 0.7));
+    }
+  }
+
+  /*
+   * Dialog card — elevated surface with destructive accent border. The
+   * left-border stripe is the destructive-affordance signal echoing the
+   * `.btn-destructive` class in app.css: every visible surface in the
+   * panic-wipe ceremony shares the destructive-red signal.
+   */
+  .panic-dialog {
+    width: 100%;
+    max-width: 32rem;
+    margin: auto;
+    padding: 1.5rem;
+    border: 1px solid var(--color-border);
+    border-inline-start: 4px solid var(--color-destructive);
+    border-radius: var(--radius);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    box-shadow: var(--shadow-lg);
+  }
+  .panic-dialog > :first-child {
+    margin-block-start: 0;
+  }
+  .panic-dialog > :last-child {
+    margin-block-end: 0;
+  }
+  .panic-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--color-destructive);
+  }
+  .panic-heading-icon {
+    flex: none;
+    color: var(--color-destructive);
+  }
+
+  /* Type-back input — monospace block so the literal-phrase value is
+     visually distinct from prose text and reads as a literal command. */
+  .panic-phrase-label {
+    display: block;
+    margin-block: 1rem 0.375rem;
+    color: var(--color-fg);
+    font-weight: 500;
+  }
+  .panic-phrase-input {
+    display: block;
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+  }
+  .panic-phrase-input:focus-visible {
+    outline: 2px solid var(--color-focus-inner);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px var(--color-focus-outer);
+  }
+
+  /* Action row — primary destructive + cancel outline, side-by-side on
+     desktop, stacked on narrow viewports. The destructive button is
+     last in the source order so a quick-tap user lands on Cancel by
+     default; but `aria-disabled` on the primary still gates submission
+     until the phrase matches (F-115 contract). */
+  .panic-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-block-start: 1.25rem;
+  }
+  .panic-primary {
+    background: var(--color-destructive);
+    color: var(--color-destructive-fg);
+    border-color: var(--color-destructive);
+  }
+  .panic-primary[aria-disabled='true'] {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .panic-cancel {
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+  }
+  .panic-cancel:hover {
+    background: var(--color-muted);
+    opacity: 1;
+  }
+
+  /* Recoverable alerts (partial_failure, audit_failed) — red-tinted
+     inline panels inside the card. The complete-toast uses the green
+     status tint to signal the (irreversible) completion state. */
+  .panic-alert {
+    margin-block: 0.75rem 0;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-tint-red-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-red-bg);
+    color: var(--color-tint-red-fg);
+  }
+  .panic-status {
+    margin-block: 0.75rem 0;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-tint-green-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-green-bg);
+    color: var(--color-tint-green-fg);
+  }
+
   /* A11Y-T19-7 / design-system §4.D.T19 panic-overlay-focus-ring rule.
      The two-layer focus ring inverts on the panic overlay surface: the
      outer ring uses border.focus (#fbbf24 amber), and the INNER ring
