@@ -490,7 +490,11 @@
           : t('onboarding.passkey_d3.heading')}
       </h1>
       {#if baselineBlocked}
-        <div role="alert" data-testid="browser-baseline-badge">
+        <div
+          class="baseline-badge baseline-badge-fail"
+          role="alert"
+          data-testid="browser-baseline-badge"
+        >
           <span class="sr-only">{t('a11y.onboarding.browser_baseline_fail_announcement')}</span>
           {t('onboarding.browser_baseline_d2.body_fail')}
           <ul aria-label={t('a11y.onboarding.failed_checks_list_label')}>
@@ -508,7 +512,11 @@
         </div>
         <p>{t('onboarding.browser_baseline_d2.supported_browsers_body')}</p>
       {:else}
-        <div role="status" data-testid="browser-baseline-badge">
+        <div
+          class="baseline-badge baseline-badge-pass"
+          role="status"
+          data-testid="browser-baseline-badge"
+        >
           <span class="sr-only">{t('a11y.onboarding.browser_baseline_pass_announcement')}</span>
           {t('onboarding.browser_baseline_d2.badge.webcrypto.pass')}
         </div>
@@ -545,15 +553,20 @@
       -->
       <div data-testid="onboarding-d4-body"></div>
       {#if d4_revealCapped}
-        <p data-testid="passphrase-helper">{t('onboarding.passphrase_d4.passphrase_helper')}</p>
+        <p class="onboarding-helper" data-testid="passphrase-helper">
+          {t('onboarding.passphrase_d4.passphrase_helper')}
+        </p>
         <button
           type="button"
+          class="onboarding-outline-button"
           aria-disabled="true"
           aria-label={t('onboarding.passphrase_d4.passphrase_reveal_label')}
         >
           {t('onboarding.passphrase_d4.show_again_label')}
         </button>
-        <p data-testid="show-again-capped">{t('onboarding.passphrase_d4.show_again_capped')}</p>
+        <p class="onboarding-helper" data-testid="show-again-capped">
+          {t('onboarding.passphrase_d4.show_again_capped')}
+        </p>
       {/if}
       <!-- Download state-matrix mirror — only rendered when a test seam
            forces a non-default state. The real download button (default
@@ -575,7 +588,7 @@
         </button>
       {/if}
       {#if d4ForceDownloadBlocked}
-        <div role="alert" data-testid="download-blocked-toast">
+        <div class="onboarding-alert" role="alert" data-testid="download-blocked-toast">
           {t('onboarding.passphrase_d4.download_error_toast')}
         </div>
       {/if}
@@ -583,7 +596,9 @@
         {t('onboarding.passphrase_d4.confirm_continue_button')}
       </button>
       {#if d4_rateLimitedKey}
-        <div role="alert" data-testid="d4-rate-limited">{t(d4_rateLimitedKey)}</div>
+        <div class="onboarding-alert" role="alert" data-testid="d4-rate-limited">
+          {t(d4_rateLimitedKey)}
+        </div>
       {/if}
     {:else if currentStep === 'D.5'}
       <D5SessionRevocationPrimer
@@ -605,7 +620,9 @@
         {t('onboarding.passphrase_d4.primary_button')}
       </button>
       {#if d6Error}
-        <div role="alert" id="d6-err" data-testid="d6-error">{d6Error}</div>
+        <div class="onboarding-alert" role="alert" id="d6-err" data-testid="d6-error">
+          {d6Error}
+        </div>
       {/if}
     {:else if currentStep === 'D.7'}
       <D7Complete />
@@ -724,6 +741,68 @@
   [data-testid='wizard-step-body'] button {
     margin-block-start: 0.75rem;
     margin-inline-end: 0.5rem;
+  }
+
+  /*
+   * Browser-baseline badges (D.2 / D.3 mount points). Pass = green tint
+   * (the WebCrypto subsystem is OK); fail = red tint (the browser is
+   * below the supported baseline) with the failed sub-checks enumerated
+   * in a nested list. Both badges keep their existing role + data-testid
+   * pins from d2-browser-baseline.test.ts; classes are additive.
+   */
+  .baseline-badge {
+    margin-block: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid;
+    border-radius: var(--radius-md);
+  }
+  .baseline-badge-pass {
+    background: var(--color-tint-green-bg);
+    color: var(--color-tint-green-fg);
+    border-color: var(--color-tint-green-border);
+  }
+  .baseline-badge-fail {
+    background: var(--color-tint-red-bg);
+    color: var(--color-tint-red-fg);
+    border-color: var(--color-tint-red-border);
+  }
+  .baseline-badge-fail ul {
+    margin-block: 0.5rem 0;
+    padding-inline-start: 1.25rem;
+  }
+
+  /*
+   * Onboarding inline alerts — D4 download-blocked + rate-limited and
+   * D6 type-back error. Red-tinted panels matching the worker-hub error
+   * affordance vocabulary. Aliased to the wizard-step-body chrome so
+   * the cards inside the wizard body share spacing + radius with the
+   * step components' own scoped alerts.
+   */
+  .onboarding-alert {
+    margin-block: 0.75rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-red-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-red-bg);
+    color: var(--color-tint-red-fg);
+  }
+
+  /* Capped-reveal helper copy + show-again-capped notice — muted prose
+     used in the reveal-cap force state. The mirror button (rendered
+     alongside in the capped state) is a disabled outline. */
+  .onboarding-helper {
+    margin-block: 0.5rem 0;
+    color: var(--color-fg-muted);
+    font-size: 0.875rem;
+  }
+  .onboarding-outline-button {
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+  }
+  .onboarding-outline-button[aria-disabled='true'] {
+    cursor: not-allowed;
+    opacity: 0.55;
   }
 
   /* Two-layer AODA focus ring (preserved). */
