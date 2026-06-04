@@ -19,6 +19,7 @@
   import { t } from '../../i18n';
   import { revokeAllSessions } from '../../auth/session';
   import { flushSync } from 'svelte';
+  import { getOnboardingTestConfig } from '../onboarding-test-config';
 
   function syncFlush() {
     try {
@@ -35,14 +36,20 @@
   export let session_count = 1;
   /** Devices that failed to revoke (driven by the parent wizard / harness). */
   export let failed_devices = [];
-  /** Test-only artificial delay (ms) before resolving revokeAllSessions(). */
-  export let __test_revoke_delay_ms = undefined;
-  /** Test-only error injection: 'rate_limited' | 'server_unreachable'. */
-  export let __test_revoke_error = undefined;
   /** Called when the user advances away from D.5 (Skip OR after success). */
   export let onAdvance = () => {};
   /** Bound state lets the parent surface aria-busy on the wizard body. */
   export let in_progress = false;
+
+  // Test-only revoke delay / error injection, read from the production-stripped
+  // onboarding-test-config seam (issue #120). These were `export let __test_*`
+  // props; reading the seam under `!import.meta.env.PROD` keeps the names out of
+  // the production bundle (D5 is only ever rendered by OnboardingFlow; tests
+  // drive it via renderOnboarding({ step: 'D.5', revokeDelayMs, revokeError })).
+  /** @type {import('../onboarding-test-config').OnboardingTestConfig} */
+  const __tc = !import.meta.env.PROD ? getOnboardingTestConfig() : {};
+  const tcRevokeDelayMs = !import.meta.env.PROD ? __tc.revokeDelayMs : undefined;
+  const tcRevokeError = !import.meta.env.PROD ? __tc.revokeError : undefined;
 
   let state = 'idle';
   let errorKey = null;
@@ -57,14 +64,14 @@
     if (state === 'in_progress') return;
     state = 'in_progress';
     syncFlush();
-    const delay = __test_revoke_delay_ms ?? 0;
+    const delay = tcRevokeDelayMs ?? 0;
     if (delay > 0) {
       await new Promise((r) => setTimeout(r, delay));
     }
-    if (__test_revoke_error) {
+    if (tcRevokeError) {
       state = 'error';
       errorKey =
-        __test_revoke_error === 'rate_limited'
+        tcRevokeError === 'rate_limited'
           ? 'onboarding.sessions_d5.error.rate_limited'
           : 'onboarding.sessions_d5.error.server_unreachable';
       return;

@@ -31,12 +31,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/svelte';
+import { screen, fireEvent, cleanup } from '@testing-library/svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { WEB_ROOT, REPO_ROOT } from '../_helpers/paths';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
+import { renderOnboarding, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 
 const ONBOARDING_SRC = path.join(WEB_ROOT, 'src/lib/onboarding');
@@ -47,6 +47,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
 });
 
 // ----------------------------------------------------------------------------
@@ -133,7 +134,7 @@ describe('T19 / F-104 M-104d — no === on passphrase or typed in D.4/D.6 source
 
 describe('T19 / F-104 M-104c — D.6 type-back input attributes (defense vs Chromium cloud-spellcheck)', () => {
   it('the D.6 textarea has autocomplete=off, spellcheck=false, autocapitalize=none, autocorrect=off', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.6' } });
+    renderOnboarding({ step: 'D.6' });
     const input = screen.getByRole('textbox', { name: /type the passphrase|confirm/i });
     expect(input.getAttribute('autocomplete')).toBe('off');
     expect(input.getAttribute('spellcheck')).toBe('false');
@@ -253,12 +254,12 @@ describe('T19 / F-105 M-105c — recovery-blob-download header comment documents
 
 describe('T19 / F-108 M-108a — D.4 has no copy-passphrase affordance', () => {
   it('D.4 renders no element with data-testid="copy-passphrase"', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     expect(document.querySelector('[data-testid="copy-passphrase"]')).toBeNull();
   });
 
   it('D.4 renders no button labelled "Copy" / "Copy passphrase"', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     const buttons = Array.from(document.querySelectorAll('button'));
     for (const b of buttons) {
       expect(b.textContent ?? '').not.toMatch(/^copy(\s+passphrase)?$/i);
@@ -311,7 +312,7 @@ describe('T19 / F-108 M-108b + G-T19-6 — no speech synthesis under onboarding/
 
 describe('T19 / F-108 M-108c — passphrase visible region has no live-region attributes', () => {
   it('the passphrase <code> element rendered at D.4 has no aria-live, no role=alert, no role=status', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     const codes = Array.from(document.querySelectorAll('code[data-testid="passphrase-reveal"], code[data-testid="recovery-passphrase"]'));
     expect(codes.length).toBeGreaterThanOrEqual(1);
     for (const c of codes) {
@@ -335,7 +336,7 @@ describe('T19 / F-110 M-110a — D.4 error rendering does not echo the passphras
         throw new Error('argon2id_unavailable_libsodium_wrappers_sumo_required');
       });
     }
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     // Drive the D.4 → D.6 transition to force encryptRecoveryBlob to fire.
     const primary = screen.queryByRole('button', { name: /print recovery sheet|continue/i });
     if (primary) fireEvent.click(primary);
@@ -463,7 +464,7 @@ describe('T19 / F-112 M-112a — client-side rate-limit on D.4 → D.6 attempts'
 
 describe('T19 / Decision 2.b — in-memory wizard state: hard refresh restarts at D.1', () => {
   it('unmounting and remounting OnboardingFlow returns the user to D.1 (no sessionStorage / localStorage persistence)', async () => {
-    const first = render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    const first = renderOnboarding({ step: 'D.4' });
     // Confirm we are at D.4 — the D.4 heading is "Your recovery passphrase".
     // (Note: queryByText cannot be used here because the D.4 body text
     // legitimately contains "recovery passphrase" multiple times; we
@@ -475,7 +476,7 @@ describe('T19 / Decision 2.b — in-memory wizard state: hard refresh restarts a
     expect(window.sessionStorage.length).toBe(0);
     expect(window.localStorage.length).toBe(0);
     // Remount fresh; the wizard MUST start at D.1.
-    render(OnboardingFlow);
+    renderOnboarding();
     expect(screen.getByRole('heading', { name: /personal device/i })).toBeDefined();
   });
 });
@@ -496,7 +497,7 @@ describe('T19 / F-104 M-104b — passphrase ref cleared on successful D.6 type-b
       ).__test_only_get_passphrase_ref;
     expect(typeof seam).toBe('function');
     // Drive D.4 → D.6 → match.
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     // The implementer's test-only seam returns the in-memory ref.
     // Pre-advance: the ref is set.
     const initial = seam!();

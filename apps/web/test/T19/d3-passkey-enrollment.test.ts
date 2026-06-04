@@ -18,9 +18,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/svelte';
+import { screen, fireEvent, cleanup } from '@testing-library/svelte';
 import { freezeClock, restoreClock } from '../_helpers/clock';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
+import { renderOnboarding, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 import { existsSync, readFileSync } from 'node:fs';
 import nodePath from 'node:path';
@@ -38,6 +38,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
 });
 
 // ============================================================================
@@ -149,9 +150,7 @@ describe('T19 / F-103 M-103c — collapsed user-visible 410/401 surface', () => 
 
 describe('T19 / F-110 M-110a — D.3 error rendering does not echo the TOTP code', () => {
   it('with a baseline-pass UA, the D.3 surface renders the totp input WITHOUT exposing the entered value in the error', async () => {
-    render(OnboardingFlow, {
-      props: { __test_user_agent: CHROME_130_UA, __test_step: 'D.3' }
-    });
+    renderOnboarding({ userAgent: CHROME_130_UA, step: 'D.3' });
     const totpInput = screen.getByRole('textbox', { name: /one-time code|invite slip|totp/i });
     // Inject a canary code; in any error state the rendered toast/alert text
     // must NOT contain the canary.
@@ -179,18 +178,14 @@ describe('T19 / F-110 M-110a — D.3 error rendering does not echo the TOTP code
 
 describe('T19 / D.3 — totp input attributes', () => {
   it('totp input has autocomplete="one-time-code" (or "off"); never "username"/"current-password"', async () => {
-    render(OnboardingFlow, {
-      props: { __test_user_agent: CHROME_130_UA, __test_step: 'D.3' }
-    });
+    renderOnboarding({ userAgent: CHROME_130_UA, step: 'D.3' });
     const totp = screen.getByRole('textbox', { name: /one-time code|invite slip|totp/i });
     const ac = totp.getAttribute('autocomplete') ?? '';
     expect(['one-time-code', 'off']).toContain(ac);
   });
 
   it('totp input has inputmode="numeric" (mobile keyboard hint)', async () => {
-    render(OnboardingFlow, {
-      props: { __test_user_agent: CHROME_130_UA, __test_step: 'D.3' }
-    });
+    renderOnboarding({ userAgent: CHROME_130_UA, step: 'D.3' });
     const totp = screen.getByRole('textbox', { name: /one-time code|invite slip|totp/i });
     expect(totp.getAttribute('inputmode')).toBe('numeric');
   });

@@ -20,9 +20,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
+import { screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
+import { renderOnboarding, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 
 beforeEach(() => {
@@ -31,6 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
 });
 
 // ============================================================================
@@ -58,22 +59,22 @@ describe('T19 / Designer §A — D.5 canonical labels are FIXED', () => {
 
 describe('T19 / D.5 — primer renders heading + bulk action + tertiary skip', () => {
   it('renders the FIXED heading text', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.5' } });
+    renderOnboarding({ step: 'D.5' });
     expect(screen.getByRole('heading', { name: 'Sign out other devices?' })).toBeDefined();
   });
 
   it('renders the destructive primary button with FIXED label', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.5' } });
+    renderOnboarding({ step: 'D.5' });
     expect(screen.getByRole('button', { name: 'Revoke other sessions' })).toBeDefined();
   });
 
   it('renders the tertiary skip button with FIXED label', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.5' } });
+    renderOnboarding({ step: 'D.5' });
     expect(screen.getByRole('button', { name: "Skip — I'll do this later" })).toBeDefined();
   });
 
   it('primer renders the same `table.sessions`-shaped list as Surface H (no per-row Revoke buttons)', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.5' } });
+    renderOnboarding({ step: 'D.5' });
     const list = screen.queryByTestId('session-revocation-primer-list');
     expect(list).not.toBeNull();
     // Per-row Revoke buttons MUST NOT exist on the primer (Designer Surface H amendment).
@@ -82,7 +83,7 @@ describe('T19 / D.5 — primer renders heading + bulk action + tertiary skip', (
   });
 
   it('primer does NOT render a Revoke-all destructive_confirm modal (Surface H feature absent on primer)', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.5' } });
+    renderOnboarding({ step: 'D.5' });
     // The primer's primary action is the bulk action; no destructive_confirm
     // modal is interposed (the user already authenticated at D.3).
     expect(document.querySelector('[role="dialog"][data-testid="revoke-all-confirm"]')).toBeNull();
@@ -95,9 +96,7 @@ describe('T19 / D.5 — primer renders heading + bulk action + tertiary skip', (
 
 describe('T19 / D.5 state matrix per Designer §4', () => {
   it('empty (only-this-device) — primer renders the only-this-device helper and Skip becomes the only forward action', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.5', __test_session_count: 1 }
-    });
+    renderOnboarding({ step: 'D.5', sessionCount: 1 });
     // The helper text references the only-this-device state.
     expect(screen.getByText(t('onboarding.sessions_d5.helper_only_this_device'))).toBeDefined();
     // The destructive primary button SHOULD be disabled (nothing to revoke).
@@ -106,9 +105,7 @@ describe('T19 / D.5 state matrix per Designer §4', () => {
   });
 
   it('in_progress — clicking the primary fires the loading state; primary is aria-busy=true', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.5', __test_session_count: 3, __test_revoke_delay_ms: 1500 }
-    });
+    renderOnboarding({ step: 'D.5', sessionCount: 3, revokeDelayMs: 1500 });
     const primary = screen.getByRole('button', { name: 'Revoke other sessions' });
     fireEvent.click(primary);
     // Don't advance the clock — the loading state is current.
@@ -117,9 +114,7 @@ describe('T19 / D.5 state matrix per Designer §4', () => {
   });
 
   it('success — after revokeAllSessions resolves, role=status announces success', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.5', __test_session_count: 3, __test_revoke_delay_ms: 100 }
-    });
+    renderOnboarding({ step: 'D.5', sessionCount: 3, revokeDelayMs: 100 });
     const primary = screen.getByRole('button', { name: 'Revoke other sessions' });
     fireEvent.click(primary);
     advanceBy(110);
@@ -130,13 +125,11 @@ describe('T19 / D.5 state matrix per Designer §4', () => {
   });
 
   it('partial_failure — Designer §G state-row: error_state surfaces with the failed-systems enumeration', async () => {
-    render(OnboardingFlow, {
-      props: {
-        __test_step: 'D.5',
-        __test_session_count: 3,
-        __test_revoke_partial_failure: ['device-2', 'device-3']
-      }
-    });
+    renderOnboarding({
+        step: 'D.5',
+        sessionCount: 3,
+        revokePartialFailure: ['device-2', 'device-3']
+      });
     const primary = screen.getByRole('button', { name: 'Revoke other sessions' });
     fireEvent.click(primary);
     advanceBy(110);
@@ -150,9 +143,7 @@ describe('T19 / D.5 state matrix per Designer §4', () => {
   });
 
   it('error (rate-limited) — primary button reverts; Skip remains available so the user is not stranded', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.5', __test_session_count: 3, __test_revoke_error: 'rate_limited' }
-    });
+    renderOnboarding({ step: 'D.5', sessionCount: 3, revokeError: 'rate_limited' });
     const primary = screen.getByRole('button', { name: 'Revoke other sessions' });
     fireEvent.click(primary);
     advanceBy(110);
@@ -171,9 +162,7 @@ describe('T19 / D.5 state matrix per Designer §4', () => {
 
 describe('T19 / F-39 — D.5 loading resolves on promise resolution (not on click)', () => {
   it('with a 3000ms delay seam, the primary button stays loading until the seam resolves', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.5', __test_session_count: 3, __test_revoke_delay_ms: 3000 }
-    });
+    renderOnboarding({ step: 'D.5', sessionCount: 3, revokeDelayMs: 3000 });
     const primary = screen.getByRole('button', { name: 'Revoke other sessions' });
     fireEvent.click(primary);
     advanceBy(1000);
@@ -191,9 +180,7 @@ describe('T19 / F-39 — D.5 loading resolves on promise resolution (not on clic
 
 describe('T19 / D.5 — Skip advances to D.7 without firing revokeAllSessions', () => {
   it('clicking Skip routes to D.7 immediately', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.5', __test_session_count: 3 }
-    });
+    renderOnboarding({ step: 'D.5', sessionCount: 3 });
     const skip = screen.getByRole('button', { name: "Skip — I'll do this later" });
     fireEvent.click(skip);
     await waitFor(() => {
