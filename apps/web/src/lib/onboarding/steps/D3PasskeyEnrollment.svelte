@@ -78,11 +78,18 @@
   }
 </script>
 
-<section>
+<section class="passkey-enroll">
   <h2>{t('onboarding.passkey_d3.heading')}</h2>
   <p>{t('onboarding.passkey_d3.body')}</p>
   <label for="totp">{t('onboarding.passkey_d3.totp_label')}</label>
-  <input id="totp" type="text" inputmode="numeric" autocomplete="one-time-code" bind:value={totp} />
+  <input
+    id="totp"
+    class="totp-input"
+    type="text"
+    inputmode="numeric"
+    autocomplete="one-time-code"
+    bind:value={totp}
+  />
   <button type="button" on:click={start}>{t('onboarding.passkey_d3.primary_button')}</button>
   {#if errorKey === 'onboarding.passkey_d3.error.totp_invalid'}
     <div role="alert">{t('onboarding.passkey_d3.error.totp_invalid')}</div>
@@ -100,3 +107,37 @@
     <div role="alert">{t('onboarding.passkey_d3.error.enrollment_failed_generic')}</div>
   {/if}
 </section>
+
+<style>
+  /*
+   * Passkey-enrollment surface — the TOTP input is a numeric one-time
+   * code, so a tabular-figures monospace stack reads more naturally and
+   * larger-than-body type matches the gravity of the action (the user
+   * is bridging a one-time invite into a permanent passkey).
+   */
+  .passkey-enroll label[for='totp'] {
+    display: block;
+    margin-block-start: 1rem;
+    margin-block-end: 0.375rem;
+    color: var(--color-fg);
+    font-weight: 500;
+  }
+  .totp-input {
+    display: block;
+    width: 100%;
+    max-width: 16rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 1.0625rem;
+    letter-spacing: 0.1em;
+  }
+  .totp-input:focus-visible {
+    outline: 2px solid var(--color-focus-inner);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px var(--color-focus-outer);
+  }
+</style>

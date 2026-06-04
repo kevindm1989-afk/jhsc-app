@@ -18,13 +18,15 @@
       theme-color drives the OS chrome (URL bar on Android, status bar
       tint on iOS standalone). Two media-keyed variants so the chrome
       tracks `prefers-color-scheme`:
-        - Light: `#2d3a8c` (brand accent — high contrast on a light surface).
+        - Light: `#2563eb` (worker-hub blue accent — matches the in-app
+          `--color-accent` in the boot stylesheet below so the OS chrome
+          tint flows continuously into the app's interactive accent).
         - Dark:  `#0c0e12` (surface-matched to the dark body background
           painted by the boot stylesheet below).
       Order matters: UAs without media-keyed theme-color support pick the
       first tag, so the light variant ships first as the back-compat default.
     -->
-    <meta name="theme-color" content="#2d3a8c" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0c0e12" media="(prefers-color-scheme: dark)" />
     <!--
       iOS standalone-mode hints (Safari-only). `apple-mobile-web-app-capable`

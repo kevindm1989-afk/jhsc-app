@@ -9,7 +9,7 @@
   "orientation": "any",
   "lang": "en-CA",
   "dir": "ltr",
-  "theme_color": "#2d3a8c",
+  "theme_color": "#2563eb",
   "background_color": "#fbfbfa",
   "categories": ["productivity", "utilities"],
   "prefer_related_applications": false,

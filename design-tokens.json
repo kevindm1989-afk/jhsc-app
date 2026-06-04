@@ -2,7 +2,13 @@
   "$schema": "https://json-schema.org/draft-07/schema",
   "_meta": {
     "direction": "Civic-record. A serious workplace-safety instrument that reads like a labour-tribunal binder rendered for a phone: high-contrast, dense type, restrained color, no decorative motion. Builds trust by feeling consequential and audited, not friendly. Closer to a court filing system than to a SaaS dashboard.",
-    "mood_adjectives": ["sober", "audited", "candid", "careful", "load-bearing"],
+    "mood_adjectives": [
+      "sober",
+      "audited",
+      "candid",
+      "careful",
+      "load-bearing"
+    ],
     "references": [
       "GOV.UK Design System — neutral grays, restrained palette, content-forward typography, accessibility-first density; we borrow the typographic posture, the focus-ring discipline (visible black-on-yellow outline), and the unapologetic plainness of language.",
       "Stripe Dashboard — calm semantic color (a single accent + clearly-coded states), confident empty/loading/error treatments, and the convention that destructive surfaces explicitly name the irreversible thing about to happen. We borrow the destructive-confirm pattern.",
@@ -25,7 +31,7 @@
 
   "color": {
     "_modes": ["light", "dark"],
-    "_principle": "A single accent (slate-indigo), three semantic colors (success/warning/danger), and two sensitivity tokens (C3 / C4). C4 is visually distinct from any state color so a sensitive surface is never mistaken for a warning. Every color used is paired with a text label or icon — color carries no information alone.",
+    "_principle": "A single accent (worker-hub blue), three semantic colors (success/warning/danger), and two sensitivity tokens (C3 / C4). C4 is visually distinct from any state color so a sensitive surface is never mistaken for a warning. Every color used is paired with a text label or icon — color carries no information alone.",
 
     "light": {
       "background": {
@@ -49,12 +55,12 @@
         "on_info": "#ffffff"
       },
       "accent": {
-        "default": "#2d3a8c",
-        "hover": "#222d70",
-        "active": "#1a235a",
-        "subtle_bg": "#e3e6f5",
+        "default": "#2563eb",
+        "hover": "#1d4ed8",
+        "active": "#1e40af",
+        "subtle_bg": "#dbeafe",
         "on_accent": "#ffffff",
-        "border": "#2d3a8c"
+        "border": "#2563eb"
       },
       "state": {
         "success": "#0f6a3a",
@@ -89,7 +95,7 @@
       "surface": {
         "raised": "#ffffff",
         "sunken": "#f3f3f1",
-        "selection": "rgba(45,58,140,0.18)",
+        "selection": "rgba(37,99,235,0.18)",
         "hover": "rgba(22,24,29,0.04)",
         "press": "rgba(22,24,29,0.08)"
       },
@@ -105,9 +111,9 @@
         "step_indicator_pending_bg": "#f3f3f1",
         "step_indicator_pending_fg": "#5b6270",
         "step_indicator_pending_border": "#c9c9c4",
-        "step_indicator_active_bg": "#2d3a8c",
+        "step_indicator_active_bg": "#2563eb",
         "step_indicator_active_fg": "#ffffff",
-        "step_indicator_active_border": "#1a235a",
+        "step_indicator_active_border": "#1e40af",
         "step_indicator_complete_bg": "#e1f3e7",
         "step_indicator_complete_fg": "#0f6a3a",
         "step_indicator_complete_border": "#2c7a4f",
@@ -129,7 +135,7 @@
         "completion_success_border": "#2c7a4f",
         "panic_overlay_bg": "rgba(22,24,29,0.92)",
         "panic_overlay_fg": "#fbfbfa",
-        "download_affordance_fg": "#2d3a8c",
+        "download_affordance_fg": "#2563eb",
         "download_affordance_border": "#c9c9c4"
       }
     },
@@ -156,12 +162,12 @@
         "on_info": "#0f1116"
       },
       "accent": {
-        "default": "#a9b3f0",
-        "hover": "#bdc4f5",
-        "active": "#d2d6f8",
-        "subtle_bg": "#1c2244",
-        "on_accent": "#0f1116",
-        "border": "#a9b3f0"
+        "default": "#60a5fa",
+        "hover": "#93c5fd",
+        "active": "#bfdbfe",
+        "subtle_bg": "#172554",
+        "on_accent": "#0f172a",
+        "border": "#60a5fa"
       },
       "state": {
         "success": "#7fd4a4",
@@ -370,20 +376,94 @@
     },
     "roles": {
       "_comment": "Named text roles. Implementers compose from these, not from raw size/weight pairs.",
-      "display": { "size": "4xl", "weight": "semibold", "leading": "tight", "tracking": "display" },
-      "title": { "size": "2xl", "weight": "semibold", "leading": "snug", "tracking": "tight" },
-      "section": { "size": "xl", "weight": "semibold", "leading": "snug", "tracking": "normal" },
-      "subsection": { "size": "lg", "weight": "semibold", "leading": "snug", "tracking": "normal" },
-      "body": { "size": "base", "weight": "regular", "leading": "relaxed", "tracking": "normal" },
-      "body_strong": { "size": "base", "weight": "semibold", "leading": "relaxed", "tracking": "normal" },
-      "small": { "size": "sm", "weight": "regular", "leading": "normal", "tracking": "normal" },
-      "hint": { "size": "sm", "weight": "regular", "leading": "normal", "tracking": "normal" },
-      "caption": { "size": "xs", "weight": "regular", "leading": "normal", "tracking": "normal" },
-      "label": { "size": "sm", "weight": "semibold", "leading": "tight", "tracking": "normal" },
-      "label_caps": { "size": "xs", "weight": "semibold", "leading": "tight", "tracking": "label_caps", "transform": "uppercase" },
-      "code": { "size": "sm", "weight": "regular", "leading": "normal", "tracking": "normal", "family": "mono" },
-      "hash": { "size": "xs", "weight": "regular", "leading": "tight", "tracking": "normal", "family": "mono" },
-      "totp": { "size": "3xl", "weight": "semibold", "leading": "tight", "tracking": "wider", "family": "mono" }
+      "display": {
+        "size": "4xl",
+        "weight": "semibold",
+        "leading": "tight",
+        "tracking": "display"
+      },
+      "title": {
+        "size": "2xl",
+        "weight": "semibold",
+        "leading": "snug",
+        "tracking": "tight"
+      },
+      "section": {
+        "size": "xl",
+        "weight": "semibold",
+        "leading": "snug",
+        "tracking": "normal"
+      },
+      "subsection": {
+        "size": "lg",
+        "weight": "semibold",
+        "leading": "snug",
+        "tracking": "normal"
+      },
+      "body": {
+        "size": "base",
+        "weight": "regular",
+        "leading": "relaxed",
+        "tracking": "normal"
+      },
+      "body_strong": {
+        "size": "base",
+        "weight": "semibold",
+        "leading": "relaxed",
+        "tracking": "normal"
+      },
+      "small": {
+        "size": "sm",
+        "weight": "regular",
+        "leading": "normal",
+        "tracking": "normal"
+      },
+      "hint": {
+        "size": "sm",
+        "weight": "regular",
+        "leading": "normal",
+        "tracking": "normal"
+      },
+      "caption": {
+        "size": "xs",
+        "weight": "regular",
+        "leading": "normal",
+        "tracking": "normal"
+      },
+      "label": {
+        "size": "sm",
+        "weight": "semibold",
+        "leading": "tight",
+        "tracking": "normal"
+      },
+      "label_caps": {
+        "size": "xs",
+        "weight": "semibold",
+        "leading": "tight",
+        "tracking": "label_caps",
+        "transform": "uppercase"
+      },
+      "code": {
+        "size": "sm",
+        "weight": "regular",
+        "leading": "normal",
+        "tracking": "normal",
+        "family": "mono"
+      },
+      "hash": {
+        "size": "xs",
+        "weight": "regular",
+        "leading": "tight",
+        "tracking": "normal",
+        "family": "mono"
+      },
+      "totp": {
+        "size": "3xl",
+        "weight": "semibold",
+        "leading": "tight",
+        "tracking": "wider",
+        "family": "mono"
+      }
     }
   },
 
@@ -524,14 +604,54 @@
     "_no_spring": "Spring/bounce easings are deliberately excluded. They are inappropriate for a labour-safety tool.",
     "_reduced_motion": "When prefers-reduced-motion: reduce, all transitions collapse to duration.instant; opacity-only transitions persist at duration.micro for state-change feedback; no transform-based motion at all (no slide-in, no fade-up). Skeletons stop pulsing and render as flat solid blocks. Toasts appear and dismiss without translate; opacity 0→1.",
     "per_surface": {
-      "button_state": { "property": "background-color, border-color, color", "duration": "fast", "easing": "out", "reduced": "instant" },
-      "input_focus": { "property": "box-shadow, border-color", "duration": "fast", "easing": "out", "reduced": "instant" },
-      "modal_enter": { "property": "opacity", "duration": "normal", "easing": "out", "reduced": "micro" },
-      "modal_scrim": { "property": "opacity", "duration": "normal", "easing": "linear", "reduced": "micro" },
-      "toast_enter": { "property": "opacity, transform", "duration": "fast", "easing": "out", "reduced": "opacity-only at micro" },
-      "skeleton_pulse": { "property": "opacity", "duration": "1200ms", "easing": "in_out", "reduced": "disabled — flat block" },
-      "spinner_rotate": { "property": "transform", "duration": "1000ms", "easing": "linear", "reduced": "replaced by static 'Loading…' text + indeterminate progress bar (no rotation)" },
-      "wizard_step_transition": { "property": "opacity", "duration": "step_transition", "easing": "out", "reduced": "instant — no opacity fade; the next step renders flat, current step is removed; SR announcement still fires per design-system §4.D.T19" }
+      "button_state": {
+        "property": "background-color, border-color, color",
+        "duration": "fast",
+        "easing": "out",
+        "reduced": "instant"
+      },
+      "input_focus": {
+        "property": "box-shadow, border-color",
+        "duration": "fast",
+        "easing": "out",
+        "reduced": "instant"
+      },
+      "modal_enter": {
+        "property": "opacity",
+        "duration": "normal",
+        "easing": "out",
+        "reduced": "micro"
+      },
+      "modal_scrim": {
+        "property": "opacity",
+        "duration": "normal",
+        "easing": "linear",
+        "reduced": "micro"
+      },
+      "toast_enter": {
+        "property": "opacity, transform",
+        "duration": "fast",
+        "easing": "out",
+        "reduced": "opacity-only at micro"
+      },
+      "skeleton_pulse": {
+        "property": "opacity",
+        "duration": "1200ms",
+        "easing": "in_out",
+        "reduced": "disabled — flat block"
+      },
+      "spinner_rotate": {
+        "property": "transform",
+        "duration": "1000ms",
+        "easing": "linear",
+        "reduced": "replaced by static 'Loading…' text + indeterminate progress bar (no rotation)"
+      },
+      "wizard_step_transition": {
+        "property": "opacity",
+        "duration": "step_transition",
+        "easing": "out",
+        "reduced": "instant — no opacity fade; the next step renders flat, current step is removed; SR announcement still fires per design-system §4.D.T19"
+      }
     }
   },
 
@@ -591,11 +711,26 @@
     "_comment": "Detailed component specs (states, triggers, a11y notes, empty/loading/error coverage) live in /home/user/agent-os/.context/design-system.md. The JSON below captures token-level decisions only — never raw values; only refs to tokens above.",
 
     "button": {
-      "variants": ["primary", "secondary", "ghost", "destructive", "icon_only_with_aria_label"],
+      "variants": [
+        "primary",
+        "secondary",
+        "ghost",
+        "destructive",
+        "icon_only_with_aria_label"
+      ],
       "size": ["sm", "md", "lg"],
       "min_height_mobile": "touch_target.min",
       "min_height_inspection": "touch_target.inspection_min",
-      "states": ["default", "hover", "focus_visible", "active", "disabled", "loading", "success", "error"],
+      "states": [
+        "default",
+        "hover",
+        "focus_visible",
+        "active",
+        "disabled",
+        "loading",
+        "success",
+        "error"
+      ],
       "tokens": {
         "primary_bg": "color.accent.default",
         "primary_fg": "color.foreground.on_accent",
@@ -612,8 +747,28 @@
     },
 
     "input": {
-      "variants": ["text", "textarea", "select", "checkbox", "radio", "switch", "passphrase", "totp_code"],
-      "states": ["default", "hover", "focus_visible", "active", "filled", "disabled", "readonly", "loading_validate", "error", "success"],
+      "variants": [
+        "text",
+        "textarea",
+        "select",
+        "checkbox",
+        "radio",
+        "switch",
+        "passphrase",
+        "totp_code"
+      ],
+      "states": [
+        "default",
+        "hover",
+        "focus_visible",
+        "active",
+        "filled",
+        "disabled",
+        "readonly",
+        "loading_validate",
+        "error",
+        "success"
+      ],
       "tokens": {
         "bg": "color.surface.raised",
         "fg": "color.foreground.primary",
@@ -631,7 +786,13 @@
     },
 
     "card": {
-      "variants": ["default", "interactive", "elevated", "sensitive_c3", "sensitive_c4"],
+      "variants": [
+        "default",
+        "interactive",
+        "elevated",
+        "sensitive_c3",
+        "sensitive_c4"
+      ],
       "tokens": {
         "bg": "color.surface.raised",
         "border": "color.border.subtle",
@@ -646,7 +807,15 @@
     },
 
     "modal": {
-      "variants": ["dialog", "confirm", "destructive_confirm", "export_interstitial", "reauth_prompt", "passphrase_prompt", "four_eyes_pending"],
+      "variants": [
+        "dialog",
+        "confirm",
+        "destructive_confirm",
+        "export_interstitial",
+        "reauth_prompt",
+        "passphrase_prompt",
+        "four_eyes_pending"
+      ],
       "tokens": {
         "scrim": "color.background.scrim",
         "bg": "color.surface.raised",
@@ -663,7 +832,13 @@
     },
 
     "toast": {
-      "variants": ["info", "success", "warning", "danger", "sensitive_activity"],
+      "variants": [
+        "info",
+        "success",
+        "warning",
+        "danger",
+        "sensitive_activity"
+      ],
       "tokens": {
         "bg_info": "color.state.info_bg",
         "bg_success": "color.state.success_bg",
@@ -678,8 +853,20 @@
         "z": "z_index.toast"
       },
       "behavior": {
-        "auto_dismiss_ms": { "info": 4000, "success": 4000, "warning": 7000, "danger": "never (manual dismiss only)", "sensitive_activity": "never (manual dismiss; also persists to audit feed)" },
-        "aria_role": { "info": "status", "success": "status", "warning": "status", "danger": "alert", "sensitive_activity": "alert" },
+        "auto_dismiss_ms": {
+          "info": 4000,
+          "success": 4000,
+          "warning": 7000,
+          "danger": "never (manual dismiss only)",
+          "sensitive_activity": "never (manual dismiss; also persists to audit feed)"
+        },
+        "aria_role": {
+          "info": "status",
+          "success": "status",
+          "warning": "status",
+          "danger": "alert",
+          "sensitive_activity": "alert"
+        },
         "max_visible": 3,
         "stacking": "newest at top; older fade in opacity"
       }
@@ -687,7 +874,14 @@
 
     "alert_banner": {
       "_comment": "In-page persistent advisory (e.g., 'You are offline — entries queued'). Not a toast; lives inside the page chrome.",
-      "variants": ["info", "warning", "danger", "offline", "sensitive_c4", "device_advisory"],
+      "variants": [
+        "info",
+        "warning",
+        "danger",
+        "offline",
+        "sensitive_c4",
+        "device_advisory"
+      ],
       "tokens": {
         "bg": "color.state.{variant}_bg",
         "fg": "color.foreground.primary",
@@ -696,7 +890,12 @@
     },
 
     "table": {
-      "variants": ["list_mobile_stacked", "list_desktop_columned", "audit_feed", "sessions"],
+      "variants": [
+        "list_mobile_stacked",
+        "list_desktop_columned",
+        "audit_feed",
+        "sessions"
+      ],
       "tokens": {
         "header_bg": "color.background.secondary",
         "header_fg": "color.foreground.secondary",
@@ -720,7 +919,17 @@
 
     "status_pill": {
       "_comment": "Small inline status indicator (offline, queued, draft, in-progress, resolved, sensitive-c3, sensitive-c4). Always icon + text; never color-only.",
-      "variants": ["info", "success", "warning", "danger", "neutral", "sensitive_c3", "sensitive_c4", "offline", "queued"],
+      "variants": [
+        "info",
+        "success",
+        "warning",
+        "danger",
+        "neutral",
+        "sensitive_c3",
+        "sensitive_c4",
+        "offline",
+        "queued"
+      ],
       "tokens": {
         "bg_neutral": "color.background.tertiary",
         "fg_neutral": "color.foreground.secondary",
@@ -739,7 +948,13 @@
     },
 
     "loading_state": {
-      "variants": ["skeleton", "spinner_inline", "spinner_page", "progress_bar_determinate", "progress_bar_indeterminate"],
+      "variants": [
+        "skeleton",
+        "spinner_inline",
+        "spinner_page",
+        "progress_bar_determinate",
+        "progress_bar_indeterminate"
+      ],
       "skeleton": {
         "bg": "color.background.tertiary",
         "shimmer_bg": "color.background.secondary",
@@ -750,7 +965,14 @@
 
     "error_state": {
       "_comment": "Required for every failed network/crypto/permission path. Names the error in plain language, says what the user can do (Retry / Re-auth / Re-enter passphrase / Wait), and links to support contact for unrecoverable errors.",
-      "variants": ["network", "permission", "crypto", "integrity_fail", "rate_limit", "session_expired"],
+      "variants": [
+        "network",
+        "permission",
+        "crypto",
+        "integrity_fail",
+        "rate_limit",
+        "session_expired"
+      ],
       "tokens": {
         "icon": "color.state.danger",
         "heading_role": "typography.roles.section",
@@ -774,11 +996,25 @@
   "components_extended": {
     "_comment": "JHSC-specific surfaces — not general components. State spec for each lives in design-system.md.",
     "export_interstitial": { "modal_variant": "export_interstitial" },
-    "concern_intake_form": { "form_variant": "with_anonymous_toggle_default_on" },
-    "reprisal_log_entry": { "card_variant": "sensitive_c4", "requires_passphrase_prompt": true },
-    "sensitive_read_feed": { "toast_variant": "sensitive_activity", "feed_variant": "audit_feed" },
-    "onboarding_passphrase_print": { "page_variant": "print_layout", "max_width": "layout.max_width.recovery_sheet_print" },
-    "photo_capture": { "advisory": "gps_removed", "location_input": "free_text_only" },
+    "concern_intake_form": {
+      "form_variant": "with_anonymous_toggle_default_on"
+    },
+    "reprisal_log_entry": {
+      "card_variant": "sensitive_c4",
+      "requires_passphrase_prompt": true
+    },
+    "sensitive_read_feed": {
+      "toast_variant": "sensitive_activity",
+      "feed_variant": "audit_feed"
+    },
+    "onboarding_passphrase_print": {
+      "page_variant": "print_layout",
+      "max_width": "layout.max_width.recovery_sheet_print"
+    },
+    "photo_capture": {
+      "advisory": "gps_removed",
+      "location_input": "free_text_only"
+    },
     "offline_banner": { "alert_variant": "offline" },
     "lock_screen": { "z": "z_index.lock_screen" },
     "panic_wipe": {
@@ -802,7 +1038,15 @@
       "chrome_border": "color.{mode}.onboarding.wizard_chrome_border",
       "max_width": "layout.max_width.wizard_chrome",
       "step_count": 7,
-      "step_labels": ["D.1 Device", "D.2 Hosting", "D.3 Passkey", "D.4 Recovery", "D.5 Sessions", "D.6 Verify", "D.7 Done"],
+      "step_labels": [
+        "D.1 Device",
+        "D.2 Hosting",
+        "D.3 Passkey",
+        "D.4 Recovery",
+        "D.5 Sessions",
+        "D.6 Verify",
+        "D.7 Done"
+      ],
       "_d5_canonical": "Per ADR-0020 Decision 2.a + designer's pass 2026-05-24: D.5 canonical = SESSION-REVOCATION PRIMER. The print sheet is D.4.print (a sub-step rendered via @media print stylesheet). Resolves G-T19-2 labelling drift.",
       "step_indicator": {
         "variants": ["pending", "active", "complete"],

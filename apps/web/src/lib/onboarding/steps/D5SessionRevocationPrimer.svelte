@@ -101,13 +101,13 @@
   }
 </script>
 
-<section>
+<section class="revoke-primer">
   <h2 id="onboarding-current-heading">{t('onboarding.sessions_d5.heading')}</h2>
   <p>{t('onboarding.sessions_d5.body')}</p>
   {#if session_count <= 1}
     <p>{t('onboarding.sessions_d5.helper_only_this_device')}</p>
   {/if}
-  <ul data-testid="session-revocation-primer-list">
+  <ul class="session-list" data-testid="session-revocation-primer-list">
     <li>{t('onboarding.sessions_d5.row.this_device_label')}</li>
     {#if session_count >= 2}
       <li>device-2</li>
@@ -158,5 +158,30 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border-width: 0;
+  }
+
+  /*
+   * Session-revocation primer surface — Surface H constrained subset.
+   * No per-row revoke buttons (Designer §A), so the list is a static
+   * read-only enumeration. Style it as a vertical stack of bordered
+   * rows so the user can see at a glance how many devices the bulk
+   * action will affect.
+   */
+  .session-list {
+    margin-block: 0.75rem;
+    padding-inline-start: 0;
+    list-style: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .session-list > li {
+    padding: 0.625rem 0.875rem;
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-size: 0.9375rem;
+  }
+  .session-list > li + li {
+    border-block-start: 1px solid var(--color-border);
   }
 </style>
