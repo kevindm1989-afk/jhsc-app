@@ -220,82 +220,99 @@
 
 <style>
   /*
-    Token consumption — every value below is a CSS custom-property hook
-    bound through tokens.ts at the section root via `style:` directives.
-    The literal `1px` border width is the only raw-pixel value tolerated;
-    no `border.width` token exists yet (matches T08's exception).
-  */
+   * Worker-hub visual language port — same migration as PR for
+   * ConcernIntakeForm. Every colour reads from a --color-* token
+   * defined in apps/web/src/app.html's boot stylesheet (cool-slate
+   * surfaces + worker-hub blue accent + status tints); spacing uses
+   * the 8pt grid in rem (matching apps/web/src/app.css); the
+   * two-layer AODA focus ring is preserved on every focusable.
+   *
+   * Before this PR the form's CSS used a legacy --color-foreground-* /
+   * --space-* / --typography-* token namespace that this app's boot
+   * stylesheet doesn't expose, so the form rendered with browser
+   * defaults. The form is unmounted today; this port readies it for
+   * the /reprisal route mount (T13.1 wire-up) so the surface lands
+   * in the worker-hub palette out of the box.
+   */
   .reprisal-intake-form {
     display: block;
-    max-width: var(--layout-max-width-form, 560px);
+    max-width: 34rem;
     margin-inline: auto;
-    padding-inline: var(--layout-gutter, 1rem);
-    color: var(--color-foreground-primary);
-    background-color: var(--color-background-primary);
+    padding-inline: 1rem;
+    color: var(--color-fg);
+    background-color: var(--color-bg);
   }
 
   h1 {
-    font-family: var(--typography-family-sans);
-    font-size: var(--typography-size-heading-md);
-    font-weight: var(--typography-weight-semibold);
-    line-height: var(--typography-leading-tight);
+    font-family: var(--font-sans);
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.25;
     margin-block-start: 0;
-    margin-block-end: var(--space-2);
+    margin-block-end: 0.5rem;
   }
 
   .lead {
-    font-family: var(--typography-family-sans);
-    font-size: var(--typography-size-body);
-    color: var(--color-foreground-secondary);
-    margin-block-end: var(--space-4);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    margin-block-end: 1rem;
   }
 
   .consent-bullets {
     display: block;
-    padding-inline-start: var(--space-4);
-    margin-block-end: var(--space-3);
-    color: var(--color-foreground-primary);
+    padding-inline-start: 1rem;
+    margin-block-end: 0.75rem;
+    color: var(--color-fg);
   }
 
   .consent-bullets li {
-    margin-block-end: var(--space-2);
-    line-height: var(--typography-leading-relaxed);
+    margin-block-end: 0.5rem;
+    line-height: 1.55;
   }
 
+  /*
+   * OHSA reminder — C4 sensitivity callout. Until a dedicated
+   * --color-c4-* token group lands in the boot stylesheet, we use the
+   * red tint (semantically the closest available); the design-tokens
+   * deep-burgundy C4 palette is on the design-system roadmap.
+   */
   .ohsa-reminder {
-    background-color: var(--color-sensitivity-c4-bg);
+    background-color: var(--color-tint-red-bg);
+    color: var(--color-tint-red-fg);
     border-inline-start-style: solid;
     border-inline-start-width: 4px;
-    border-inline-start-color: var(--color-sensitivity-c4-border);
-    padding-block: var(--space-3);
-    padding-inline: var(--space-3);
+    border-inline-start-color: var(--color-tint-red-border);
+    padding-block: 0.75rem;
+    padding-inline: 0.875rem;
     border-radius: var(--radius-md);
-    margin-block-end: var(--space-4);
+    margin-block-end: 1rem;
   }
 
   .field {
     display: block;
-    margin-block-end: var(--density-form-field-gap, 1.25rem);
+    margin-block-end: 1.25rem;
   }
 
   .consent-field {
     display: flex;
     align-items: flex-start;
-    gap: var(--space-2);
-    margin-block-end: var(--space-4);
+    gap: 0.5rem;
+    margin-block-end: 1rem;
   }
 
   .consent-field input[type='checkbox'] {
-    width: var(--touch-target-min, 2.75rem);
-    height: var(--touch-target-min, 2.75rem);
-    margin: 0;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-block-start: 0.15rem;
     flex-shrink: 0;
+    accent-color: var(--color-accent);
   }
 
   label {
     display: block;
-    font-weight: var(--typography-weight-medium);
-    margin-block-end: var(--space-1);
+    font-weight: 500;
+    margin-block-end: 0.25rem;
   }
 
   input[type='text'],
@@ -303,20 +320,20 @@
   textarea {
     display: block;
     width: 100%;
-    min-height: var(--touch-target-min, 2.75rem);
-    padding-block: var(--space-2);
-    padding-inline: var(--space-3);
-    font-family: var(--typography-family-sans);
-    font-size: var(--typography-size-body);
-    color: var(--color-foreground-primary);
-    background-color: var(--color-background-raised);
+    min-height: 2.75rem;
+    padding-block: 0.5rem;
+    padding-inline: 0.75rem;
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    color: var(--color-fg);
+    background-color: var(--color-bg-elevated);
     border-style: solid;
     border-width: 1px;
-    border-color: var(--color-border-default);
+    border-color: var(--color-border-strong);
     border-radius: var(--radius-md);
     transition:
-      box-shadow var(--motion-duration-fast) var(--motion-easing-out),
-      border-color var(--motion-duration-fast) var(--motion-easing-out);
+      box-shadow 150ms ease,
+      border-color 150ms ease;
   }
 
   input:focus-visible,
@@ -324,10 +341,10 @@
   button:focus-visible {
     outline: none;
     /*
-      Two-layer focus ring per design-tokens.json shadow.focus_ring.
-      The :focus-visible replacement is mandatory — never strip the
-      outline without an equivalent visible indicator.
-    */
+     * Two-layer AODA focus ring (preserved): a 2px inner foreground
+     * line + a 3px outer halo. The inner layer is the WCAG 1.4.11
+     * conformance path; removing it is forbidden.
+     */
     box-shadow:
       0 0 0 2px var(--color-focus-inner),
       0 0 0 5px var(--color-focus-outer);
@@ -336,50 +353,57 @@
 
   .helper,
   .form-error {
-    font-family: var(--typography-family-sans);
-    font-size: var(--typography-size-helper);
-    color: var(--color-foreground-secondary);
-    margin-block-start: var(--space-1);
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    margin-block-start: 0.25rem;
   }
 
   .form-error {
-    color: var(--color-state-danger);
+    color: var(--color-destructive);
   }
 
   .actions {
     display: flex;
-    gap: var(--space-3);
-    margin-block-start: var(--space-4);
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-block-start: 1rem;
   }
 
   .actions .primary {
-    min-height: var(--touch-target-min, 2.75rem);
-    padding-block: var(--space-2);
-    padding-inline: var(--space-4);
-    font-family: var(--typography-family-sans);
-    font-size: var(--typography-size-body);
-    font-weight: var(--typography-weight-semibold);
-    background-color: var(--color-accent-default);
-    color: var(--color-on-accent);
-    border: none;
+    min-height: 2.75rem;
+    padding-block: 0.5rem;
+    padding-inline: 1rem;
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    background-color: var(--color-accent);
+    color: var(--color-accent-fg);
+    border: 1px solid var(--color-accent);
     border-radius: var(--radius-md);
     cursor: pointer;
   }
 
+  .actions .primary:hover:not([aria-disabled='true']) {
+    background-color: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+  }
+
   .actions .primary[aria-disabled='true'] {
     cursor: not-allowed;
-    opacity: var(--opacity-disabled, 0.6);
+    opacity: 0.55;
   }
 
   /*
-    Reduced-motion — collapse transitions to instant per
-    design-tokens.json motion._reduced_motion.
-  */
+   * Reduced-motion — the boot stylesheet's global @media query
+   * already zeros transition + animation durations app-wide; this
+   * rule is defense-in-depth for the form's specific transitions.
+   */
   @media (prefers-reduced-motion: reduce) {
     input,
     textarea,
     button {
-      transition-duration: var(--motion-duration-instant, 0ms);
+      transition-duration: 0ms;
     }
   }
 </style>
