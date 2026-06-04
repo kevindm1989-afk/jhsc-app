@@ -123,6 +123,39 @@
       "bullet_actor_visible_to_author": "Your authorship is visible to you in your own UI; the pseudonymized projection hides the author from other members' feeds.",
       "bullet_ohsa_reminder": "OHSA section 50 prohibits reprisal against workers who exercise rights under the Act — the consent text on the intake surface restates this in plain language.",
       "back_to_home_cta": "Back to home"
+    },
+    "inspectionsPage": {
+      "title": "Inspections",
+      "heading": "Workplace inspections",
+      "coming_soon_body": "The monthly-inspection capture surface is being wired to the backend. When it ships, the JHSC will use it to record the at-least-monthly workplace inspection required by OHSA section 9(26)(b), with offline-first capture for shop-floor walks beyond cell signal.",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_ohsa_monthly": "Monthly inspections per OHSA s. 9(26)(b) — the JHSC walks the workplace at least once a month and records what was checked.",
+      "bullet_offline_first": "Offline-first capture — you can record an inspection in a basement, on a roof, or anywhere without cell signal; entries sync when you're back online.",
+      "bullet_integrity_tag": "Per-entry HMAC integrity tag — every inspection carries a cryptographic seal so server-side tampering is detectable.",
+      "bullet_photo_sanitize": "Photos are sanitized before encryption — EXIF metadata (GPS, timestamps, device fingerprints) is stripped on this device first.",
+      "back_to_home_cta": "Back to home"
+    },
+    "minutesPage": {
+      "title": "Minutes",
+      "heading": "Meeting minutes",
+      "coming_soon_body": "The meeting-minutes drafting surface is being wired to the backend. When it ships, the JHSC will use it to capture committee deliberations, hold drafts in worker-side encryption until approval, and publish finalized minutes only with a quorum present.",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_worker_side_drafts": "Worker-side deliberation — drafts are encrypted on this device and stay readable only by authorized worker members until the committee approves them.",
+      "bullet_approval_gated": "Approval-gated publication — only the worker co-chair can promote a draft to 'approved', and only with a documented quorum.",
+      "bullet_revision_history": "Append-only revision history — every edit is captured for audit; nothing is silently overwritten.",
+      "bullet_quoted_consent": "Quoted-concern consent — if a minute quotes a filed concern, the original author must consent before the minute can be approved.",
+      "back_to_home_cta": "Back to home"
+    },
+    "recommendationsPage": {
+      "title": "Recommendations",
+      "heading": "Recommendations register",
+      "coming_soon_body": "The recommendations register is being wired to the backend. When it ships, the JHSC will use it to track every recommendation made to the employer, hold the 21-day response timer (OHSA s. 50(7)(c)), and surface auto-escalation flags when a recommendation goes unanswered.",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_21_day_timer": "21-day response timer per OHSA s. 50(7)(c) — the employer must respond in writing to a recommendation within 21 days.",
+      "bullet_auto_escalation": "Auto-escalation on expiry — a recommendation that times out without a written response is flagged for the next meeting and recorded in the audit log.",
+      "bullet_traceability": "Linked to concerns and inspections — every recommendation traces back to the safety issue that prompted it.",
+      "bullet_export_deliberate": "Export is deliberate — a recommendation reaches the employer co-chair only via the four-eyes export flow, never silently or automatically.",
+      "back_to_home_cta": "Back to home"
     }
   },
 
