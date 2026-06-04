@@ -41,6 +41,26 @@
 
   {#if $isSignedIn}
     <a
+      href="/concerns"
+      class="tab"
+      class:active={path === '/concerns'}
+      aria-current={path === '/concerns' ? 'page' : undefined}
+      data-testid="tab-concerns"
+    >
+      <Icon name="clipboard-list" size={20} strokeWidth={path === '/concerns' ? 2.25 : 2} />
+      <span>{t('common.header.concerns_link')}</span>
+    </a>
+    <a
+      href="/reprisal"
+      class="tab"
+      class:active={path === '/reprisal'}
+      aria-current={path === '/reprisal' ? 'page' : undefined}
+      data-testid="tab-reprisal"
+    >
+      <Icon name="shield-alert" size={20} strokeWidth={path === '/reprisal' ? 2.25 : 2} />
+      <span>{t('common.header.reprisal_link')}</span>
+    </a>
+    <a
       href="/settings"
       class="tab"
       class:active={path === '/settings'}

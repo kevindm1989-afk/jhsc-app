@@ -27,6 +27,8 @@
     "header": {
       "sign_in_link": "Sign in",
       "settings_link": "Settings",
+      "concerns_link": "Concerns",
+      "reprisal_link": "Reprisal",
       "primary_nav_aria_label": "Primary"
     },
     "nav": {
