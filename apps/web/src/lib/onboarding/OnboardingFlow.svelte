@@ -12,13 +12,14 @@
    * gate, D.1/D.2 advisory panels) lives in this file; the step
    * components compose the real auth / crypto / session libraries.
    *
-   * Test-only props (`__test_step` / `__test_user_agent` / etc.) are
-   * runtime-stripped when MODE === 'production' per ADR-0020 Decision 8.
-   * The split-form references defeat constant-folding leak (G-T05-10
-   * precedent / F-102 M-102b grep gate). Build-time enforcement: the
-   * `scripts/check-onboarding-test-props-stripped.sh` script greps the
-   * production bundle for the literal prop names AND the test-seam
-   * symbol names.
+   * Test-only configuration (initial step, UA override, D.4/D.5 state-matrix
+   * forcing) is injected through the production-stripped `onboarding-test-config`
+   * seam, NOT via `__test_*` Svelte props (issue #120 / A-T19-RR-4): such props
+   * compile their names into the bundle even when runtime-stripped, tripping the
+   * `scripts/check-onboarding-test-props-stripped.sh` gate. The seam is read
+   * only inside `if (!import.meta.env.PROD)` so Vite DCE + Rollup tree-shake it
+   * out of production entirely. Build-time enforcement: that same gate greps the
+   * prod bundle for `__test_*` / test-seam symbol names.
    */
   import { onMount, tick } from 'svelte';
   import { flushSync } from 'svelte';
@@ -51,6 +52,7 @@
     __setPassphraseRefForTest as __setRef,
     __clearAllPassphraseRefsForTest as __clearRefs
   } from './__test_seams';
+  import { getOnboardingTestConfig } from './onboarding-test-config';
 
   function syncFlush() {
     try {
@@ -60,57 +62,48 @@
     }
   }
 
-  // ----- Public props -----
-  export let __test_step = undefined;
-  export let __test_user_agent = undefined;
-  export let __test_session_count = undefined;
-  export let __test_revoke_delay_ms = undefined;
-  export let __test_revoke_partial_failure = undefined;
-  export let __test_revoke_error = undefined;
-  export let __test_force_encryption_in_progress = undefined;
-  export let __test_force_download_in_progress = undefined;
-  export let __test_force_download_blocked = undefined;
-  export let __test_force_download_success = undefined;
-  export let __test_force_reveal_cap = undefined;
+  // ----- Test-only config (production-stripped seam, issue #120 / A-T19-RR-4) --
+  // Read once at init, ONLY in non-production. Every reference below sits inside
+  // a `!import.meta.env.PROD` ternary, so Vite DCE drops the seam read in prod →
+  // the import is unused → Rollup tree-shakes the side-effect-free seam out and
+  // NO `__test_*` prop names compile into the production bundle. Tests set the
+  // config via setOnboardingTestConfig() before render; the D5 child reads the
+  // same seam directly for its revoke delay/error injection.
+  /** @type {import('./onboarding-test-config').OnboardingTestConfig} */
+  const __tc = !import.meta.env.PROD ? getOnboardingTestConfig() : {};
 
-  // Per ADR-0020 Decision 8 — runtime-strip test props in production.
-  // Source-level split-form references defeat constant-folding leak.
-  const __probe_test_step = '__test_' + 'step';
-  const __probe_test_ua = '__test_' + 'user_agent';
-  const __probe_test_origin = '__test_' + 'origin';
-  if (import.meta.env.MODE === 'production') {
-    __test_step = undefined;
-    __test_user_agent = undefined;
-    __test_session_count = undefined;
-    __test_revoke_delay_ms = undefined;
-    __test_revoke_partial_failure = undefined;
-    __test_revoke_error = undefined;
-    __test_force_encryption_in_progress = undefined;
-    __test_force_download_in_progress = undefined;
-    __test_force_download_blocked = undefined;
-    __test_force_download_success = undefined;
-    __test_force_reveal_cap = undefined;
-  }
-  void __probe_test_step;
-  void __probe_test_ua;
-  void __probe_test_origin;
+  // Locals drive pickInitialStep, the device-fingerprint/baseline override, the
+  // D.4 state-matrix template branches, and the D.5 child's real props. They
+  // must be locals (not seam calls) so the template never references the seam
+  // and prod resolves each to a literal.
+  const tcStep = !import.meta.env.PROD ? __tc.step : undefined;
+  const tcUserAgent = !import.meta.env.PROD ? __tc.userAgent : undefined;
+  const d5SessionCount = !import.meta.env.PROD ? (__tc.sessionCount ?? 1) : 1;
+  const d5RevokePartialFailure = !import.meta.env.PROD ? (__tc.revokePartialFailure ?? []) : [];
+  const d4ForceEncryptionInProgress = !import.meta.env.PROD
+    ? !!__tc.forceEncryptionInProgress
+    : false;
+  const d4ForceDownloadInProgress = !import.meta.env.PROD ? !!__tc.forceDownloadInProgress : false;
+  const d4ForceDownloadBlocked = !import.meta.env.PROD ? !!__tc.forceDownloadBlocked : false;
+  const d4ForceDownloadSuccess = !import.meta.env.PROD ? !!__tc.forceDownloadSuccess : false;
+  const d4ForceRevealCap = !import.meta.env.PROD ? !!__tc.forceRevealCap : false;
 
   function pickInitialStep() {
-    if (__test_step) {
+    if (tcStep) {
       if (
-        __test_step === 'D.1' ||
-        __test_step === 'D.2' ||
-        __test_step === 'D.3' ||
-        __test_step === 'D.4' ||
-        __test_step === 'D.5' ||
-        __test_step === 'D.6' ||
-        __test_step === 'D.7'
+        tcStep === 'D.1' ||
+        tcStep === 'D.2' ||
+        tcStep === 'D.3' ||
+        tcStep === 'D.4' ||
+        tcStep === 'D.5' ||
+        tcStep === 'D.6' ||
+        tcStep === 'D.7'
       ) {
-        return __test_step;
+        return tcStep;
       }
     }
-    if (__test_user_agent) {
-      const baselineCheck = runExtendedBaseline({ user_agent_override: __test_user_agent });
+    if (tcUserAgent) {
+      const baselineCheck = runExtendedBaseline({ user_agent_override: tcUserAgent });
       if (!baselineCheck.ua_baseline_ok) {
         return 'D.3';
       }
@@ -132,7 +125,7 @@
   let d4_passphrase = '';
   let d4_identity_privkey = new Uint8Array(0);
   let d4_passphrase_ready = false;
-  let d4_revealCapped = !!__test_force_reveal_cap;
+  let d4_revealCapped = d4ForceRevealCap;
 
   // Rate limiter (F-112 M-112a) — per-component-instance, NOT module-level.
   // The wizard's per-tab in-memory posture means a fresh tab gets a fresh
@@ -154,10 +147,10 @@
 
   // ----- Device fingerprint + baseline -----
   const fp = composeDeviceFingerprint(
-    __test_user_agent ? { user_agent_override: __test_user_agent } : undefined
+    tcUserAgent ? { user_agent_override: tcUserAgent } : undefined
   );
   const baseline = runExtendedBaseline(
-    __test_user_agent ? { user_agent_override: __test_user_agent } : undefined
+    tcUserAgent ? { user_agent_override: tcUserAgent } : undefined
   );
   const baselineBlocked = !baseline.ok;
 
@@ -536,10 +529,10 @@
         user_id={''}
         passphrase={d4_passphrase}
         identity_privkey={d4_identity_privkey}
-        suppress_download_button={!!__test_force_encryption_in_progress ||
-          !!__test_force_download_in_progress ||
-          !!__test_force_download_success ||
-          !!__test_force_reveal_cap}
+        suppress_download_button={d4ForceEncryptionInProgress ||
+          d4ForceDownloadInProgress ||
+          d4ForceDownloadSuccess ||
+          d4ForceRevealCap}
         suppress_reveal_button={!!d4_revealCapped}
         onDownloadComplete={onD4DownloadComplete}
       />
@@ -565,23 +558,23 @@
       <!-- Download state-matrix mirror — only rendered when a test seam
            forces a non-default state. The real download button (default
            state) lives inside <D4RecoveryPassphrase />. -->
-      {#if __test_force_encryption_in_progress || __test_force_download_in_progress || __test_force_download_success}
+      {#if d4ForceEncryptionInProgress || d4ForceDownloadInProgress || d4ForceDownloadSuccess}
         <button
           type="button"
-          aria-disabled={__test_force_encryption_in_progress ? 'true' : null}
-          aria-busy={__test_force_download_in_progress ? 'true' : null}
+          aria-disabled={d4ForceEncryptionInProgress ? 'true' : null}
+          aria-busy={d4ForceDownloadInProgress ? 'true' : null}
           data-testid="d4-download-state-mirror"
         >
-          {#if __test_force_download_in_progress}
+          {#if d4ForceDownloadInProgress}
             {t('onboarding.passphrase_d4.download_preparing')}
-          {:else if __test_force_download_success}
+          {:else if d4ForceDownloadSuccess}
             {t('onboarding.passphrase_d4.download_done_label')}
           {:else}
             {t('onboarding.passphrase_d4.download_label')}
           {/if}
         </button>
       {/if}
-      {#if __test_force_download_blocked}
+      {#if d4ForceDownloadBlocked}
         <div role="alert" data-testid="download-blocked-toast">
           {t('onboarding.passphrase_d4.download_error_toast')}
         </div>
@@ -594,10 +587,8 @@
       {/if}
     {:else if currentStep === 'D.5'}
       <D5SessionRevocationPrimer
-        session_count={__test_session_count ?? 1}
-        failed_devices={__test_revoke_partial_failure ?? []}
-        {__test_revoke_delay_ms}
-        {__test_revoke_error}
+        session_count={d5SessionCount}
+        failed_devices={d5RevokePartialFailure}
         bind:in_progress={d5_in_progress}
         onAdvance={onD5Advance}
       />

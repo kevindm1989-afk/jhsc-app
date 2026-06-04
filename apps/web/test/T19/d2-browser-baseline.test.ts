@@ -18,9 +18,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/svelte';
+import { screen, cleanup } from '@testing-library/svelte';
 import { freezeClock, restoreClock } from '../_helpers/clock';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
+import { renderOnboarding, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 import { existsSync, readFileSync } from 'node:fs';
 import nodePath from 'node:path';
@@ -32,6 +32,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
 });
 
 // ============================================================================
@@ -40,7 +41,7 @@ afterEach(() => {
 
 describe('T19 / D.2 — hosting tradeoff body composes the catalog key', () => {
   it('the D.2 body composes onboarding.browser_baseline_d2.body_pass when the browser passes baseline', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.2' } });
+    renderOnboarding({ step: 'D.2' });
     const body = screen.getByTestId('onboarding-d2-body');
     const catalogValue = t('onboarding.browser_baseline_d2.body_pass');
     // The first 80 chars of the catalog value (modulo whitespace) should appear in the rendered body.
@@ -50,13 +51,13 @@ describe('T19 / D.2 — hosting tradeoff body composes the catalog key', () => {
   });
 
   it('D.2 body does NOT contain Latin abbreviations (grade-8 reading-level floor — scaffold line 56)', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.2' } });
+    renderOnboarding({ step: 'D.2' });
     const body = screen.getByTestId('onboarding-d2-body');
     expect(body.textContent ?? '').not.toMatch(/\bi\.e\.|\be\.g\.|\betc\.|\bvs\./);
   });
 
   it('D.2 body discloses Supabase + ca-central-1 (the hosting tradeoff is informed-of-purpose)', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.2' } });
+    renderOnboarding({ step: 'D.2' });
     const body = screen.getByTestId('onboarding-d2-body');
     expect(body.textContent ?? '').toMatch(/Supabase/);
     expect(body.textContent ?? '').toMatch(/ca-central/);
@@ -70,13 +71,11 @@ describe('T19 / D.2 — hosting tradeoff body composes the catalog key', () => {
 describe('T19 / F-102 + Surface D.T19.e — browser baseline badge', () => {
   it('pass badge renders role="status" and label key onboarding.browser_baseline_d2.badge.webcrypto.pass', async () => {
     // Modern Chrome UA pass.
-    render(OnboardingFlow, {
-      props: {
-        __test_user_agent:
+    renderOnboarding({
+        userAgent:
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        __test_step: 'D.3'
-      }
-    });
+        step: 'D.3'
+      });
     const badge = screen.getByTestId('browser-baseline-badge');
     expect(badge.getAttribute('role')).toBe('status');
     expect(badge.textContent ?? '').toMatch(/ready|supported/i);
@@ -84,12 +83,10 @@ describe('T19 / F-102 + Surface D.T19.e — browser baseline badge', () => {
 
   it('fail badge renders role="alert" and enumerates which sub-checks failed', async () => {
     // Old Safari 15 — below baseline.
-    render(OnboardingFlow, {
-      props: {
-        __test_user_agent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
-        __test_step: 'D.3'
-      }
-    });
+    renderOnboarding({
+        userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
+        step: 'D.3'
+      });
     const badge = screen.getByTestId('browser-baseline-badge');
     expect(badge.getAttribute('role')).toBe('alert');
     // The badge MUST present a sub-check list (per Designer §4 D.T19.e fail row).
@@ -99,12 +96,10 @@ describe('T19 / F-102 + Surface D.T19.e — browser baseline badge', () => {
   });
 
   it('baseline_blocked terminal sub-state freezes the step indicator at D.3 (no continue button)', async () => {
-    render(OnboardingFlow, {
-      props: {
-        __test_user_agent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
-        __test_step: 'D.3'
-      }
-    });
+    renderOnboarding({
+        userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
+        step: 'D.3'
+      });
     // Continue button must NOT exist on the baseline-blocked sub-state.
     expect(screen.queryByRole('button', { name: /set up passkey/i })).toBeNull();
     // The baseline-fail body matches /browser is too old/i per the existing scaffold.
@@ -113,9 +108,7 @@ describe('T19 / F-102 + Surface D.T19.e — browser baseline badge', () => {
 
   it('F-110 / M-110a — the baseline-fail body does NOT echo the rejected UA fingerprint into a user-visible toast', async () => {
     const canaryUA = 'Mozilla/5.0 (CANARY-FINGERPRINT-CAN-NOT-LEAK) BadBrowser/0.0';
-    render(OnboardingFlow, {
-      props: { __test_user_agent: canaryUA, __test_step: 'D.3' }
-    });
+    renderOnboarding({ userAgent: canaryUA, step: 'D.3' });
     // Locate any role=alert + role=status text; the canary substring MUST NOT appear in either.
     const alerts = Array.from(document.querySelectorAll('[role="alert"], [role="status"]'));
     for (const a of alerts) {
@@ -171,30 +164,26 @@ describe('T19 / F-102 M-102b + G-T19-5 — production-bundle grep gate names all
 // Test-only props are runtime-stripped under MODE=production (ADR-0020 Decision 8)
 // ============================================================================
 
-describe('T19 / Decision 8 — test-only props are runtime no-op under MODE=production', () => {
-  it('OnboardingFlow source contains the MODE === "production" runtime guard for test props', () => {
+describe('T19 / Decision 8 — test-only config is injected via a production-stripped seam', () => {
+  it('OnboardingFlow source declares NO `export let __test_*` props (the names would leak into the prod bundle)', () => {
     const path = nodePath.join(WEB_ROOT, 'src/lib/onboarding/OnboardingFlow.svelte');
     expect(existsSync(path)).toBe(true);
     const src = readFileSync(path, 'utf8');
-    // The guard MUST exist near the top of the prop-application code path.
-    expect(src).toMatch(/import\.meta\.env\.MODE\s*===?\s*['"]production['"]/);
+    // Svelte compiles every `export let __test_x` into a literal prop-name
+    // string in the bundle even when runtime-stripped (issue #120). The
+    // component must therefore declare none of them.
+    expect(/export\s+let\s+__test_/.test(src)).toBe(false);
   });
 
-  it('OnboardingFlow source references the test-only prop names via split form (defeats constant-folding leak)', () => {
-    // G-T05-10 split-form precedent — the prop names live as concatenated literals
-    // OR as variables. Either way, the BARE LITERAL strings '__test_step' /
-    // '__test_user_agent' must NOT appear concatenated in a single quoted token
-    // inside a runtime call site (only inside type / comment / split-form contexts).
+  it('OnboardingFlow reads test config from the seam only under `!import.meta.env.PROD` (tree-shaken in prod)', () => {
     const path = nodePath.join(WEB_ROOT, 'src/lib/onboarding/OnboardingFlow.svelte');
     const src = readFileSync(path, 'utf8');
-    // The split-form pattern OR an explicit destructure binding is acceptable;
-    // a bare 'foo.__test_step' chain in a runtime call site is the regression.
-    // Defense-in-depth: at minimum the split-form '__test_' + 'step' shape appears,
-    // OR the prop is named in a destructure / export-let position.
-    const hasSplitForm =
-      /['"]__test_['"]\s*\+\s*['"]step['"]/.test(src) ||
-      /['"]__test_['"]\s*\+\s*['"]user_agent['"]/.test(src);
-    const hasExportLet = /export\s+let\s+__test_(step|user_agent)/.test(src);
-    expect(hasSplitForm || hasExportLet).toBe(true);
+    // Injection now goes through the production-stripped `onboarding-test-config`
+    // seam, read inside a `!import.meta.env.PROD` guard so Vite DCE + Rollup
+    // tree-shake the seam (and the test-only config reads) out of the prod
+    // bundle entirely — replacing the old `export let __test_*` + runtime-strip
+    // strategy that baked the prop NAMES into the bundle.
+    expect(src).toMatch(/getOnboardingTestConfig/);
+    expect(src).toMatch(/!import\.meta\.env\.PROD/);
   });
 });

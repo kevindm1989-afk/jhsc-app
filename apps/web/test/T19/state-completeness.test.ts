@@ -31,10 +31,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/svelte';
+import { screen, cleanup, fireEvent } from '@testing-library/svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
-import { renderPanicWipe, resetTestConfigs } from '../_helpers/render-with-test-config';
+import { renderOnboarding, renderPanicWipe, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 
 beforeEach(() => {
@@ -52,22 +51,20 @@ afterEach(() => {
 
 describe('T19 / D.T19.a — OnboardingFlow chrome state matrix', () => {
   it('default — wizard root has role="region" with aria-labelledby naming the current step heading', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const root = screen.getByRole('region', { name: /account setup|onboarding|personal device/i });
     expect(root).toBeDefined();
     expect(root.getAttribute('aria-labelledby')).toBeTruthy();
   });
 
   it('default — chrome has an aria-live="polite" region for step-change announcements', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const live = document.querySelector('[aria-live="polite"][data-testid="wizard-step-announce"]');
     expect(live).not.toBeNull();
   });
 
   it('loading (during a step async) — body region has aria-busy="true"', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.5', __test_session_count: 3, __test_revoke_delay_ms: 1500 }
-    });
+    renderOnboarding({ step: 'D.5', sessionCount: 3, revokeDelayMs: 1500 });
     const primary = screen.getByRole('button', { name: 'Revoke other sessions' });
     fireEvent.click(primary);
     const body = screen.getByTestId('wizard-step-body');
@@ -75,12 +72,10 @@ describe('T19 / D.T19.a — OnboardingFlow chrome state matrix', () => {
   });
 
   it('baseline_blocked — terminal sub-state freezes step indicator at D.3; no continue button', async () => {
-    render(OnboardingFlow, {
-      props: {
-        __test_user_agent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
-        __test_step: 'D.3'
-      }
-    });
+    renderOnboarding({
+        userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
+        step: 'D.3'
+      });
     // No /set up passkey/i button on the baseline-blocked surface (already
     // covered by d2-browser-baseline; here we confirm the step indicator
     // does NOT advance past D.3).
@@ -106,7 +101,7 @@ describe('T19 / D.T19.a — OnboardingFlow chrome state matrix', () => {
         onchange: null,
         dispatchEvent: () => false
       } as unknown as MediaQueryList);
-    render(OnboardingFlow);
+    renderOnboarding();
     const body = screen.getByTestId('wizard-step-body');
     // The implementer encodes the reduced-motion posture in a data-attribute.
     expect(body.getAttribute('data-reduced-motion')).toBe('true');
@@ -119,7 +114,7 @@ describe('T19 / D.T19.a — OnboardingFlow chrome state matrix', () => {
 
 describe('T19 / D.T19.b — Step indicator state matrix', () => {
   it('complete pill carries the check icon (color-blind safety per design-system §4.D.T19.b)', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     const list = screen.getByRole('list', { name: /(step|wizard) progress|account setup/i });
     const items = Array.from(list.querySelectorAll('li'));
     // D.1..D.3 are complete; each MUST carry a check icon.
@@ -130,7 +125,7 @@ describe('T19 / D.T19.b — Step indicator state matrix', () => {
   });
 
   it('complete pill aria-label includes the word "completed"', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     const list = screen.getByRole('list', { name: /(step|wizard) progress|account setup/i });
     const items = Array.from(list.querySelectorAll('li'));
     for (let i = 0; i < 3; i++) {
@@ -139,12 +134,10 @@ describe('T19 / D.T19.b — Step indicator state matrix', () => {
   });
 
   it('error state — active pill has the x-circle icon (color-blind safety)', async () => {
-    render(OnboardingFlow, {
-      props: {
-        __test_user_agent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
-        __test_step: 'D.3'
-      }
-    });
+    renderOnboarding({
+        userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
+        step: 'D.3'
+      });
     const list = screen.getByRole('list', { name: /(step|wizard) progress|account setup/i });
     const items = Array.from(list.querySelectorAll('li'));
     // D.3 is the active step in error.
@@ -159,7 +152,7 @@ describe('T19 / D.T19.b — Step indicator state matrix', () => {
 
 describe('T19 / D.T19.c — Device fingerprint card is read-only', () => {
   it('the card is NOT a button / link / role="button"', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     expect(fp.tagName.toLowerCase()).not.toBe('button');
     expect(fp.tagName.toLowerCase()).not.toBe('a');
@@ -167,7 +160,7 @@ describe('T19 / D.T19.c — Device fingerprint card is read-only', () => {
   });
 
   it('the card has no onClick / no tabindex inviting tab focus (text-select is OS-native only)', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     // No tabindex=0; allowed: absent OR -1 (text-select is independent).
     const ti = fp.getAttribute('tabindex');
@@ -181,31 +174,25 @@ describe('T19 / D.T19.c — Device fingerprint card is read-only', () => {
 
 describe('T19 / D.T19.d — recovery-blob download state matrix', () => {
   it('default — button labelled per onboarding.passphrase_d4.download_label', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     const btn = screen.getByRole('button', { name: t('onboarding.passphrase_d4.download_label') });
     expect(btn).toBeDefined();
   });
 
   it('disabled — during the encryption phase, the download button is aria-disabled=true', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.4', __test_force_encryption_in_progress: true }
-    });
+    renderOnboarding({ step: 'D.4', forceEncryptionInProgress: true });
     const btn = screen.getByRole('button', { name: t('onboarding.passphrase_d4.download_label') });
     expect(btn.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('loading — button enters loading state; aria-busy=true; label switches to "Preparing the file…"', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.4', __test_force_download_in_progress: true }
-    });
+    renderOnboarding({ step: 'D.4', forceDownloadInProgress: true });
     const btn = screen.getByRole('button', { name: /preparing the file/i });
     expect(btn.getAttribute('aria-busy')).toBe('true');
   });
 
   it('error — toast appears; button STAYS available for retry; wizard does NOT block advancement (Decision 9)', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.4', __test_force_download_blocked: true }
-    });
+    renderOnboarding({ step: 'D.4', forceDownloadBlocked: true });
     const toast = document.querySelector('[role="alert"][data-testid="download-blocked-toast"]');
     expect(toast).not.toBeNull();
     // Continue button remains available.
@@ -214,9 +201,7 @@ describe('T19 / D.T19.d — recovery-blob download state matrix', () => {
   });
 
   it('success — label transiently switches to "Downloaded — download again"', async () => {
-    render(OnboardingFlow, {
-      props: { __test_step: 'D.4', __test_force_download_success: true }
-    });
+    renderOnboarding({ step: 'D.4', forceDownloadSuccess: true });
     const btn = screen.getByRole('button', { name: /downloaded.*download again/i });
     expect(btn).toBeDefined();
   });
@@ -230,12 +215,10 @@ describe('T19 / D.T19.d — recovery-blob download state matrix', () => {
 
 describe('T19 / D.T19.e — browser-baseline badge per-state', () => {
   it('every fail sub-check is rendered as its own <li> with an aria-label naming the failed capability', async () => {
-    render(OnboardingFlow, {
-      props: {
-        __test_user_agent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
-        __test_step: 'D.3'
-      }
-    });
+    renderOnboarding({
+        userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15',
+        step: 'D.3'
+      });
     const list = screen.getByRole('list', { name: /failed checks/i });
     const items = Array.from(list.querySelectorAll('li'));
     for (const li of items) {
@@ -250,14 +233,14 @@ describe('T19 / D.T19.e — browser-baseline badge per-state', () => {
 
 describe('T19 / D.T19.f — recovery-passphrase reveal state matrix', () => {
   it('default (concealed) — passphrase <code> is NOT in the DOM before the first hold-to-reveal', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4' } });
+    renderOnboarding({ step: 'D.4' });
     // The implementer renders the <code> only during the revealed-transient window.
     const code = document.querySelector('code[data-testid="passphrase-reveal"]');
     expect(code).toBeNull();
   });
 
   it('capped (after 3 reveals) — reveal control is aria-disabled=true; helper text swaps to capped variant', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.4', __test_force_reveal_cap: true } });
+    renderOnboarding({ step: 'D.4', forceRevealCap: true });
     const reveal = screen.getByRole('button', { name: /show.*passphrase|press and hold/i });
     expect(reveal.getAttribute('aria-disabled')).toBe('true');
     // The capped helper text is from the catalog.
@@ -271,7 +254,7 @@ describe('T19 / D.T19.f — recovery-passphrase reveal state matrix', () => {
 
 describe('T19 / D.T19.h — completion summary state matrix', () => {
   it('default — card role="status"; next-step pointer block is role="region"', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.7' } });
+    renderOnboarding({ step: 'D.7' });
     const card = screen.getByTestId('completion-summary');
     expect(card.getAttribute('role')).toBe('status');
     const pointer = screen.getByTestId('completion-next-steps');

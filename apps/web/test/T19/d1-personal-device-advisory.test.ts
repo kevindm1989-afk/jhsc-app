@@ -16,10 +16,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/svelte';
+import { screen, fireEvent, cleanup } from '@testing-library/svelte';
 import { freezeClock, restoreClock } from '../_helpers/clock';
 import { createTestSupabase, type TestSupabase } from '../_helpers/supabase-test';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
+import { renderOnboarding, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { t } from '../../src/lib/i18n';
 
 let supa: TestSupabase;
@@ -30,6 +30,7 @@ beforeEach(async () => {
 afterEach(async () => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
   await supa.tearDown();
 });
 
@@ -39,7 +40,7 @@ afterEach(async () => {
 
 describe('T19 / F-101 M-101a — D.1 advisory: 4 clauses present in body copy', () => {
   it('clause (a) — body states "this device will store identity material" (sign-in key)', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const body = screen.getByTestId('onboarding-d1-body');
     // The catalog key onboarding.advisory_d1.body must communicate
     // that the device stores the key that signs the user in.
@@ -47,20 +48,20 @@ describe('T19 / F-101 M-101a — D.1 advisory: 4 clauses present in body copy', 
   });
 
   it('clause (b) — body forbids enrolling on a shared or employer-issued device', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const body = screen.getByTestId('onboarding-d1-body');
     expect(body.textContent ?? '').toMatch(/employer.*(own|pay|manage)/i);
   });
 
   it('clause (c) — body states the app cannot detect MDM / employer management for the user', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const body = screen.getByTestId('onboarding-d1-body');
     // ADR-0008 honest-framing — must explicitly say the app can NOT detect.
     expect(body.textContent ?? '').toMatch(/(cannot|can'?t|does not) detect|you have to choose/i);
   });
 
   it('clause (d) — body informs the user that a recovery passphrase is required (cross-device access)', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const body = screen.getByTestId('onboarding-d1-body');
     // Either the body or a sibling helper conveys "recovery passphrase required" or
     // "this device is the way you reach your account".
@@ -68,7 +69,7 @@ describe('T19 / F-101 M-101a — D.1 advisory: 4 clauses present in body copy', 
   });
 
   it('confirmation checkbox is present (explicit consent step before the primary action enables)', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     // The advisory_d1.checkbox_label key SHOULD render a checkable input.
     const cb = screen.getByRole('checkbox', { name: /personal device|employer.*not own/i });
     expect((cb as HTMLInputElement).type).toBe('checkbox');
@@ -91,7 +92,7 @@ describe('T19 / F-101 M-101a — D.1 advisory: 4 clauses present in body copy', 
 
 describe('T19 / F-101 M-101b — D.1 → D.2 gate is an explicit click', () => {
   it('a synthesized window "load" event does not advance past D.1', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     window.dispatchEvent(new Event('load'));
     // Heading on D.1 still matches /personal device/i; the D.2 body testid is absent.
     expect(screen.getByRole('heading', { name: /personal device/i })).toBeDefined();
@@ -99,7 +100,7 @@ describe('T19 / F-101 M-101b — D.1 → D.2 gate is an explicit click', () => {
   });
 
   it('pressing Enter on the body region does not advance past D.1 (no keyboard auto-advance)', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const body = screen.getByTestId('onboarding-d1-body');
     fireEvent.keyDown(body, { key: 'Enter' });
     expect(screen.queryByTestId('onboarding-d2-body')).toBeNull();
@@ -108,7 +109,7 @@ describe('T19 / F-101 M-101b — D.1 → D.2 gate is an explicit click', () => {
   it('the URL hash "#D.2" does not skip past D.1 (no URL-driven navigation in production)', async () => {
     // M-111a — wizard state is in-memory only; the URL hash is not a step source.
     window.location.hash = '#D.2';
-    render(OnboardingFlow);
+    renderOnboarding();
     expect(screen.getByRole('heading', { name: /personal device/i })).toBeDefined();
     expect(screen.queryByTestId('onboarding-d2-body')).toBeNull();
     // Cleanup so we don't pollute other tests.
@@ -116,14 +117,14 @@ describe('T19 / F-101 M-101b — D.1 → D.2 gate is an explicit click', () => {
   });
 
   it('clicking primary BEFORE the confirmation checkbox is checked does not advance past D.1', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const primary = screen.getByRole('button', { name: /personal device.*continue/i });
     fireEvent.click(primary);
     expect(screen.queryByTestId('onboarding-d2-body')).toBeNull();
   });
 
   it('checking the confirmation checkbox + clicking primary DOES advance to D.2', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const cb = screen.getByRole('checkbox', { name: /personal device|employer.*not own/i });
     fireEvent.click(cb);
     const primary = screen.getByRole('button', { name: /personal device.*continue/i });
@@ -138,7 +139,7 @@ describe('T19 / F-101 M-101b — D.1 → D.2 gate is an explicit click', () => {
 
 describe('T19 / F-101 M-101c — device fingerprint is UA + platform only', () => {
   it('fingerprint element renders navigator.userAgent + navigator.platform; no IPv4 shape; no IPv6 shape', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     const text = fp.textContent ?? '';
     // M-101c hard rule: never an IP shape.
@@ -147,35 +148,35 @@ describe('T19 / F-101 M-101c — device fingerprint is UA + platform only', () =
   });
 
   it('fingerprint does NOT render Sec-CH-UA-Full-Version-List substring', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     expect(fp.textContent ?? '').not.toMatch(/Sec-CH-UA-Full-Version-List/i);
   });
 
   it('fingerprint does NOT render navigator.connection.effectiveType', async () => {
     // M-101c — no `navigator.connection.*` exposure.
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     // The connection enum values: 'slow-2g'|'2g'|'3g'|'4g'. None should appear.
     expect(fp.textContent ?? '').not.toMatch(/\b(slow-2g|2g|3g|4g)\b/);
   });
 
   it('fingerprint does NOT render geolocation latitude/longitude', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     // Decimal degrees within Ontario (defensive — no geolocation should ever appear).
     expect(fp.textContent ?? '').not.toMatch(/-?\d{1,2}\.\d{4,}/);
   });
 
   it('fingerprint contains the user-agent substring (proves it was actually composed from navigator.userAgent)', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     // navigator.userAgent in jsdom contains "Mozilla" or "jsdom"; either is fine.
     expect(fp.textContent ?? '').toMatch(/Mozilla|jsdom/);
   });
 
   it('fingerprint has aria-label naming it as browser information and explicitly stating "nothing sent to the server"', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     const label = fp.getAttribute('aria-label') ?? '';
     expect(label).toMatch(/browser/i);
@@ -190,7 +191,7 @@ describe('T19 / F-101 M-101c — device fingerprint is UA + platform only', () =
 describe('T19 / F-101 M-101c — fingerprint never appears in any audit-meta payload', () => {
   it('after rendering D.1, no captured audit row carries the fingerprint string in any meta field', async () => {
     const auditSpy = supa.spyAuditWrites();
-    render(OnboardingFlow);
+    renderOnboarding();
     const fp = screen.getByTestId('device-fingerprint');
     const fpText = (fp.textContent ?? '').trim();
     // Sanity — the fingerprint must be non-empty for this assertion to be meaningful.
@@ -210,14 +211,14 @@ describe('T19 / F-101 M-101c — fingerprint never appears in any audit-meta pay
 
 describe('T19 / Surface D.T19.b — step indicator at D.1', () => {
   it('renders 7 step pills (one <li> per D.1..D.7 step)', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const list = screen.getByRole('list', { name: /(step|wizard) progress|account setup/i });
     const items = list.querySelectorAll('li');
     expect(items.length).toBe(7);
   });
 
   it('pill 1 carries aria-current="step" at D.1 entry', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const list = screen.getByRole('list', { name: /(step|wizard) progress|account setup/i });
     const items = Array.from(list.querySelectorAll('li'));
     expect(items[0].getAttribute('aria-current')).toBe('step');
@@ -227,7 +228,7 @@ describe('T19 / Surface D.T19.b — step indicator at D.1', () => {
   });
 
   it('pending pills (2..7) carry aria-disabled="true" at D.1 entry', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const list = screen.getByRole('list', { name: /(step|wizard) progress|account setup/i });
     const items = Array.from(list.querySelectorAll('li'));
     for (let i = 1; i < 7; i++) {

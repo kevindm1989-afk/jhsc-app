@@ -12,11 +12,17 @@
  */
 import { render } from '@testing-library/svelte';
 import PanicWipeModal from '../../src/lib/lock/PanicWipeModal.svelte';
+import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
 import {
   setPanicWipeTestConfig,
   clearPanicWipeTestConfig,
   type PanicWipeTestConfig
 } from '../../src/lib/lock/panic-wipe-test-config';
+import {
+  setOnboardingTestConfig,
+  clearOnboardingTestConfig,
+  type OnboardingTestConfig
+} from '../../src/lib/onboarding/onboarding-test-config';
 
 /** Real (production) PanicWipeModal props — passed as actual Svelte props. */
 interface PanicWipeRealProps {
@@ -39,7 +45,18 @@ export function renderPanicWipe(opts: PanicWipeTestConfig & PanicWipeRealProps =
   return render(PanicWipeModal, { props });
 }
 
+/**
+ * Render OnboardingFlow with test config (initial step, UA override, D.4/D.5
+ * state forcing) routed through the production-stripped seam. OnboardingFlow
+ * has no real props, so everything is config.
+ */
+export function renderOnboarding(cfg: OnboardingTestConfig = {}) {
+  setOnboardingTestConfig(cfg);
+  return render(OnboardingFlow);
+}
+
 /** Clear every test-config seam. Call in `afterEach` of any suite using these helpers. */
 export function resetTestConfigs(): void {
   clearPanicWipeTestConfig();
+  clearOnboardingTestConfig();
 }

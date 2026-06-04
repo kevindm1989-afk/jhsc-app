@@ -14,8 +14,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
+import { screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
+import { renderOnboarding, resetTestConfigs } from '../_helpers/render-with-test-config';
 import PanicWipeModal from '../../src/lib/lock/PanicWipeModal.svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';
 import { createTestSupabase, type TestSupabase } from '../_helpers/supabase-test';
@@ -29,6 +29,7 @@ beforeEach(async () => {
 afterEach(async () => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
   await supa.tearDown();
 });
 
@@ -38,7 +39,7 @@ afterEach(async () => {
 
 describe('T19 / ADR-0008 / D.1 — personal-device advisory', () => {
   it('T19 / D.1 — first-launch renders the personal-device advisory with both Continue and Stop affordances, current device fingerprint shown', async () => {
-    render(OnboardingFlow);
+    renderOnboarding();
     const heading = screen.getByRole('heading', { name: /personal device/i });
     expect(heading).toBeDefined();
     expect(screen.getByRole('button', { name: /personal device.*continue/i })).toBeDefined();
@@ -48,7 +49,7 @@ describe('T19 / ADR-0008 / D.1 — personal-device advisory', () => {
   });
 
   it('T19 / ADR-0001 / D.2 — hosting-tradeoff copy explains in plain English: ciphertext-only, US legal process reach is bounded to ciphertext', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.2' } });
+    renderOnboarding({ step: 'D.2' });
     const body = screen.getByTestId('onboarding-d2-body');
     expect(body.textContent ?? '').toMatch(/encrypted|scrambled/i);
     expect(body.textContent ?? '').toMatch(/Canada|ca-central|Canadian/i);
@@ -58,7 +59,7 @@ describe('T19 / ADR-0008 / D.1 — personal-device advisory', () => {
 
   it('T19 / a11y — every onboarding screen meets WCAG 2.0 AA per the design system §3.1: focus-visible + first-focus discipline', async () => {
     const { default: axeCheck } = await import('../_helpers/axe-check');
-    render(OnboardingFlow);
+    renderOnboarding();
     const r = await axeCheck(document.body, { wcagLevel: 'wcag2aa' });
     expect(r.violations).toEqual([]);
   });
@@ -70,19 +71,17 @@ describe('T19 / ADR-0008 / D.1 — personal-device advisory', () => {
 
 describe('T19 / ADR-0002 / D.3 — minimum browser baseline check', () => {
   it('T19 / D.3 — onboarding shows the "browser too old" block state for Safari 15', async () => {
-    render(OnboardingFlow, {
-      props: { __test_user_agent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15' },
+    renderOnboarding({
+      userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/15.6 Safari/605.1.15'
     });
     expect(screen.getByText(/browser is too old/i)).toBeDefined();
   });
 
   it('T19 / D.3 — onboarding proceeds for Chrome 130 (above 109 baseline)', async () => {
-    render(OnboardingFlow, {
-      props: {
-        __test_user_agent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        __test_step: 'D.3',
-      },
+    renderOnboarding({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      step: 'D.3'
     });
     expect(screen.getByRole('button', { name: /set up passkey/i })).toBeDefined();
   });

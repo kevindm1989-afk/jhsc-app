@@ -21,12 +21,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/svelte';
+import { screen, cleanup } from '@testing-library/svelte';
 import { freezeClock, restoreClock } from '../_helpers/clock';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { WEB_ROOT } from '../_helpers/paths';
-import OnboardingFlow from '../../src/lib/onboarding/OnboardingFlow.svelte';
+import { renderOnboarding, resetTestConfigs } from '../_helpers/render-with-test-config';
 import { createTestSupabase, type TestSupabase } from '../_helpers/supabase-test';
 import { SYNTHETIC_USER_A } from '../_helpers/fixtures';
 import { t } from '../../src/lib/i18n';
@@ -41,6 +41,7 @@ beforeEach(async () => {
 afterEach(async () => {
   cleanup();
   restoreClock();
+  resetTestConfigs();
   await supa.tearDown();
 });
 
@@ -66,17 +67,17 @@ function walkSrc(root: string): string[] {
 
 describe('T19 / D.7 — completion surface renders', () => {
   it('renders the "You\'re set up" heading', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.7' } });
+    renderOnboarding({ step: 'D.7' });
     expect(screen.getByRole('heading', { name: /you'?re set up/i })).toBeDefined();
   });
 
   it('renders the "Open the app" primary button', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.7' } });
+    renderOnboarding({ step: 'D.7' });
     expect(screen.getByRole('button', { name: t('onboarding.completion_d7.primary_button') })).toBeDefined();
   });
 
   it('Designer D.T19.h — check-circle icon is REQUIRED (color-blind safety)', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.7' } });
+    renderOnboarding({ step: 'D.7' });
     const card = screen.getByTestId('completion-summary');
     // Icon presence — either an <svg> with the check-circle name OR an <i> /
     // image with a check-icon descriptor. The implementer encodes the icon
@@ -86,7 +87,7 @@ describe('T19 / D.7 — completion surface renders', () => {
   });
 
   it('next-step pointer block names panic-wipe + sessions (Decision 3.f)', async () => {
-    render(OnboardingFlow, { props: { __test_step: 'D.7' } });
+    renderOnboarding({ step: 'D.7' });
     const pointer = screen.getByTestId('completion-next-steps');
     expect(pointer.textContent ?? '').toMatch(/Settings.*Sessions|sign out other devices/i);
     expect(pointer.textContent ?? '').toMatch(/Settings.*Wipe|wipe this device/i);
