@@ -40,11 +40,13 @@
   import { generateRecoveryPassphrase } from '../crypto/passphrase';
   import { generateIdentityKeypair } from '../crypto/identity-keys';
   import { resetPanicWipeLockout } from '../lock/panic-wipe';
-  // Test-only seam wiring — the seam module module-throws when MODE ===
-  // 'production' (ADR-0020 Decision 8 + the build-time grep gate).
-  // Under non-production the static import is valid; under production
-  // bundlers can tree-shake the unused symbols. The seam re-exports are
-  // also covered by the production-bundle grep gate.
+  // Test-only seam wiring (ADR-0020 Decision 8 + the build-time grep gate).
+  // Every reference to these bindings below is wrapped in
+  // `if (!import.meta.env.PROD)`, so Vite's DCE removes them in a production
+  // build → the bindings become unused → Rollup prunes this import → the
+  // side-effect-free seam module is tree-shaken out of the bundle entirely
+  // (G-T19-5: no seam symbols ship, and no top-level throw crashes
+  // /onboarding in production). Tests (non-production MODE) keep the seams.
   import {
     __setPassphraseRefForTest as __setRef,
     __clearAllPassphraseRefsForTest as __clearRefs
@@ -237,10 +239,15 @@
       d4_passphrase = phr.passphrase;
       d4_identity_privkey = kp.private_key;
       d4_passphrase_ready = true;
-      try {
-        __setRef(d4_passphrase, enrollment_session_id);
-      } catch {
-        /* prod */
+      // Test-only seam seed. Guarded by `import.meta.env.PROD` so Vite's DCE
+      // drops this branch in production, leaving the seam import unused →
+      // tree-shaken out of the bundle (G-T19-5 hardening).
+      if (!import.meta.env.PROD) {
+        try {
+          __setRef(d4_passphrase, enrollment_session_id);
+        } catch {
+          /* non-production only */
+        }
       }
     } catch {
       // Argon2 unavailable in this jsdom build is OK — the passphrase
@@ -265,10 +272,13 @@
     // 32-char Crockford base32 placeholder (matches the production shape).
     const seed = 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aaaa';
     d4_passphrase = seed;
-    try {
-      __setRef(seed, enrollment_session_id);
-    } catch {
-      /* prod */
+    // Test-only seam seed — DCE-stripped in production (see ensureD4Ready).
+    if (!import.meta.env.PROD) {
+      try {
+        __setRef(seed, enrollment_session_id);
+      } catch {
+        /* non-production only */
+      }
     }
   }
 
@@ -326,10 +336,13 @@
       d4_identity_privkey = new Uint8Array(0);
       typedBack = '';
       typeBackAttempts = 0;
-      try {
-        __clearRefs();
-      } catch {
-        /* prod */
+      // Test-only seam clear — DCE-stripped in production (see ensureD4Ready).
+      if (!import.meta.env.PROD) {
+        try {
+          __clearRefs();
+        } catch {
+          /* non-production only */
+        }
       }
       wizardState = { ...wizardState, passphrase_confirmed: true };
       const gate = canAdvance(wizardState);
