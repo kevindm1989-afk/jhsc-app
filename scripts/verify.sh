@@ -155,20 +155,16 @@ run_gate_shell "libsodium-wrappers-sumo lockfile-lint" "bash scripts/check-libso
 # (clipboard writeText, TTS, aria-live / role=alert on the passphrase
 # region, autofocus on passphrase-bearing inputs). F-108 M-108b.
 run_gate_shell "onboarding no-passphrase-leak lint" "bash scripts/check-onboarding-no-passphrase-leak.sh"
-# G-T19-5 — onboarding production-bundle test-props strip. NOT wired
-# yet: the script catches real leaks now that PRs #35 (/onboarding)
-# and #38 (/settings) mount OnboardingFlow + PanicWipeModal in the
-# production bundle. Source-side `export let __test_*` declarations
-# emit the literal names in the compiled output even though the
-# runtime values are stripped under MODE === 'production'. Fixing
-# the contract requires component-side refactoring (dynamic-import
-# for MemoryWipeStore so the test-only branch in PanicWipeModal does
-# not pull `__debugForceClearFailure` into the production graph,
-# plus a non-`export let` pattern for the test-only Svelte props).
-# Tracked as a follow-up gap; wire this gate AFTER that refactor.
-# scripts/check-onboarding-test-props-stripped.sh remains callable
-# manually for CI dry-runs (it requires a built bundle at
-# apps/web/build/).
+# G-T19-5 — onboarding production-bundle test-props strip. Wired as a
+# DEDICATED CI step in the hardening-gates job (.github/workflows/ci.yml),
+# NOT here: scripts/check-onboarding-test-props-stripped.sh fail-closes when
+# apps/web/build/ is absent, and verify.sh runs locally without guaranteeing
+# a build. The CI job builds first, then runs the gate against the real
+# bundle. The component-side refactor that makes it pass — prod-stripped
+# test-config seams (onboarding-test-config.ts / panic-wipe-test-config.ts)
+# + MemoryWipeStore tree-shaking — landed in the issue-#120 PR series. The
+# script stays callable manually for local dry-runs after
+# `pnpm -C apps/web build`.
 
 # Sentry-scrub / canary-PII test fixture is part of the Vitest gate below
 # (apps/web/test/T02/sentry-scrub.test.ts); listed here so the verify.sh

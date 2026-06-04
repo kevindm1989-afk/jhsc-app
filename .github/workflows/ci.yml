@@ -118,6 +118,16 @@ jobs:
         # names that appear in comments (e.g. HMAC_PSEUDONYM_KEY).
         run: pnpm -C apps/web build
 
+      - name: Test-only props stripped from prod bundle (G-T19-5)
+        # Scans the built bundle (apps/web/build/, produced by the step above)
+        # for any leaked `__test_*` / `__debug*` test symbol. Runs as a
+        # dedicated step rather than inside verify.sh because the script
+        # fail-closes without a build dir and verify.sh also runs locally.
+        # The issue-#120 PR series (prod-stripped test-config seams) makes
+        # this pass; wiring it here guards against a strip regression that the
+        # synthetic-fixture bundle-strip-gate.test.ts cannot catch.
+        run: bash scripts/check-onboarding-test-props-stripped.sh
+
       - name: Run verify.sh (informational)
         run: bash scripts/verify.sh
 
