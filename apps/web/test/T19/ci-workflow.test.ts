@@ -77,6 +77,19 @@ describe('T19.1 — ci.yml five canonical jobs are present', () => {
     expect(src).toMatch(/name:\s*Hardening\s*gates/);
   });
 
+  it('hardening-gates builds a production bundle and runs the test-props strip gate against it (G-T19-5 / #125)', () => {
+    // The bundle-scanning gates must inspect a REAL production build. The job
+    // sets NODE_ENV=ci job-wide, which makes Vite's `import.meta.env.PROD`
+    // false and leaves DCE-guarded test-only seam code IN the bundle — a
+    // non-deployable hybrid. The Build step therefore overrides
+    // NODE_ENV=production. Pinning both the override AND the gate invocation
+    // guards against silently reverting #125 (which would let `__test_*` /
+    // `__debug*` symbols ship undetected — the only other coverage is the
+    // synthetic-fixture bundle-strip-gate.test.ts).
+    expect(src).toMatch(/NODE_ENV:\s*production/);
+    expect(src).toMatch(/check-onboarding-test-props-stripped\.sh/);
+  });
+
   it('declares the `committee-db-tests` job ("Committee DB tests (pgTAP)")', () => {
     // Runs pgTAP against the migrations under supabase/test/*.sql.
     // The committee membership + RLS contracts are SQL-side; this
