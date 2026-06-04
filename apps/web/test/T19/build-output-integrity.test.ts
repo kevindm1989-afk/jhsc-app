@@ -95,7 +95,7 @@ describe.skipIf(!buildPresent)('T19.1 — built index.html head injection', () =
   });
 
   it('contains the theme-color meta tag (light variant)', () => {
-    expect(src).toContain('content="#2d3a8c"');
+    expect(src).toContain('content="#2563eb"');
   });
 
   it('contains the noindex robots meta tag (every route is noindex by design)', () => {

@@ -77,11 +77,14 @@ describe('T19.1 — manifest required fields (W3C PWA installability)', () => {
     expect(manifest.display).toBe('standalone');
   });
 
-  it('declares a `theme_color` matching the design-token slate-indigo accent', () => {
-    // Sourced from `design-tokens.json` `color.light.accent.default`
-    // (#2d3a8c). Drives the Android URL bar tint + iOS status bar tint
-    // when the app is launched in standalone mode.
-    expect(manifest.theme_color).toBe('#2d3a8c');
+  it('declares a `theme_color` matching the in-app worker-hub blue accent', () => {
+    // Matches the `--color-accent` token painted by app.html's boot
+    // stylesheet (#2563eb). Drives the Android URL bar tint + iOS status
+    // bar tint when the app is launched in standalone mode; aligning the
+    // OS chrome tint with the in-app accent means the chrome flows
+    // continuously into the interactive accent the user sees in the
+    // shell (sign-in CTA, active step pill, focus states).
+    expect(manifest.theme_color).toBe('#2563eb');
   });
 
   it('declares a `background_color` matching `color.light.background.primary` (used during splash on first launch)', () => {
@@ -136,13 +139,13 @@ describe('T19.1 — app.html wires the manifest + brand chrome', () => {
     );
   });
 
-  it('declares a light-mode theme-color meta tag matching the design-token accent (#2d3a8c)', () => {
+  it('declares a light-mode theme-color meta tag matching the in-app accent (#2563eb)', () => {
     // The light variant carries `media="(prefers-color-scheme: light)"`.
     // Order matters: UAs that don't understand media-keyed theme-color
     // pick the FIRST tag, so the light variant must appear before the
     // dark one (verified by string-index in the next test).
     expect(src).toMatch(
-      /<meta\s+name=["']theme-color["']\s+content=["']#2d3a8c["']\s+media=["']\(prefers-color-scheme:\s*light\)["']\s*\/?>/
+      /<meta\s+name=["']theme-color["']\s+content=["']#2563eb["']\s+media=["']\(prefers-color-scheme:\s*light\)["']\s*\/?>/
     );
   });
 
@@ -156,7 +159,7 @@ describe('T19.1 — app.html wires the manifest + brand chrome', () => {
   });
 
   it('the light-mode theme-color tag appears BEFORE the dark variant (UA back-compat ordering)', () => {
-    const lightAt = src.search(/<meta\s+name=["']theme-color["']\s+content=["']#2d3a8c["']/);
+    const lightAt = src.search(/<meta\s+name=["']theme-color["']\s+content=["']#2563eb["']/);
     const darkAt = src.search(/<meta\s+name=["']theme-color["']\s+content=["']#0c0e12["']/);
     expect(lightAt).toBeGreaterThan(-1);
     expect(darkAt).toBeGreaterThan(-1);
@@ -213,11 +216,11 @@ describe('T19.1 — icon SVG structural sanity', () => {
     expect(src).toMatch(/<svg\b[^>]*\bviewBox=["']0 0 512 512["']/);
   });
 
-  it('uses the brand accent color (#2d3a8c) for the mark background', () => {
+  it('uses the in-app accent color (#2563eb) for the mark background', () => {
     // Defense pin: a refactor that swaps the icon's brand color must
     // also update the manifest theme_color + app.html theme-color meta
     // to stay in sync.
-    expect(src).toContain('#2d3a8c');
+    expect(src).toContain('#2563eb');
   });
 
   it('carries an aria-label so screen readers announce the icon when surfaced as an <img>', () => {

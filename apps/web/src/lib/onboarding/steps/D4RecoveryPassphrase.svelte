@@ -96,7 +96,7 @@
        _status) MUST NOT decorate the passphrase-bearing <code>. TTS
        exfiltration + AODA defense. The visible region renders without
        any live-region attribute. -->
-  <code data-testid="recovery-passphrase">{passphrase}</code>
+  <code class="passphrase-reveal" data-testid="recovery-passphrase">{passphrase}</code>
   {#if !suppress_reveal_button}
     <RecoveryPassphraseScreen {enrollment_session_id} user={{ user_id }} {passphrase} />
   {/if}
@@ -109,3 +109,32 @@
     <div role="alert" data-testid="d4-error">{error}</div>
   {/if}
 </section>
+
+<style>
+  /*
+   * The recovery passphrase is THE recovery mechanism — if a user can't
+   * read it back accurately from the screen, the recovery path is broken
+   * at the human interface. Style as a high-contrast monospace evidence
+   * block: large font, generous letter-spacing, wraps freely so chunks
+   * stay readable on a narrow mobile viewport.
+   *
+   * No live-region / TTS-readable attributes are added — F-108 M-108c
+   * forbids decorating this <code> with aria-live, role="alert", or
+   * role="status" (TTS exfiltration defense).
+   */
+  .passphrase-reveal {
+    display: block;
+    margin-block: 0.75rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-muted);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+</style>
