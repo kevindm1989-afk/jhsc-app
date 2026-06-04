@@ -23,14 +23,24 @@ The system is built so that even if the server, the hosting provider, or a
 worker's device is compromised, worker-side content cannot be read without a
 key held by an authorized worker member.
 
-- **End-to-end encryption** of committee content (WebCrypto + libsodium).
+- **End-to-end encryption** of committee content (WebCrypto +
+  `libsodium-wrappers-sumo`; the WASM build requires CSP
+  `'wasm-unsafe-eval'` — JS `eval` / `new Function` remain forbidden).
 - **Recovery passphrase** derived with **Argon2id**; the recovery blob is
   encrypted client-side and never leaves the device in plaintext.
-- **Passkey (WebAuthn)** device enrollment with a TOTP bootstrap.
+- **Passkey (WebAuthn)** device enrollment with a TOTP bootstrap; sign-in
+  via the mint-session ceremony (ES256 + JWKS, ADR-0023).
+- **Panic-wipe** destructive ceremony with audit-before-side-effect
+  ordering (F-106 / M-106a — server logs the action before any local
+  data is destroyed) and a four-regex confirmation contract (F-115).
+- **F-39 client revocation loop** — Edge Function 401 responses
+  automatically clear the in-memory JWT and broadcast across tabs via
+  `BroadcastChannel`.
 - **Offline-first PWA** — inspections and concerns are queued locally with
   per-entry HMAC integrity tags and synced when online.
-- **No third-party JS at runtime** — the Sentry SDK is bundled, never loaded
-  from a CDN; system-font stack only (no Google Fonts).
+- **No third-party JS at runtime** — Sentry SDK is bundled, never loaded
+  from a CDN; system-font stack only (no Google Fonts); strict CSP with
+  `script-src 'self' 'wasm-unsafe-eval'` (no `unsafe-eval` / `unsafe-inline`).
 - **PII-scrubbing observability** — the structured logger and Sentry
   `beforeSend` drop denylisted fields; canary tests enforce the contract.
 - **Data residency** — Supabase project pinned to `ca-central-1`.
@@ -43,13 +53,13 @@ The threat model and privacy reviews live under `.context/` and the
 
 ## Stack
 
-| Layer        | Choice                                                    |
-| ------------ | --------------------------------------------------------- |
-| Frontend     | SvelteKit 5 (`@sveltejs/adapter-static`), TypeScript      |
-| Crypto       | `libsodium-wrappers`, WebCrypto, Argon2id                 |
-| Backend      | Supabase (Postgres + RLS + Edge Functions), `ca-central-1`|
-| Observability| `@sentry/sveltekit` (bundled), structured PII-safe logger |
-| Tests        | Vitest (+ Testing Library), pgTAP, Deno (edge functions)  |
+| Layer         | Choice                                                     |
+| ------------- | ---------------------------------------------------------- |
+| Frontend      | SvelteKit 5 (`@sveltejs/adapter-static`), TypeScript       |
+| Crypto        | `libsodium-wrappers`, WebCrypto, Argon2id                  |
+| Backend       | Supabase (Postgres + RLS + Edge Functions), `ca-central-1` |
+| Observability | `@sentry/sveltekit` (bundled), structured PII-safe logger  |
+| Tests         | Vitest (+ Testing Library), pgTAP, Deno (edge functions)   |
 
 ---
 
@@ -78,15 +88,15 @@ Feature modules under `apps/web/src/lib/`: `audit-integrity`, `auth`,
 
 ## Prerequisites
 
-| Tool         | Version             | Why                                  |
-| ------------ | ------------------- | ------------------------------------ |
-| Node         | 22.x (see `.nvmrc`) | Project runtime (`>=22 <23`)         |
-| pnpm         | 10.33.0             | Workspace package manager            |
-| Supabase CLI | latest              | Local stack for integration tests    |
-| Deno         | 1.46+               | Edge-function test runner            |
-| `pg_prove`   | latest              | pgTAP SQL-level tests                |
-| gitleaks     | 8.21+               | Secrets scan in `scripts/verify.sh`  |
-| semgrep      | 1.95+               | Static analysis in `scripts/verify.sh`|
+| Tool         | Version             | Why                                    |
+| ------------ | ------------------- | -------------------------------------- |
+| Node         | 22.x (see `.nvmrc`) | Project runtime (`>=22 <23`)           |
+| pnpm         | 10.33.0             | Workspace package manager              |
+| Supabase CLI | latest              | Local stack for integration tests      |
+| Deno         | 1.46+               | Edge-function test runner              |
+| `pg_prove`   | latest              | pgTAP SQL-level tests                  |
+| gitleaks     | 8.21+               | Secrets scan in `scripts/verify.sh`    |
+| semgrep      | 1.95+               | Static analysis in `scripts/verify.sh` |
 
 CI (`.github/workflows/ci.yml`) provisions all of these on a GitHub-hosted
 runner. Locally, install only what a given task needs.
@@ -112,28 +122,43 @@ works without a `.env` (CI / fresh clones).
 
 ## Scripts (repo root)
 
-| Command              | Action                                            |
-| -------------------- | ------------------------------------------------- |
-| `pnpm dev`           | `vite dev` in `apps/web`                           |
-| `pnpm build`         | production build (`adapter-static`)                |
-| `pnpm test`          | Vitest run (currently **662 pass / 2 skipped**)    |
-| `pnpm typecheck`     | `svelte-check` + `tsc --noEmit` (strict)           |
-| `pnpm lint`          | ESLint                                             |
-| `pnpm format:check`  | Prettier check                                     |
-| `pnpm verify`        | full verification gate stack                       |
+| Command             | Action                                                     |
+| ------------------- | ---------------------------------------------------------- |
+| `pnpm dev`          | `vite dev` in `apps/web`                                   |
+| `pnpm build`        | production build (`adapter-static`, `NODE_ENV=production`) |
+| `pnpm test`         | Vitest run (currently **1437 pass / 2 skipped**)           |
+| `pnpm typecheck`    | `svelte-check` + `tsc --noEmit` (strict)                   |
+| `pnpm lint`         | ESLint                                                     |
+| `pnpm format:check` | Prettier check                                             |
+| `pnpm verify`       | full verification gate stack                               |
 
 ---
 
 ## CI gates
 
-Two jobs, both **blocking**:
+Five jobs, all **blocking** on PRs to `main`
+(`.github/workflows/ci.yml`, pinned by
+`apps/web/test/T19/ci-workflow.test.ts`):
 
 1. **build-and-test** — build, strict typecheck, Vitest.
-2. **hardening-gates** — `scripts/verify.sh`: ESLint, Prettier, token-audit,
-   i18n raw-string scan, gitleaks, semgrep (project rules + auto), `pnpm
-   audit`, audit-log enum coverage, bundle hygiene, region pin,
-   recovery-surface lint, Vitest, and Deno edge-function tests. pgTAP runs
-   when a local Postgres is reachable.
+2. **hardening-gates** — `scripts/verify.sh`: ESLint, Prettier,
+   token-audit, i18n raw-string scan, gitleaks, semgrep, `pnpm audit`,
+   audit-log enum coverage, bundle hygiene, region pin,
+   recovery-surface lint, Vitest, Deno edge-function tests, plus the
+   onboarding test-prop strip gate
+   (`scripts/check-onboarding-test-props-stripped.sh`) running against
+   a real `NODE_ENV=production` build.
+3. **committee-db-tests** — pgTAP against the committee membership +
+   RLS migrations under `supabase/test/*.sql`.
+4. **supabase-live-stack** — end-to-end GoTrue → `auth.uid()` → RLS
+   chain against a live local Supabase stack.
+5. **mint-live-e2e** — ES256 + JWKS verification end-to-end against
+   the mint-session ceremony (ADR-0023 asymmetric-JWT contract).
+
+All five run on `ubuntu-22.04` (pinned — drift to `ubuntu-latest`
+would silently change Docker / Postgres versions) with
+`cancel-in-progress: true` concurrency so a rapid push storm doesn't
+queue redundant runs.
 
 ---
 

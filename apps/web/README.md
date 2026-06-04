@@ -6,8 +6,13 @@ Worker-side JHSC (Ontario Joint Health & Safety Committee) PWA. SvelteKit
   `/JHSC-APP-PLAN.md` for the product context and `/.context/decisions.md`
   for the ratified ADRs and amendments.
 
-> **Status — scaffold only.** Phase-2 implementer fills in feature code
-> task-by-task per `.context/test-plan.md` §6. Tests are read-only.
+> **Status — Phase 3 in flight.** Auth (T05 / T05.1), key-management
+> (T07 / T07.1), concerns (T08 / T08.1), and onboarding (T19) have
+> shipped substantial production wire-up; ~1437 Vitest pass / 2 skipped.
+> Remaining sibling-task production wire-ups (T10.1 / T11.1 / T13.1 /
+> T14.1 / T16 retention / T17 backup / T18 integrity) are tracked in
+> `.context/known-gaps.md`. Test files in `apps/web/test/T**` are
+> read-only (test-writer owns).
 
 ---
 
@@ -50,41 +55,39 @@ bash scripts/verify.sh
 
 ## What runs in `pnpm test`
 
-- Unit + integration tests under `apps/web/test/**`.
-- **T02 tests pass** in the scaffold (the Sentry scrubber, structured
-  logger, and CI-gate semgrep-rule-file existence checks are all wired).
-- **T05/T07/T08/T10/T11/T13/T14/T16/T17/T18/T19 tests fail** with
-  `module not found` on the feature code those tasks own. This is the
-  intended failure mode at scaffold time — see `.context/test-plan.md`
-  §6 (the implementer makes them pass task-by-task).
+The full Vitest suite (currently **1437 pass / 2 skipped**) covers
+T02 (observability), T05 / T05.1 (auth + mint-session), T07 / T07.1
+(key management), T08 / T08.1 (concerns), and T19 / T19.1 (onboarding,
+panic-wipe, route mounts). T10 / T11 / T13 / T14 / T16 / T17 / T18
+sibling-task production wire-ups are still in flight; the library-only
+halves are shipped and tested.
 
-Edge-function tests live in `supabase/functions/_shared/test/` and run
-under Deno (`deno test --allow-read ...`); they are not part of the
-Vitest run.
+Edge-function tests live in `supabase/functions/auth-op/test/` and
+related directories; they run under Deno
+(`deno test --allow-read ...`) and are part of the
+`hardening-gates` CI job, not the Vitest run.
 
 pgTAP tests live in `supabase/test/` and run under `pg_prove` against
-a `supabase start` local stack.
+a `supabase start` local stack (the `committee-db-tests` CI job runs
+this against a fresh container).
 
 ---
 
-## What's intentionally NOT wired at scaffold
+## Production routes
 
-- **Sentry SDK init.** `apps/web/src/hooks.client.ts` /
-  `hooks.server.ts` carry the structured-logger handler only. The
-  Sentry SDK is bundled (npm) by the T02 implementer; the
-  `beforeSend` / `beforeBreadcrumb` from
-  `$lib/observability/sentry-scrub` are wired then.
-- **Supabase auth + RLS schema.** Migrations land per-task (T05 / T06 /
-  T07 / T08 / T13 / T14 / T16 / T18) per the architect's task list.
-- **Feature-code modules.** `src/lib/{auth,crypto,concerns,reprisal,
-inspections,export,photo,onboarding,lock}/...` do not exist yet; the
-  tests import them and fail at module-resolution time.
-- **Test helpers under `test/_helpers/`** that depend on a running
-  Supabase / EXIF parser / B2 fake / SW harness. The stubbed
-  `_helpers/supabase-test.ts` throws `NOT_IMPLEMENTED`; the implementer
-  of T05 (the first task) wires it.
+| Route         | Purpose                                        |
+| ------------- | ---------------------------------------------- |
+| `/`           | Landing — branches on `$isSignedIn`            |
+| `/onboarding` | D.1 → D.7 wizard (mounted by `OnboardingFlow`) |
+| `/sign-in`    | Mint-session passkey ceremony                  |
+| `/settings`   | Sign-out + panic-wipe trigger                  |
+| `/privacy`    | Placeholder privacy summary (HG-10 pending)    |
+| `/+error`     | Customized error page (404 + generic)          |
 
-The full per-task acceptance criteria are in `.context/test-plan.md` §4.
+All routes are `prerender = true; ssr = false` per `+page.ts`
+(adapter-static; no PI on the route surface). The shared layout
+(`/+layout.svelte`) provides the sticky top bar, brand mark, primary
+nav, theme toggle, and mobile bottom tab bar.
 
 ---
 
@@ -93,22 +96,36 @@ The full per-task acceptance criteria are in `.context/test-plan.md` §4.
 ```
 apps/web/
 ├── src/
-│   ├── app.html                                  # System-font stack only (no Google Fonts)
+│   ├── app.html                                # System-font stack + boot CSS tokens
+│   ├── app.css                                 # Worker-hub global styles
 │   ├── app.d.ts
-│   ├── hooks.client.ts                           # Logger + Sentry hook (Sentry wired by T02)
-│   ├── hooks.server.ts                           # request_id propagation (logging.md §6)
+│   ├── hooks.client.ts                         # Sentry init + cross-tab JWT sync + panic-wipe hooks
+│   ├── service-worker.ts                       # PWA registration + cache versioning
 │   ├── lib/
-│   │   ├── observability/sentry-scrub.ts         # Port of observability/sentry-scrub.ts spec
-│   │   ├── log/                                  # Structured logger (browser + server)
-│   │   ├── i18n/                                 # en-CA catalog loader
-│   │   ├── tokens.ts                             # Typed accessor over /design-tokens.json
-│   │   ├── feature-flags.ts                      # In-process flag system (no SaaS)
-│   │   ├── sw/                                   # Service-worker skeleton (ADR-0013 allowlist)
-│   │   └── crypto/sodium.ts                      # libsodium-wrappers-sumo wrapper (ADR-0003 / G-T07-12)
-│   └── routes/                                   # Placeholder landing page
-└── test/                                         # READ-ONLY (test-writer owns)
+│   │   ├── auth/                               # Mint-session, WebAuthn, JWT store, F-39 revocation loop
+│   │   ├── concerns/                           # Encrypted concern intake (T08)
+│   │   ├── crypto/                             # libsodium-wrappers-sumo wrappers, recovery-blob
+│   │   ├── i18n/                               # en-CA / fr-CA catalog loader
+│   │   ├── inspections/                        # Offline queue + HMAC integrity (T10 library-only)
+│   │   ├── lock/                               # PanicWipeModal + BrowserWipeStore (F-106)
+│   │   ├── log/                                # Structured logger (browser + server)
+│   │   ├── observability/sentry-scrub.ts       # PI-scrubbing Sentry beforeSend
+│   │   ├── onboarding/                         # OnboardingFlow + step components D3-D7
+│   │   ├── recovery/                           # Hold-to-reveal show-again controller (Amendment F)
+│   │   ├── reprisal/                           # Encrypted reprisal intake (T13 library-only)
+│   │   ├── server-client/                      # Edge Function factories (auth-op / t07-op / etc.)
+│   │   ├── sw/                                 # Service-worker control channel
+│   │   ├── tokens.ts                           # Typed accessor over /design-tokens.json
+│   │   └── ui/                                 # BottomTabBar / Icon / ThemeToggle
+│   ├── routes/                                 # Production routes (see table above)
+│   └── lib/feature-flags.ts                    # In-process flag system (no SaaS)
+├── static/
+│   ├── manifest.webmanifest                    # PWA manifest (theme_color = #2563eb)
+│   ├── icon.svg                                # Brand mark (worker-hub blue)
+│   └── .well-known/security.txt                # RFC 9116
+└── test/                                       # READ-ONLY (test-writer owns)
     ├── _helpers/
-    └── T02 … T19/                                # ~325 failing tests at scaffold hand-off
+    └── T02 … T19/                              # 1437 passing / 2 skipped
 ```
 
 ---
