@@ -68,13 +68,22 @@ describe('T19.1 — CSP directives: required shapes (presence + value)', () => {
     );
   });
 
-  it('script-src is set to [\'self\'] (no third-party JS at runtime per ADR-0010)', () => {
+  it('script-src is [\'self\', \'wasm-unsafe-eval\'] (self + WASM-only eval per ADR-0010)', () => {
     // ADR-0010 / JHSC-APP-PLAN.md §7 forbids third-party JS. SvelteKit
     // augments this at build time with a sha256-hash entry for its
-    // single inline hydration script, but the SOURCE config must
-    // declare `'self'` only — the hash gets added by the auto-CSP
-    // pass at prerender, not by the source author.
-    expect(src).toMatch(/['"]script-src['"]\s*:\s*\[\s*['"]self['"]\s*\]/);
+    // single inline hydration script, but the SOURCE config declares
+    // only `'self'` plus `'wasm-unsafe-eval'`.
+    //
+    // `'wasm-unsafe-eval'` is required because the locked-in
+    // libsodium-wrappers-sumo build (Argon2id crypto_pwhash, G-T07-12) is
+    // WebAssembly; without it, WebAssembly.instantiate is refused under
+    // the strict CSP and every crypto-using route breaks in production.
+    // It permits WASM compilation ONLY — it does NOT enable JS
+    // eval()/new Function() (that is the separate, still-forbidden
+    // 'unsafe-eval' token; the defense pin below holds).
+    expect(src).toMatch(
+      /['"]script-src['"]\s*:\s*\[\s*['"]self['"]\s*,\s*['"]wasm-unsafe-eval['"]\s*\]/
+    );
   });
 
   it('frame-ancestors is set to [\'none\'] (clickjacking prevention)', () => {
