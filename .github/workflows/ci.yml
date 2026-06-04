@@ -113,19 +113,27 @@ jobs:
           sudo apt-get install -y libtap-parser-sourcehandler-pgtap-perl postgresql-client
 
       - name: Build (apps/web)
-        # The "no third-party JS in bundle" gate scans the built bundle. Without
-        # a build it falls back to scanning source and false-fails on token
-        # names that appear in comments (e.g. HMAC_PSEUDONYM_KEY).
+        # Build a TRUE production bundle. NODE_ENV=production overrides the
+        # job-level NODE_ENV=ci for this step: under NODE_ENV=ci, Vite sets
+        # `import.meta.env.PROD = false` (it keys PROD off NODE_ENV, not the
+        # build mode), which leaves DCE-guarded test-only code (the seam
+        # imports) in the bundle — a non-deployable hybrid that would
+        # false-fail the strip gate below. NODE_ENV=production matches the
+        # actually-deployed artifact, so both bundle-scanning gates (no
+        # third-party JS + test-props strip) inspect what really ships.
+        env:
+          NODE_ENV: production
         run: pnpm -C apps/web build
 
       - name: Test-only props stripped from prod bundle (G-T19-5)
-        # Scans the built bundle (apps/web/build/, produced by the step above)
-        # for any leaked `__test_*` / `__debug*` test symbol. Runs as a
-        # dedicated step rather than inside verify.sh because the script
-        # fail-closes without a build dir and verify.sh also runs locally.
-        # The issue-#120 PR series (prod-stripped test-config seams) makes
-        # this pass; wiring it here guards against a strip regression that the
-        # synthetic-fixture bundle-strip-gate.test.ts cannot catch.
+        # Scans the production bundle (apps/web/build/, built by the step
+        # above with NODE_ENV=production) for any leaked `__test_*` / `__debug*`
+        # test symbol. Runs as a dedicated step rather than inside verify.sh
+        # because the script fail-closes without a build dir and verify.sh also
+        # runs locally. The issue-#120 PR series (prod-stripped test-config
+        # seams) makes this pass; wiring it here guards against a strip
+        # regression that the synthetic-fixture bundle-strip-gate.test.ts
+        # cannot catch.
         run: bash scripts/check-onboarding-test-props-stripped.sh
 
       - name: Run verify.sh (informational)
