@@ -87,6 +87,18 @@
       "body_other": "An unexpected error occurred. Try the action again, or return to the home page.",
       "status_label": "Status:",
       "back_to_home_cta": "Back to home"
+    },
+    "privacyPage": {
+      "title": "Privacy",
+      "heading": "Privacy",
+      "placeholder_body": "The full privacy policy is being finalized. In the meantime, if you have questions about how this app handles your information, contact your worker co-chair.",
+      "summary_heading": "What the system can and cannot see",
+      "summary_intro": "The JHSC PWA is built so the app operator cannot read your concerns, reprisal entries, or sensitive narratives — those are encrypted on your device before they leave it. The summary below is the short version of the published policy.",
+      "bullet_no_third_party": "No third-party JavaScript or analytics. No cookies are used to track you across sites.",
+      "bullet_local_first": "Your concerns, recovery passphrase, and identity keys live on your device. The server stores only the encrypted blobs.",
+      "bullet_audit": "An append-only audit log records every action you take (e.g. 'opened a concern', 'wiped this device') using a pseudonym derived from your worker ID — not your name.",
+      "bullet_no_pi_logs": "Crash and error logs are scrubbed of personally identifying information before they are sent to the operator.",
+      "back_to_home_cta": "Back to home"
     }
   },
 
