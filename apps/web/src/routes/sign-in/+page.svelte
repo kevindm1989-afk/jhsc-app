@@ -166,25 +166,48 @@
         instead of `alert` (assertive) because the transition is
         expected by the user and doesn't need to interrupt.
       -->
-      <p role="status" data-testid="sign-in-success">
+      <p role="status" data-testid="sign-in-success" class="signin-success">
         {t('signIn.success', { sessionId })}
       </p>
     {:else}
-      <p data-testid="sign-in-already-signed-in">{t('signIn.already_signed_in')}</p>
+      <p data-testid="sign-in-already-signed-in" class="signin-already">
+        {t('signIn.already_signed_in')}
+      </p>
     {/if}
-    <p>
-      <a href="/settings" data-testid="sign-in-go-to-settings">{t('signIn.go_to_settings_cta')}</a>
+    <p class="signin-cta-row">
+      <a href="/settings" class="cta" data-testid="sign-in-go-to-settings">
+        {t('signIn.go_to_settings_cta')}
+      </a>
     </p>
   {:else}
     <p class="muted">{t('signIn.intro')}</p>
 
     <button
       type="button"
+      class="signin-primary"
       on:click={signIn}
       disabled={state === 'signing-in'}
       data-testid="sign-in-button"
     >
       {#if state === 'signing-in'}
+        <svg class="signin-spinner" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="3"
+            opacity="0.25"
+          />
+          <path
+            d="M22 12a10 10 0 0 1-10 10"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="3"
+            stroke-linecap="round"
+          />
+        </svg>
         {t('signIn.button.signing_in')}
       {:else}
         {t('signIn.button.idle')}
@@ -200,13 +223,87 @@
         reserved for the `failed` state below where the system rejects
         the user's action.
       -->
-      <p role="status" data-testid="sign-in-cancelled">{t('signIn.cancelled')}</p>
+      <p role="status" data-testid="sign-in-cancelled" class="signin-cancelled">
+        {t('signIn.cancelled')}
+      </p>
     {/if}
 
     {#if state === 'failed'}
-      <p role="alert" data-testid="sign-in-failed">
+      <p role="alert" data-testid="sign-in-failed" class="signin-failed">
         {friendlyError}
       </p>
     {/if}
   {/if}
 </section>
+
+<style>
+  /*
+   * Sign-in states — visual feedback for the WebAuthn ceremony. The
+   * primary button is the only affordance; the cancelled / failed /
+   * already-signed-in states render as tinted inline panels so the user
+   * can see at a glance whether the system is acting, paused, or
+   * stranded.
+   *
+   * The spinner only renders while state === 'signing-in' and is
+   * decorative (aria-hidden="true"); the button's disabled attribute +
+   * the section's aria-busy="true" carry the SR semantics. Animation
+   * respects prefers-reduced-motion: reduce (the boot stylesheet zeros
+   * animation-duration globally).
+   */
+  .signin-primary {
+    background: var(--color-accent);
+    color: var(--color-accent-fg);
+    border-color: var(--color-accent);
+  }
+  .signin-primary:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+    opacity: 1;
+  }
+  .signin-spinner {
+    flex: none;
+    animation: signin-spin 0.9s linear infinite;
+  }
+  @keyframes signin-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Success / already-signed-in / cancelled / failed — tinted panels. */
+  .signin-success {
+    margin-block: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-tint-green-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-green-bg);
+    color: var(--color-tint-green-fg);
+  }
+  .signin-already {
+    margin-block: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-tint-blue-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-blue-bg);
+    color: var(--color-tint-blue-fg);
+  }
+  .signin-cancelled {
+    margin-block-start: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-neutral-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-neutral-bg);
+    color: var(--color-tint-neutral-fg);
+  }
+  .signin-failed {
+    margin-block-start: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-red-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-red-bg);
+    color: var(--color-tint-red-fg);
+  }
+  .signin-cta-row {
+    margin-block-start: 0.5rem;
+  }
+</style>
