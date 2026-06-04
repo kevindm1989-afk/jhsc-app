@@ -139,7 +139,7 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section aria-busy={state === 'signing-in' ? 'true' : 'false'}>
+<section aria-busy={state === 'signing-in' ? 'true' : 'false'} class="card">
   <!--
     `aria-busy` mirrors the form-level pattern from ConcernIntakeForm
     + ReprisalIntakeForm: while the WebAuthn ceremony is in flight
@@ -176,7 +176,7 @@
       <a href="/settings" data-testid="sign-in-go-to-settings">{t('signIn.go_to_settings_cta')}</a>
     </p>
   {:else}
-    <p>{t('signIn.intro')}</p>
+    <p class="muted">{t('signIn.intro')}</p>
 
     <button
       type="button"

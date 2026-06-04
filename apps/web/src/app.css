@@ -1,0 +1,319 @@
+/*
+ * Global application stylesheet — the worker-hub visual language ported to
+ * jhsc-app's token discipline.
+ *
+ * RULES (enforced by scripts/verify-tokens.sh):
+ *   - Every colour is a `var(--color-*)` / `var(--shadow-*)` reference. No
+ *     raw hex, rgb(), or hsl() literals live here — the palette is defined
+ *     as CSS custom properties in app.html and switched by `data-theme` /
+ *     prefers-color-scheme.
+ *   - Spacing / radius use the rem 8pt grid (worker-hub parity).
+ *
+ * This file styles the route content rendered through the layout <slot>
+ * (which Svelte's scoped styles cannot reach), plus the shared chrome
+ * classes the layout + ui components opt into.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Typography ──────────────────────────────────────────────────────── */
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--color-fg);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+  margin-block: 0 0.5rem;
+}
+h1 {
+  font-size: 1.5rem;
+}
+h2 {
+  font-size: 1.125rem;
+  margin-block-start: 1.5rem;
+}
+h3 {
+  font-size: 1rem;
+}
+p {
+  margin-block: 0 0.75rem;
+  color: var(--color-fg);
+}
+small,
+.muted {
+  color: var(--color-fg-muted);
+}
+strong {
+  font-weight: 600;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* ── Focus ring — jhsc-app's two-layer AODA ring, preserved ──────────── */
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus-inner);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--color-focus-outer);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Layout container ────────────────────────────────────────────────── */
+
+.container {
+  width: 100%;
+  max-width: 48rem;
+  margin-inline: auto;
+}
+
+/* ── Cards (worker-hub elevated surface) ─────────────────────────────── */
+
+.card {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+  margin-block-end: 1rem;
+}
+.card > :first-child {
+  margin-block-start: 0;
+}
+.card > :last-child {
+  margin-block-end: 0;
+}
+
+/* Section eyebrow — uppercase label above a group (worker-hub density). */
+.section-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-fg-muted);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+
+button,
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+button:hover,
+.btn:hover {
+  opacity: 0.9;
+}
+button:disabled,
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (pointer: fine) {
+  button,
+  .btn {
+    min-height: 2.25rem;
+  }
+}
+
+/* Secondary / outline button — opt-in via class. */
+.btn-secondary {
+  background: var(--color-secondary);
+  color: var(--color-secondary-fg);
+}
+.btn-outline {
+  background: var(--color-bg-elevated);
+  color: var(--color-fg);
+  border-color: var(--color-border);
+}
+.btn-outline:hover {
+  background: var(--color-muted);
+  opacity: 1;
+}
+.btn-destructive {
+  background: var(--color-destructive);
+  color: var(--color-destructive-fg);
+}
+
+/* A link styled as a primary call-to-action (e.g. landing CTAs). */
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.cta:hover {
+  background: var(--color-accent-hover);
+  text-decoration: none;
+}
+
+/* ── Status badges (semantic, colour always paired with a label) ─────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.badge-open {
+  background: var(--color-tint-red-bg);
+  color: var(--color-tint-red-fg);
+  border-color: var(--color-tint-red-border);
+}
+.badge-pending {
+  background: var(--color-tint-amber-bg);
+  color: var(--color-tint-amber-fg);
+  border-color: var(--color-tint-amber-border);
+}
+.badge-resolved {
+  background: var(--color-tint-green-bg);
+  color: var(--color-tint-green-fg);
+  border-color: var(--color-tint-green-border);
+}
+.badge-info {
+  background: var(--color-tint-blue-bg);
+  color: var(--color-tint-blue-fg);
+  border-color: var(--color-tint-blue-border);
+}
+.badge-neutral {
+  background: var(--color-tint-neutral-bg);
+  color: var(--color-tint-neutral-fg);
+  border-color: var(--color-tint-neutral-border);
+}
+
+/* ── App shell: sticky top bar (the layout's <header>) ───────────────── */
+
+header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 20;
+  border-block-end: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 3.5rem;
+  max-width: 48rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+}
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+  min-width: 0;
+}
+/* The home link is the first child of the top nav — the brand wordmark.
+   Targeted by position so the layout markup stays exactly as the route
+   tests pin it (no class on the home <a>). */
+.topnav > a:first-child {
+  color: var(--color-fg);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.topnav > a:first-child:hover {
+  text-decoration: none;
+}
+.navlink {
+  margin-inline-start: auto;
+  color: var(--color-fg-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.navlink:hover {
+  color: var(--color-fg);
+  text-decoration: none;
+}
+.navlink[aria-current='page'] {
+  color: var(--color-fg);
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: none;
+}
+
+/* ── Main content region ─────────────────────────────────────────────── */
+
+main {
+  padding: 1.25rem 1rem;
+  padding-block-end: 5rem; /* clear the fixed mobile tab bar */
+}
+@media (min-width: 768px) {
+  main {
+    padding-block-end: 1.5rem;
+  }
+}
