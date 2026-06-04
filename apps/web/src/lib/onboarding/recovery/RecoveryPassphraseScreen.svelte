@@ -130,12 +130,13 @@
     : t('onboarding.recovery.show_again.helper');
 </script>
 
-<section aria-labelledby="recovery-show-again-heading">
+<section class="recovery-screen" aria-labelledby="recovery-show-again-heading">
   <h2 id="recovery-show-again-heading">{t('onboarding.recovery.heading')}</h2>
   <p>{t('onboarding.recovery.body')}</p>
 
   <button
     type="button"
+    class="hold-to-reveal"
     data-testid="show-again-control"
     aria-disabled={capReached ? 'true' : 'false'}
     aria-pressed={revealed ? 'true' : 'false'}
@@ -153,7 +154,7 @@
     {t('a11y.onboarding.reveal_button_announcement')}
   </span>
 
-  <p data-testid="show-again-helper">{helperText}</p>
+  <p class="recovery-helper" data-testid="show-again-helper">{helperText}</p>
   <!-- SR-only state announcers for the reveal lifecycle. The aria-pressed
        attribute already carries the binary state; these spans add the
        longer-form catalog copy so screen readers can read the full
@@ -181,13 +182,13 @@
          passphrase-bearing element or any ancestor. The reveal button
          carries the aria-pressed transition; no live-region echoes the
          passphrase value (TTS exfil / AODA failure). -->
-    <div data-testid="recovery-passphrase-onscreen">
-      <code data-testid="passphrase-reveal">{passphrase}</code>
+    <div class="reveal-block" data-testid="recovery-passphrase-onscreen">
+      <code class="passphrase-reveal-code" data-testid="passphrase-reveal">{passphrase}</code>
     </div>
   {/if}
 
   {#if dangerToast}
-    <div role="alert" data-testid="show-again-danger-toast">
+    <div class="reveal-alert" role="alert" data-testid="show-again-danger-toast">
       {t('common.errors.generic')}
     </div>
   {/if}
@@ -205,18 +206,90 @@
     white-space: nowrap;
     border-width: 0;
   }
-  section {
-    display: block;
+
+  /*
+   * Recovery "show again" surface — Amendment F operational rule 4
+   * forbids any copy / audio-readout / screenshot affordance here, so the
+   * only interactive control is the hold-to-reveal button. Style it as
+   * an outline button (worker-hub language) so it reads as a secondary
+   * action vs. the primary D4 download button.
+   */
+  .recovery-screen {
+    margin-block-start: 1rem;
   }
-  button {
+  .hold-to-reveal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding-inline: 1rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
     cursor: pointer;
   }
-  button[aria-disabled='true'] {
-    cursor: not-allowed;
-    opacity: 0.6;
+  .hold-to-reveal:hover {
+    background: var(--color-muted);
   }
+  .hold-to-reveal[aria-pressed='true'] {
+    background: var(--color-tint-blue-bg);
+    border-color: var(--color-tint-blue-border);
+    color: var(--color-tint-blue-fg);
+  }
+  .hold-to-reveal[aria-disabled='true'] {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  .recovery-helper {
+    margin-block: 0.5rem 0;
+    color: var(--color-fg-muted);
+    font-size: 0.875rem;
+  }
+
+  /*
+   * The revealed passphrase mirrors D4's `.passphrase-reveal` block —
+   * high-contrast monospace evidence so chunk boundaries read clearly.
+   * The reveal is short-lived (hold-to-show), so the prominence matches
+   * the D4 default reveal: same font, same letter-spacing, same wrap
+   * behaviour. F-108 M-108c contract: no live-region / role on this
+   * element or any ancestor — only style.
+   */
+  .reveal-block {
+    margin-block-start: 0.75rem;
+  }
+  .passphrase-reveal-code {
+    display: block;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-muted);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  /* The danger toast surfaces only when the audit emit failed (M-54b):
+     the passphrase stays hidden, the toast announces the failure as a
+     red-tinted inline panel. */
+  .reveal-alert {
+    margin-block: 0.75rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-red-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-red-bg);
+    color: var(--color-tint-red-fg);
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    button {
+    .hold-to-reveal {
       transition: none;
     }
   }
