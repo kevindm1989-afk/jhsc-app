@@ -156,6 +156,28 @@
       "bullet_traceability": "Linked to concerns and inspections — every recommendation traces back to the safety issue that prompted it.",
       "bullet_export_deliberate": "Export is deliberate — a recommendation reaches the employer co-chair only via the four-eyes export flow, never silently or automatically.",
       "back_to_home_cta": "Back to home"
+    },
+    "workRefusalPage": {
+      "title": "Work refusal (s.43)",
+      "heading": "Work refusal (OHSA s. 43)",
+      "coming_soon_body": "The work-refusal capture surface is being wired to the backend. When it ships, a worker can record a refusal to perform work they believe is unsafe under OHSA section 43, with stage-gated documentation through the s. 43(4) investigation and (if needed) Ministry of Labour escalation under s. 43(8).",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_right_to_refuse": "Right to refuse unsafe work — OHSA s. 43 protects a worker who refuses work they have reason to believe is dangerous; the surface captures the refusal in worker-side encryption.",
+      "bullet_stage_gated": "Stage-gated documentation — the worker, then the joint investigation under s. 43(4), then (if unresolved) Ministry escalation under s. 43(8). Each stage carries its own entry.",
+      "bullet_certified_member_visibility": "Worker certified member visibility — entries are readable by the worker certified member; never the employer co-chair without a deliberate export.",
+      "bullet_audit_full_chain": "Audit-log full chain — every action (refusal filed, employer notified, investigation outcome, escalation) is logged with pseudonymized actor IDs.",
+      "back_to_home_cta": "Back to home"
+    },
+    "s51Page": {
+      "title": "Critical injury (s.51)",
+      "heading": "Critical injury (OHSA s. 51)",
+      "coming_soon_body": "The s.51 critical-injury evidence surface is being wired to the backend. When it ships, the worker member required to be present at the s. 51 investigation will use it to capture evidence — photos, witness statements, scene notes — in sensitivity-C4 encryption, with the 48-hour scene-preservation timer surfaced as a deadline.",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_worker_member_present": "Worker member present — OHSA s. 51 requires a worker member of the JHSC to be present at the investigation of any critical injury or fatality; this surface captures what that member sees.",
+      "bullet_scene_preservation": "Scene preservation — the s. 51(2) 48-hour preservation requirement is surfaced as a countdown so the evidence window is visible to the team.",
+      "bullet_c4_encryption": "Sensitivity C4 — evidence is encrypted at the highest tier with per-entry passphrases; ciphertext leaves the device, plaintext never does.",
+      "bullet_photo_sanitize": "Photos are sanitized — EXIF metadata (GPS, timestamps, device fingerprints) is stripped on this device before encryption.",
+      "back_to_home_cta": "Back to home"
     }
   },
 
