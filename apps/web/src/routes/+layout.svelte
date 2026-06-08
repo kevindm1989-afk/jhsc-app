@@ -53,6 +53,7 @@
   $: ariaCurrentSignIn = currentPath === '/sign-in' ? ('page' as const) : undefined;
   $: ariaCurrentConcerns = currentPath === '/concerns' ? ('page' as const) : undefined;
   $: ariaCurrentReprisal = currentPath === '/reprisal' ? ('page' as const) : undefined;
+  $: ariaCurrentMore = currentPath === '/more' ? ('page' as const) : undefined;
 </script>
 
 <a class="skip-link" href="#main-content" data-testid="skip-to-content">
@@ -89,6 +90,12 @@
           aria-current={ariaCurrentReprisal}
           data-testid="header-reprisal-link"
           class="navlink">{t('common.header.reprisal_link')}</a
+        >
+        <a
+          href="/more"
+          aria-current={ariaCurrentMore}
+          data-testid="header-more-link"
+          class="navlink">{t('common.header.more_link')}</a
         >
         <a
           href="/settings"

@@ -81,6 +81,11 @@
     <path d="M12 16h4" />
     <path d="M8 11h.01" />
     <path d="M8 16h.01" />
+  {:else if name === 'layout-grid'}
+    <rect width="7" height="7" x="3" y="3" rx="1" />
+    <rect width="7" height="7" x="14" y="3" rx="1" />
+    <rect width="7" height="7" x="14" y="14" rx="1" />
+    <rect width="7" height="7" x="3" y="14" rx="1" />
   {/if}
 </svg>
 
