@@ -61,6 +61,16 @@
       <span>{t('common.header.reprisal_link')}</span>
     </a>
     <a
+      href="/more"
+      class="tab"
+      class:active={path === '/more'}
+      aria-current={path === '/more' ? 'page' : undefined}
+      data-testid="tab-more"
+    >
+      <Icon name="layout-grid" size={20} strokeWidth={path === '/more' ? 2.25 : 2} />
+      <span>{t('common.header.more_link')}</span>
+    </a>
+    <a
       href="/settings"
       class="tab"
       class:active={path === '/settings'}
