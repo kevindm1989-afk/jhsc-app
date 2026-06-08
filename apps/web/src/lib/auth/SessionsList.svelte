@@ -103,7 +103,10 @@
     } catch {
       lastError = t('settings.sessions.error.revoke_failed');
     } finally {
-      const { [session_id]: _, ...rest } = revoking;
+      // Drop the session_id key from `revoking` without an unused
+      // throwaway binding (no-unused-vars hates `const {[k]: _, ...} = …`).
+      const rest = { ...revoking };
+      delete rest[session_id];
       revoking = rest;
     }
   }
