@@ -200,6 +200,28 @@
       "bullet_pseudonymized_audit": "Pseudonymized audit — training completion events are logged with pseudonymized actor IDs, so the audit trail records who was trained without exposing names in unrelated views.",
       "bullet_evidence_attach": "Evidence attachments — certificates and course completion records can be attached and encrypted alongside the record.",
       "back_to_home_cta": "Back to home"
+    },
+    "auditPage": {
+      "title": "Audit log",
+      "heading": "Audit log",
+      "coming_soon_body": "The audit-log viewer is being wired to the backend. When it ships, authorized worker members will be able to scroll the append-only record of every committee action — who did what, when, with pseudonymized actor IDs — and verify the Merkle integrity chain end-to-end (T18).",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_append_only": "Append-only — rows are never updated or deleted; corrections land as additional rows that reference the original.",
+      "bullet_pseudonymized": "Pseudonymized actor IDs — the audit row carries an HMAC-pseudonym derived from the actor's user_id, not their name (ADR-0016).",
+      "bullet_merkle_integrity": "Merkle integrity chain — every batch of audit rows is hashed into a Merkle tree; tampering on the server is detectable client-side (T18).",
+      "bullet_retention_aware": "Retention-aware — rows age out under the ADR-0017 schedule; the viewer surfaces what remains and what was swept.",
+      "back_to_home_cta": "Back to home"
+    },
+    "sensitiveFeedPage": {
+      "title": "Recent sensitive activity",
+      "heading": "Recent sensitive activity",
+      "coming_soon_body": "The sensitive-activity feed is being wired to the backend. When it ships, the worker co-chair and worker certified member will use it to monitor recent C3/C4 sensitivity activity — concerns filed, reprisal entries created, work-refusal stages advanced — without reading the underlying narratives, which remain encrypted.",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_metadata_only": "Metadata only — the feed shows the action and the pseudonymized actor; the narrative content stays encrypted and never appears in the feed.",
+      "bullet_c3_c4_scoped": "C3 / C4 scoped — only sensitive-tier events surface here; routine actions (training records, library reads) live in the full audit log.",
+      "bullet_export_deliberate": "Export is deliberate — the feed cannot be forwarded to the employer side; the four-eyes export flow is the only path off the worker side.",
+      "bullet_role_gated": "Role-gated — visibility is limited to the worker co-chair and the worker certified member; an ordinary member sees only their own actions.",
+      "back_to_home_cta": "Back to home"
     }
   },
 
