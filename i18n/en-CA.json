@@ -726,6 +726,25 @@
       "intro_emphasis": "not",
       "intro_after_emphasis": " sign you out on the server or other devices.",
       "wipe_button": "Wipe this device's data…"
+    },
+    "sessions": {
+      "heading": "Active sessions",
+      "intro": "Every device that is currently signed in to your account. Revoke a session to sign that device out immediately.",
+      "loading": "Loading sessions…",
+      "empty": "You have no other active sessions.",
+      "this_device_label": "This device",
+      "issued_label": "Issued",
+      "expires_label": "Expires",
+      "revoke": "Revoke",
+      "revoking": "Revoking…",
+      "revoke_all": "Revoke all other sessions",
+      "revoking_all": "Revoking…",
+      "error": {
+        "load_failed": "Couldn't load your sessions. Try again, or contact your worker co-chair if the problem continues.",
+        "revoke_failed": "That session couldn't be revoked. It may have already expired — try refreshing.",
+        "revoke_all_failed": "Couldn't revoke the other sessions. Try again in a moment.",
+        "signed_out": "You're not signed in. Sign in to see your active sessions."
+      }
     }
   },
 

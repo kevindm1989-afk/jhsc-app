@@ -31,6 +31,7 @@
   import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
+  import SessionsList from '../../lib/auth/SessionsList.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
   import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
   import { isSignedIn } from '../../lib/auth/session-jwt-svelte';
@@ -38,6 +39,7 @@
     createPanicWipeAuditEmitter,
     createSupabaseT07Client
   } from '../../lib/server-client/t07-client-factory';
+  import { createSupabaseAuthStore } from '../../lib/server-client/auth-op-client-factory';
 
   let modalOpen = false;
   // `signedOut` is the inverse of the reactive `$isSignedIn` store (from
@@ -75,6 +77,18 @@
   });
   const wipeStore = new BrowserWipeStore({
     auditEmitter: createPanicWipeAuditEmitter(client)
+  });
+
+  // Production AuthStore for the sessions surface (SessionsList component
+  // below). Shares the same JWT provider + F-39 revocation hook as the
+  // t07-op client so a 401 from auth-op clears the in-memory JWT through
+  // the same code path. The store is unauthenticated until setJwt() fires
+  // post sign-in; SessionsList handles the "signed out" surface itself
+  // via getCurrentUserId() returning null.
+  const authStore = createSupabaseAuthStore({
+    baseUrl,
+    getJwt,
+    onSessionRevoked: clearJwt
   });
 
   function openWipeModal() {
@@ -136,6 +150,12 @@
     </p>
   {/if}
 </section>
+
+{#if $isSignedIn}
+  <section class="card">
+    <SessionsList {authStore} />
+  </section>
+{/if}
 
 <section class="card">
   <h2>{t('settings.device_data.heading')}</h2>
