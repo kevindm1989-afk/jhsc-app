@@ -178,6 +178,28 @@
       "bullet_c4_encryption": "Sensitivity C4 — evidence is encrypted at the highest tier with per-entry passphrases; ciphertext leaves the device, plaintext never does.",
       "bullet_photo_sanitize": "Photos are sanitized — EXIF metadata (GPS, timestamps, device fingerprints) is stripped on this device before encryption.",
       "back_to_home_cta": "Back to home"
+    },
+    "libraryPage": {
+      "title": "Document library",
+      "heading": "Committee document library",
+      "coming_soon_body": "The document library is being wired up. When it ships, the JHSC will have a shared, version-controlled space for OHSA references, the workplace's safety policies, training materials, and any documents committee members need at meetings or on the shop floor.",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_versioned": "Versioned — every document carries its revision; superseded versions stay accessible so a worker can quote a policy as it was at the time of an incident.",
+      "bullet_offline_cache": "Offline cache — the most-referenced documents (OHSA Part III/IV, workplace policies, the JHSC terms of reference) are cached on the device so they're readable without cell signal.",
+      "bullet_search": "Searchable on-device — the index lives in the browser; queries never leave your device, so 'what did I look up' is not visible to the operator.",
+      "bullet_committee_scoped": "Committee-scoped — documents are visible to authorized worker members; the employer side cannot read what the committee references unless explicitly shared.",
+      "back_to_home_cta": "Back to home"
+    },
+    "trainingPage": {
+      "title": "Training records",
+      "heading": "Training records",
+      "coming_soon_body": "The training-records surface is being wired up. When it ships, the JHSC will use it to track which committee members have completed which training modules — the OHSA s. 9(12)(d) baseline (the worker certified member program), refresher cycles, and any workplace-specific training the employer is required to provide.",
+      "what_this_will_do_heading": "What this will do",
+      "bullet_certified_member": "Worker certified member tracking — OHSA s. 9(12)(d) requires at least one worker member who has completed the certified-member program; the surface surfaces who holds the certification and when it expires.",
+      "bullet_refresher_alerts": "Refresher alerts — certifications and workplace-specific training have expiry dates; the surface flags upcoming and overdue refreshers.",
+      "bullet_pseudonymized_audit": "Pseudonymized audit — training completion events are logged with pseudonymized actor IDs, so the audit trail records who was trained without exposing names in unrelated views.",
+      "bullet_evidence_attach": "Evidence attachments — certificates and course completion records can be attached and encrypted alongside the record.",
+      "back_to_home_cta": "Back to home"
     }
   },
 
