@@ -33,6 +33,7 @@
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import SessionsList from '../../lib/auth/SessionsList.svelte';
   import DeviceInfoCard from '../../lib/ui/DeviceInfoCard.svelte';
+  import RecoveryVerifierCard from '../../lib/recovery/RecoveryVerifierCard.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
   import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
   import { isSignedIn } from '../../lib/auth/session-jwt-svelte';
@@ -177,6 +178,10 @@
 
 <section class="card">
   <DeviceInfoCard />
+</section>
+
+<section class="card">
+  <RecoveryVerifierCard />
 </section>
 
 <PanicWipeModal

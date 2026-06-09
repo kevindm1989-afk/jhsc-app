@@ -782,6 +782,32 @@
         "passkey": "Passkey (WebAuthn)",
         "argon2id": "Argon2id (WASM)"
       }
+    },
+    "recoveryVerify": {
+      "heading": "Verify your recovery sheet",
+      "intro": "Upload the JSON file from your recovery sheet and type the passphrase to check that the sheet still works. This is a periodic check-in — it runs entirely on this device, nothing is sent to the server, and no key material is saved.",
+      "file_label": "Recovery JSON file",
+      "passphrase_label": "Recovery passphrase",
+      "passphrase_helper": "Type the words exactly as printed on the sheet, separated by spaces.",
+      "verify": "Verify",
+      "verifying": "Verifying…",
+      "reset": "Verify another sheet",
+      "success": {
+        "heading": "Your recovery sheet works.",
+        "body": "The JSON file and the passphrase decrypted successfully. Store this sheet somewhere safe — not at work.",
+        "blob_id_label": "Sheet ID"
+      },
+      "error": {
+        "not_json": "That file is not valid JSON. Check that you uploaded the recovery sheet that the app gave you.",
+        "wrong_shape": "That JSON does not look like a recovery sheet. The expected file has four top-level fields (ciphertext, kdf_params, version, blob_id).",
+        "wrong_version": "This recovery sheet uses a version this app doesn't support. Contact your worker co-chair.",
+        "bad_base64": "Part of the recovery sheet is corrupted. Check whether the file was modified after it was downloaded.",
+        "bad_nonce_length": "The recovery sheet is too short to be valid. Re-download it from the original device if possible.",
+        "decrypt_failed": "The recovery sheet did not decrypt with that passphrase. Re-check the passphrase letter-by-letter, or use a fresh recovery sheet.",
+        "argon2_unavailable": "Your browser cannot run the Argon2id crypto needed to verify this sheet. Try a different browser (Chrome, Edge, Firefox, or Safari, recent versions).",
+        "file_read": "Could not read the file. Try selecting it again.",
+        "unknown": "Something went wrong verifying the recovery sheet. Try again, or contact your worker co-chair if the problem continues."
+      }
     }
   },
 
