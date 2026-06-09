@@ -864,6 +864,26 @@
       "title": "Audit log",
       "subtitle": "Every action on the worker side. Hash-chained and tamper-evident."
     },
+    "viewer": {
+      "heading": "Audit log",
+      "intro": "Every action recorded on the worker side. Append-only; pseudonymized actor IDs; Merkle integrity chain when the T18 backend lands.",
+      "integrity": {
+        "label": "Integrity",
+        "value_demo": "Demo data — the real Merkle integrity chain ships with T18."
+      },
+      "loading": "Loading audit log…",
+      "empty": "The audit log is empty.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real audit-op Edge Function + Merkle integrity chain ship with T18.",
+      "column": {
+        "actor": "Actor"
+      },
+      "error": {
+        "load_failed": "Couldn't load the audit log. Try again."
+      }
+    },
     "filter": {
       "action_label": "Action",
       "actor_label": "Actor",
