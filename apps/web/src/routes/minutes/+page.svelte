@@ -1,19 +1,26 @@
-<script lang="ts">
+<script>
   /**
-   * /minutes — coming-soon placeholder for the meeting-minutes drafting
-   * surface (committee deliberation, approval-gated publication).
+   * /minutes — JHSC meeting-minutes register viewer mount.
    *
-   * The minutes module is a follow-on product surface; library code is
-   * partially scaffolded (audit-log enums for minutes events exist in
-   * the catalog) but no intake component ships yet. The placeholder
-   * lands the URL + the four-bullet contract so a worker who navigates
-   * here from a future nav link doesn't 404 and sees what's coming.
-   * Same pattern as PRs #133 (/privacy) and #136 (/concerns + /reprisal).
+   * Replaces the PR #137 coming-soon placeholder. Mounts MinutesViewer
+   * with the demo provider so the surface renders realistic content
+   * until the real minutes-module backend (drafts in worker-side
+   * encryption + four-eyes approval ceremony + append-only revision
+   * history + quoted-concern consent gate) is wired.
    *
-   * Replaces this file on minutes-module mount: a thin wiring shell
-   * that mounts the production minutes editor + approval ceremony.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import MinutesViewer from '$lib/minutes/MinutesViewer.svelte';
+  import { buildDemoMinutes, fetchDemoMinutesPage } from '$lib/minutes/demo-minutes';
+
+  const DEMO_ROWS = buildDemoMinutes(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoMinutesPage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -21,22 +28,12 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section class="card minutes-card" data-testid="minutes-page">
-  <h1>{t('common.minutesPage.heading')}</h1>
-
-  <p class="muted" data-testid="minutes-coming-soon-notice">
-    {t('common.minutesPage.coming_soon_body')}
+<section class="card min-card" data-testid="minutes-page">
+  <MinutesViewer {fetchPage} />
+  <p class="min-demo-note muted" data-testid="min-demo-note">
+    {t('minutes.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.minutesPage.what_this_will_do_heading')}</h2>
-  <ul class="minutes-bullets">
-    <li>{t('common.minutesPage.bullet_worker_side_drafts')}</li>
-    <li>{t('common.minutesPage.bullet_approval_gated')}</li>
-    <li>{t('common.minutesPage.bullet_revision_history')}</li>
-    <li>{t('common.minutesPage.bullet_quoted_consent')}</li>
-  </ul>
-
-  <p>
+  <p class="min-footer">
     <a href="/" data-testid="minutes-back-to-home">
       {t('common.minutesPage.back_to_home_cta')}
     </a>
@@ -44,14 +41,19 @@
 </section>
 
 <style>
-  .minutes-card {
+  .min-card {
     margin-block-start: 1rem;
   }
-  .minutes-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .min-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .minutes-bullets > li {
-    margin-block-end: 0.5rem;
+  .min-footer {
+    margin-block-start: 0.75rem;
   }
 </style>

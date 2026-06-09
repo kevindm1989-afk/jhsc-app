@@ -859,6 +859,35 @@
     }
   },
 
+  "minutes": {
+    "viewer": {
+      "heading": "Meeting minutes register",
+      "intro": "Every set of meeting minutes the JHSC has drafted, approved, or archived. Drafts stay encrypted on the worker side; approval requires a documented quorum.",
+      "approval_note": {
+        "label": "Approval gate",
+        "value": "Only the worker co-chair can promote a draft to approved, and only with a documented quorum. Minutes that quote a filed concern require the original author's consent before approval."
+      },
+      "loading": "Loading minutes…",
+      "empty": "No minutes on file yet.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real minutes-module backend (drafts in worker-side encryption + four-eyes approval ceremony + append-only revision history + quoted-concern consent gate) ships with the minutes-module wire-up.",
+      "status": {
+        "draft": "Draft",
+        "approved": "Approved",
+        "archived": "Archived"
+      },
+      "quorum_label": "Quorum",
+      "revisions_label": "Revisions",
+      "quoted_label": "Quoted concerns",
+      "drafted_by": "Drafted by",
+      "error": {
+        "load_failed": "Couldn't load the minutes register. Try again."
+      }
+    }
+  },
+
   "recommendations": {
     "viewer": {
       "heading": "Recommendations register",
