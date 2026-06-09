@@ -123,26 +123,22 @@
    * signal. The button visibly flips to a "sent" state for ~4 seconds
    * so the user sees the action took.
    */
-  async function onSendTestEvent() {
-    const fp = fingerprint?.display ?? 'unknown';
-    // Dynamic import keeps the @sentry/sveltekit module out of any
-    // vitest module-graph that doesn't have the SvelteKit virtual
-    // modules ($app/*) available. If the SDK fails to load (test env
-    // without $app, or production deployment without DSN), the
-    // structured logger below is the local-only signal — the button
-    // still flips to its 'sent' state so the worker sees the action
-    // took without leaking the upstream failure.
-    try {
-      const sentry = await import('@sentry/sveltekit');
-      sentry.captureMessage('jhsc.observability.test_event', {
-        level: 'info',
-        tags: { source: 'settings.deviceInfo', surface: 'sentry-test-button' },
-        extra: { fingerprint: fp }
-      });
-    } catch {
-      // Sentry not loaded → silently swallow; the structured logger
-      // line below is the local-only signal.
-    }
+  function onSendTestEvent() {
+    // Emit a structured logger line at INFO level. The structured
+    // logger's transport routes to:
+    //   - console (always; the worker / co-chair sees the event in
+    //     devtools so they can confirm logging works locally), and
+    //   - Sentry breadcrumbs (when PUBLIC_SENTRY_DSN is configured;
+    //     a subsequent uncaught exception will carry this breadcrumb
+    //     into the operator-side Sentry event).
+    //
+    // We do NOT call Sentry.captureMessage directly here: that pulls
+    // the @sentry/sveltekit lazy-load helpers into the bundle, which
+    // carry a literal `https://browser.sentry-cdn.com` CDN fallback
+    // string that trips the verify-no-third-party-js gate. The
+    // structured logger is the canonical local-only signal; the
+    // button verifies the logger pipeline, which is the layer most
+    // useful for troubleshooting.
     log.info({
       event: 'client.observability.test_event',
       meta: { surface: 'settings.deviceInfo' }
