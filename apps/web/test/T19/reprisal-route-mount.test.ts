@@ -1,20 +1,10 @@
 /**
- * T19.1 — /reprisal coming-soon placeholder route mount.
+ * T19.1 — /reprisal route mount.
  *
- * The intake component (`ReprisalIntakeForm.svelte`) is shipped and
- * tested, but the production wire-up (T13.1 — submit handler bound to
- * `SupabaseReprisalClient`, per-entry passphrase derivation, audit
- * emission) is a separate focused PR. Until then the /reprisal route
- * renders a placeholder card so a worker who navigates here from a
- * future nav link or a shared URL doesn't 404 and sees what's coming.
- *
- * Worse than other placeholder surfaces because reprisal entries are
- * sensitivity C4 (the highest tier) — mounting an unwired form would
- * be a data-loss risk for the most sensitive content type the app
- * handles. Placeholder posture is the safer interim.
- *
- * This test pins the placeholder's structural shape so a future
- * refactor (e.g. the T13.1 mount swap) is deliberate.
+ * Replaces the PR #136 coming-soon placeholder pins with structural
+ * pins for the real ReprisalViewer mount + demo provider. Preserves
+ * the 4px destructive-red inline-start border the placeholder card
+ * established for the C4 sensitivity tier.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -24,7 +14,7 @@ import { resolve } from 'node:path';
 const PAGE_PATH = resolve(__dirname, '../../src/routes/reprisal/+page.svelte');
 const PAGE_TS_PATH = resolve(__dirname, '../../src/routes/reprisal/+page.ts');
 
-describe('T19.1 — /reprisal route mount (coming-soon placeholder)', () => {
+describe('T19.1 — /reprisal route mount (real viewer + demo provider)', () => {
   it('the +page.svelte component exists at the expected path', () => {
     expect(existsSync(PAGE_PATH)).toBe(true);
   });
@@ -33,7 +23,7 @@ describe('T19.1 — /reprisal route mount (coming-soon placeholder)', () => {
     expect(existsSync(PAGE_TS_PATH)).toBe(true);
   });
 
-  it('+page.ts declares prerender = true (parity with the rest of the app shell)', () => {
+  it('+page.ts declares prerender = true', () => {
     const src = readFileSync(PAGE_TS_PATH, 'utf8');
     expect(src).toMatch(/export\s+const\s+prerender\s*=\s*true/);
   });
@@ -43,51 +33,45 @@ describe('T19.1 — /reprisal route mount (coming-soon placeholder)', () => {
     expect(src).toMatch(/export\s+const\s+ssr\s*=\s*false/);
   });
 
-  it('the page carries the reprisal-page data-testid + a heading via t()', () => {
+  it('the page carries the reprisal-page data-testid', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/data-testid=["']reprisal-page["']/);
-    expect(src).toMatch(/t\(['"]common\.reprisalPage\.heading['"]\)/);
   });
 
-  it('renders the coming-soon notice (so the user knows the intake is pending)', () => {
+  it('mounts <ReprisalViewer> with a fetchPage prop wired through', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/data-testid=["']reprisal-coming-soon-notice["']/);
-    expect(src).toMatch(/t\(['"]common\.reprisalPage\.coming_soon_body['"]\)/);
+    expect(src).toMatch(
+      /import\s+ReprisalViewer\s+from\s+['"]\$lib\/reprisal\/ReprisalViewer\.svelte['"]/
+    );
+    expect(src).toMatch(/<ReprisalViewer\s+\{fetchPage\}/);
   });
 
-  it('surfaces the four "what this will do" bullets via t()', () => {
+  it('imports the demo provider (buildDemoReprisals + fetchDemoReprisalPage)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/t\(['"]common\.reprisalPage\.bullet_consent_per_intake['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.reprisalPage\.bullet_per_entry_passphrase['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.reprisalPage\.bullet_actor_visible_to_author['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.reprisalPage\.bullet_ohsa_reminder['"]\)/);
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*buildDemoReprisals[\s\S]*fetchDemoReprisalPage[\s\S]*\}\s+from\s+['"]\$lib\/reprisal\/demo-reprisal['"]/
+    );
   });
 
-  it('renders a back-to-home link so the user is not stranded', () => {
+  it('renders the demo-note callout', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/data-testid=["']rep-demo-note["']/);
+    expect(src).toMatch(/t\(['"]reprisal\.viewer\.demo_note['"]\)/);
+  });
+
+  it('renders a back-to-home link', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/<a\s+href=["']\/["']/);
     expect(src).toMatch(/data-testid=["']reprisal-back-to-home["']/);
-    expect(src).toMatch(/t\(['"]common\.reprisalPage\.back_to_home_cta['"]\)/);
   });
 
-  it('carries a noindex meta (placeholder route should not be indexed)', () => {
+  it('carries a noindex meta', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
   });
 
-  it('every common.reprisalPage.* key referenced is present in the root catalog', () => {
-    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
-    expect(existsSync(catalogPath)).toBe(true);
-    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-    expect(catalog.common.reprisalPage).toBeDefined();
-    expect(typeof catalog.common.reprisalPage.title).toBe('string');
-    expect(typeof catalog.common.reprisalPage.heading).toBe('string');
-    expect(typeof catalog.common.reprisalPage.coming_soon_body).toBe('string');
-    expect(typeof catalog.common.reprisalPage.what_this_will_do_heading).toBe('string');
-    expect(typeof catalog.common.reprisalPage.bullet_consent_per_intake).toBe('string');
-    expect(typeof catalog.common.reprisalPage.bullet_per_entry_passphrase).toBe('string');
-    expect(typeof catalog.common.reprisalPage.bullet_actor_visible_to_author).toBe('string');
-    expect(typeof catalog.common.reprisalPage.bullet_ohsa_reminder).toBe('string');
-    expect(typeof catalog.common.reprisalPage.back_to_home_cta).toBe('string');
+  it('preserves the destructive-red inline-start border on the reprisal card (C4 accent)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/border-inline-start:\s*4px\s+solid\s+var\(--color-destructive\)/);
   });
 });

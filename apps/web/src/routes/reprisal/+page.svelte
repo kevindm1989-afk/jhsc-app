@@ -1,30 +1,30 @@
-<script lang="ts">
+<script>
   /**
-   * /reprisal — coming-soon placeholder for the reprisal-log intake
-   * surface (Surface C / T13).
+   * /reprisal — JHSC C4-tier reprisal-log register viewer mount.
    *
-   * The intake component (`ReprisalIntakeForm.svelte`) is shipped and
-   * tested, but the production wire-up (T13.1 — submit handler bound to
-   * `SupabaseReprisalClient`, per-entry passphrase derivation, audit
-   * emission) is a separate focused PR. Mounting the form here without
-   * that wire-up would let a worker type a real reprisal narrative into
-   * a textarea that goes nowhere — actively bad UX, a data-loss risk,
-   * and worse than other surfaces because reprisal entries are
-   * sensitivity C4 (the highest tier).
+   * Replaces the PR #136 coming-soon placeholder. Mounts ReprisalViewer
+   * with the demo provider so the register surface renders realistic
+   * content until T13.1 wires the production SupabaseReprisalClient
+   * (per-entry passphrase derivation + audit emission + role-gated
+   * read path).
    *
-   * This placeholder lands the URL + the four-bullet contract bullets
-   * the intake surface will honour, so a worker who clicks through from
-   * a future nav link doesn't 404 and sees what's coming. The four
-   * "what this will do" bullets restate the structural contracts
-   * already enforced by the form (per-intake re-render of consent,
-   * per-entry passphrase, actor visibility, OHSA s.50 reminder) so the
-   * catalog strings the form references stay in sync with the
-   * user-facing summary here.
+   * Preserves the destructive-red 4px inline-start border the
+   * placeholder card established, so the C4 sensitivity reads at a
+   * glance even before the row list paints.
    *
-   * Replaces this file on T13.1 mount: a thin wiring shell that mounts
-   * <ReprisalIntakeForm /> with the production client.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import ReprisalViewer from '$lib/reprisal/ReprisalViewer.svelte';
+  import { buildDemoReprisals, fetchDemoReprisalPage } from '$lib/reprisal/demo-reprisal';
+
+  const DEMO_ROWS = buildDemoReprisals(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoReprisalPage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -33,21 +33,11 @@
 </svelte:head>
 
 <section class="card reprisal-card" data-testid="reprisal-page">
-  <h1>{t('common.reprisalPage.heading')}</h1>
-
-  <p class="muted" data-testid="reprisal-coming-soon-notice">
-    {t('common.reprisalPage.coming_soon_body')}
+  <ReprisalViewer {fetchPage} />
+  <p class="rep-demo-note muted" data-testid="rep-demo-note">
+    {t('reprisal.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.reprisalPage.what_this_will_do_heading')}</h2>
-  <ul class="reprisal-bullets">
-    <li>{t('common.reprisalPage.bullet_consent_per_intake')}</li>
-    <li>{t('common.reprisalPage.bullet_per_entry_passphrase')}</li>
-    <li>{t('common.reprisalPage.bullet_actor_visible_to_author')}</li>
-    <li>{t('common.reprisalPage.bullet_ohsa_reminder')}</li>
-  </ul>
-
-  <p>
+  <p class="rep-footer">
     <a href="/" data-testid="reprisal-back-to-home">
       {t('common.reprisalPage.back_to_home_cta')}
     </a>
@@ -55,15 +45,24 @@
 </section>
 
 <style>
+  /*
+   * Preserves the destructive-red 4px inline-start border the
+   * placeholder card established for the C4 sensitivity tier.
+   */
   .reprisal-card {
     margin-block-start: 1rem;
     border-inline-start: 4px solid var(--color-destructive);
   }
-  .reprisal-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .rep-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .reprisal-bullets > li {
-    margin-block-end: 0.5rem;
+  .rep-footer {
+    margin-block-start: 0.75rem;
   }
 </style>
