@@ -533,6 +533,36 @@
       "approved_announce": "Change approved by {approver} — {action}",
       "self_approve_denied_heading": "You can't approve your own proposal",
       "self_approve_denied_body": "Another active member must approve. This is by design."
+    },
+    "viewer": {
+      "heading": "Reprisal log register",
+      "intro": "Suspected reprisal incidents the JHSC has on file. OHSA s.50 protects workers who exercise rights under the Act.",
+      "c4_note": {
+        "label": "Highest sensitivity tier (C4)",
+        "value": "Every entry is encrypted at rest. The narrative body is sealed under a per-entry passphrase by default; without that passphrase, even authorized members cannot read it back. Source identity stays hidden behind the actor pseudonym unless the author has consented to being named."
+      },
+      "loading": "Loading reprisal log…",
+      "empty": "No reprisal entries on file.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (per-entry passphrase derivation + audit emission + role-gated read path + four-eyes status changes) ships with T13.1.",
+      "status": {
+        "filed": "Filed",
+        "investigating": "Investigating",
+        "resolved": "Resolved",
+        "archived": "Archived"
+      },
+      "passphrase_required": "Passphrase sealed",
+      "source": {
+        "protected": "Source protected",
+        "revealed": "Source revealed with consent"
+      },
+      "days_label": "Days since filed",
+      "filed_by": "Filed by",
+      "error": {
+        "load_failed": "Couldn't load the reprisal log. Try again."
+      }
     }
   },
 
