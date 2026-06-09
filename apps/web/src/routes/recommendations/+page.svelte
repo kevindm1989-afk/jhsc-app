@@ -1,20 +1,29 @@
-<script lang="ts">
+<script>
   /**
-   * /recommendations — coming-soon placeholder for the recommendations
-   * register (T12 sibling task — recommendations + 21-day OHSA s. 50(7)(c)
-   * timer + auto-escalation).
+   * /recommendations — JHSC recommendations register viewer mount.
    *
-   * The T12 timer infrastructure is library-only today; production
-   * wire-up (real recommendation store, employer-response capture,
-   * auto-escalation alarm, export-deliberate flow into T11) is deferred.
-   * This placeholder lands the URL + the four-bullet contract so a
-   * worker who navigates here from a future nav link doesn't 404 and
-   * sees what's coming. Same pattern as PRs #133, #136.
+   * Replaces the PR #138 coming-soon placeholder. Mounts
+   * RecommendationsViewer with the demo provider so the surface
+   * renders realistic content until T12 wires the real backend
+   * (recommendations store + 21-day timer state + employer-response
+   * capture + auto-escalation).
    *
-   * Replaces this file on T12 mount: a thin wiring shell that mounts
-   * the production recommendations list + 21-day timer surfaces.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import RecommendationsViewer from '$lib/recommendations/RecommendationsViewer.svelte';
+  import {
+    buildDemoRecommendations,
+    fetchDemoRecommendationsPage
+  } from '$lib/recommendations/demo-recommendations';
+
+  const DEMO_ROWS = buildDemoRecommendations(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoRecommendationsPage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -22,22 +31,12 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section class="card recommendations-card" data-testid="recommendations-page">
-  <h1>{t('common.recommendationsPage.heading')}</h1>
-
-  <p class="muted" data-testid="recommendations-coming-soon-notice">
-    {t('common.recommendationsPage.coming_soon_body')}
+<section class="card recs-card" data-testid="recommendations-page">
+  <RecommendationsViewer {fetchPage} />
+  <p class="recs-demo-note muted" data-testid="recs-demo-note">
+    {t('recommendations.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.recommendationsPage.what_this_will_do_heading')}</h2>
-  <ul class="recommendations-bullets">
-    <li>{t('common.recommendationsPage.bullet_21_day_timer')}</li>
-    <li>{t('common.recommendationsPage.bullet_auto_escalation')}</li>
-    <li>{t('common.recommendationsPage.bullet_traceability')}</li>
-    <li>{t('common.recommendationsPage.bullet_export_deliberate')}</li>
-  </ul>
-
-  <p>
+  <p class="recs-footer">
     <a href="/" data-testid="recommendations-back-to-home">
       {t('common.recommendationsPage.back_to_home_cta')}
     </a>
@@ -45,14 +44,19 @@
 </section>
 
 <style>
-  .recommendations-card {
+  .recs-card {
     margin-block-start: 1rem;
   }
-  .recommendations-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .recs-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .recommendations-bullets > li {
-    margin-block-end: 0.5rem;
+  .recs-footer {
+    margin-block-start: 0.75rem;
   }
 </style>
