@@ -32,6 +32,7 @@
   import { t } from '$lib/i18n';
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import SessionsList from '../../lib/auth/SessionsList.svelte';
+  import DeviceInfoCard from '../../lib/ui/DeviceInfoCard.svelte';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
   import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
   import { isSignedIn } from '../../lib/auth/session-jwt-svelte';
@@ -172,6 +173,10 @@
   >
     {t('settings.device_data.wipe_button')}
   </button>
+</section>
+
+<section class="card">
+  <DeviceInfoCard />
 </section>
 
 <PanicWipeModal

@@ -61,6 +61,12 @@
   let revoking = {};
   let bulkRevoking = false;
   let lastError = '';
+  // Success feedback — set after a successful revoke (per-row OR bulk).
+  // Polite live-region; AT users hear "Session revoked" or
+  // "All other sessions revoked" without an interrupt. Auto-clears on
+  // the next user action (any revoke / refresh) so it doesn't linger
+  // through a follow-on error state.
+  let successMessage = '';
 
   onMount(async () => {
     userId = getCurrentUserId();
@@ -97,9 +103,11 @@
     if (revoking[session_id]) return;
     revoking = { ...revoking, [session_id]: true };
     lastError = '';
+    successMessage = '';
     try {
       await authStore.revokeSession(session_id, Date.now());
       await refresh();
+      successMessage = t('settings.sessions.success.one_revoked');
     } catch {
       lastError = t('settings.sessions.error.revoke_failed');
     } finally {
@@ -115,9 +123,11 @@
     if (!userId || bulkRevoking) return;
     bulkRevoking = true;
     lastError = '';
+    successMessage = '';
     try {
       await authStore.revokeAllForUser(userId, Date.now());
       await refresh();
+      successMessage = t('settings.sessions.success.all_revoked');
     } catch {
       lastError = t('settings.sessions.error.revoke_all_failed');
     } finally {
@@ -208,6 +218,12 @@
           {bulkRevoking ? t('settings.sessions.revoking_all') : t('settings.sessions.revoke_all')}
         </button>
       </div>
+    {/if}
+
+    {#if successMessage}
+      <p class="sessions-success" role="status" data-testid="sessions-success">
+        {successMessage}
+      </p>
     {/if}
 
     {#if lastError}
@@ -301,5 +317,16 @@
     border-radius: var(--radius-md);
     background: var(--color-tint-red-bg);
     color: var(--color-tint-red-fg);
+  }
+  /* Polite success — green-tinted panel; matches /sign-in's success
+     surface (same --color-tint-green-* tokens). role="status" on the
+     element gives AT users a non-interrupting announcement. */
+  .sessions-success {
+    margin-block: 0.75rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-green-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-green-bg);
+    color: var(--color-tint-green-fg);
   }
 </style>
