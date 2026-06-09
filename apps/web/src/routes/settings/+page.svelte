@@ -33,6 +33,7 @@
   import PanicWipeModal from '../../lib/lock/PanicWipeModal.svelte';
   import SessionsList from '../../lib/auth/SessionsList.svelte';
   import DeviceInfoCard from '../../lib/ui/DeviceInfoCard.svelte';
+  import AboutCard from '../../lib/ui/AboutCard.svelte';
   import RecoveryVerifierCard from '../../lib/recovery/RecoveryVerifierCard.svelte';
   import RecoveryReissueCard from '../../lib/recovery/RecoveryReissueCard.svelte';
   import { BrowserLocalIdentityStore } from '../../lib/crypto/browser-local-identity-store';
@@ -196,6 +197,10 @@
 
 <section class="card">
   <RecoveryReissueCard getIdentityPrivateKey={getLocalIdentityPrivateKey} />
+</section>
+
+<section class="card">
+  <AboutCard />
 </section>
 
 <PanicWipeModal

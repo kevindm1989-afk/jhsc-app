@@ -42,8 +42,14 @@ describe('T19.1 — DeviceInfoCard source pins', () => {
     expect(typeof di.heading).toBe('string');
     expect(typeof di.intro).toBe('string');
     expect(typeof di.unavailable).toBe('string');
-    for (const k of ['browser', 'install', 'theme', 'reduced_motion', 'baseline']) {
+    for (const k of ['browser', 'install', 'theme', 'reduced_motion', 'connection', 'baseline']) {
       expect(typeof di.label[k]).toBe('string');
+    }
+    for (const k of ['online', 'offline']) {
+      expect(typeof di.connection[k]).toBe('string');
+    }
+    for (const k of ['send', 'sent', 'helper']) {
+      expect(typeof di.sentry_test[k]).toBe('string');
     }
     for (const k of ['installed', 'browser']) {
       expect(typeof di.install[k]).toBe('string');
@@ -68,14 +74,40 @@ describe('T19.1 — DeviceInfoCard render', () => {
     });
   });
 
-  it('renders five info rows (fingerprint / install / theme / reduced-motion / baseline)', async () => {
+  it('renders six info rows (fingerprint / install / theme / reduced-motion / connection / baseline)', async () => {
     render(DeviceInfoCard);
     await waitFor(() => {
       expect(screen.getByTestId('device-info-fingerprint')).toBeDefined();
       expect(screen.getByTestId('device-info-install')).toBeDefined();
       expect(screen.getByTestId('device-info-theme')).toBeDefined();
       expect(screen.getByTestId('device-info-reduced-motion')).toBeDefined();
+      expect(screen.getByTestId('device-info-connection')).toBeDefined();
       expect(screen.getByTestId('device-info-baseline')).toBeDefined();
+    });
+  });
+
+  it('renders the Sentry test-event button + helper', async () => {
+    render(DeviceInfoCard);
+    await waitFor(() => {
+      const btn = screen.getByTestId('device-info-sentry-test-button');
+      expect(btn).toBeDefined();
+      expect((btn as HTMLButtonElement).disabled).toBe(false);
+      // Helper line below the button.
+      const section = screen.getByTestId('device-info-section');
+      expect(section.textContent ?? '').toMatch(/test event/i);
+    });
+  });
+
+  it('the test-event button flips to a sent state after click', async () => {
+    render(DeviceInfoCard);
+    await waitFor(() => {
+      expect(screen.getByTestId('device-info-sentry-test-button')).toBeDefined();
+    });
+    const btn = screen.getByTestId('device-info-sentry-test-button') as HTMLButtonElement;
+    btn.click();
+    await waitFor(() => {
+      expect(btn.disabled).toBe(true);
+      expect(btn.textContent ?? '').toMatch(/sent/i);
     });
   });
 
