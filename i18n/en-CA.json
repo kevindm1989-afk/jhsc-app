@@ -1013,6 +1013,32 @@
       "save": "Save inspection",
       "saving": "Encrypting and saving…",
       "save_draft": "Save as draft"
+    },
+    "viewer": {
+      "heading": "Inspections register",
+      "intro": "Every workplace inspection the JHSC has logged. Required at least monthly under OHSA s. 9(26)(b).",
+      "offline_note": {
+        "label": "Offline-first capture",
+        "value": "Inspections are recorded on this device first. Each entry carries a per-entry HMAC integrity tag so server-side tampering between this device and the register is detectable on drain."
+      },
+      "loading": "Loading inspections…",
+      "empty": "No inspections on file yet.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (IndexedDB-backed store + PhotoCaptureSurface UI + ServiceWorker integration + real-canvas EXIF re-encode) ships with T10.1.",
+      "integrity": {
+        "verified": "Verified",
+        "quarantined": "Quarantined"
+      },
+      "offline_queued": "Offline-queued",
+      "area_label": "Area",
+      "checklist_label": "Checklist items",
+      "photos_label": "Photos",
+      "conducted_by": "Conducted by",
+      "error": {
+        "load_failed": "Couldn't load the inspections register. Try again."
+      }
     }
   },
 

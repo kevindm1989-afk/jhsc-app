@@ -1,16 +1,8 @@
 /**
- * T19.1 — /inspections coming-soon placeholder route mount.
+ * T19.1 — /inspections route mount.
  *
- * The T10 inspection queue library is shipped (offline-first queue,
- * per-entry HMAC integrity tags, photo sanitize) but production wire-up
- * is deferred to T10.1 (real IndexedDB-backed store, PhotoCaptureSurface
- * UI, ServiceWorker integration, real-canvas EXIF re-encode). Until then
- * the /inspections route renders a placeholder card so a worker who
- * navigates here from a future nav link doesn't 404 and sees what's
- * coming.
- *
- * Same pattern as the /concerns + /reprisal placeholder tests
- * (concerns-route-mount.test.ts, reprisal-route-mount.test.ts).
+ * Replaces the PR #136 coming-soon placeholder pins with structural
+ * pins for the real InspectionsViewer mount + demo provider.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,7 +12,7 @@ import { resolve } from 'node:path';
 const PAGE_PATH = resolve(__dirname, '../../src/routes/inspections/+page.svelte');
 const PAGE_TS_PATH = resolve(__dirname, '../../src/routes/inspections/+page.ts');
 
-describe('T19.1 — /inspections route mount (coming-soon placeholder)', () => {
+describe('T19.1 — /inspections route mount (real viewer + demo provider)', () => {
   it('the +page.svelte component exists at the expected path', () => {
     expect(existsSync(PAGE_PATH)).toBe(true);
   });
@@ -29,7 +21,7 @@ describe('T19.1 — /inspections route mount (coming-soon placeholder)', () => {
     expect(existsSync(PAGE_TS_PATH)).toBe(true);
   });
 
-  it('+page.ts declares prerender = true (parity with the rest of the app shell)', () => {
+  it('+page.ts declares prerender = true', () => {
     const src = readFileSync(PAGE_TS_PATH, 'utf8');
     expect(src).toMatch(/export\s+const\s+prerender\s*=\s*true/);
   });
@@ -39,51 +31,40 @@ describe('T19.1 — /inspections route mount (coming-soon placeholder)', () => {
     expect(src).toMatch(/export\s+const\s+ssr\s*=\s*false/);
   });
 
-  it('the page carries the inspections-page data-testid + a heading via t()', () => {
+  it('the page carries the inspections-page data-testid', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/data-testid=["']inspections-page["']/);
-    expect(src).toMatch(/t\(['"]common\.inspectionsPage\.heading['"]\)/);
   });
 
-  it('renders the coming-soon notice (so the user knows the surface is pending)', () => {
+  it('mounts <InspectionsViewer> with a fetchPage prop wired through', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/data-testid=["']inspections-coming-soon-notice["']/);
-    expect(src).toMatch(/t\(['"]common\.inspectionsPage\.coming_soon_body['"]\)/);
+    expect(src).toMatch(
+      /import\s+InspectionsViewer\s+from\s+['"]\$lib\/inspections\/InspectionsViewer\.svelte['"]/
+    );
+    expect(src).toMatch(/<InspectionsViewer\s+\{fetchPage\}/);
   });
 
-  it('surfaces the four "what this will do" bullets via t()', () => {
+  it('imports the demo provider (buildDemoInspections + fetchDemoInspectionsPage)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/t\(['"]common\.inspectionsPage\.bullet_ohsa_monthly['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.inspectionsPage\.bullet_offline_first['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.inspectionsPage\.bullet_integrity_tag['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.inspectionsPage\.bullet_photo_sanitize['"]\)/);
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*buildDemoInspections[\s\S]*fetchDemoInspectionsPage[\s\S]*\}\s+from\s+['"]\$lib\/inspections\/demo-inspections['"]/
+    );
   });
 
-  it('renders a back-to-home link so the user is not stranded', () => {
+  it('renders the demo-note callout', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/data-testid=["']ins-demo-note["']/);
+    expect(src).toMatch(/t\(['"]inspection\.viewer\.demo_note['"]\)/);
+  });
+
+  it('renders a back-to-home link', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/<a\s+href=["']\/["']/);
     expect(src).toMatch(/data-testid=["']inspections-back-to-home["']/);
-    expect(src).toMatch(/t\(['"]common\.inspectionsPage\.back_to_home_cta['"]\)/);
   });
 
-  it('carries a noindex meta (placeholder route should not be indexed)', () => {
+  it('carries a noindex meta', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
-  });
-
-  it('every common.inspectionsPage.* key referenced is present in the root catalog', () => {
-    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
-    expect(existsSync(catalogPath)).toBe(true);
-    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-    expect(catalog.common.inspectionsPage).toBeDefined();
-    expect(typeof catalog.common.inspectionsPage.title).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.heading).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.coming_soon_body).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.what_this_will_do_heading).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.bullet_ohsa_monthly).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.bullet_offline_first).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.bullet_integrity_tag).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.bullet_photo_sanitize).toBe('string');
-    expect(typeof catalog.common.inspectionsPage.back_to_home_cta).toBe('string');
   });
 });

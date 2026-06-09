@@ -1,24 +1,29 @@
-<script lang="ts">
+<script>
   /**
-   * /inspections — coming-soon placeholder for the monthly-inspection
-   * capture surface (T10 sibling task).
+   * /inspections — JHSC inspections register viewer mount.
    *
-   * The T10 inspection queue library is shipped (offline-first queue,
-   * per-entry HMAC integrity tags, photo sanitize) but production
-   * wire-up is deferred to T10.1 (real IndexedDB-backed store,
-   * PhotoCaptureSurface UI, ServiceWorker integration, real-canvas
-   * EXIF re-encode). Mounting an unwired capture surface would risk a
-   * worker filling in an inspection that goes nowhere.
+   * Replaces the PR #136 coming-soon placeholder. Mounts
+   * InspectionsViewer with the demo provider so the surface renders
+   * realistic content until T10.1 wires the real backend (real
+   * IndexedDB-backed store + PhotoCaptureSurface UI + ServiceWorker
+   * integration + real-canvas EXIF re-encode).
    *
-   * This placeholder lands the URL + the four-bullet contract bullets
-   * the capture surface will honour so a worker who navigates here from
-   * a future nav link or shared URL doesn't 404 and sees what's coming.
-   * Same pattern as PRs #133 (/privacy) and #136 (/concerns + /reprisal).
-   *
-   * Replaces this file on T10.1 mount: a thin wiring shell that mounts
-   * the production PhotoCaptureSurface + IndexedDBInspectionStore.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import InspectionsViewer from '$lib/inspections/InspectionsViewer.svelte';
+  import {
+    buildDemoInspections,
+    fetchDemoInspectionsPage
+  } from '$lib/inspections/demo-inspections';
+
+  const DEMO_ROWS = buildDemoInspections(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoInspectionsPage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -26,22 +31,12 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section class="card inspections-card" data-testid="inspections-page">
-  <h1>{t('common.inspectionsPage.heading')}</h1>
-
-  <p class="muted" data-testid="inspections-coming-soon-notice">
-    {t('common.inspectionsPage.coming_soon_body')}
+<section class="card ins-card" data-testid="inspections-page">
+  <InspectionsViewer {fetchPage} />
+  <p class="ins-demo-note muted" data-testid="ins-demo-note">
+    {t('inspection.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.inspectionsPage.what_this_will_do_heading')}</h2>
-  <ul class="inspections-bullets">
-    <li>{t('common.inspectionsPage.bullet_ohsa_monthly')}</li>
-    <li>{t('common.inspectionsPage.bullet_offline_first')}</li>
-    <li>{t('common.inspectionsPage.bullet_integrity_tag')}</li>
-    <li>{t('common.inspectionsPage.bullet_photo_sanitize')}</li>
-  </ul>
-
-  <p>
+  <p class="ins-footer">
     <a href="/" data-testid="inspections-back-to-home">
       {t('common.inspectionsPage.back_to_home_cta')}
     </a>
@@ -49,14 +44,19 @@
 </section>
 
 <style>
-  .inspections-card {
+  .ins-card {
     margin-block-start: 1rem;
   }
-  .inspections-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .ins-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .inspections-bullets > li {
-    margin-block-end: 0.5rem;
+  .ins-footer {
+    margin-block-start: 0.75rem;
   }
 </style>
