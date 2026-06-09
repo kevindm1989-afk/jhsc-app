@@ -859,6 +859,36 @@
     }
   },
 
+  "recommendations": {
+    "viewer": {
+      "heading": "Recommendations register",
+      "intro": "Every recommendation the JHSC has made to the employer, with the 21-day OHSA s. 50(7)(c) response timer.",
+      "timer": {
+        "label": "21-day response timer",
+        "value": "Under OHSA s. 50(7)(c) the employer must respond in writing within 21 days. Recommendations that pass that window are auto-escalated to the next meeting."
+      },
+      "loading": "Loading recommendations…",
+      "empty": "No recommendations on file.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (recommendations store + 21-day timer + employer-response capture + auto-escalation) ships with T12.",
+      "status": {
+        "responded": "Responded",
+        "pending": "Pending",
+        "overdue": "Overdue",
+        "archived": "Archived"
+      },
+      "day_of": "Day {day} of {total}",
+      "from_concern": "From concern",
+      "from_inspection": "From inspection",
+      "filed_by": "Filed by",
+      "error": {
+        "load_failed": "Couldn't load the recommendations. Try again."
+      }
+    }
+  },
+
   "sensitiveFeed": {
     "viewer": {
       "heading": "Recent sensitive activity",
