@@ -207,6 +207,50 @@ describe('T19.1 — SessionsList per-row Revoke', () => {
   });
 });
 
+describe('T19.1 — SessionsList success-toast feedback', () => {
+  it('renders a role="status" toast after a successful per-row revoke', async () => {
+    const authStore = makeAuthStore([
+      mockSession(CURRENT_SESSION_ID),
+      mockSession(OTHER_SESSION_ID, 1700000500)
+    ]);
+    render(SessionsList, { props: { authStore: authStore as never } });
+    await waitFor(() => {
+      expect(screen.getAllByTestId('session-row').length).toBe(2);
+    });
+    // Click the row that's not the current session.
+    const rows = screen.getAllByTestId('session-row');
+    const otherRowIdx = rows.findIndex(
+      (r) => (r.querySelector('[data-testid="session-id"]')?.textContent ?? '') === OTHER_SESSION_ID
+    );
+    const otherBtn = rows[otherRowIdx]!.querySelector(
+      '[data-testid="session-revoke-button"]'
+    ) as HTMLButtonElement;
+    fireEvent.click(otherBtn);
+    await waitFor(() => {
+      const toast = screen.getByTestId('sessions-success');
+      expect(toast.getAttribute('role')).toBe('status');
+      expect(toast.textContent ?? '').toMatch(/revoked/i);
+    });
+  });
+
+  it('renders a role="status" toast after a successful bulk revoke', async () => {
+    const authStore = makeAuthStore([
+      mockSession(CURRENT_SESSION_ID),
+      mockSession(OTHER_SESSION_ID, 1700000500)
+    ]);
+    render(SessionsList, { props: { authStore: authStore as never } });
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-revoke-all-button')).toBeDefined();
+    });
+    fireEvent.click(screen.getByTestId('sessions-revoke-all-button'));
+    await waitFor(() => {
+      const toast = screen.getByTestId('sessions-success');
+      expect(toast.getAttribute('role')).toBe('status');
+      expect(toast.textContent ?? '').toMatch(/all other sessions revoked/i);
+    });
+  });
+});
+
 describe('T19.1 — SessionsList bulk "Revoke all other sessions"', () => {
   it('renders the bulk-revoke button only when there are other sessions', async () => {
     const authStore = makeAuthStore([mockSession(CURRENT_SESSION_ID)]);

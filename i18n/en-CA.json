@@ -739,11 +739,48 @@
       "revoking": "Revoking…",
       "revoke_all": "Revoke all other sessions",
       "revoking_all": "Revoking…",
+      "success": {
+        "one_revoked": "Session revoked.",
+        "all_revoked": "All other sessions revoked."
+      },
       "error": {
         "load_failed": "Couldn't load your sessions. Try again, or contact your worker co-chair if the problem continues.",
         "revoke_failed": "That session couldn't be revoked. It may have already expired — try refreshing.",
         "revoke_all_failed": "Couldn't revoke the other sessions. Try again in a moment.",
         "signed_out": "You're not signed in. Sign in to see your active sessions."
+      }
+    },
+    "deviceInfo": {
+      "heading": "This device",
+      "intro": "What the app is running on. Useful when you're troubleshooting with your worker co-chair — none of this information leaves your device.",
+      "unavailable": "Not available",
+      "label": {
+        "browser": "Browser",
+        "install": "Installed as app",
+        "theme": "Theme",
+        "reduced_motion": "Reduced motion",
+        "baseline": "Capabilities"
+      },
+      "install": {
+        "installed": "Installed",
+        "browser": "Running in browser"
+      },
+      "theme": {
+        "light": "Light",
+        "dark": "Dark",
+        "system": "System"
+      },
+      "reduced_motion": {
+        "on": "On",
+        "off": "Off"
+      },
+      "capability": {
+        "webcrypto": "WebCrypto",
+        "indexeddb": "IndexedDB",
+        "service_worker": "Service Worker",
+        "locks": "Web Locks",
+        "passkey": "Passkey (WebAuthn)",
+        "argon2id": "Argon2id (WASM)"
       }
     }
   },
