@@ -417,6 +417,49 @@
       "filter_status": "Status",
       "filter_severity": "Severity",
       "filter_hazard": "Hazard class"
+    },
+    "viewer": {
+      "heading": "Concerns register",
+      "intro": "Every concern the JHSC has on file. Anonymous by default; revealed only with the worker's consent.",
+      "anon_note": {
+        "label": "Anonymous by default",
+        "value": "Under F-17, every concern is filed anonymously by default. The source identity stays hidden behind the actor pseudonym unless the worker who filed it consents to being named."
+      },
+      "loading": "Loading concerns…",
+      "empty": "No concerns on file yet.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real concerns backend (intake form + Supabase client + committee-key decryption + audit emission) ships with T08.1.",
+      "status": {
+        "open": "Open",
+        "triaged": "Triaged",
+        "resolved": "Resolved",
+        "archived": "Archived"
+      },
+      "severity": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "critical": "Critical"
+      },
+      "hazard": {
+        "physical": "Physical",
+        "chemical": "Chemical",
+        "biological": "Biological",
+        "ergonomic": "Ergonomic",
+        "psychosocial": "Psychosocial"
+      },
+      "hazard_label": "Hazard",
+      "days_label": "Days since filed",
+      "filed_by": "Filed by",
+      "source": {
+        "protected": "Source protected",
+        "revealed": "Source revealed with consent"
+      },
+      "error": {
+        "load_failed": "Couldn't load the concerns register. Try again."
+      }
     }
   },
 
