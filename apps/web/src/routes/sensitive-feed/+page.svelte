@@ -1,23 +1,35 @@
-<script lang="ts">
+<script>
   /**
-   * /sensitive-feed — coming-soon placeholder for the worker-co-chair
-   * + worker-certified-member C3/C4 activity feed.
+   * /sensitive-feed — worker co-chair + worker certified member C3/C4
+   * activity-feed viewer mount.
    *
-   * The feed surfaces metadata for sensitivity-tier events (concerns
-   * filed, reprisal entries created, work-refusal stages, s.51 evidence
-   * captured) without exposing the narrative content — narratives stay
-   * encrypted. Role-gated visibility (worker co-chair / certified member
-   * only); ordinary members see only their own actions.
+   * Replaces the PR #141 coming-soon placeholder. Mounts
+   * SensitiveFeedViewer with the demo provider so the surface renders
+   * realistic content until the real backend ships (role-gating +
+   * server-side aggregation of sensitive-tier audit rows + Merkle proofs).
    *
-   * Sensitivity-tier-aware visual: the page carries the same 4px
-   * destructive-red inline-start border as /reprisal, /s51-evidence,
-   * and PanicWipeModal — every surface that interacts with C3/C4
-   * content in the worker-hub language shares that destructive accent.
+   * Provider injection (`fetchPage` prop): the viewer is backend-
+   * agnostic; T-future swap-in replaces the demo provider with no
+   * viewer-side changes.
    *
-   * Replaces this file on sensitive-feed-module mount: a thin wiring
-   * shell that mounts the production feed surface.
+   * Sensitivity-tier visual: the page keeps the 4px destructive-red
+   * inline-start border on the outer card (matches PR #141's placeholder
+   * + /reprisal + /s51-evidence + PanicWipeModal). The viewer's per-row
+   * badge layers an additional tier indicator (C3 blue, C4 red).
+   *
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import SensitiveFeedViewer from '$lib/audit/SensitiveFeedViewer.svelte';
+  import { buildDemoSensitiveRows, fetchDemoSensitivePage } from '$lib/audit/demo-sensitive-feed';
+
+  const DEMO_ROWS = buildDemoSensitiveRows(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoSensitivePage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -26,21 +38,11 @@
 </svelte:head>
 
 <section class="card sensitive-feed-card" data-testid="sensitive-feed-page">
-  <h1>{t('common.sensitiveFeedPage.heading')}</h1>
-
-  <p class="muted" data-testid="sensitive-feed-coming-soon-notice">
-    {t('common.sensitiveFeedPage.coming_soon_body')}
+  <SensitiveFeedViewer {fetchPage} />
+  <p class="sensitive-feed-demo-note muted" data-testid="sensitive-feed-demo-note">
+    {t('sensitiveFeed.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.sensitiveFeedPage.what_this_will_do_heading')}</h2>
-  <ul class="sensitive-feed-bullets">
-    <li>{t('common.sensitiveFeedPage.bullet_metadata_only')}</li>
-    <li>{t('common.sensitiveFeedPage.bullet_c3_c4_scoped')}</li>
-    <li>{t('common.sensitiveFeedPage.bullet_export_deliberate')}</li>
-    <li>{t('common.sensitiveFeedPage.bullet_role_gated')}</li>
-  </ul>
-
-  <p>
+  <p class="sensitive-feed-footer">
     <a href="/" data-testid="sensitive-feed-back-to-home">
       {t('common.sensitiveFeedPage.back_to_home_cta')}
     </a>
@@ -50,19 +52,23 @@
 <style>
   /*
    * 4px destructive-red inline-start border — shared with /reprisal,
-   * /s51-evidence, and PanicWipeModal. Every surface that interacts
-   * with C3/C4 content (even just metadata) carries this signal so
-   * the user reads the gravity before they read the prose.
+   * /s51-evidence, and PanicWipeModal. Preserved verbatim from PR #141's
+   * placeholder so the visual gravity signal doesn't regress.
    */
   .sensitive-feed-card {
     margin-block-start: 1rem;
     border-inline-start: 4px solid var(--color-destructive);
   }
-  .sensitive-feed-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .sensitive-feed-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .sensitive-feed-bullets > li {
-    margin-block-end: 0.5rem;
+  .sensitive-feed-footer {
+    margin-block-start: 0.75rem;
   }
 </style>

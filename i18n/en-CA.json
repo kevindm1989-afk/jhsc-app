@@ -859,6 +859,29 @@
     }
   },
 
+  "sensitiveFeed": {
+    "viewer": {
+      "heading": "Recent sensitive activity",
+      "intro": "Metadata for recent C3 and C4 sensitivity-tier events. Narratives stay encrypted; this surface shows only what action was taken, by whom (pseudonymized), and when.",
+      "role": {
+        "label": "Who can see this",
+        "value": "Visibility is limited to the worker co-chair and the worker certified member. An ordinary worker member sees only their own actions in this feed."
+      },
+      "loading": "Loading sensitive activity…",
+      "empty": "No recent sensitive activity.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (server-side aggregation + role-gating + Merkle proofs) ships with T18 / the sensitive-feed wire-up.",
+      "column": {
+        "actor": "Actor"
+      },
+      "error": {
+        "load_failed": "Couldn't load the sensitive-activity feed. Try again."
+      }
+    }
+  },
+
   "audit": {
     "page": {
       "title": "Audit log",
