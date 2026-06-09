@@ -34,6 +34,8 @@
   import SessionsList from '../../lib/auth/SessionsList.svelte';
   import DeviceInfoCard from '../../lib/ui/DeviceInfoCard.svelte';
   import RecoveryVerifierCard from '../../lib/recovery/RecoveryVerifierCard.svelte';
+  import RecoveryReissueCard from '../../lib/recovery/RecoveryReissueCard.svelte';
+  import { BrowserLocalIdentityStore } from '../../lib/crypto/browser-local-identity-store';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
   import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
   import { isSignedIn } from '../../lib/auth/session-jwt-svelte';
@@ -92,6 +94,14 @@
     getJwt,
     onSessionRevoked: clearJwt
   });
+
+  // Browser-local identity store — backs the RecoveryReissueCard's
+  // "print a fresh sheet without re-onboarding" flow. The private key
+  // material reads happen in the closure of the card's onGenerate, never
+  // surface to the DOM. Construction is browser-only (IndexedDB); the
+  // store's own fallback handles SSR / non-browser environments.
+  const localIdentityStore = new BrowserLocalIdentityStore();
+  const getLocalIdentityPrivateKey = (user_id) => localIdentityStore.getIdentityPrivateKey(user_id);
 
   function openWipeModal() {
     modalOpen = true;
@@ -182,6 +192,10 @@
 
 <section class="card">
   <RecoveryVerifierCard />
+</section>
+
+<section class="card">
+  <RecoveryReissueCard getIdentityPrivateKey={getLocalIdentityPrivateKey} />
 </section>
 
 <PanicWipeModal

@@ -808,6 +808,29 @@
         "file_read": "Could not read the file. Try selecting it again.",
         "unknown": "Something went wrong verifying the recovery sheet. Try again, or contact your worker co-chair if the problem continues."
       }
+    },
+    "recoveryReissue": {
+      "heading": "Print a new recovery sheet",
+      "intro": "Generate a fresh recovery sheet (new JSON file + new passphrase) for the identity that's already on this device. Useful if the printed sheet is lost, smudged, or you want to rotate the passphrase.",
+      "warning": {
+        "old_sheet_still_works": "Your OLD paper sheet still works with the OLD passphrase — destroy the old print after you've stored the new one. The system cannot enforce paper destruction.",
+        "server_backup_unchanged": "This updates the sheet ON THIS DEVICE only. The server-stored backup is unchanged and still requires the original passphrase for the lost-device recovery flow."
+      },
+      "generate": "Generate a new recovery sheet",
+      "generating": "Generating…",
+      "reset": "Done",
+      "success": {
+        "heading": "New recovery sheet issued.",
+        "body": "The JSON file downloaded to this device. Write the passphrase below on the print-out you store with it.",
+        "file_label": "File",
+        "passphrase_label": "New passphrase (write this down)"
+      },
+      "error": {
+        "signed_out": "You're not signed in. Sign in to print a new recovery sheet.",
+        "no_identity": "Couldn't find an identity key on this device. Sign in or re-onboard.",
+        "download_failed": "The JSON file couldn't be downloaded. Check that pop-ups are allowed and try again.",
+        "unknown": "Something went wrong generating the recovery sheet. Try again, or contact your worker co-chair if the problem continues."
+      }
     }
   },
 
