@@ -759,7 +759,17 @@
         "install": "Installed as app",
         "theme": "Theme",
         "reduced_motion": "Reduced motion",
+        "connection": "Connection",
         "baseline": "Capabilities"
+      },
+      "connection": {
+        "online": "Online",
+        "offline": "Offline"
+      },
+      "sentry_test": {
+        "send": "Send a test report",
+        "sent": "Sent ✓",
+        "helper": "Sends a no-content test event so the worker co-chair can confirm error reporting works. No personal information is included."
       },
       "install": {
         "installed": "Installed",
@@ -808,6 +818,21 @@
         "file_read": "Could not read the file. Try selecting it again.",
         "unknown": "Something went wrong verifying the recovery sheet. Try again, or contact your worker co-chair if the problem continues."
       }
+    },
+    "about": {
+      "heading": "About this app",
+      "intro": "Version, security disclosure, and links to the public documents that describe what the app does and doesn't do.",
+      "label": {
+        "app": "App",
+        "version": "Version",
+        "security": "Security disclosure",
+        "threat_model": "Threat model",
+        "decisions": "Decisions & ADRs"
+      },
+      "security_link": "Read /.well-known/security.txt",
+      "threat_model_link": "Read the threat model on GitHub",
+      "decisions_link": "Read the decisions document on GitHub",
+      "license_note": "Not legal advice. A privacy lawyer and a labour-law lawyer must review the app before any production launch."
     },
     "recoveryReissue": {
       "heading": "Print a new recovery sheet",

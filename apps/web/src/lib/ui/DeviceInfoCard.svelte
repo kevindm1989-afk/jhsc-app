@@ -21,8 +21,9 @@
    * `<script>` (no lang="ts") + JSDoc per G-T07-13 — Svelte 5's esrap
    * codegen cannot serialize TS annotations on `let`.
    */
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import { log } from '$lib/log';
   import { composeDeviceFingerprint } from '$lib/onboarding/device-fingerprint';
   import { runExtendedBaseline } from '$lib/onboarding/browser-baseline';
   import { theme } from '$lib/ui/theme';
@@ -34,12 +35,39 @@
   /** @type {'installed' | 'browser' | 'unknown'} */
   let installState = 'unknown';
   let reducedMotion = false;
+  /** @type {'online' | 'offline' | 'unknown'} */
+  let connectionState = 'unknown';
+  /** @type {'idle' | 'sent'} */
+  let sentryTestState = 'idle';
+
+  // navigator.online listeners — wired in onMount, torn down on destroy.
+  /** @type {(() => void) | null} */
+  let offOnline = null;
+  /** @type {(() => void) | null} */
+  let offOffline = null;
 
   onMount(() => {
     fingerprint = composeDeviceFingerprint();
     baseline = runExtendedBaseline();
     installState = detectInstallState();
     reducedMotion = detectReducedMotion();
+    connectionState = detectConnectionState();
+    // Live updates: navigator.onLine flips when the OS detects a
+    // connectivity change. Useful for the offline-first PWA so the
+    // worker sees their queue-vs-sync state at a glance.
+    if (typeof window !== 'undefined') {
+      const onOnline = () => (connectionState = 'online');
+      const onOffline = () => (connectionState = 'offline');
+      window.addEventListener('online', onOnline);
+      window.addEventListener('offline', onOffline);
+      offOnline = () => window.removeEventListener('online', onOnline);
+      offOffline = () => window.removeEventListener('offline', onOffline);
+    }
+  });
+
+  onDestroy(() => {
+    if (offOnline) offOnline();
+    if (offOffline) offOffline();
   });
 
   /** @returns {'installed' | 'browser' | 'unknown'} */
@@ -73,9 +101,56 @@
     }
   }
 
+  /** @returns {'online' | 'offline' | 'unknown'} */
+  function detectConnectionState() {
+    if (typeof navigator === 'undefined' || typeof navigator.onLine !== 'boolean') {
+      return 'unknown';
+    }
+    return navigator.onLine ? 'online' : 'offline';
+  }
+
   /** @param {string} key */
   function capabilityLabel(key) {
     return t(`settings.deviceInfo.capability.${key}`);
+  }
+
+  /**
+   * Send a Sentry test event so the worker / co-chair can confirm
+   * observability is wired correctly. Uses Sentry.captureMessage which
+   * silently no-ops when PUBLIC_SENTRY_DSN is not configured — the
+   * structured logger still emits a `client.observability.test_event`
+   * line either way, so a local-only check still produces a console
+   * signal. The button visibly flips to a "sent" state for ~4 seconds
+   * so the user sees the action took.
+   */
+  async function onSendTestEvent() {
+    const fp = fingerprint?.display ?? 'unknown';
+    // Dynamic import keeps the @sentry/sveltekit module out of any
+    // vitest module-graph that doesn't have the SvelteKit virtual
+    // modules ($app/*) available. If the SDK fails to load (test env
+    // without $app, or production deployment without DSN), the
+    // structured logger below is the local-only signal — the button
+    // still flips to its 'sent' state so the worker sees the action
+    // took without leaking the upstream failure.
+    try {
+      const sentry = await import('@sentry/sveltekit');
+      sentry.captureMessage('jhsc.observability.test_event', {
+        level: 'info',
+        tags: { source: 'settings.deviceInfo', surface: 'sentry-test-button' },
+        extra: { fingerprint: fp }
+      });
+    } catch {
+      // Sentry not loaded → silently swallow; the structured logger
+      // line below is the local-only signal.
+    }
+    log.info({
+      event: 'client.observability.test_event',
+      meta: { surface: 'settings.deviceInfo' }
+    });
+    sentryTestState = 'sent';
+    setTimeout(() => {
+      sentryTestState = 'idle';
+    }, 4000);
   }
 </script>
 
@@ -144,6 +219,23 @@
       </dd>
     </div>
 
+    <div class="device-info-row" data-testid="device-info-connection">
+      <dt>{t('settings.deviceInfo.label.connection')}</dt>
+      <dd>
+        {#if connectionState === 'online'}
+          <span class="device-info-badge device-info-badge-good"
+            >{t('settings.deviceInfo.connection.online')}</span
+          >
+        {:else if connectionState === 'offline'}
+          <span class="device-info-badge device-info-badge-warn"
+            >{t('settings.deviceInfo.connection.offline')}</span
+          >
+        {:else}
+          <span class="muted">{t('settings.deviceInfo.unavailable')}</span>
+        {/if}
+      </dd>
+    </div>
+
     <div class="device-info-row" data-testid="device-info-baseline">
       <dt>{t('settings.deviceInfo.label.baseline')}</dt>
       <dd>
@@ -170,6 +262,23 @@
       </dd>
     </div>
   </dl>
+
+  <div class="device-info-actions">
+    <button
+      type="button"
+      class="btn-outline device-info-test-button"
+      on:click={onSendTestEvent}
+      disabled={sentryTestState === 'sent'}
+      data-testid="device-info-sentry-test-button"
+    >
+      {sentryTestState === 'sent'
+        ? t('settings.deviceInfo.sentry_test.sent')
+        : t('settings.deviceInfo.sentry_test.send')}
+    </button>
+    <p class="muted device-info-test-helper">
+      {t('settings.deviceInfo.sentry_test.helper')}
+    </p>
+  </div>
 </section>
 
 <style>
@@ -228,6 +337,30 @@
     background: var(--color-tint-neutral-bg);
     color: var(--color-tint-neutral-fg);
     border-color: var(--color-tint-neutral-border);
+  }
+  .device-info-badge-warn {
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    border-color: var(--color-tint-amber-border);
+  }
+
+  /* Test-event action row — outline button + a muted helper line. */
+  .device-info-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    margin-block-start: 1rem;
+  }
+  .device-info-test-button {
+    min-height: 2.25rem;
+    padding-inline: 0.875rem;
+    font-size: 0.8125rem;
+  }
+  .device-info-test-helper {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
   }
 
   /* Capability pill row — one pill per baseline check, colour-coded
