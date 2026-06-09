@@ -1,11 +1,13 @@
 /**
- * T19.1 — /audit coming-soon placeholder route mount.
+ * T19.1 — /audit route mount.
  *
- * The append-only audit log itself is shipped server-side; the viewer
- * surface (scrollable feed, Merkle integrity verification UI,
- * retention-aware filtering) is a follow-on. The placeholder lands
- * the URL so a worker who navigates here from a future nav link
- * doesn't 404. Same pattern as the rest of the placeholder route tests.
+ * Replaces the original coming-soon placeholder pin set (PR #141)
+ * with structural pins for the real AuditLogViewer mount. The viewer
+ * surfaces demo data via the deterministic provider in
+ * $lib/audit/demo-audit-rows until the real audit-op Edge Function
+ * lands; the mount test pins the WIRE shape (provider injected, demo
+ * note rendered, back-to-home link, noindex meta) so a future swap-in
+ * is structurally constrained.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -15,7 +17,7 @@ import { resolve } from 'node:path';
 const PAGE_PATH = resolve(__dirname, '../../src/routes/audit/+page.svelte');
 const PAGE_TS_PATH = resolve(__dirname, '../../src/routes/audit/+page.ts');
 
-describe('T19.1 — /audit route mount (coming-soon placeholder)', () => {
+describe('T19.1 — /audit route mount (real viewer + demo provider)', () => {
   it('the +page.svelte component exists at the expected path', () => {
     expect(existsSync(PAGE_PATH)).toBe(true);
   });
@@ -34,24 +36,28 @@ describe('T19.1 — /audit route mount (coming-soon placeholder)', () => {
     expect(src).toMatch(/export\s+const\s+ssr\s*=\s*false/);
   });
 
-  it('the page carries the audit-page data-testid + a heading via t()', () => {
+  it('the page carries the audit-page data-testid', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/data-testid=["']audit-page["']/);
-    expect(src).toMatch(/t\(['"]common\.auditPage\.heading['"]\)/);
   });
 
-  it('renders the coming-soon notice (so the user knows the surface is pending)', () => {
+  it('mounts <AuditLogViewer> with a fetchPage prop wired through', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/data-testid=["']audit-coming-soon-notice["']/);
-    expect(src).toMatch(/t\(['"]common\.auditPage\.coming_soon_body['"]\)/);
+    expect(src).toMatch(/import\s+AuditLogViewer\s+from\s+['"]\$lib\/audit\/AuditLogViewer\.svelte['"]/);
+    expect(src).toMatch(/<AuditLogViewer\s+\{fetchPage\}/);
   });
 
-  it('surfaces the four "what this will do" bullets via t()', () => {
+  it('imports the demo provider (buildDemoAuditRows + fetchDemoAuditPage)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/t\(['"]common\.auditPage\.bullet_append_only['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.auditPage\.bullet_pseudonymized['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.auditPage\.bullet_merkle_integrity['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.auditPage\.bullet_retention_aware['"]\)/);
+    expect(src).toMatch(
+      /import\s*{\s*buildDemoAuditRows\s*,\s*fetchDemoAuditPage\s*}\s+from\s+['"]\$lib\/audit\/demo-audit-rows['"]/
+    );
+  });
+
+  it('renders the demo-note callout (so the worker knows this is not real audit data)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/data-testid=["']audit-page-demo-note["']/);
+    expect(src).toMatch(/t\(['"]audit\.viewer\.demo_note['"]\)/);
   });
 
   it('renders a back-to-home link so the user is not stranded', () => {
@@ -61,24 +67,8 @@ describe('T19.1 — /audit route mount (coming-soon placeholder)', () => {
     expect(src).toMatch(/t\(['"]common\.auditPage\.back_to_home_cta['"]\)/);
   });
 
-  it('carries a noindex meta (placeholder route should not be indexed)', () => {
+  it('carries a noindex meta', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
-  });
-
-  it('every common.auditPage.* key referenced is present in the root catalog', () => {
-    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
-    expect(existsSync(catalogPath)).toBe(true);
-    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-    expect(catalog.common.auditPage).toBeDefined();
-    expect(typeof catalog.common.auditPage.title).toBe('string');
-    expect(typeof catalog.common.auditPage.heading).toBe('string');
-    expect(typeof catalog.common.auditPage.coming_soon_body).toBe('string');
-    expect(typeof catalog.common.auditPage.what_this_will_do_heading).toBe('string');
-    expect(typeof catalog.common.auditPage.bullet_append_only).toBe('string');
-    expect(typeof catalog.common.auditPage.bullet_pseudonymized).toBe('string');
-    expect(typeof catalog.common.auditPage.bullet_merkle_integrity).toBe('string');
-    expect(typeof catalog.common.auditPage.bullet_retention_aware).toBe('string');
-    expect(typeof catalog.common.auditPage.back_to_home_cta).toBe('string');
   });
 });
