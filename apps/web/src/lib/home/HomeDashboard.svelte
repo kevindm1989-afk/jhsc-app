@@ -33,7 +33,7 @@
   <ul class="hd-grid" data-testid="hd-grid">
     <li>
       <a
-        href="/concerns"
+        href="/concerns?filter=open"
         class="hd-tile"
         class:active={summary.openConcerns > 0}
         class:tone-blue={summary.openConcerns > 0}
@@ -46,7 +46,7 @@
     </li>
     <li>
       <a
-        href="/recommendations"
+        href="/recommendations?filter=overdue"
         class="hd-tile"
         class:active={summary.overdueRecommendations > 0}
         class:tone-red={summary.overdueRecommendations > 0}
@@ -61,7 +61,7 @@
     </li>
     <li>
       <a
-        href="/training"
+        href="/training?filter=expired"
         class="hd-tile"
         class:active={summary.expiredTraining > 0}
         class:tone-red={summary.expiredTraining > 0}
@@ -74,7 +74,7 @@
     </li>
     <li>
       <a
-        href="/work-refusal"
+        href="/work-refusal?filter=active"
         class="hd-tile"
         class:active={summary.activeRefusals > 0}
         class:tone-amber={summary.activeRefusals > 0}
@@ -87,7 +87,7 @@
     </li>
     <li>
       <a
-        href="/s51-evidence"
+        href="/s51-evidence?filter=preserving"
         class="hd-tile"
         class:active={summary.preservingScenes > 0}
         class:tone-red={summary.preservingScenes > 0}

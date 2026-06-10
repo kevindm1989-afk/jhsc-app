@@ -5,8 +5,11 @@
    * Replaces the PR #139 coming-soon placeholder. Mounts
    * WorkRefusalViewer with the demo provider so the register surface
    * renders realistic content until the work-refusal-module backend
-   * (stage-gated capture + worker-side encryption + audit chain) is
-   * wired.
+   * is wired.
+   *
+   * Supports URL-driven filtering:
+   *   - `?filter=active` narrows to `stage !== 'resolved'`, matching
+   *     the "Active s. 43 refusals" home dashboard tile.
    *
    * Work refusals are sensitivity C4 — the card carries the
    * destructive-red inline-start border shared with /reprisal and
@@ -14,20 +17,31 @@
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import WorkRefusalViewer from '$lib/work-refusal/WorkRefusalViewer.svelte';
   import {
     buildDemoWorkRefusals,
     fetchDemoWorkRefusalPage
   } from '$lib/work-refusal/demo-work-refusal';
+  import FilterBanner from '$lib/ui/FilterBanner.svelte';
 
   const DEMO_ROWS = buildDemoWorkRefusals(50);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoWorkRefusalPage(page, page_size, DEMO_ROWS);
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: filterLabel =
+    filterParam === 'active' ? t('common.filterBanner.label.work_refusal_active') : null;
+  $: predicate =
+    filterParam === 'active'
+      ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
+          r.stage !== 'resolved'
+      : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoWorkRefusalPage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -36,7 +50,12 @@
 </svelte:head>
 
 <section class="card work-refusal-card" data-testid="work-refusal-page">
-  <WorkRefusalViewer {fetchPage} />
+  {#if filterLabel}
+    <FilterBanner label={filterLabel} clearHref="/work-refusal" />
+  {/if}
+  {#key filterParam}
+    <WorkRefusalViewer {fetchPage} />
+  {/key}
   <p class="wr-demo-note muted" data-testid="wr-demo-note">
     {t('workRefusal.viewer.demo_note')}
   </p>
