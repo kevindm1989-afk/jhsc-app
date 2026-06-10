@@ -128,7 +128,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('library.viewer.empty')}
     </p>
   {:else}
-    <div class="lib-controls" data-testid="lib-controls">
+    <div class="lib-controls" data-testid="lib-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

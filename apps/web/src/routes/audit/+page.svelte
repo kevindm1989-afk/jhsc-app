@@ -75,6 +75,14 @@
     }
   ];
 
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    return t('common.auditPage.title');
+  })();
+
   $: predicate = activeValue ? predicateFor(activeValue) : undefined;
   $: fetchPage =
     /**
@@ -85,7 +93,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.auditPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -97,7 +105,7 @@
   <p class="audit-page-demo-note muted" data-testid="audit-page-demo-note">
     {t('audit.viewer.demo_note')}
   </p>
-  <p class="audit-page-footer">
+  <p class="audit-page-footer" data-print="hide">
     <a href="/" data-testid="audit-back-to-home">{t('common.auditPage.back_to_home_cta')}</a>
   </p>
 </section>

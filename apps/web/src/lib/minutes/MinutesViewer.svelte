@@ -128,7 +128,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('minutes.viewer.empty')}
     </p>
   {:else}
-    <div class="min-controls" data-testid="min-controls">
+    <div class="min-controls" data-testid="min-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

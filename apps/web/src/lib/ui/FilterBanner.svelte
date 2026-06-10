@@ -21,7 +21,7 @@
   export let clearHref;
 </script>
 
-<aside class="fb-banner" data-testid="filter-banner" role="status">
+<aside class="fb-banner" data-testid="filter-banner" role="status" data-print="hide">
   <span class="fb-label">
     <strong>{t('common.filterBanner.filtered_label')}:</strong>
     {label}

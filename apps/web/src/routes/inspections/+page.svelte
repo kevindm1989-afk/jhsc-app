@@ -48,6 +48,15 @@
     }
   ];
 
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    if (filterLabel) return filterLabel;
+    return t('common.inspectionsPage.title');
+  })();
+
   $: predicate = activeValue
     ? /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) =>
         r.integrity_status === activeValue
@@ -61,7 +70,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.inspectionsPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -76,7 +85,7 @@
   <p class="ins-demo-note muted" data-testid="ins-demo-note">
     {t('inspection.viewer.demo_note')}
   </p>
-  <p class="ins-footer">
+  <p class="ins-footer" data-print="hide">
     <a href="/" data-testid="inspections-back-to-home">
       {t('common.inspectionsPage.back_to_home_cta')}
     </a>

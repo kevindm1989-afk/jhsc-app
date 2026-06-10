@@ -127,7 +127,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('recommendations.viewer.empty')}
     </p>
   {:else}
-    <div class="recs-controls" data-testid="recs-controls">
+    <div class="recs-controls" data-testid="recs-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

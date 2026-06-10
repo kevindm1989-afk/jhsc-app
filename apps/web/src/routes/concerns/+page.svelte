@@ -53,6 +53,18 @@
     }
   ];
 
+  // Filter-aware document title: when a chip filter is active, use its
+  // label; when a macro filter (banner) is active, use that; otherwise
+  // the default page title.
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    if (filterLabel) return filterLabel;
+    return t('common.concernsPage.title');
+  })();
+
   $: predicate = activeValue
     ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) =>
         r.status === activeValue
@@ -66,7 +78,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.concernsPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -81,7 +93,7 @@
   <p class="con-demo-note muted" data-testid="con-demo-note">
     {t('concern.viewer.demo_note')}
   </p>
-  <p class="con-footer">
+  <p class="con-footer" data-print="hide">
     <a href="/" data-testid="concerns-back-to-home">
       {t('common.concernsPage.back_to_home_cta')}
     </a>

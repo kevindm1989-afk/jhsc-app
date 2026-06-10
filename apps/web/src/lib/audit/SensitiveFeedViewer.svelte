@@ -138,7 +138,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('sensitiveFeed.viewer.empty')}
     </p>
   {:else}
-    <div class="sensitive-feed-controls" data-testid="sensitive-feed-controls">
+    <div class="sensitive-feed-controls" data-testid="sensitive-feed-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

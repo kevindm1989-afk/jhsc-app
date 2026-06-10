@@ -129,7 +129,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('inspection.viewer.empty')}
     </p>
   {:else}
-    <div class="ins-controls" data-testid="ins-controls">
+    <div class="ins-controls" data-testid="ins-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

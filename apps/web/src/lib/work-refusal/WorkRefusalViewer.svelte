@@ -141,7 +141,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('workRefusal.viewer.empty')}
     </p>
   {:else}
-    <div class="wr-controls" data-testid="wr-controls">
+    <div class="wr-controls" data-testid="wr-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"
