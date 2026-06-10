@@ -22,6 +22,7 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoLibrary(50);
@@ -97,15 +98,18 @@
       ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
           r.offline_cached === true
       : undefined;
+  $: sortParam = $page.url.searchParams.get('sort');
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+
   $: fetchPage =
     /**
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoLibraryPage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoLibraryPage(p, ps, sortedRows, predicate);
 
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('library') };
   }
 </script>
@@ -117,11 +121,16 @@
 
 <section class="card lib-card" data-testid="library-page">
   <FilterChipsRail {chips} {activeValue} />
+  <SortToggle
+    baseHref="/library"
+    activeSort={sortParam}
+    preservedParams={{ filter: filterParam }}
+  />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/library" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
     <LibraryViewer
       {fetchPage}
       filterActive={filterParam !== null}

@@ -29,6 +29,7 @@
   import { buildDemoSensitiveRows, fetchDemoSensitivePage } from '$lib/audit/demo-sensitive-feed';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoSensitiveRows(50);
@@ -78,15 +79,18 @@
     ? /** @param {import('$lib/audit/demo-sensitive-feed').DemoSensitiveRow} r */ (r) =>
         r.sensitivity === activeValue
     : undefined;
+  $: sortParam = $page.url.searchParams.get('sort');
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+
   $: fetchPage =
     /**
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoSensitivePage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoSensitivePage(p, ps, sortedRows, predicate);
 
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('sensitive-feed') };
   }
 </script>
@@ -98,8 +102,13 @@
 
 <section class="card sensitive-feed-card" data-testid="sensitive-feed-page">
   <FilterChipsRail {chips} {activeValue} />
+  <SortToggle
+    baseHref="/sensitive-feed"
+    activeSort={sortParam}
+    preservedParams={{ filter: filterParam }}
+  />
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
     <SensitiveFeedViewer
       {fetchPage}
       filterActive={filterParam !== null}

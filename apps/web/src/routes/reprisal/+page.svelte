@@ -26,6 +26,7 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoReprisals(50);
@@ -90,15 +91,18 @@
       ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
           r.status === 'filed' || r.status === 'investigating'
       : undefined;
+  $: sortParam = $page.url.searchParams.get('sort');
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+
   $: fetchPage =
     /**
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoReprisalPage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoReprisalPage(p, ps, sortedRows, predicate);
 
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('reprisal') };
   }
 </script>
@@ -110,11 +114,16 @@
 
 <section class="card reprisal-card" data-testid="reprisal-page">
   <FilterChipsRail {chips} {activeValue} />
+  <SortToggle
+    baseHref="/reprisal"
+    activeSort={sortParam}
+    preservedParams={{ filter: filterParam }}
+  />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/reprisal" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
     <ReprisalViewer
       {fetchPage}
       filterActive={filterParam !== null}

@@ -29,6 +29,7 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoS51Evidence(30);
@@ -92,15 +93,18 @@
     ? /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (r) =>
         r.scene_state === activeValue
     : undefined;
+  $: sortParam = $page.url.searchParams.get('sort');
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+
   $: fetchPage =
     /**
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoS51EvidencePage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoS51EvidencePage(p, ps, sortedRows, predicate);
 
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('s51-evidence') };
   }
 </script>
@@ -112,11 +116,16 @@
 
 <section class="card s51-card" data-testid="s51-page">
   <FilterChipsRail {chips} {activeValue} />
+  <SortToggle
+    baseHref="/s51-evidence"
+    activeSort={sortParam}
+    preservedParams={{ filter: filterParam }}
+  />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/s51-evidence" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
     <S51EvidenceViewer
       {fetchPage}
       filterActive={filterParam !== null}

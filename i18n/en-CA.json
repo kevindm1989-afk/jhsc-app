@@ -108,6 +108,13 @@
       "newest": "Newest first",
       "oldest": "Oldest first"
     },
+    "dateRange": {
+      "aria_label": "Date range",
+      "all_time": "All time",
+      "today": "Today",
+      "last_7_days": "Last 7 days",
+      "last_30_days": "Last 30 days"
+    },
     "filterEmptyState": {
       "no_matches": "No matches for this filter. Pick a different chip above, or clear the filter."
     },
