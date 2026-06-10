@@ -30,6 +30,7 @@
   import Icon from '$lib/ui/Icon.svelte';
   import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
   import BottomTabBar from '$lib/ui/BottomTabBar.svelte';
+  import HeaderSearch from '$lib/ui/HeaderSearch.svelte';
   import '../app.css';
 
   // Trigger feature-flag setup (no-op at scaffold; T-feature-flag wires).
@@ -113,6 +114,9 @@
       {/if}
     </nav>
     <div class="topbar-actions">
+      {#if $isSignedIn}
+        <HeaderSearch />
+      {/if}
       <ThemeToggle />
     </div>
   </div>
