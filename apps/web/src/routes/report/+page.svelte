@@ -16,8 +16,17 @@
    */
   import { page } from '$app/stores';
   import { t } from '$lib/i18n';
-  import { buildMonthlyReport, shiftMonth, toMonthString } from '$lib/report/aggregate';
+  import {
+    buildMonthlyReport,
+    reportToCsvRows,
+    shiftMonth,
+    toMonthString
+  } from '$lib/report/aggregate';
   import { buildHref } from '$lib/ui/url-state';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
+
+  const CSV_FIELDS = /** @type {const} */ (['month', 'section', 'key', 'count']);
 
   $: monthParam = $page.url.searchParams.get('month');
   $: month =
@@ -40,6 +49,11 @@
 
   const SEVERITY_KEYS = /** @type {const} */ (['critical', 'high', 'medium', 'low']);
   const REC_STATUS_KEYS = /** @type {const} */ (['overdue', 'pending', 'responded', 'archived']);
+
+  function buildDownload() {
+    const rows = reportToCsvRows(report);
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename(`report-${month}`) };
+  }
 </script>
 
 <svelte:head>
@@ -62,6 +76,8 @@
       {t('report.page.next_month')}
     </a>
   </nav>
+
+  <CsvDownloadButton onClick={buildDownload} />
 
   <h2>{t('report.page.totals_heading')}</h2>
   <ul class="report-tiles" data-testid="report-tiles">

@@ -30,6 +30,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoWorkRefusals(50);
@@ -93,13 +95,27 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.workRefusalPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
-        r.stage === activeValue
-    : filterParam === 'active'
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  $: predicate = (() => {
+    const stagePred = activeValue
       ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
-          r.stage !== 'resolved'
-      : undefined;
+          r.stage === activeValue
+      : filterParam === 'active'
+        ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
+            r.stage !== 'resolved'
+        : null;
+    const hasRange = fromParam || toParam;
+    if (!stagePred && !hasRange) return undefined;
+    return /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (
+      r
+    ) => {
+      if (stagePred && !stagePred(r)) return false;
+      if (hasRange && !withinRange(r.filed_at, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: sortParam = $page.url.searchParams.get('sort');
   $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
@@ -123,19 +139,25 @@
 
 <section class="card work-refusal-card" data-testid="work-refusal-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/work-refusal"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/work-refusal"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/work-refusal" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <WorkRefusalViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}

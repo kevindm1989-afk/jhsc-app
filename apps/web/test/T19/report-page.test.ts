@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildMonthlyReport,
+  reportToCsvRows,
   shiftMonth,
   toMonthString
 } from '../../src/lib/report/aggregate';
@@ -107,6 +108,46 @@ describe('T19 — report aggregator (pure functions)', () => {
   });
 });
 
+describe('T19 — reportToCsvRows', () => {
+  it('emits one row per total + one row per breakdown bucket', () => {
+    const report = buildMonthlyReport('2026-06');
+    const rows = reportToCsvRows(report);
+    // 8 totals + 4 severity + 4 status = 16 rows
+    expect(rows.length).toBe(16);
+  });
+
+  it('every row carries the source month so a multi-month CSV stack pivots correctly', () => {
+    const rows = reportToCsvRows(buildMonthlyReport('2026-06'));
+    for (const r of rows) expect(r.month).toBe('2026-06');
+  });
+
+  it('groups rows under three sections: totals, concerns_severity, recs_status', () => {
+    const rows = reportToCsvRows(buildMonthlyReport('2026-06'));
+    const sections = new Set(rows.map((r) => r.section));
+    expect(sections).toEqual(new Set(['totals', 'concerns_severity', 'recs_status']));
+  });
+
+  it('totals rows match the report.totals object', () => {
+    const report = buildMonthlyReport('2026-06');
+    const rows = reportToCsvRows(report);
+    const totalsRows = rows.filter((r) => r.section === 'totals');
+    expect(totalsRows.length).toBe(8);
+    for (const r of totalsRows) {
+      expect(r.count).toBe(
+        report.totals[/** @type {keyof typeof report.totals} */ (r.key as keyof typeof report.totals)]
+      );
+    }
+  });
+
+  it('every count is a non-negative integer', () => {
+    const rows = reportToCsvRows(buildMonthlyReport('2026-06'));
+    for (const r of rows) {
+      expect(Number.isInteger(r.count)).toBe(true);
+      expect(r.count).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
 describe('T19 — /report route mount', () => {
   it('the +page.svelte component exists at the expected path', () => {
     expect(existsSync(PAGE_PATH)).toBe(true);
@@ -173,6 +214,16 @@ describe('T19 — /report route mount', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/<a\s+href=["']\/["']/);
     expect(src).toMatch(/data-testid=["']report-back-to-home["']/);
+  });
+
+  it('mounts CsvDownloadButton + wires it to reportToCsvRows for the current month', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(
+      /import\s+CsvDownloadButton\s+from\s+['"]\$lib\/ui\/CsvDownloadButton\.svelte['"]/
+    );
+    expect(src).toMatch(/<CsvDownloadButton/);
+    expect(src).toMatch(/reportToCsvRows\(report\)/);
+    expect(src).toMatch(/csvFilename\(`report-\$\{month\}`\)/);
   });
 
   it('carries a noindex meta', () => {

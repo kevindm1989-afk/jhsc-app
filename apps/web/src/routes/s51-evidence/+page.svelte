@@ -30,6 +30,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoS51Evidence(30);
@@ -89,10 +91,24 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.s51Page.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (r) =>
-        r.scene_state === activeValue
-    : undefined;
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  $: predicate = (() => {
+    const scenePred = activeValue
+      ? /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (r) =>
+          r.scene_state === activeValue
+      : null;
+    const hasRange = fromParam || toParam;
+    if (!scenePred && !hasRange) return undefined;
+    return /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (
+      r
+    ) => {
+      if (scenePred && !scenePred(r)) return false;
+      if (hasRange && !withinRange(r.opened_at, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: sortParam = $page.url.searchParams.get('sort');
   $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
@@ -116,19 +132,25 @@
 
 <section class="card s51-card" data-testid="s51-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/s51-evidence"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/s51-evidence"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/s51-evidence" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <S51EvidenceViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}

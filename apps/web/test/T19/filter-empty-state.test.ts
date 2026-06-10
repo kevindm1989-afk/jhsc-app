@@ -78,10 +78,11 @@ describe('T19.1 — every register route passes filterActive to its viewer', () 
         resolve(__dirname, '../../src/routes', route, '+page.svelte'),
         'utf8'
       );
-      // Most routes pass `filterParam !== null`. /concerns supports
-      // multi-axis filtering and passes the OR of all axes instead.
+      // Most routes pass `filterParam !== null` and now compose with
+      // ?from/?to so the expression includes fromParam/toParam too.
+      // /concerns supports multi-axis filtering and passes anyAxisActive.
       const ok =
-        /filterActive=\{filterParam\s*!==\s*null\}/.test(src) ||
+        /filterActive=\{[^}]*filterParam\s*!==\s*null/.test(src) ||
         /filterActive=\{anyAxisActive\}/.test(src);
       expect(ok).toBe(true);
     });

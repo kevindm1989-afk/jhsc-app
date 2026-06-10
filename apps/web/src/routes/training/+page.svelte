@@ -22,6 +22,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoTraining(50);
@@ -74,10 +76,24 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.trainingPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/training/demo-training').DemoTrainingRow} r */ (r) =>
-        r.validity === activeValue
-    : undefined;
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  // Compose the validity filter with the date range so both gates must
+  // pass for a row to appear.
+  $: predicate = (() => {
+    const validityPred = activeValue
+      ? /** @param {import('$lib/training/demo-training').DemoTrainingRow} r */ (r) =>
+          r.validity === activeValue
+      : null;
+    const hasRange = fromParam || toParam;
+    if (!validityPred && !hasRange) return undefined;
+    return /** @param {import('$lib/training/demo-training').DemoTrainingRow} r */ (r) => {
+      if (validityPred && !validityPred(r)) return false;
+      if (hasRange && !withinRange(r.completed_at, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: sortParam = $page.url.searchParams.get('sort');
   $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
@@ -101,19 +117,25 @@
 
 <section class="card trn-card" data-testid="training-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/training"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/training"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/training" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <TrainingViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}
