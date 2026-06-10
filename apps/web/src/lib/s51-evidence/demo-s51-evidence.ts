@@ -134,16 +134,22 @@ export function buildDemoS51Evidence(count: number, seed = 51): DemoS51EvidenceR
   return rows;
 }
 
-/** Page-based slicer — same contract as the other demo providers. */
+/**
+ * Page-based slicer — same contract as the other demo providers.
+ * Optional predicate narrows the dataset before pagination (e.g. only
+ * preserving scenes).
+ */
 export async function fetchDemoS51EvidencePage(
   page: number,
   page_size: number,
-  all: DemoS51EvidenceRow[]
+  all: DemoS51EvidenceRow[],
+  predicate?: (row: DemoS51EvidenceRow) => boolean
 ): Promise<DemoS51EvidencePage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };

@@ -82,6 +82,17 @@
       "crypto": "Could not decrypt the data on this device. Try locking and signing in again. If this keeps happening, your device may have been tampered with — contact your worker co-chair.",
       "integrity_fail": "The data on this device could not be verified. This entry may have been tampered with and was not saved. Please re-enter it."
     },
+    "filterBanner": {
+      "filtered_label": "Filtered",
+      "clear_cta": "Clear filter",
+      "label": {
+        "concerns_open": "Open concerns",
+        "recommendations_overdue": "Overdue recommendations",
+        "training_expired": "Expired training",
+        "work_refusal_active": "Active s. 43 refusals",
+        "s51_preserving": "Preserving scenes"
+      }
+    },
     "errorPage": {
       "title": "Something went wrong",
       "heading_404": "Page not found",

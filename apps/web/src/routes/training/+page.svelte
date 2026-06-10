@@ -4,22 +4,36 @@
    *
    * Replaces the PR #139 coming-soon placeholder. Mounts TrainingViewer
    * with the demo provider so the surface renders realistic content
-   * until the training-records-module backend (certified-member
-   * tracking + refresher alerts + evidence attachments) is wired.
+   * until the training-records-module backend is wired.
+   *
+   * Supports URL-driven filtering:
+   *   - `?filter=expired` narrows to `validity === 'expired'`, matching
+   *     the "Expired training" home dashboard tile.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import TrainingViewer from '$lib/training/TrainingViewer.svelte';
   import { buildDemoTraining, fetchDemoTrainingPage } from '$lib/training/demo-training';
+  import FilterBanner from '$lib/ui/FilterBanner.svelte';
 
   const DEMO_ROWS = buildDemoTraining(50);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoTrainingPage(page, page_size, DEMO_ROWS);
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: filterLabel =
+    filterParam === 'expired' ? t('common.filterBanner.label.training_expired') : null;
+  $: predicate =
+    filterParam === 'expired'
+      ? /** @param {import('$lib/training/demo-training').DemoTrainingRow} r */ (r) =>
+          r.validity === 'expired'
+      : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoTrainingPage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -28,7 +42,12 @@
 </svelte:head>
 
 <section class="card trn-card" data-testid="training-page">
-  <TrainingViewer {fetchPage} />
+  {#if filterLabel}
+    <FilterBanner label={filterLabel} clearHref="/training" />
+  {/if}
+  {#key filterParam}
+    <TrainingViewer {fetchPage} />
+  {/key}
   <p class="trn-demo-note muted" data-testid="trn-demo-note">
     {t('training.viewer.demo_note')}
   </p>

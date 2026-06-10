@@ -124,16 +124,22 @@ export function buildDemoTraining(count: number, seed = 912): DemoTrainingRow[] 
   return rows;
 }
 
-/** Page-based slicer — same contract as the other demo providers. */
+/**
+ * Page-based slicer — same contract as the other demo providers.
+ * Optional predicate narrows the dataset before pagination (e.g. only
+ * expired rows).
+ */
 export async function fetchDemoTrainingPage(
   page: number,
   page_size: number,
-  all: DemoTrainingRow[]
+  all: DemoTrainingRow[],
+  predicate?: (row: DemoTrainingRow) => boolean
 ): Promise<DemoTrainingPage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };

@@ -58,15 +58,27 @@ describe('T19.1 — HomeDashboard', () => {
     expect(screen.getByTestId('hd-tile-s51').getAttribute('data-active')).toBe('false');
   });
 
-  it('each tile deep-links to its register surface', () => {
+  it('each tile deep-links to its register surface WITH the matching filter param', () => {
+    // The filter param wires each tile to the same predicate the
+    // summariser already applies — so a click on "Open concerns: 7"
+    // lands on a register narrowed to those 7 rows. Without the
+    // filter, the count is lost on click.
     render(HomeDashboard, { props: { summary: ZERO_SUMMARY } });
-    expect(screen.getByTestId('hd-tile-concerns').getAttribute('href')).toBe('/concerns');
-    expect(screen.getByTestId('hd-tile-recommendations').getAttribute('href')).toBe(
-      '/recommendations'
+    expect(screen.getByTestId('hd-tile-concerns').getAttribute('href')).toBe(
+      '/concerns?filter=open'
     );
-    expect(screen.getByTestId('hd-tile-training').getAttribute('href')).toBe('/training');
-    expect(screen.getByTestId('hd-tile-work-refusal').getAttribute('href')).toBe('/work-refusal');
-    expect(screen.getByTestId('hd-tile-s51').getAttribute('href')).toBe('/s51-evidence');
+    expect(screen.getByTestId('hd-tile-recommendations').getAttribute('href')).toBe(
+      '/recommendations?filter=overdue'
+    );
+    expect(screen.getByTestId('hd-tile-training').getAttribute('href')).toBe(
+      '/training?filter=expired'
+    );
+    expect(screen.getByTestId('hd-tile-work-refusal').getAttribute('href')).toBe(
+      '/work-refusal?filter=active'
+    );
+    expect(screen.getByTestId('hd-tile-s51').getAttribute('href')).toBe(
+      '/s51-evidence?filter=preserving'
+    );
     expect(screen.getByTestId('hd-more-link').getAttribute('href')).toBe('/more');
   });
 });

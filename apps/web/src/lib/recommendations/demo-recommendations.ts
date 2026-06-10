@@ -139,16 +139,22 @@ export function buildDemoRecommendations(count: number, seed = 1789): DemoRecomm
   return rows;
 }
 
-/** Page-based slicer — same contract as the other demo providers. */
+/**
+ * Page-based slicer — same contract as the other demo providers.
+ * Optional predicate narrows the dataset before pagination (e.g. only
+ * overdue rows).
+ */
 export async function fetchDemoRecommendationsPage(
   page: number,
   page_size: number,
-  all: DemoRecommendationRow[]
+  all: DemoRecommendationRow[],
+  predicate?: (row: DemoRecommendationRow) => boolean
 ): Promise<DemoRecommendationsPage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };

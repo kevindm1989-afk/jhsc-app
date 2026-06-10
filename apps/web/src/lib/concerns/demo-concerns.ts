@@ -161,16 +161,25 @@ export function buildDemoConcerns(count: number, seed = 2024): DemoConcernRow[] 
   return rows;
 }
 
-/** Page-based slicer — same contract as the other demo providers. */
+/**
+ * Page-based slicer — same contract as the other demo providers.
+ *
+ * The optional `predicate` lets the route page narrow the dataset
+ * before slicing (e.g. only rows where `status === 'open'`). It is
+ * applied to the whole dataset BEFORE pagination so `total` reflects
+ * the filtered count.
+ */
 export async function fetchDemoConcernsPage(
   page: number,
   page_size: number,
-  all: DemoConcernRow[]
+  all: DemoConcernRow[],
+  predicate?: (row: DemoConcernRow) => boolean
 ): Promise<DemoConcernsPage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };

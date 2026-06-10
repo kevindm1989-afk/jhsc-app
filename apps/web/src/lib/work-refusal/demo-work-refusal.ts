@@ -140,16 +140,22 @@ export function buildDemoWorkRefusals(count: number, seed = 43): DemoWorkRefusal
   return rows;
 }
 
-/** Page-based slicer — same contract as the other demo providers. */
+/**
+ * Page-based slicer — same contract as the other demo providers.
+ * Optional predicate narrows the dataset before pagination (e.g. only
+ * active refusals).
+ */
 export async function fetchDemoWorkRefusalPage(
   page: number,
   page_size: number,
-  all: DemoWorkRefusalRow[]
+  all: DemoWorkRefusalRow[],
+  predicate?: (row: DemoWorkRefusalRow) => boolean
 ): Promise<DemoWorkRefusalPage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };

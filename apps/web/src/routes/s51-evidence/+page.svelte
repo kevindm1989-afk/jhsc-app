@@ -5,9 +5,11 @@
    *
    * Replaces the PR #141 coming-soon placeholder. Mounts
    * S51EvidenceViewer with the demo provider so the register surface
-   * renders realistic content until T14 wires the real backend
-   * (evidence-capture flow + scene-preservation timer + per-entry
-   * passphrase + photo sanitize).
+   * renders realistic content until T14 wires the real backend.
+   *
+   * Supports URL-driven filtering:
+   *   - `?filter=preserving` narrows to `scene_state === 'preserving'`,
+   *     matching the "Scenes preserving" home dashboard tile.
    *
    * Preserves the destructive-red 4px inline-start border the
    * placeholder card established — every C4 surface in the worker-hub
@@ -15,20 +17,31 @@
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import S51EvidenceViewer from '$lib/s51-evidence/S51EvidenceViewer.svelte';
   import {
     buildDemoS51Evidence,
     fetchDemoS51EvidencePage
   } from '$lib/s51-evidence/demo-s51-evidence';
+  import FilterBanner from '$lib/ui/FilterBanner.svelte';
 
   const DEMO_ROWS = buildDemoS51Evidence(30);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoS51EvidencePage(page, page_size, DEMO_ROWS);
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: filterLabel =
+    filterParam === 'preserving' ? t('common.filterBanner.label.s51_preserving') : null;
+  $: predicate =
+    filterParam === 'preserving'
+      ? /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (r) =>
+          r.scene_state === 'preserving'
+      : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoS51EvidencePage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -37,7 +50,12 @@
 </svelte:head>
 
 <section class="card s51-card" data-testid="s51-page">
-  <S51EvidenceViewer {fetchPage} />
+  {#if filterLabel}
+    <FilterBanner label={filterLabel} clearHref="/s51-evidence" />
+  {/if}
+  {#key filterParam}
+    <S51EvidenceViewer {fetchPage} />
+  {/key}
   <p class="s51-demo-note muted" data-testid="s51-demo-note">
     {t('s51.viewer.demo_note')}
   </p>

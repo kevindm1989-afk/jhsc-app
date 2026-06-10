@@ -8,22 +8,38 @@
    * (recommendations store + 21-day timer state + employer-response
    * capture + auto-escalation).
    *
+   * Supports URL-driven filtering:
+   *   - `?filter=overdue` narrows to `status === 'overdue'`, matching
+   *     the "Overdue recommendations" home dashboard tile.
+   *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import RecommendationsViewer from '$lib/recommendations/RecommendationsViewer.svelte';
   import {
     buildDemoRecommendations,
     fetchDemoRecommendationsPage
   } from '$lib/recommendations/demo-recommendations';
+  import FilterBanner from '$lib/ui/FilterBanner.svelte';
 
   const DEMO_ROWS = buildDemoRecommendations(50);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoRecommendationsPage(page, page_size, DEMO_ROWS);
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: filterLabel =
+    filterParam === 'overdue' ? t('common.filterBanner.label.recommendations_overdue') : null;
+  $: predicate =
+    filterParam === 'overdue'
+      ? /** @param {import('$lib/recommendations/demo-recommendations').DemoRecommendationRow} r */ (
+          r
+        ) => r.status === 'overdue'
+      : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoRecommendationsPage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -32,7 +48,12 @@
 </svelte:head>
 
 <section class="card recs-card" data-testid="recommendations-page">
-  <RecommendationsViewer {fetchPage} />
+  {#if filterLabel}
+    <FilterBanner label={filterLabel} clearHref="/recommendations" />
+  {/if}
+  {#key filterParam}
+    <RecommendationsViewer {fetchPage} />
+  {/key}
   <p class="recs-demo-note muted" data-testid="recs-demo-note">
     {t('recommendations.viewer.demo_note')}
   </p>
