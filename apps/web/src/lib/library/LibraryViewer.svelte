@@ -21,6 +21,7 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import SkeletonRows from '$lib/ui/SkeletonRows.svelte';
 
   /**
    * @type {(page: number, page_size: number) => Promise<{
@@ -115,9 +116,9 @@
   </header>
 
   {#if loading}
-    <p class="muted" role="status" data-testid="lib-loading">
-      {t('library.viewer.loading')}
-    </p>
+    <div role="status" aria-label={t('library.viewer.loading')} data-testid="lib-loading">
+      <SkeletonRows />
+    </div>
   {:else if loadError}
     <p class="lib-alert" role="alert" data-testid="lib-load-error">
       {t('library.viewer.error.load_failed')}
@@ -139,6 +140,9 @@
       </button>
       <span class="lib-page-indicator" data-testid="lib-page-indicator">
         {t('library.viewer.page_indicator', { page: page + 1, total: pageCount })}
+        <span class="pagination-total" data-testid="pagination-total"
+          >· {t('common.pagination.total_entries', { count: total })}</span
+        >
       </span>
       <button
         type="button"

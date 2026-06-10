@@ -30,6 +30,7 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import SkeletonRows from '$lib/ui/SkeletonRows.svelte';
 
   /**
    * Page fetcher contract. The provider returns a deterministic page
@@ -125,9 +126,9 @@
   </header>
 
   {#if loading}
-    <p class="muted" role="status" data-testid="audit-viewer-loading">
-      {t('audit.viewer.loading')}
-    </p>
+    <div role="status" aria-label={t('audit.viewer.loading')} data-testid="audit-viewer-loading">
+      <SkeletonRows />
+    </div>
   {:else if loadError}
     <p class="audit-viewer-alert" role="alert" data-testid="audit-viewer-load-error">
       {t('audit.viewer.error.load_failed')}
@@ -149,6 +150,9 @@
       </button>
       <span class="audit-viewer-page-indicator" data-testid="audit-viewer-page-indicator">
         {t('audit.viewer.page_indicator', { page: page + 1, total: pageCount })}
+        <span class="pagination-total" data-testid="pagination-total"
+          >· {t('common.pagination.total_entries', { count: total })}</span
+        >
       </span>
       <button
         type="button"
