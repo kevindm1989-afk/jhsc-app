@@ -97,8 +97,10 @@ describe('T19.1 — /sensitive-feed route wires the FilterChipsRail with c3 / c4
     }
   });
 
-  it('passes filterActive={filterParam !== null} to the viewer', () => {
-    expect(src).toMatch(/filterActive=\{filterParam\s*!==\s*null\}/);
+  it('passes filterActive=<truthy-when-filtered> to the viewer', () => {
+    // /sensitive-feed now composes filterParam with the date-range params; the
+    // expression includes filterParam OR fromParam OR toParam.
+    expect(src).toMatch(/filterActive=\{[\s\S]*filterParam\s*!==\s*null/);
   });
 
   it('preserves the destructive-red inline-start border on the card', () => {

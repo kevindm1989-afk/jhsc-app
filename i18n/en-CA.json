@@ -309,6 +309,8 @@
       "link_audit_blurb": "Append-only record of every committee action with the Merkle integrity chain.",
       "link_sensitive_feed_label": "Recent sensitive activity",
       "link_sensitive_feed_blurb": "Role-gated metadata feed for C3/C4 events.",
+      "link_report_label": "Monthly report",
+      "link_report_blurb": "Per-month roll-up of every register, with concern and recommendation breakdowns.",
       "link_settings_label": "Settings",
       "link_settings_blurb": "Sign out, wipe this device, theme preferences.",
       "link_privacy_label": "Privacy",
@@ -1470,6 +1472,32 @@
       "error": {
         "load_failed": "Couldn't load the training records. Try again."
       }
+    }
+  },
+
+  "report": {
+    "page": {
+      "title": "Monthly report",
+      "heading": "Monthly committee report",
+      "intro": "Per-month roll-up of activity across every register, with concern and recommendation breakdowns. Use the month nav to compare against earlier periods.",
+      "month_nav_aria": "Choose report month",
+      "prev_month": "← Previous month",
+      "next_month": "Next month →",
+      "totals_heading": "Totals by register",
+      "concerns_severity_heading": "Concerns by severity",
+      "recs_status_heading": "Recommendations by status",
+      "tile": {
+        "concerns": "Concerns",
+        "recommendations": "Recommendations",
+        "work_refusals": "Work refusals",
+        "s51_evidence": "Critical injury (s.51)",
+        "reprisal": "Reprisal log",
+        "minutes": "Minutes",
+        "inspections": "Inspections",
+        "training": "Training records"
+      },
+      "demo_note": "Totals are computed from synthetic demo data so you can see what the surface will look like. The real backend (cross-register query + role-aware row scoping) ships with the reporting-module wire-up.",
+      "back_to_home_cta": "Back to home"
     }
   }
 }

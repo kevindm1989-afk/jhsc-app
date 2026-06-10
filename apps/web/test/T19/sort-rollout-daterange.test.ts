@@ -178,3 +178,30 @@ describe('T19.1 — common.dateRange.* i18n keys', () => {
     expect(typeof catalog.common.dateRange.last_30_days).toBe('string');
   });
 });
+
+describe('T19.1 — /sensitive-feed route wires DateRangeChips + composes the predicate', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/routes/sensitive-feed/+page.svelte'),
+    'utf8'
+  );
+
+  it('imports DateRangeChips + withinRange', () => {
+    expect(src).toMatch(
+      /import\s+DateRangeChips\s+from\s+['"]\$lib\/ui\/DateRangeChips\.svelte['"]/
+    );
+    expect(src).toMatch(/import\s+\{\s*withinRange\s*\}\s+from\s+['"]\$lib\/ui\/date-range['"]/);
+  });
+
+  it('reads fromParam + toParam from the URL', () => {
+    expect(src).toMatch(/\$:\s*fromParam\s*=/);
+    expect(src).toMatch(/\$:\s*toParam\s*=/);
+  });
+
+  it('composes the date-range predicate with the existing tier predicate', () => {
+    expect(src).toContain('withinRange(r.ts, fromParam, toParam)');
+  });
+
+  it('mounts DateRangeChips', () => {
+    expect(src).toMatch(/<DateRangeChips/);
+  });
+});

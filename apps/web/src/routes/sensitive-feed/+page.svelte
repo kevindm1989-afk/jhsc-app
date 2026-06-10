@@ -30,6 +30,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoSensitiveRows(50);
@@ -75,10 +77,24 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.sensitiveFeedPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/audit/demo-sensitive-feed').DemoSensitiveRow} r */ (r) =>
-        r.sensitivity === activeValue
-    : undefined;
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  // Compose the sensitivity-tier filter with the date range so both
+  // gates must pass for a row to appear.
+  $: predicate = (() => {
+    const tierPred = activeValue
+      ? /** @param {import('$lib/audit/demo-sensitive-feed').DemoSensitiveRow} r */ (r) =>
+          r.sensitivity === activeValue
+      : null;
+    const hasRange = fromParam || toParam;
+    if (!tierPred && !hasRange) return undefined;
+    return /** @param {import('$lib/audit/demo-sensitive-feed').DemoSensitiveRow} r */ (r) => {
+      if (tierPred && !tierPred(r)) return false;
+      if (hasRange && !withinRange(r.ts, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: sortParam = $page.url.searchParams.get('sort');
   $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
@@ -102,16 +118,22 @@
 
 <section class="card sensitive-feed-card" data-testid="sensitive-feed-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/sensitive-feed"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/sensitive-feed"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <SensitiveFeedViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}

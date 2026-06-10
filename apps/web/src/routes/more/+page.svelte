@@ -137,6 +137,12 @@
           <span>{t('common.morePage.link_sensitive_feed_blurb')}</span>
         </a>
       </li>
+      <li>
+        <a href="/report" class="more-link" data-testid="more-link-report">
+          <strong>{t('common.morePage.link_report_label')}</strong>
+          <span>{t('common.morePage.link_report_blurb')}</span>
+        </a>
+      </li>
     </ul>
   </section>
 
