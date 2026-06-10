@@ -114,6 +114,35 @@ describe('T19.1 — landing route (/) mount', () => {
     expect(src).toMatch(/\{#if\s+\$isSignedIn\}[\s\S]*?\{:else\}[\s\S]*?\{\/if\}/);
   });
 
+  it('signed-in branch mounts the HomeDashboard alongside the welcome-back card', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    // The dashboard sibling card surfaces the cross-register
+    // "needs attention" digest. Pinning the import + the mount keeps
+    // the front-door digest from being silently dropped in a refactor.
+    expect(src).toMatch(
+      /import\s+HomeDashboard\s+from\s+['"]\$lib\/home\/HomeDashboard\.svelte['"]/
+    );
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*buildHomeSummary[\s\S]*\}\s+from\s+['"]\$lib\/home\/home-summary['"]/
+    );
+    expect(src).toMatch(/data-testid=["']landing-dashboard["']/);
+    expect(src).toMatch(/<HomeDashboard\s+\{summary\}/);
+  });
+
+  it('home.dashboard.* i18n keys referenced by the dashboard are in the catalog', () => {
+    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    expect(catalog.home.dashboard).toBeDefined();
+    expect(typeof catalog.home.dashboard.heading).toBe('string');
+    expect(typeof catalog.home.dashboard.intro).toBe('string');
+    expect(typeof catalog.home.dashboard.see_all_cta).toBe('string');
+    expect(typeof catalog.home.dashboard.tile.open_concerns).toBe('string');
+    expect(typeof catalog.home.dashboard.tile.overdue_recommendations).toBe('string');
+    expect(typeof catalog.home.dashboard.tile.expired_training).toBe('string');
+    expect(typeof catalog.home.dashboard.tile.active_refusals).toBe('string');
+    expect(typeof catalog.home.dashboard.tile.preserving_scenes).toBe('string');
+  });
+
   it('the route sets prerender=true + ssr=false (adapter-static + no SSR for PI safety; per-route pin, parity with /onboarding /sign-in /settings)', () => {
     // The other three routes (/onboarding, /sign-in, /settings) each
     // carry a +page.ts that re-affirms the layout's posture. Before
