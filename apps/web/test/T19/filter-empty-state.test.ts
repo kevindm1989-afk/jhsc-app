@@ -73,12 +73,17 @@ describe('T19.1 — filter-aware empty state (RecommendationsViewer)', () => {
 
 describe('T19.1 — every register route passes filterActive to its viewer', () => {
   for (const route of ROUTES) {
-    it(`/${route} passes filterActive={filterParam !== null}`, () => {
+    it(`/${route} passes filterActive=<truthy-when-filtered>`, () => {
       const src = readFileSync(
         resolve(__dirname, '../../src/routes', route, '+page.svelte'),
         'utf8'
       );
-      expect(src).toMatch(/filterActive=\{filterParam\s*!==\s*null\}/);
+      // Most routes pass `filterParam !== null`. /concerns supports
+      // multi-axis filtering and passes the OR of all axes instead.
+      const ok =
+        /filterActive=\{filterParam\s*!==\s*null\}/.test(src) ||
+        /filterActive=\{anyAxisActive\}/.test(src);
+      expect(ok).toBe(true);
     });
   }
 });

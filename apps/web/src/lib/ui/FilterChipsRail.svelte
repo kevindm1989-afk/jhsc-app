@@ -29,14 +29,14 @@
 
   /** The active filter value (null = no filter applied). */
   export let activeValue = null;
+
+  /** Optional i18n key for the nav's aria-label. Defaults to the
+   *  status-axis label; route pages with multiple chip rails pass a
+   *  more specific key (severity, hazard, …). */
+  export let ariaLabelKey = 'common.filterChips.aria_label';
 </script>
 
-<nav
-  class="fcr-rail"
-  aria-label={t('common.filterChips.aria_label')}
-  data-testid="filter-chips"
-  data-print="hide"
->
+<nav class="fcr-rail" aria-label={t(ariaLabelKey)} data-testid="filter-chips" data-print="hide">
   <ul class="fcr-list">
     {#each chips as chip (chip.value === null ? '__all__' : chip.value)}
       {@const isActive = chip.value === activeValue}

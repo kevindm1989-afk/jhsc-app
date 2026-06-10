@@ -6,11 +6,14 @@
    * with the demo provider so the register surface renders realistic
    * content until T08.1 wires the production SupabaseConcernsClient.
    *
-   * Supports URL-driven filtering on `status` (one of open / triaged /
-   * resolved / archived) via `?filter=<value>`. A FilterChipsRail
-   * above the viewer lets the worker swap chips without typing the
-   * URL. The "Open concerns" home dashboard tile deep-links here with
-   * `?filter=open` already highlighted.
+   * Multi-axis URL filtering: status + severity + hazard, plus a sort
+   * direction. Each axis chip rail composes URL state via buildHref
+   * so the other axes survive a chip click.
+   *
+   *   ?filter=<status>      open / triaged / resolved / archived
+   *   ?severity=<value>     low / medium / high / critical
+   *   ?hazard=<value>       physical / chemical / biological / ergonomic / psychosocial
+   *   ?sort=oldest          flips newest-first to oldest-first
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
@@ -21,11 +24,12 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
+  import { buildHref } from '$lib/ui/url-state';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoConcerns(50);
 
-  /** Fields exported to CSV, in column order. */
   const CSV_FIELDS = /** @type {const} */ ([
     'id',
     'filed_at',
@@ -38,42 +42,83 @@
     'actor_pseudonym'
   ]);
 
-  /** Canonical status values supported by `?filter=`. */
   const STATUS_VALUES = /** @type {const} */ (['open', 'triaged', 'resolved', 'archived']);
+  const SEVERITY_VALUES = /** @type {const} */ (['low', 'medium', 'high', 'critical']);
+  const HAZARD_VALUES = /** @type {const} */ ([
+    'physical',
+    'chemical',
+    'biological',
+    'ergonomic',
+    'psychosocial'
+  ]);
 
   $: filterParam = $page.url.searchParams.get('filter');
-  $: activeValue =
-    filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
-  // FilterBanner still shows on the dashboard-tile "Open concerns" path
-  // for clear-filter symmetry; the chip rail also highlights "Open".
-  $: filterLabel = activeValue === 'open' ? t('common.filterBanner.label.concerns_open') : null;
+  $: severityParam = $page.url.searchParams.get('severity');
+  $: hazardParam = $page.url.searchParams.get('hazard');
+  $: sortParam = $page.url.searchParams.get('sort');
 
-  $: chips = [
-    { href: '/concerns', label: t('common.filterChips.all'), value: null },
-    { href: '/concerns?filter=open', label: t('concern.viewer.status.open'), value: 'open' },
+  $: activeStatus =
+    filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
+  $: activeSeverity =
+    severityParam && SEVERITY_VALUES.includes(/** @type {any} */ (severityParam))
+      ? severityParam
+      : null;
+  $: activeHazard =
+    hazardParam && HAZARD_VALUES.includes(/** @type {any} */ (hazardParam)) ? hazardParam : null;
+
+  $: anyAxisActive = !!(activeStatus || activeSeverity || activeHazard);
+
+  $: filterLabel = activeStatus === 'open' ? t('common.filterBanner.label.concerns_open') : null;
+
+  // Preserved-param sets for each chip rail's hrefs. Each rail's chips
+  // change THEIR axis; the other axes survive verbatim.
+  $: preservedForStatus = { severity: activeSeverity, hazard: activeHazard, sort: sortParam };
+  $: preservedForSeverity = { filter: activeStatus, hazard: activeHazard, sort: sortParam };
+  $: preservedForHazard = { filter: activeStatus, severity: activeSeverity, sort: sortParam };
+  $: preservedForSort = { filter: activeStatus, severity: activeSeverity, hazard: activeHazard };
+
+  $: statusChips = [
     {
-      href: '/concerns?filter=triaged',
-      label: t('concern.viewer.status.triaged'),
-      value: 'triaged'
+      href: buildHref('/concerns', preservedForStatus, { filter: null }),
+      label: t('common.filterChips.all'),
+      value: null
     },
-    {
-      href: '/concerns?filter=resolved',
-      label: t('concern.viewer.status.resolved'),
-      value: 'resolved'
-    },
-    {
-      href: '/concerns?filter=archived',
-      label: t('concern.viewer.status.archived'),
-      value: 'archived'
-    }
+    ...STATUS_VALUES.map((v) => ({
+      href: buildHref('/concerns', preservedForStatus, { filter: v }),
+      label: t(`concern.viewer.status.${v}`),
+      value: v
+    }))
   ];
 
-  // Filter-aware document title + viewer h1 echo: extract the active
-  // filter label first (chip-driven or banner macro), then derive the
-  // page title from it.
+  $: severityChips = [
+    {
+      href: buildHref('/concerns', preservedForSeverity, { severity: null }),
+      label: t('common.filterChips.all'),
+      value: null
+    },
+    ...SEVERITY_VALUES.map((v) => ({
+      href: buildHref('/concerns', preservedForSeverity, { severity: v }),
+      label: t(`concern.viewer.severity.${v}`),
+      value: v
+    }))
+  ];
+
+  $: hazardChips = [
+    {
+      href: buildHref('/concerns', preservedForHazard, { hazard: null }),
+      label: t('common.filterChips.all'),
+      value: null
+    },
+    ...HAZARD_VALUES.map((v) => ({
+      href: buildHref('/concerns', preservedForHazard, { hazard: v }),
+      label: t(`concern.viewer.hazard.${v}`),
+      value: v
+    }))
+  ];
+
   $: activeFilterLabel = (() => {
-    if (activeValue) {
-      const chip = chips.find((c) => c.value === activeValue);
+    if (activeStatus) {
+      const chip = statusChips.find((c) => c.value === activeStatus);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
@@ -81,25 +126,38 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.concernsPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) =>
-        r.status === activeValue
+  /** Composed multi-axis predicate. */
+  $: predicate = anyAxisActive
+    ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) => {
+        if (activeStatus && r.status !== activeStatus) return false;
+        if (activeSeverity && r.severity !== activeSeverity) return false;
+        if (activeHazard && r.hazard_class !== activeHazard) return false;
+        return true;
+      }
     : undefined;
+
+  // Sort: default is newest-first (the demo provider returns rows in
+  // that order). `?sort=oldest` reverses before pagination.
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+
   $: fetchPage =
     /**
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoConcernsPage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoConcernsPage(p, ps, sortedRows, predicate);
 
-  /** Build a filter-aware CSV snapshot of the register. */
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return {
       csv: toCsv(rows, CSV_FIELDS),
       filename: csvFilename('concerns')
     };
   }
+
+  // The {#key} block remounts the viewer when ANY axis or the sort
+  // changes — resets the page indicator to page 1.
+  $: viewerKey = `${filterParam ?? ''}|${severityParam ?? ''}|${hazardParam ?? ''}|${sortParam ?? ''}`;
 </script>
 
 <svelte:head>
@@ -108,17 +166,24 @@
 </svelte:head>
 
 <section class="card con-card" data-testid="concerns-page">
-  <FilterChipsRail {chips} {activeValue} />
+  <FilterChipsRail chips={statusChips} activeValue={activeStatus} />
+  <FilterChipsRail
+    chips={severityChips}
+    activeValue={activeSeverity}
+    ariaLabelKey="common.filterChips.severity_aria_label"
+  />
+  <FilterChipsRail
+    chips={hazardChips}
+    activeValue={activeHazard}
+    ariaLabelKey="common.filterChips.hazard_aria_label"
+  />
+  <SortToggle baseHref="/concerns" activeSort={sortParam} preservedParams={preservedForSort} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/concerns" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
-    <ConcernsViewer
-      {fetchPage}
-      filterActive={filterParam !== null}
-      filterLabel={activeFilterLabel}
-    />
+  {#key viewerKey}
+    <ConcernsViewer {fetchPage} filterActive={anyAxisActive} filterLabel={activeFilterLabel} />
   {/key}
   <p class="con-demo-note muted" data-testid="con-demo-note">
     {t('concern.viewer.demo_note')}

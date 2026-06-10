@@ -67,12 +67,14 @@ describe('T19.1 — FilterChipsRail', () => {
 describe('T19.1 — /concerns route wires the FilterChipsRail with all four status chips', () => {
   const PAGE_PATH = resolve(__dirname, '../../src/routes/concerns/+page.svelte');
 
-  it('imports FilterChipsRail and mounts it with chips + activeValue', () => {
+  it('imports FilterChipsRail and mounts it (multi-axis: status + severity + hazard)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(
       /import\s+FilterChipsRail\s+from\s+['"]\$lib\/ui\/FilterChipsRail\.svelte['"]/
     );
-    expect(src).toMatch(/<FilterChipsRail\s+\{chips\}\s+\{activeValue\}/);
+    // Multi-axis: status, severity, hazard each get a chip rail.
+    const mounts = (src.match(/<FilterChipsRail/g) ?? []).length;
+    expect(mounts).toBeGreaterThanOrEqual(3);
   });
 
   it('declares the four canonical status values', () => {
