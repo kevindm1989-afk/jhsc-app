@@ -143,6 +143,32 @@ describe('T19.1 — landing route (/) mount', () => {
     expect(typeof catalog.home.dashboard.tile.preserving_scenes).toBe('string');
   });
 
+  it('signed-in branch mounts the RecentActivityCard with top-5 audit rows', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(
+      /import\s+RecentActivityCard\s+from\s+['"]\$lib\/home\/RecentActivityCard\.svelte['"]/
+    );
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*buildDemoAuditRows[\s\S]*\}\s+from\s+['"]\$lib\/audit\/demo-audit-rows['"]/
+    );
+    expect(src).toMatch(/data-testid=["']landing-recent["']/);
+    expect(src).toMatch(/<RecentActivityCard\s+rows=\{recentRows\}/);
+    // The top-5 slice — pinned so a refactor that drops the slice
+    // (and dumps all 50 rows into the home card) is loud.
+    expect(src).toMatch(/buildDemoAuditRows\(50\)\.slice\(0,\s*5\)/);
+  });
+
+  it('home.recent.* i18n keys referenced by the recent-activity card are in the catalog', () => {
+    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    expect(catalog.home.recent).toBeDefined();
+    expect(typeof catalog.home.recent.heading).toBe('string');
+    expect(typeof catalog.home.recent.intro).toBe('string');
+    expect(typeof catalog.home.recent.empty).toBe('string');
+    expect(typeof catalog.home.recent.actor_label).toBe('string');
+    expect(typeof catalog.home.recent.see_all_cta).toBe('string');
+  });
+
   it('the route sets prerender=true + ssr=false (adapter-static + no SSR for PI safety; per-route pin, parity with /onboarding /sign-in /settings)', () => {
     // The other three routes (/onboarding, /sign-in, /settings) each
     // carry a +page.ts that re-affirms the layout's posture. Before

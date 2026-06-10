@@ -38,12 +38,14 @@
   import { t } from '$lib/i18n';
   import { isSignedIn } from '$lib/auth/session-jwt-svelte';
   import HomeDashboard from '$lib/home/HomeDashboard.svelte';
+  import RecentActivityCard from '$lib/home/RecentActivityCard.svelte';
   import { buildHomeSummary } from '$lib/home/home-summary';
   import { buildDemoConcerns } from '$lib/concerns/demo-concerns';
   import { buildDemoRecommendations } from '$lib/recommendations/demo-recommendations';
   import { buildDemoTraining } from '$lib/training/demo-training';
   import { buildDemoWorkRefusals } from '$lib/work-refusal/demo-work-refusal';
   import { buildDemoS51Evidence } from '$lib/s51-evidence/demo-s51-evidence';
+  import { buildDemoAuditRows } from '$lib/audit/demo-audit-rows';
 
   // Digest is computed once at mount over the demo providers. When each
   // register's real backend lands the page swaps these calls for real
@@ -55,6 +57,10 @@
     workRefusals: buildDemoWorkRefusals(50),
     s51Evidence: buildDemoS51Evidence(30)
   });
+
+  // Top-5 recent audit rows for the "what just happened" timeline.
+  // buildDemoAuditRows sorts newest-first so a plain slice works.
+  const recentRows = buildDemoAuditRows(50).slice(0, 5);
 </script>
 
 <svelte:head>
@@ -78,6 +84,9 @@
   </section>
   <section class="card" data-testid="landing-dashboard">
     <HomeDashboard {summary} />
+  </section>
+  <section class="card" data-testid="landing-recent">
+    <RecentActivityCard rows={recentRows} />
   </section>
 {:else}
   <section class="card" data-testid="landing-new-device">
