@@ -823,7 +823,8 @@
       "intro": "The latest entries in the worker-side audit log. Pseudonymized actors; no PI.",
       "empty": "No recent activity yet.",
       "actor_label": "Actor",
-      "see_all_cta": "See the full audit log"
+      "see_all_cta": "See the full audit log",
+      "row_aria": "{event} at {ts}. Open the related register."
     }
   },
 
