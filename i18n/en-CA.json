@@ -1227,6 +1227,134 @@
     "empty": {
       "heading": "No documents yet",
       "body": "Reference documents will appear here once they are published."
+    },
+    "viewer": {
+      "heading": "Document library",
+      "intro": "Versioned committee reference documents — policies, procedures, training material, legislation, and templates.",
+      "offline_note": {
+        "label": "Readable offline",
+        "value": "Cached documents stay readable on the shop floor beyond cell signal. Versions are append-only — superseded versions stay retrievable, nothing is silently overwritten."
+      },
+      "loading": "Loading documents…",
+      "empty": "No documents in the library yet.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real library backend (versioned document store + offline cache + on-device search) ships with the library-module wire-up.",
+      "category": {
+        "policy": "Policy",
+        "procedure": "Procedure",
+        "training": "Training material",
+        "legislation": "Legislation",
+        "template": "Template"
+      },
+      "language": {
+        "en": "EN",
+        "fr": "FR",
+        "both": "EN + FR"
+      },
+      "offline_cached": "Cached offline",
+      "error": {
+        "load_failed": "Couldn't load the document library. Try again."
+      }
+    }
+  },
+
+  "workRefusal": {
+    "viewer": {
+      "heading": "Work refusal register",
+      "intro": "Work refusals under OHSA s. 43 — a worker may refuse work they have reason to believe is dangerous. Each entry tracks the staged process to resolution.",
+      "stages_note": {
+        "label": "Staged process",
+        "value": "A refusal moves through up to three stages: the worker's refusal (s. 43(3)), the joint investigation with the employer and a worker member (s. 43(4)), and — only if unresolved — a Ministry of Labour inspector (s. 43(8)). Most refusals resolve at the first or second stage."
+      },
+      "loading": "Loading work refusals…",
+      "empty": "No work refusals on file.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (stage-gated capture + worker-side encryption + audit chain) ships with the work-refusal-module wire-up.",
+      "stage": {
+        "worker_refusal": "Worker refusal",
+        "s43_4_investigation": "s. 43(4) investigation",
+        "s43_8_mol": "s. 43(8) Ministry",
+        "resolved": "Resolved"
+      },
+      "resolved_at_label": "Resolved at",
+      "alternative_work": "Alternative work (s. 43(5))",
+      "gauge_aria": "Stage {depth} of {total}",
+      "gauge": {
+        "step1": "1 · Refusal",
+        "step2": "2 · Joint investigation",
+        "step3": "3 · Ministry"
+      },
+      "days_label": "Days since filed",
+      "filed_by": "Filed by",
+      "error": {
+        "load_failed": "Couldn't load the work-refusal register. Try again."
+      }
+    }
+  },
+
+  "s51": {
+    "viewer": {
+      "heading": "Critical-injury evidence (s. 51)",
+      "intro": "Evidence bundles for critical injuries and fatalities. OHSA s. 51 requires a worker member of the JHSC be present at the investigation.",
+      "scene_note": {
+        "label": "Scene preservation (s. 51(2))",
+        "value": "After a critical injury, the scene must not be disturbed until an inspector releases it or 48 hours pass. Active bundles show the hours remaining on that window. Every bundle is sensitivity C4 — sealed under a per-entry passphrase."
+      },
+      "loading": "Loading evidence bundles…",
+      "empty": "No evidence bundles on file.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (evidence-capture flow + scene-preservation timer + per-entry passphrase + photo sanitize) ships with T14.",
+      "scene": {
+        "preserving": "Preserving — {hours}h left",
+        "released_by_inspector": "Released by inspector",
+        "window_expired": "48-hour window expired"
+      },
+      "passphrase_required": "Passphrase sealed",
+      "member": {
+        "present": "Worker member present",
+        "absent": "Worker member not present"
+      },
+      "photos_label": "Photos",
+      "witness_label": "Witness statements",
+      "opened_by": "Opened by",
+      "error": {
+        "load_failed": "Couldn't load the evidence register. Try again."
+      }
+    }
+  },
+
+  "training": {
+    "viewer": {
+      "heading": "Training records",
+      "intro": "Certification tracking for committee members — OHSA s. 9(12)(d) certified-member training plus the refresher backlog.",
+      "refresher_note": {
+        "label": "Refresher alerts",
+        "value": "Records turn amber 60 days before a certification expires and red once it lapses, so the refresher backlog reads at a glance. Members appear by pseudonym only."
+      },
+      "loading": "Loading training records…",
+      "empty": "No training records on file.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (certified-member tracking + refresher alerts + evidence attachments) ships with the training-module wire-up.",
+      "validity": {
+        "valid": "Valid",
+        "expiring": "Expiring soon",
+        "expired": "Expired"
+      },
+      "days_left": "{days} days left",
+      "days_overdue": "{days} days overdue",
+      "evidence_attached": "Evidence attached",
+      "member_label": "Member",
+      "error": {
+        "load_failed": "Couldn't load the training records. Try again."
+      }
     }
   }
 }

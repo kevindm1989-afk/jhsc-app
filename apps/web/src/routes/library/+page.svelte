@@ -1,18 +1,25 @@
-<script lang="ts">
+<script>
   /**
-   * /library — coming-soon placeholder for the committee document
-   * library (versioned reference docs, offline cache, on-device search).
+   * /library — JHSC committee document library register mount.
    *
-   * The library module is a follow-on product surface; no intake or
-   * viewer component ships yet. The placeholder lands the URL + the
-   * four-bullet contract so a worker who navigates here from a future
-   * nav link doesn't 404 and sees what's coming. Same pattern as
-   * PRs #133, #136, #138, #139.
+   * Replaces the PR #139 coming-soon placeholder. Mounts LibraryViewer
+   * with the demo provider so the surface renders realistic content
+   * until the library-module backend (versioned doc store + offline
+   * cache + on-device search) is wired.
    *
-   * Replaces this file on library-module mount: a thin wiring shell
-   * that mounts the production document-list + viewer.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import LibraryViewer from '$lib/library/LibraryViewer.svelte';
+  import { buildDemoLibrary, fetchDemoLibraryPage } from '$lib/library/demo-library';
+
+  const DEMO_ROWS = buildDemoLibrary(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoLibraryPage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -20,22 +27,12 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section class="card library-card" data-testid="library-page">
-  <h1>{t('common.libraryPage.heading')}</h1>
-
-  <p class="muted" data-testid="library-coming-soon-notice">
-    {t('common.libraryPage.coming_soon_body')}
+<section class="card lib-card" data-testid="library-page">
+  <LibraryViewer {fetchPage} />
+  <p class="lib-demo-note muted" data-testid="lib-demo-note">
+    {t('library.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.libraryPage.what_this_will_do_heading')}</h2>
-  <ul class="library-bullets">
-    <li>{t('common.libraryPage.bullet_versioned')}</li>
-    <li>{t('common.libraryPage.bullet_offline_cache')}</li>
-    <li>{t('common.libraryPage.bullet_search')}</li>
-    <li>{t('common.libraryPage.bullet_committee_scoped')}</li>
-  </ul>
-
-  <p>
+  <p class="lib-footer">
     <a href="/" data-testid="library-back-to-home">
       {t('common.libraryPage.back_to_home_cta')}
     </a>
@@ -43,14 +40,19 @@
 </section>
 
 <style>
-  .library-card {
+  .lib-card {
     margin-block-start: 1rem;
   }
-  .library-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .lib-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .library-bullets > li {
-    margin-block-end: 0.5rem;
+  .lib-footer {
+    margin-block-start: 0.75rem;
   }
 </style>

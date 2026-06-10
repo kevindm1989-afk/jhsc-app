@@ -1,26 +1,34 @@
-<script lang="ts">
+<script>
   /**
-   * /s51-evidence — coming-soon placeholder for the OHSA s. 51
-   * critical-injury evidence capture surface (T14 sibling task).
+   * /s51-evidence — JHSC C4-tier OHSA s. 51 critical-injury evidence
+   * register mount.
    *
-   * Section 51 requires a worker member of the JHSC to be present at
-   * the investigation of any critical injury or fatality, and the
-   * scene must be preserved for at least 48 hours per s. 51(2). The
-   * full capture surface (photos + witness statements + scene notes
-   * at sensitivity C4, per-entry passphrase, scene-preservation timer
-   * surfaced as a deadline) is a follow-on product surface; T14
-   * library scaffolding exists for the s51_evidence schema but no
-   * intake component ships yet.
+   * Replaces the PR #141 coming-soon placeholder. Mounts
+   * S51EvidenceViewer with the demo provider so the register surface
+   * renders realistic content until T14 wires the real backend
+   * (evidence-capture flow + scene-preservation timer + per-entry
+   * passphrase + photo sanitize).
    *
-   * This placeholder is sensitivity-tier-aware: it carries the same
-   * 4px destructive-red inline-start border as /reprisal and the
-   * PanicWipeModal — every C4 surface in the worker-hub language
-   * shares that destructive accent.
+   * Preserves the destructive-red 4px inline-start border the
+   * placeholder card established — every C4 surface in the worker-hub
+   * language shares that accent.
    *
-   * Replaces this file on T14 mount: a thin wiring shell that mounts
-   * the production evidence-capture flow + scene-preservation timer.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import S51EvidenceViewer from '$lib/s51-evidence/S51EvidenceViewer.svelte';
+  import {
+    buildDemoS51Evidence,
+    fetchDemoS51EvidencePage
+  } from '$lib/s51-evidence/demo-s51-evidence';
+
+  const DEMO_ROWS = buildDemoS51Evidence(30);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoS51EvidencePage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -29,21 +37,11 @@
 </svelte:head>
 
 <section class="card s51-card" data-testid="s51-page">
-  <h1>{t('common.s51Page.heading')}</h1>
-
-  <p class="muted" data-testid="s51-coming-soon-notice">
-    {t('common.s51Page.coming_soon_body')}
+  <S51EvidenceViewer {fetchPage} />
+  <p class="s51-demo-note muted" data-testid="s51-demo-note">
+    {t('s51.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.s51Page.what_this_will_do_heading')}</h2>
-  <ul class="s51-bullets">
-    <li>{t('common.s51Page.bullet_worker_member_present')}</li>
-    <li>{t('common.s51Page.bullet_scene_preservation')}</li>
-    <li>{t('common.s51Page.bullet_c4_encryption')}</li>
-    <li>{t('common.s51Page.bullet_photo_sanitize')}</li>
-  </ul>
-
-  <p>
+  <p class="s51-footer">
     <a href="/" data-testid="s51-back-to-home">
       {t('common.s51Page.back_to_home_cta')}
     </a>
@@ -53,19 +51,22 @@
 <style>
   /*
    * 4px destructive-red inline-start border — the C4 sensitivity
-   * accent shared with /reprisal and PanicWipeModal. Every high-
-   * consequence surface in the worker-hub language carries this
-   * signal so the user reads the gravity before they read the prose.
+   * accent shared with /reprisal and PanicWipeModal.
    */
   .s51-card {
     margin-block-start: 1rem;
     border-inline-start: 4px solid var(--color-destructive);
   }
-  .s51-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .s51-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .s51-bullets > li {
-    margin-block-end: 0.5rem;
+  .s51-footer {
+    margin-block-start: 0.75rem;
   }
 </style>

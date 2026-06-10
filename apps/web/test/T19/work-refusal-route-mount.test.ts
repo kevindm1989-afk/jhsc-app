@@ -1,12 +1,10 @@
 /**
- * T19.1 — /work-refusal coming-soon placeholder route mount.
+ * T19.1 — /work-refusal route mount.
  *
- * OHSA s. 43 work-refusal capture surface. Library scaffolding for
- * the stage machine (refusal → s. 43(4) joint investigation →
- * s. 43(8) Ministry escalation) doesn't ship yet; until then the
- * route renders a placeholder so a worker who navigates here from
- * a future nav link doesn't 404. Same pattern as the rest of the
- * placeholder route tests.
+ * Replaces the PR #139 coming-soon placeholder pins with structural
+ * pins for the real WorkRefusalViewer mount + demo provider. The
+ * card carries the C4 destructive-red inline-start border shared
+ * with /reprisal and /s51-evidence.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -16,7 +14,7 @@ import { resolve } from 'node:path';
 const PAGE_PATH = resolve(__dirname, '../../src/routes/work-refusal/+page.svelte');
 const PAGE_TS_PATH = resolve(__dirname, '../../src/routes/work-refusal/+page.ts');
 
-describe('T19.1 — /work-refusal route mount (coming-soon placeholder)', () => {
+describe('T19.1 — /work-refusal route mount (real viewer + demo provider)', () => {
   it('the +page.svelte component exists at the expected path', () => {
     expect(existsSync(PAGE_PATH)).toBe(true);
   });
@@ -25,7 +23,7 @@ describe('T19.1 — /work-refusal route mount (coming-soon placeholder)', () => 
     expect(existsSync(PAGE_TS_PATH)).toBe(true);
   });
 
-  it('+page.ts declares prerender = true (parity with the rest of the app shell)', () => {
+  it('+page.ts declares prerender = true', () => {
     const src = readFileSync(PAGE_TS_PATH, 'utf8');
     expect(src).toMatch(/export\s+const\s+prerender\s*=\s*true/);
   });
@@ -35,51 +33,45 @@ describe('T19.1 — /work-refusal route mount (coming-soon placeholder)', () => 
     expect(src).toMatch(/export\s+const\s+ssr\s*=\s*false/);
   });
 
-  it('the page carries the work-refusal-page data-testid + a heading via t()', () => {
+  it('the page carries the work-refusal-page data-testid', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/data-testid=["']work-refusal-page["']/);
-    expect(src).toMatch(/t\(['"]common\.workRefusalPage\.heading['"]\)/);
   });
 
-  it('renders the coming-soon notice (so the user knows the surface is pending)', () => {
+  it('mounts <WorkRefusalViewer> with a fetchPage prop wired through', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/data-testid=["']work-refusal-coming-soon-notice["']/);
-    expect(src).toMatch(/t\(['"]common\.workRefusalPage\.coming_soon_body['"]\)/);
+    expect(src).toMatch(
+      /import\s+WorkRefusalViewer\s+from\s+['"]\$lib\/work-refusal\/WorkRefusalViewer\.svelte['"]/
+    );
+    expect(src).toMatch(/<WorkRefusalViewer\s+\{fetchPage\}/);
   });
 
-  it('surfaces the four "what this will do" bullets via t()', () => {
+  it('imports the demo provider (buildDemoWorkRefusals + fetchDemoWorkRefusalPage)', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/t\(['"]common\.workRefusalPage\.bullet_right_to_refuse['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.workRefusalPage\.bullet_stage_gated['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.workRefusalPage\.bullet_certified_member_visibility['"]\)/);
-    expect(src).toMatch(/t\(['"]common\.workRefusalPage\.bullet_audit_full_chain['"]\)/);
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*buildDemoWorkRefusals[\s\S]*fetchDemoWorkRefusalPage[\s\S]*\}\s+from\s+['"]\$lib\/work-refusal\/demo-work-refusal['"]/
+    );
   });
 
-  it('renders a back-to-home link so the user is not stranded', () => {
+  it('renders the demo-note callout', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/data-testid=["']wr-demo-note["']/);
+    expect(src).toMatch(/t\(['"]workRefusal\.viewer\.demo_note['"]\)/);
+  });
+
+  it('renders a back-to-home link', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/<a\s+href=["']\/["']/);
     expect(src).toMatch(/data-testid=["']work-refusal-back-to-home["']/);
-    expect(src).toMatch(/t\(['"]common\.workRefusalPage\.back_to_home_cta['"]\)/);
   });
 
-  it('carries a noindex meta (placeholder route should not be indexed)', () => {
+  it('carries a noindex meta', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
   });
 
-  it('every common.workRefusalPage.* key referenced is present in the root catalog', () => {
-    const catalogPath = resolve(__dirname, '../../../../i18n/en-CA.json');
-    expect(existsSync(catalogPath)).toBe(true);
-    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-    expect(catalog.common.workRefusalPage).toBeDefined();
-    expect(typeof catalog.common.workRefusalPage.title).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.heading).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.coming_soon_body).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.what_this_will_do_heading).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.bullet_right_to_refuse).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.bullet_stage_gated).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.bullet_certified_member_visibility).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.bullet_audit_full_chain).toBe('string');
-    expect(typeof catalog.common.workRefusalPage.back_to_home_cta).toBe('string');
+  it('carries the destructive-red inline-start border on the card (C4 accent)', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/border-inline-start:\s*4px\s+solid\s+var\(--color-destructive\)/);
   });
 });
