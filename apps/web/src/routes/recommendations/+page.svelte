@@ -60,14 +60,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.recommendationsPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.recommendationsPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/recommendations/demo-recommendations').DemoRecommendationRow} r */ (
@@ -93,7 +94,11 @@
     <FilterBanner label={filterLabel} clearHref="/recommendations" />
   {/if}
   {#key filterParam}
-    <RecommendationsViewer {fetchPage} filterActive={filterParam !== null} />
+    <RecommendationsViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="recs-demo-note muted" data-testid="recs-demo-note">
     {t('recommendations.viewer.demo_note')}

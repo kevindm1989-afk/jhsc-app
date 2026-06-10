@@ -60,14 +60,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.reprisalPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.reprisalPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
@@ -95,7 +96,11 @@
     <FilterBanner label={filterLabel} clearHref="/reprisal" />
   {/if}
   {#key filterParam}
-    <ReprisalViewer {fetchPage} filterActive={filterParam !== null} />
+    <ReprisalViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="rep-demo-note muted" data-testid="rep-demo-note">
     {t('reprisal.viewer.demo_note')}

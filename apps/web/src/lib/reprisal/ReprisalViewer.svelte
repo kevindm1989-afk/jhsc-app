@@ -50,6 +50,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-reprisal').DemoReprisalRow[]} */
   let rows = [];
   let total = 0;
@@ -113,7 +116,12 @@
 >
   <header class="rep-header">
     <div class="rep-heading-row">
-      <h1 id="rep-heading">{t('reprisal.viewer.heading')}</h1>
+      <h1 id="rep-heading">
+        {t('reprisal.viewer.heading')}{#if filterLabel}<span
+            class="viewer-heading-filter"
+            data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+          >{/if}
+      </h1>
       <span class="rep-c4-badge" data-testid="rep-c4-badge">C4</span>
     </div>
     <p class="muted">{t('reprisal.viewer.intro')}</p>

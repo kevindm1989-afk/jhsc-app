@@ -51,14 +51,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.trainingPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.trainingPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/training/demo-training').DemoTrainingRow} r */ (r) =>
@@ -83,7 +84,11 @@
     <FilterBanner label={filterLabel} clearHref="/training" />
   {/if}
   {#key filterParam}
-    <TrainingViewer {fetchPage} filterActive={filterParam !== null} />
+    <TrainingViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="trn-demo-note muted" data-testid="trn-demo-note">
     {t('training.viewer.demo_note')}

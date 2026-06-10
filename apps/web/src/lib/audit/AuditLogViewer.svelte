@@ -55,6 +55,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-audit-rows').DemoAuditRow[]} */
   let rows = [];
   let total = 0;
@@ -117,7 +120,12 @@
   data-testid="audit-viewer-section"
 >
   <header class="audit-viewer-header">
-    <h1 id="audit-viewer-heading">{t('audit.viewer.heading')}</h1>
+    <h1 id="audit-viewer-heading">
+      {t('audit.viewer.heading')}{#if filterLabel}<span
+          class="viewer-heading-filter"
+          data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+        >{/if}
+    </h1>
     <p class="muted">{t('audit.viewer.intro')}</p>
     <p class="audit-viewer-integrity-note" data-testid="audit-viewer-integrity-note">
       <strong>{t('audit.viewer.integrity.label')}:</strong>

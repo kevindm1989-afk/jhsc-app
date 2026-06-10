@@ -69,14 +69,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.workRefusalPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.workRefusalPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
@@ -104,7 +105,11 @@
     <FilterBanner label={filterLabel} clearHref="/work-refusal" />
   {/if}
   {#key filterParam}
-    <WorkRefusalViewer {fetchPage} filterActive={filterParam !== null} />
+    <WorkRefusalViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="wr-demo-note muted" data-testid="wr-demo-note">
     {t('workRefusal.viewer.demo_note')}

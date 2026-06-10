@@ -54,13 +54,14 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
-    return t('common.sensitiveFeedPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.sensitiveFeedPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/audit/demo-sensitive-feed').DemoSensitiveRow} r */ (r) =>
@@ -82,7 +83,11 @@
 <section class="card sensitive-feed-card" data-testid="sensitive-feed-page">
   <FilterChipsRail {chips} {activeValue} />
   {#key filterParam}
-    <SensitiveFeedViewer {fetchPage} filterActive={filterParam !== null} />
+    <SensitiveFeedViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="sensitive-feed-demo-note muted" data-testid="sensitive-feed-demo-note">
     {t('sensitiveFeed.viewer.demo_note')}

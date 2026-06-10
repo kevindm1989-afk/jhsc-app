@@ -68,14 +68,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.libraryPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.libraryPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
@@ -103,7 +104,11 @@
     <FilterBanner label={filterLabel} clearHref="/library" />
   {/if}
   {#key filterParam}
-    <LibraryViewer {fetchPage} filterActive={filterParam !== null} />
+    <LibraryViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="lib-demo-note muted" data-testid="lib-demo-note">
     {t('library.viewer.demo_note')}

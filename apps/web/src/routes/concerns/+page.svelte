@@ -53,17 +53,18 @@
     }
   ];
 
-  // Filter-aware document title: when a chip filter is active, use its
-  // label; when a macro filter (banner) is active, use that; otherwise
-  // the default page title.
-  $: pageTitle = (() => {
+  // Filter-aware document title + viewer h1 echo: extract the active
+  // filter label first (chip-driven or banner macro), then derive the
+  // page title from it.
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.concernsPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.concernsPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) =>
@@ -88,7 +89,11 @@
     <FilterBanner label={filterLabel} clearHref="/concerns" />
   {/if}
   {#key filterParam}
-    <ConcernsViewer {fetchPage} filterActive={filterParam !== null} />
+    <ConcernsViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="con-demo-note muted" data-testid="con-demo-note">
     {t('concern.viewer.demo_note')}

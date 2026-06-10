@@ -46,6 +46,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-s51-evidence').DemoS51EvidenceRow[]} */
   let rows = [];
   let total = 0;
@@ -112,7 +115,12 @@
 >
   <header class="s51-header">
     <div class="s51-heading-row">
-      <h1 id="s51-heading">{t('s51.viewer.heading')}</h1>
+      <h1 id="s51-heading">
+        {t('s51.viewer.heading')}{#if filterLabel}<span
+            class="viewer-heading-filter"
+            data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+          >{/if}
+      </h1>
       <span class="s51-c4-badge" data-testid="s51-c4-badge">C4</span>
     </div>
     <p class="muted">{t('s51.viewer.intro')}</p>

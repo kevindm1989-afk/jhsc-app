@@ -75,13 +75,14 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
-    return t('common.auditPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.auditPage.title');
 
   $: predicate = activeValue ? predicateFor(activeValue) : undefined;
   $: fetchPage =
@@ -100,7 +101,11 @@
 <section class="audit-page" data-testid="audit-page">
   <FilterChipsRail {chips} {activeValue} />
   {#key filterParam}
-    <AuditLogViewer {fetchPage} filterActive={filterParam !== null} />
+    <AuditLogViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="audit-page-demo-note muted" data-testid="audit-page-demo-note">
     {t('audit.viewer.demo_note')}

@@ -48,6 +48,10 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1 next to
+   *  the heading (e.g. "Concerns register — Open"). */
+  export let filterLabel = null;
+
   /** @type {import('./demo-concerns').DemoConcernRow[]} */
   let rows = [];
   let total = 0;
@@ -118,7 +122,12 @@
   data-testid="con-viewer-section"
 >
   <header class="con-header">
-    <h1 id="con-heading">{t('concern.viewer.heading')}</h1>
+    <h1 id="con-heading">
+      {t('concern.viewer.heading')}{#if filterLabel}<span
+          class="viewer-heading-filter"
+          data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+        >{/if}
+    </h1>
     <p class="muted">{t('concern.viewer.intro')}</p>
     <p class="con-anon-note" data-testid="con-anon-note">
       <strong>{t('concern.viewer.anon_note.label')}:</strong>

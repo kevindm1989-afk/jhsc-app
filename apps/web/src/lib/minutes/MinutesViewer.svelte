@@ -45,6 +45,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-minutes').DemoMinutesRow[]} */
   let rows = [];
   let total = 0;
@@ -107,7 +110,12 @@
   data-testid="min-viewer-section"
 >
   <header class="min-header">
-    <h1 id="min-heading">{t('minutes.viewer.heading')}</h1>
+    <h1 id="min-heading">
+      {t('minutes.viewer.heading')}{#if filterLabel}<span
+          class="viewer-heading-filter"
+          data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+        >{/if}
+    </h1>
     <p class="muted">{t('minutes.viewer.intro')}</p>
     <p class="min-approval-note" data-testid="min-approval-note">
       <strong>{t('minutes.viewer.approval_note.label')}:</strong>

@@ -43,6 +43,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-work-refusal').DemoWorkRefusalRow[]} */
   let rows = [];
   let total = 0;
@@ -118,7 +121,12 @@
 >
   <header class="wr-header">
     <div class="wr-heading-row">
-      <h1 id="wr-heading">{t('workRefusal.viewer.heading')}</h1>
+      <h1 id="wr-heading">
+        {t('workRefusal.viewer.heading')}{#if filterLabel}<span
+            class="viewer-heading-filter"
+            data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+          >{/if}
+      </h1>
       <span class="wr-c4-badge" data-testid="wr-c4-badge">C4</span>
     </div>
     <p class="muted">{t('workRefusal.viewer.intro')}</p>
