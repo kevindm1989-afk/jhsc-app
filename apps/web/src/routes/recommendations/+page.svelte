@@ -25,6 +25,7 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoRecommendations(50);
@@ -93,10 +94,13 @@
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoRecommendationsPage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoRecommendationsPage(p, ps, sortedRows, predicate);
+
+  $: sortParam = $page.url.searchParams.get('sort');
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('recommendations') };
   }
 </script>
@@ -108,11 +112,16 @@
 
 <section class="card recs-card" data-testid="recommendations-page">
   <FilterChipsRail {chips} {activeValue} />
+  <SortToggle
+    baseHref="/recommendations"
+    activeSort={sortParam}
+    preservedParams={{ filter: filterParam }}
+  />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/recommendations" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
     <RecommendationsViewer
       {fetchPage}
       filterActive={filterParam !== null}

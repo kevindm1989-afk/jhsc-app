@@ -99,7 +99,14 @@
     },
     "filterChips": {
       "aria_label": "Filter by status",
-      "all": "All"
+      "all": "All",
+      "severity_aria_label": "Filter by severity",
+      "hazard_aria_label": "Filter by hazard class"
+    },
+    "sortToggle": {
+      "aria_label": "Sort order",
+      "newest": "Newest first",
+      "oldest": "Oldest first"
     },
     "filterEmptyState": {
       "no_matches": "No matches for this filter. Pick a different chip above, or clear the filter."
