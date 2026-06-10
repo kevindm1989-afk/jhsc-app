@@ -40,6 +40,12 @@
     <p class="muted">{t('common.morePage.intro')}</p>
   </header>
 
+  <p class="more-search">
+    <a href="/search" class="cta" data-testid="more-link-search"
+      >{t('common.morePage.link_search_cta')}</a
+    >
+  </p>
+
   <section class="card more-group" data-testid="more-group-intake">
     <h2>{t('common.morePage.group_intake_heading')}</h2>
     <p class="muted">{t('common.morePage.group_intake_blurb')}</p>

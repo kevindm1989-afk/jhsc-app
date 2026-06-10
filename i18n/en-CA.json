@@ -258,6 +258,7 @@
       "title": "More",
       "heading": "All committee surfaces",
       "intro": "Every product surface in the app, grouped by purpose. Most are placeholders today — the full intake and viewer surfaces land as the matching sibling tasks ship.",
+      "link_search_cta": "Search across all registers →",
       "group_intake_heading": "Field intake",
       "group_intake_blurb": "Worker-side-encrypted capture for concerns, reprisal, work refusal, critical injury, and monthly inspections.",
       "group_deliberation_heading": "Deliberation",
@@ -833,6 +834,35 @@
       "actor_label": "Actor",
       "see_all_cta": "See the full audit log",
       "row_aria": "{event} at {ts}. Open the related register."
+    }
+  },
+
+  "search": {
+    "page": {
+      "title": "Search",
+      "heading": "Search across the registers",
+      "intro": "Find concerns, recommendations, inspections, minutes, training records, and more. Searches titles, areas, event types, and short previews.",
+      "label": "Search query",
+      "placeholder": "Try: forklift, WHMIS, ergonomic, concern…",
+      "helper": "Case-insensitive substring match. Pseudonymized actors only; no PI.",
+      "empty_state": "Type a query above to search across the registers.",
+      "no_results": "No matches for {query}. Try a different word or check spelling.",
+      "summary": "{count} matches for {query}.",
+      "group_total": "{count} matches",
+      "register": {
+        "concerns": "Concerns",
+        "recommendations": "Recommendations",
+        "training": "Training records",
+        "work-refusal": "Work refusals (s. 43)",
+        "s51-evidence": "Critical-injury evidence (s. 51)",
+        "reprisal": "Reprisal log",
+        "minutes": "Meeting minutes",
+        "inspections": "Inspections",
+        "library": "Document library",
+        "audit": "Audit log",
+        "sensitive-feed": "Recent sensitive activity"
+      },
+      "back_to_home_cta": "Back to home"
     }
   },
 
