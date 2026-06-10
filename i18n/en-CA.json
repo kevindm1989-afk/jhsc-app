@@ -104,6 +104,9 @@
     "filterEmptyState": {
       "no_matches": "No matches for this filter. Pick a different chip above, or clear the filter."
     },
+    "pagination": {
+      "total_entries": "{count} total"
+    },
     "errorPage": {
       "title": "Something went wrong",
       "heading_404": "Page not found",

@@ -30,6 +30,7 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import SkeletonRows from '$lib/ui/SkeletonRows.svelte';
 
   /**
    * @type {(page: number, page_size: number) => Promise<{
@@ -123,9 +124,9 @@
   </header>
 
   {#if loading}
-    <p class="muted" role="status" data-testid="rep-loading">
-      {t('reprisal.viewer.loading')}
-    </p>
+    <div role="status" aria-label={t('reprisal.viewer.loading')} data-testid="rep-loading">
+      <SkeletonRows />
+    </div>
   {:else if loadError}
     <p class="rep-alert" role="alert" data-testid="rep-load-error">
       {t('reprisal.viewer.error.load_failed')}
@@ -147,6 +148,9 @@
       </button>
       <span class="rep-page-indicator" data-testid="rep-page-indicator">
         {t('reprisal.viewer.page_indicator', { page: page + 1, total: pageCount })}
+        <span class="pagination-total" data-testid="pagination-total"
+          >· {t('common.pagination.total_entries', { count: total })}</span
+        >
       </span>
       <button
         type="button"

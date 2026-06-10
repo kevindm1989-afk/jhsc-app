@@ -26,6 +26,7 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import SkeletonRows from '$lib/ui/SkeletonRows.svelte';
 
   /**
    * Page fetcher contract — returns a page of sensitive rows + the
@@ -121,9 +122,13 @@
   </header>
 
   {#if loading}
-    <p class="muted" role="status" data-testid="sensitive-feed-loading">
-      {t('sensitiveFeed.viewer.loading')}
-    </p>
+    <div
+      role="status"
+      aria-label={t('sensitiveFeed.viewer.loading')}
+      data-testid="sensitive-feed-loading"
+    >
+      <SkeletonRows />
+    </div>
   {:else if loadError}
     <p class="sensitive-feed-alert" role="alert" data-testid="sensitive-feed-load-error">
       {t('sensitiveFeed.viewer.error.load_failed')}
@@ -145,6 +150,9 @@
       </button>
       <span class="sensitive-feed-page-indicator" data-testid="sensitive-feed-page-indicator">
         {t('sensitiveFeed.viewer.page_indicator', { page: page + 1, total: pageCount })}
+        <span class="pagination-total" data-testid="pagination-total"
+          >· {t('common.pagination.total_entries', { count: total })}</span
+        >
       </span>
       <button
         type="button"
