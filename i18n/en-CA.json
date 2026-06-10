@@ -90,7 +90,11 @@
         "recommendations_overdue": "Overdue recommendations",
         "training_expired": "Expired training",
         "work_refusal_active": "Active s. 43 refusals",
-        "s51_preserving": "Preserving scenes"
+        "s51_preserving": "Preserving scenes",
+        "reprisal_active": "Active reprisal entries",
+        "minutes_draft": "Draft minutes",
+        "inspections_quarantined": "Quarantined inspections",
+        "library_offline": "Cached for offline"
       }
     },
     "errorPage": {

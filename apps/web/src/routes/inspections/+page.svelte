@@ -4,26 +4,41 @@
    *
    * Replaces the PR #136 coming-soon placeholder. Mounts
    * InspectionsViewer with the demo provider so the surface renders
-   * realistic content until T10.1 wires the real backend (real
-   * IndexedDB-backed store + PhotoCaptureSurface UI + ServiceWorker
-   * integration + real-canvas EXIF re-encode).
+   * realistic content until T10.1 wires the real backend.
+   *
+   * Supports URL-driven filtering:
+   *   - `?filter=quarantined` narrows to entries whose per-entry
+   *     HMAC integrity tag failed verification — the rare-but-real
+   *     F-45 / ADR-0014 tamper signal. Surfaces "what needs
+   *     investigation" cleanly.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import InspectionsViewer from '$lib/inspections/InspectionsViewer.svelte';
   import {
     buildDemoInspections,
     fetchDemoInspectionsPage
   } from '$lib/inspections/demo-inspections';
+  import FilterBanner from '$lib/ui/FilterBanner.svelte';
 
   const DEMO_ROWS = buildDemoInspections(50);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoInspectionsPage(page, page_size, DEMO_ROWS);
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: filterLabel =
+    filterParam === 'quarantined' ? t('common.filterBanner.label.inspections_quarantined') : null;
+  $: predicate =
+    filterParam === 'quarantined'
+      ? /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) =>
+          r.integrity_status === 'quarantined'
+      : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoInspectionsPage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -32,7 +47,12 @@
 </svelte:head>
 
 <section class="card ins-card" data-testid="inspections-page">
-  <InspectionsViewer {fetchPage} />
+  {#if filterLabel}
+    <FilterBanner label={filterLabel} clearHref="/inspections" />
+  {/if}
+  {#key filterParam}
+    <InspectionsViewer {fetchPage} />
+  {/key}
   <p class="ins-demo-note muted" data-testid="ins-demo-note">
     {t('inspection.viewer.demo_note')}
   </p>

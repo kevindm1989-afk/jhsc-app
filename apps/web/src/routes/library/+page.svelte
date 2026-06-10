@@ -4,22 +4,37 @@
    *
    * Replaces the PR #139 coming-soon placeholder. Mounts LibraryViewer
    * with the demo provider so the surface renders realistic content
-   * until the library-module backend (versioned doc store + offline
-   * cache + on-device search) is wired.
+   * until the library-module backend is wired.
+   *
+   * Supports URL-driven filtering:
+   *   - `?filter=offline` narrows to docs cached for offline reading.
+   *     Useful when a worker is about to walk the shop floor and
+   *     wants to confirm what they have without cell signal.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import LibraryViewer from '$lib/library/LibraryViewer.svelte';
   import { buildDemoLibrary, fetchDemoLibraryPage } from '$lib/library/demo-library';
+  import FilterBanner from '$lib/ui/FilterBanner.svelte';
 
   const DEMO_ROWS = buildDemoLibrary(50);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoLibraryPage(page, page_size, DEMO_ROWS);
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: filterLabel =
+    filterParam === 'offline' ? t('common.filterBanner.label.library_offline') : null;
+  $: predicate =
+    filterParam === 'offline'
+      ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
+          r.offline_cached === true
+      : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoLibraryPage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -28,7 +43,12 @@
 </svelte:head>
 
 <section class="card lib-card" data-testid="library-page">
-  <LibraryViewer {fetchPage} />
+  {#if filterLabel}
+    <FilterBanner label={filterLabel} clearHref="/library" />
+  {/if}
+  {#key filterParam}
+    <LibraryViewer {fetchPage} />
+  {/key}
   <p class="lib-demo-note muted" data-testid="lib-demo-note">
     {t('library.viewer.demo_note')}
   </p>
