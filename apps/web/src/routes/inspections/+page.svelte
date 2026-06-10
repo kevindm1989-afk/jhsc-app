@@ -6,11 +6,10 @@
    * InspectionsViewer with the demo provider so the surface renders
    * realistic content until T10.1 wires the real backend.
    *
-   * Supports URL-driven filtering:
-   *   - `?filter=quarantined` narrows to entries whose per-entry
-   *     HMAC integrity tag failed verification — the rare-but-real
-   *     F-45 / ADR-0014 tamper signal. Surfaces "what needs
-   *     investigation" cleanly.
+   * Supports URL-driven filtering on `integrity_status` (one of
+   * verified / quarantined) via `?filter=<value>`. A FilterChipsRail
+   * above the viewer lets the worker swap chips without typing the
+   * URL.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
@@ -22,17 +21,37 @@
     fetchDemoInspectionsPage
   } from '$lib/inspections/demo-inspections';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoInspections(50);
 
+  /** Canonical integrity-status values supported by `?filter=`. */
+  const INTEGRITY_VALUES = /** @type {const} */ (['verified', 'quarantined']);
+
   $: filterParam = $page.url.searchParams.get('filter');
+  $: activeValue =
+    filterParam && INTEGRITY_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
   $: filterLabel =
-    filterParam === 'quarantined' ? t('common.filterBanner.label.inspections_quarantined') : null;
-  $: predicate =
-    filterParam === 'quarantined'
-      ? /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) =>
-          r.integrity_status === 'quarantined'
-      : undefined;
+    activeValue === 'quarantined' ? t('common.filterBanner.label.inspections_quarantined') : null;
+
+  $: chips = [
+    { href: '/inspections', label: t('common.filterChips.all'), value: null },
+    {
+      href: '/inspections?filter=verified',
+      label: t('inspection.viewer.integrity.verified'),
+      value: 'verified'
+    },
+    {
+      href: '/inspections?filter=quarantined',
+      label: t('inspection.viewer.integrity.quarantined'),
+      value: 'quarantined'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) =>
+        r.integrity_status === activeValue
+    : undefined;
   $: fetchPage =
     /**
      * @param {number} p
@@ -47,6 +66,7 @@
 </svelte:head>
 
 <section class="card ins-card" data-testid="inspections-page">
+  <FilterChipsRail {chips} {activeValue} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/inspections" />
   {/if}

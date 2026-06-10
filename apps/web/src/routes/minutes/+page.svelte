@@ -6,9 +6,9 @@
    * with the demo provider so the surface renders realistic content
    * until the real minutes-module backend is wired.
    *
-   * Supports URL-driven filtering:
-   *   - `?filter=draft` narrows to `status === 'draft'`, the worker
-   *     co-chair's primary working view (drafts pending approval).
+   * Supports URL-driven filtering on `status` (one of draft / approved /
+   * archived) via `?filter=<value>`. A FilterChipsRail above the
+   * viewer lets the worker swap chips without typing the URL.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
@@ -17,16 +17,41 @@
   import MinutesViewer from '$lib/minutes/MinutesViewer.svelte';
   import { buildDemoMinutes, fetchDemoMinutesPage } from '$lib/minutes/demo-minutes';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoMinutes(50);
 
+  /** Canonical status values supported by `?filter=`. */
+  const STATUS_VALUES = /** @type {const} */ (['draft', 'approved', 'archived']);
+
   $: filterParam = $page.url.searchParams.get('filter');
-  $: filterLabel = filterParam === 'draft' ? t('common.filterBanner.label.minutes_draft') : null;
-  $: predicate =
-    filterParam === 'draft'
-      ? /** @param {import('$lib/minutes/demo-minutes').DemoMinutesRow} r */ (r) =>
-          r.status === 'draft'
-      : undefined;
+  $: activeValue =
+    filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
+  $: filterLabel = activeValue === 'draft' ? t('common.filterBanner.label.minutes_draft') : null;
+
+  $: chips = [
+    { href: '/minutes', label: t('common.filterChips.all'), value: null },
+    {
+      href: '/minutes?filter=draft',
+      label: t('minutes.viewer.status.draft'),
+      value: 'draft'
+    },
+    {
+      href: '/minutes?filter=approved',
+      label: t('minutes.viewer.status.approved'),
+      value: 'approved'
+    },
+    {
+      href: '/minutes?filter=archived',
+      label: t('minutes.viewer.status.archived'),
+      value: 'archived'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/minutes/demo-minutes').DemoMinutesRow} r */ (r) =>
+        r.status === activeValue
+    : undefined;
   $: fetchPage =
     /**
      * @param {number} p
@@ -41,6 +66,7 @@
 </svelte:head>
 
 <section class="card min-card" data-testid="minutes-page">
+  <FilterChipsRail {chips} {activeValue} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/minutes" />
   {/if}

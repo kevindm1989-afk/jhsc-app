@@ -7,9 +7,11 @@
    * renders realistic content until the work-refusal-module backend
    * is wired.
    *
-   * Supports URL-driven filtering:
-   *   - `?filter=active` narrows to `stage !== 'resolved'`, matching
-   *     the "Active s. 43 refusals" home dashboard tile.
+   * Supports URL-driven filtering on `stage` (one of worker_refusal /
+   * s43_4_investigation / s43_8_mol / resolved) via `?filter=<value>`,
+   * plus a macro `?filter=active` (stage !== 'resolved') for the
+   * home dashboard tile. The chip rail surfaces each individual stage;
+   * the macro doesn't highlight a chip but still shows the FilterBanner.
    *
    * Work refusals are sensitivity C4 — the card carries the
    * destructive-red inline-start border shared with /reprisal and
@@ -25,14 +27,52 @@
     fetchDemoWorkRefusalPage
   } from '$lib/work-refusal/demo-work-refusal';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoWorkRefusals(50);
 
+  /** Canonical stage values supported by `?filter=`. */
+  const STAGE_VALUES = /** @type {const} */ ([
+    'worker_refusal',
+    's43_4_investigation',
+    's43_8_mol',
+    'resolved'
+  ]);
+
   $: filterParam = $page.url.searchParams.get('filter');
+  $: activeValue =
+    filterParam && STAGE_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
   $: filterLabel =
     filterParam === 'active' ? t('common.filterBanner.label.work_refusal_active') : null;
-  $: predicate =
-    filterParam === 'active'
+
+  $: chips = [
+    { href: '/work-refusal', label: t('common.filterChips.all'), value: null },
+    {
+      href: '/work-refusal?filter=worker_refusal',
+      label: t('workRefusal.viewer.stage.worker_refusal'),
+      value: 'worker_refusal'
+    },
+    {
+      href: '/work-refusal?filter=s43_4_investigation',
+      label: t('workRefusal.viewer.stage.s43_4_investigation'),
+      value: 's43_4_investigation'
+    },
+    {
+      href: '/work-refusal?filter=s43_8_mol',
+      label: t('workRefusal.viewer.stage.s43_8_mol'),
+      value: 's43_8_mol'
+    },
+    {
+      href: '/work-refusal?filter=resolved',
+      label: t('workRefusal.viewer.stage.resolved'),
+      value: 'resolved'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
+        r.stage === activeValue
+    : filterParam === 'active'
       ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
           r.stage !== 'resolved'
       : undefined;
@@ -50,6 +90,7 @@
 </svelte:head>
 
 <section class="card work-refusal-card" data-testid="work-refusal-page">
+  <FilterChipsRail {chips} {activeValue} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/work-refusal" />
   {/if}

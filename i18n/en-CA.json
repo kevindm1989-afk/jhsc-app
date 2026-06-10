@@ -1356,6 +1356,11 @@
         "released_by_inspector": "Released by inspector",
         "window_expired": "48-hour window expired"
       },
+      "chip": {
+        "preserving": "Preserving",
+        "released": "Released",
+        "expired": "Window expired"
+      },
       "passphrase_required": "Passphrase sealed",
       "member": {
         "present": "Worker member present",
