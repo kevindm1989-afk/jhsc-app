@@ -28,8 +28,23 @@
   } from '$lib/s51-evidence/demo-s51-evidence';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoS51Evidence(30);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'opened_at',
+    'title',
+    'scene_state',
+    'hours_remaining',
+    'photo_count',
+    'witness_statement_count',
+    'per_entry_passphrase_required',
+    'worker_member_present',
+    'actor_pseudonym'
+  ]);
 
   /** Canonical scene-state values supported by `?filter=`. */
   const SCENE_VALUES = /** @type {const} */ ([
@@ -83,6 +98,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoS51EvidencePage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('s51-evidence') };
+  }
 </script>
 
 <svelte:head>
@@ -95,6 +115,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/s51-evidence" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <S51EvidenceViewer
       {fetchPage}

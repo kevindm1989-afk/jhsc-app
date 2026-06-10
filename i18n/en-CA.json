@@ -107,6 +107,11 @@
     "pagination": {
       "total_entries": "{count} total"
     },
+    "csvDownload": {
+      "button": "Download CSV",
+      "busy": "Preparing…",
+      "helper": "Downloads a CSV of the rows currently shown (filter-aware)."
+    },
     "errorPage": {
       "title": "Something went wrong",
       "heading_404": "Page not found",

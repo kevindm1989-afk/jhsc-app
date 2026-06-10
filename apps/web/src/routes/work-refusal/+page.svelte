@@ -28,8 +28,21 @@
   } from '$lib/work-refusal/demo-work-refusal';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoWorkRefusals(50);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'filed_at',
+    'title',
+    'stage',
+    'resolved_at_stage',
+    'alternative_work_assigned',
+    'days_since_filed',
+    'actor_pseudonym'
+  ]);
 
   /** Canonical stage values supported by `?filter=`. */
   const STAGE_VALUES = /** @type {const} */ ([
@@ -92,6 +105,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoWorkRefusalPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('work-refusal') };
+  }
 </script>
 
 <svelte:head>
@@ -104,6 +122,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/work-refusal" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <WorkRefusalViewer
       {fetchPage}
