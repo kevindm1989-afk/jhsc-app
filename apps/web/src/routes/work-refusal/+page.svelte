@@ -29,6 +29,7 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoWorkRefusals(50);
@@ -99,15 +100,18 @@
       ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
           r.stage !== 'resolved'
       : undefined;
+  $: sortParam = $page.url.searchParams.get('sort');
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+
   $: fetchPage =
     /**
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoWorkRefusalPage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoWorkRefusalPage(p, ps, sortedRows, predicate);
 
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('work-refusal') };
   }
 </script>
@@ -119,11 +123,16 @@
 
 <section class="card work-refusal-card" data-testid="work-refusal-page">
   <FilterChipsRail {chips} {activeValue} />
+  <SortToggle
+    baseHref="/work-refusal"
+    activeSort={sortParam}
+    preservedParams={{ filter: filterParam }}
+  />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/work-refusal" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
     <WorkRefusalViewer
       {fetchPage}
       filterActive={filterParam !== null}

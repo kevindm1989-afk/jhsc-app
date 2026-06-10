@@ -74,8 +74,10 @@ describe('T19.1 — /audit route wires the FilterChipsRail with three category c
     }
   });
 
-  it('passes filterActive={filterParam !== null} to the viewer', () => {
-    expect(src).toMatch(/filterActive=\{filterParam\s*!==\s*null\}/);
+  it('passes filterActive=<truthy-when-filtered> to the viewer', () => {
+    // /audit now composes filterParam with the date-range params; the
+    // expression includes filterParam OR fromParam OR toParam.
+    expect(src).toMatch(/filterActive=\{[\s\S]*filterParam\s*!==\s*null/);
   });
 });
 

@@ -27,6 +27,9 @@
   import { buildDemoAuditRows, fetchDemoAuditPage } from '$lib/audit/demo-audit-rows';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoAuditRows(50);
@@ -91,16 +94,34 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.auditPage.title');
 
-  $: predicate = activeValue ? predicateFor(activeValue) : undefined;
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  // Compose the event-type predicate (chip) with the date-range
+  // predicate (?from + ?to). If neither is active, predicate is
+  // undefined and the provider returns the full dataset.
+  $: predicate = (() => {
+    const eventPred = activeValue ? predicateFor(activeValue) : null;
+    const hasRange = fromParam || toParam;
+    if (!eventPred && !hasRange) return undefined;
+    return /** @param {import('$lib/audit/demo-audit-rows').DemoAuditRow} r */ (r) => {
+      if (eventPred && !eventPred(r)) return false;
+      if (hasRange && !withinRange(r.ts, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
+  $: sortParam = $page.url.searchParams.get('sort');
+  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+
   $: fetchPage =
     /**
      * @param {number} p
      * @param {number} ps
      */
-    (p, ps) => fetchDemoAuditPage(p, ps, DEMO_ROWS, predicate);
+    (p, ps) => fetchDemoAuditPage(p, ps, sortedRows, predicate);
 
   function buildDownload() {
-    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('audit') };
   }
 </script>
@@ -112,11 +133,22 @@
 
 <section class="audit-page" data-testid="audit-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/audit"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
+  <SortToggle
+    baseHref="/audit"
+    activeSort={sortParam}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
+  />
   <CsvDownloadButton onClick={buildDownload} />
-  {#key filterParam}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <AuditLogViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}
