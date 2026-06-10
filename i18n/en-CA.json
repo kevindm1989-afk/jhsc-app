@@ -806,6 +806,13 @@
         "preserving_scenes": "Scenes preserving (s. 51)"
       },
       "see_all_cta": "See all registers"
+    },
+    "recent": {
+      "heading": "Recent activity",
+      "intro": "The latest entries in the worker-side audit log. Pseudonymized actors; no PI.",
+      "empty": "No recent activity yet.",
+      "actor_label": "Actor",
+      "see_all_cta": "See the full audit log"
     }
   },
 
