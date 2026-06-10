@@ -38,6 +38,10 @@
 
   export let pageSize = 10;
 
+  /** True when the route page has applied a filter; switches the
+   *  empty state copy to a "no matches for this filter" message. */
+  export let filterActive = false;
+
   /** @type {import('./demo-training').DemoTrainingRow[]} */
   let rows = [];
   let total = 0;
@@ -126,7 +130,7 @@
     </p>
   {:else if rows.length === 0}
     <p class="muted" role="status" data-testid="trn-empty">
-      {t('training.viewer.empty')}
+      {filterActive ? t('common.filterEmptyState.no_matches') : t('training.viewer.empty')}
     </p>
   {:else}
     <div class="trn-controls" data-testid="trn-controls">

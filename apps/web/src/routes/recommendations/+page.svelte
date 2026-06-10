@@ -84,7 +84,7 @@
     <FilterBanner label={filterLabel} clearHref="/recommendations" />
   {/if}
   {#key filterParam}
-    <RecommendationsViewer {fetchPage} />
+    <RecommendationsViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="recs-demo-note muted" data-testid="recs-demo-note">
     {t('recommendations.viewer.demo_note')}

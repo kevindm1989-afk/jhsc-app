@@ -74,7 +74,7 @@
     <FilterBanner label={filterLabel} clearHref="/training" />
   {/if}
   {#key filterParam}
-    <TrainingViewer {fetchPage} />
+    <TrainingViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="trn-demo-note muted" data-testid="trn-demo-note">
     {t('training.viewer.demo_note')}

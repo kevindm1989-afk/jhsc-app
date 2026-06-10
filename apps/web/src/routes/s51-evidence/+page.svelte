@@ -86,7 +86,7 @@
     <FilterBanner label={filterLabel} clearHref="/s51-evidence" />
   {/if}
   {#key filterParam}
-    <S51EvidenceViewer {fetchPage} />
+    <S51EvidenceViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="s51-demo-note muted" data-testid="s51-demo-note">
     {t('s51.viewer.demo_note')}

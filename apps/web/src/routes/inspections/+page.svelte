@@ -71,7 +71,7 @@
     <FilterBanner label={filterLabel} clearHref="/inspections" />
   {/if}
   {#key filterParam}
-    <InspectionsViewer {fetchPage} />
+    <InspectionsViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="ins-demo-note muted" data-testid="ins-demo-note">
     {t('inspection.viewer.demo_note')}
