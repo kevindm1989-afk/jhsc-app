@@ -1,22 +1,33 @@
-<script lang="ts">
+<script>
   /**
-   * /work-refusal — coming-soon placeholder for the OHSA s. 43
-   * work-refusal capture surface.
+   * /work-refusal — JHSC C4-tier OHSA s. 43 work-refusal register mount.
    *
-   * Section 43 protects a worker who refuses work they have reason to
-   * believe is dangerous. The full capture surface (stage-gated entry
-   * across worker refusal → s. 43(4) joint investigation → s. 43(8)
-   * Ministry escalation, worker-side encryption, audit chain) is a
-   * follow-on product surface; library scaffolding for the stage
-   * machine doesn't ship yet. The placeholder lands the URL + the
-   * four-bullet contract so a worker who navigates here from a future
-   * nav link doesn't 404 and sees what's coming. Same pattern as
-   * PRs #133, #136, #138.
+   * Replaces the PR #139 coming-soon placeholder. Mounts
+   * WorkRefusalViewer with the demo provider so the register surface
+   * renders realistic content until the work-refusal-module backend
+   * (stage-gated capture + worker-side encryption + audit chain) is
+   * wired.
    *
-   * Replaces this file on work-refusal-module mount: a thin wiring
-   * shell that mounts the production stage-gated capture flow.
+   * Work refusals are sensitivity C4 — the card carries the
+   * destructive-red inline-start border shared with /reprisal and
+   * /s51-evidence.
+   *
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import WorkRefusalViewer from '$lib/work-refusal/WorkRefusalViewer.svelte';
+  import {
+    buildDemoWorkRefusals,
+    fetchDemoWorkRefusalPage
+  } from '$lib/work-refusal/demo-work-refusal';
+
+  const DEMO_ROWS = buildDemoWorkRefusals(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoWorkRefusalPage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -25,21 +36,11 @@
 </svelte:head>
 
 <section class="card work-refusal-card" data-testid="work-refusal-page">
-  <h1>{t('common.workRefusalPage.heading')}</h1>
-
-  <p class="muted" data-testid="work-refusal-coming-soon-notice">
-    {t('common.workRefusalPage.coming_soon_body')}
+  <WorkRefusalViewer {fetchPage} />
+  <p class="wr-demo-note muted" data-testid="wr-demo-note">
+    {t('workRefusal.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.workRefusalPage.what_this_will_do_heading')}</h2>
-  <ul class="work-refusal-bullets">
-    <li>{t('common.workRefusalPage.bullet_right_to_refuse')}</li>
-    <li>{t('common.workRefusalPage.bullet_stage_gated')}</li>
-    <li>{t('common.workRefusalPage.bullet_certified_member_visibility')}</li>
-    <li>{t('common.workRefusalPage.bullet_audit_full_chain')}</li>
-  </ul>
-
-  <p>
+  <p class="wr-footer">
     <a href="/" data-testid="work-refusal-back-to-home">
       {t('common.workRefusalPage.back_to_home_cta')}
     </a>
@@ -47,14 +48,21 @@
 </section>
 
 <style>
+  /* C4 sensitivity accent — shared with /reprisal and /s51-evidence. */
   .work-refusal-card {
     margin-block-start: 1rem;
+    border-inline-start: 4px solid var(--color-destructive);
   }
-  .work-refusal-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .wr-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .work-refusal-bullets > li {
-    margin-block-end: 0.5rem;
+  .wr-footer {
+    margin-block-start: 0.75rem;
   }
 </style>

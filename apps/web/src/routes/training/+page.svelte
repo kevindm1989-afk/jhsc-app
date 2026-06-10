@@ -1,19 +1,25 @@
-<script lang="ts">
+<script>
   /**
-   * /training — coming-soon placeholder for the JHSC training-records
-   * surface (worker certified member tracking per OHSA s. 9(12)(d),
-   * refresher alerts, evidence attachments).
+   * /training — JHSC training-records register mount.
    *
-   * The training-records module is a follow-on product surface; no
-   * component ships yet. The placeholder lands the URL + the four-
-   * bullet contract so a worker who navigates here from a future nav
-   * link doesn't 404 and sees what's coming. Same pattern as PRs #133,
-   * #136, #138, #139.
+   * Replaces the PR #139 coming-soon placeholder. Mounts TrainingViewer
+   * with the demo provider so the surface renders realistic content
+   * until the training-records-module backend (certified-member
+   * tracking + refresher alerts + evidence attachments) is wired.
    *
-   * Replaces this file on training-module mount: a thin wiring shell
-   * that mounts the production training-records list + intake.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import TrainingViewer from '$lib/training/TrainingViewer.svelte';
+  import { buildDemoTraining, fetchDemoTrainingPage } from '$lib/training/demo-training';
+
+  const DEMO_ROWS = buildDemoTraining(50);
+
+  /**
+   * @param {number} page
+   * @param {number} page_size
+   */
+  const fetchPage = (page, page_size) => fetchDemoTrainingPage(page, page_size, DEMO_ROWS);
 </script>
 
 <svelte:head>
@@ -21,22 +27,12 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-<section class="card training-card" data-testid="training-page">
-  <h1>{t('common.trainingPage.heading')}</h1>
-
-  <p class="muted" data-testid="training-coming-soon-notice">
-    {t('common.trainingPage.coming_soon_body')}
+<section class="card trn-card" data-testid="training-page">
+  <TrainingViewer {fetchPage} />
+  <p class="trn-demo-note muted" data-testid="trn-demo-note">
+    {t('training.viewer.demo_note')}
   </p>
-
-  <h2>{t('common.trainingPage.what_this_will_do_heading')}</h2>
-  <ul class="training-bullets">
-    <li>{t('common.trainingPage.bullet_certified_member')}</li>
-    <li>{t('common.trainingPage.bullet_refresher_alerts')}</li>
-    <li>{t('common.trainingPage.bullet_pseudonymized_audit')}</li>
-    <li>{t('common.trainingPage.bullet_evidence_attach')}</li>
-  </ul>
-
-  <p>
+  <p class="trn-footer">
     <a href="/" data-testid="training-back-to-home">
       {t('common.trainingPage.back_to_home_cta')}
     </a>
@@ -44,14 +40,19 @@
 </section>
 
 <style>
-  .training-card {
+  .trn-card {
     margin-block-start: 1rem;
   }
-  .training-bullets {
-    margin-block: 0.75rem 1rem;
-    padding-inline-start: 1.25rem;
+  .trn-demo-note {
+    margin-block: 1rem 0;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-tint-amber-border);
+    border-radius: var(--radius-md);
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    font-size: 0.8125rem;
   }
-  .training-bullets > li {
-    margin-block-end: 0.5rem;
+  .trn-footer {
+    margin-block-start: 0.75rem;
   }
 </style>
