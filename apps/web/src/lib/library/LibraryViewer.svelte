@@ -41,6 +41,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-library').DemoLibraryRow[]} */
   let rows = [];
   let total = 0;
@@ -107,7 +110,12 @@
   data-testid="lib-viewer-section"
 >
   <header class="lib-header">
-    <h1 id="lib-heading">{t('library.viewer.heading')}</h1>
+    <h1 id="lib-heading">
+      {t('library.viewer.heading')}{#if filterLabel}<span
+          class="viewer-heading-filter"
+          data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+        >{/if}
+    </h1>
     <p class="muted">{t('library.viewer.intro')}</p>
     <p class="lib-offline-note" data-testid="lib-offline-note">
       <strong>{t('library.viewer.offline_note.label')}:</strong>

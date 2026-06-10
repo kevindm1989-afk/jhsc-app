@@ -48,14 +48,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.minutesPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.minutesPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/minutes/demo-minutes').DemoMinutesRow} r */ (r) =>
@@ -80,7 +81,11 @@
     <FilterBanner label={filterLabel} clearHref="/minutes" />
   {/if}
   {#key filterParam}
-    <MinutesViewer {fetchPage} filterActive={filterParam !== null} />
+    <MinutesViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="min-demo-note muted" data-testid="min-demo-note">
     {t('minutes.viewer.demo_note')}

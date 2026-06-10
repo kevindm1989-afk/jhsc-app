@@ -43,6 +43,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-training').DemoTrainingRow[]} */
   let rows = [];
   let total = 0;
@@ -113,7 +116,12 @@
   data-testid="trn-viewer-section"
 >
   <header class="trn-header">
-    <h1 id="trn-heading">{t('training.viewer.heading')}</h1>
+    <h1 id="trn-heading">
+      {t('training.viewer.heading')}{#if filterLabel}<span
+          class="viewer-heading-filter"
+          data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+        >{/if}
+    </h1>
     <p class="muted">{t('training.viewer.intro')}</p>
     <p class="trn-refresher-note" data-testid="trn-refresher-note">
       <strong>{t('training.viewer.refresher_note.label')}:</strong>

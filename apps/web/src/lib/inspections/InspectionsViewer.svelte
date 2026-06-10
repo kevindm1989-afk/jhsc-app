@@ -46,6 +46,9 @@
    *  empty state copy to a "no matches for this filter" message. */
   export let filterActive = false;
 
+  /** When non-null, the active filter label echoes in the h1. */
+  export let filterLabel = null;
+
   /** @type {import('./demo-inspections').DemoInspectionRow[]} */
   let rows = [];
   let total = 0;
@@ -108,7 +111,12 @@
   data-testid="ins-viewer-section"
 >
   <header class="ins-header">
-    <h1 id="ins-heading">{t('inspection.viewer.heading')}</h1>
+    <h1 id="ins-heading">
+      {t('inspection.viewer.heading')}{#if filterLabel}<span
+          class="viewer-heading-filter"
+          data-testid="viewer-heading-filter">{' '}— {filterLabel}</span
+        >{/if}
+    </h1>
     <p class="muted">{t('inspection.viewer.intro')}</p>
     <p class="ins-offline-note" data-testid="ins-offline-note">
       <strong>{t('inspection.viewer.offline_note.label')}:</strong>

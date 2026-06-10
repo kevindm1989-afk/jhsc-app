@@ -63,14 +63,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.s51Page.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.s51Page.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (r) =>
@@ -95,7 +96,11 @@
     <FilterBanner label={filterLabel} clearHref="/s51-evidence" />
   {/if}
   {#key filterParam}
-    <S51EvidenceViewer {fetchPage} filterActive={filterParam !== null} />
+    <S51EvidenceViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="s51-demo-note muted" data-testid="s51-demo-note">
     {t('s51.viewer.demo_note')}

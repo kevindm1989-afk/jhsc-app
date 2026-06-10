@@ -48,14 +48,15 @@
     }
   ];
 
-  $: pageTitle = (() => {
+  $: activeFilterLabel = (() => {
     if (activeValue) {
       const chip = chips.find((c) => c.value === activeValue);
       if (chip?.label) return chip.label;
     }
     if (filterLabel) return filterLabel;
-    return t('common.inspectionsPage.title');
+    return null;
   })();
+  $: pageTitle = activeFilterLabel ?? t('common.inspectionsPage.title');
 
   $: predicate = activeValue
     ? /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) =>
@@ -80,7 +81,11 @@
     <FilterBanner label={filterLabel} clearHref="/inspections" />
   {/if}
   {#key filterParam}
-    <InspectionsViewer {fetchPage} filterActive={filterParam !== null} />
+    <InspectionsViewer
+      {fetchPage}
+      filterActive={filterParam !== null}
+      filterLabel={activeFilterLabel}
+    />
   {/key}
   <p class="ins-demo-note muted" data-testid="ins-demo-note">
     {t('inspection.viewer.demo_note')}
