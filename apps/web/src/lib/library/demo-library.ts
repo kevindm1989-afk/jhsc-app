@@ -136,16 +136,22 @@ export function buildDemoLibrary(count: number, seed = 1867): DemoLibraryRow[] {
   return rows;
 }
 
-/** Page-based slicer — same contract as the other demo providers. */
+/**
+ * Page-based slicer — same contract as the other demo providers.
+ * Optional predicate narrows the dataset before pagination (e.g. only
+ * offline-cached docs).
+ */
 export async function fetchDemoLibraryPage(
   page: number,
   page_size: number,
-  all: DemoLibraryRow[]
+  all: DemoLibraryRow[],
+  predicate?: (row: DemoLibraryRow) => boolean
 ): Promise<DemoLibraryPage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };

@@ -4,9 +4,13 @@
    *
    * Replaces the PR #136 coming-soon placeholder. Mounts ReprisalViewer
    * with the demo provider so the register surface renders realistic
-   * content until T13.1 wires the production SupabaseReprisalClient
-   * (per-entry passphrase derivation + audit emission + role-gated
-   * read path).
+   * content until T13.1 wires the production SupabaseReprisalClient.
+   *
+   * Supports URL-driven filtering:
+   *   - `?filter=active` narrows to stage in {filed, investigating}.
+   *     The vast majority of register activity sits in those two
+   *     stages — surfacing the "in-flight" subset is the most common
+   *     worker query.
    *
    * Preserves the destructive-red 4px inline-start border the
    * placeholder card established, so the C4 sensitivity reads at a
@@ -14,17 +18,27 @@
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import ReprisalViewer from '$lib/reprisal/ReprisalViewer.svelte';
   import { buildDemoReprisals, fetchDemoReprisalPage } from '$lib/reprisal/demo-reprisal';
+  import FilterBanner from '$lib/ui/FilterBanner.svelte';
 
   const DEMO_ROWS = buildDemoReprisals(50);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoReprisalPage(page, page_size, DEMO_ROWS);
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: filterLabel = filterParam === 'active' ? t('common.filterBanner.label.reprisal_active') : null;
+  $: predicate =
+    filterParam === 'active'
+      ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
+          r.status === 'filed' || r.status === 'investigating'
+      : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoReprisalPage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -33,7 +47,12 @@
 </svelte:head>
 
 <section class="card reprisal-card" data-testid="reprisal-page">
-  <ReprisalViewer {fetchPage} />
+  {#if filterLabel}
+    <FilterBanner label={filterLabel} clearHref="/reprisal" />
+  {/if}
+  {#key filterParam}
+    <ReprisalViewer {fetchPage} />
+  {/key}
   <p class="rep-demo-note muted" data-testid="rep-demo-note">
     {t('reprisal.viewer.demo_note')}
   </p>

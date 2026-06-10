@@ -148,16 +148,22 @@ export function buildDemoMinutes(count: number, seed = 1789): DemoMinutesRow[] {
   return rows;
 }
 
-/** Page-based slicer — same contract as the other demo providers. */
+/**
+ * Page-based slicer — same contract as the other demo providers.
+ * Optional predicate narrows the dataset before pagination (e.g. only
+ * drafts).
+ */
 export async function fetchDemoMinutesPage(
   page: number,
   page_size: number,
-  all: DemoMinutesRow[]
+  all: DemoMinutesRow[],
+  predicate?: (row: DemoMinutesRow) => boolean
 ): Promise<DemoMinutesPage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };
