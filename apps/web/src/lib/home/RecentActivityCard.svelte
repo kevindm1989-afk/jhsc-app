@@ -17,6 +17,7 @@
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import { eventTypeToHref } from './recent-activity-targets';
 
   /** @type {import('../audit/demo-audit-rows').DemoAuditRow[]} */
   export let rows = [];
@@ -43,12 +44,22 @@
     <ul class="ra-list" data-testid="ra-list">
       {#each rows as row (row.id)}
         <li class="ra-row" data-testid="ra-row">
-          <time class="ra-ts" data-testid="ra-row-ts">{formatTimestamp(row.ts)}</time>
-          <code class="ra-event" data-testid="ra-row-event">{row.event_type}</code>
-          <span class="ra-actor-row">
-            <span class="ra-actor-key">{t('home.recent.actor_label')}:</span>
-            <code class="ra-actor" data-testid="ra-row-actor">{row.actor_pseudonym}</code>
-          </span>
+          <a
+            href={eventTypeToHref(row.event_type)}
+            class="ra-row-link"
+            data-testid="ra-row-link"
+            aria-label={t('home.recent.row_aria', {
+              event: row.event_type,
+              ts: formatTimestamp(row.ts)
+            })}
+          >
+            <time class="ra-ts" data-testid="ra-row-ts">{formatTimestamp(row.ts)}</time>
+            <code class="ra-event" data-testid="ra-row-event">{row.event_type}</code>
+            <span class="ra-actor-row">
+              <span class="ra-actor-key">{t('home.recent.actor_label')}:</span>
+              <code class="ra-actor" data-testid="ra-row-actor">{row.actor_pseudonym}</code>
+            </span>
+          </a>
         </li>
       {/each}
     </ul>
@@ -79,16 +90,28 @@
     overflow: hidden;
   }
   .ra-row {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: 0.5rem;
-    row-gap: 0.125rem;
-    padding: 0.625rem 0.875rem;
+    display: block;
     background: var(--color-bg-elevated);
     color: var(--color-fg);
   }
   .ra-row + .ra-row {
     border-block-start: 1px solid var(--color-border);
+  }
+  /* The row itself is a link so a tap anywhere in the row navigates.
+     Mirror grid layout the row used to carry. */
+  .ra-row-link {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.5rem;
+    row-gap: 0.125rem;
+    padding: 0.625rem 0.875rem;
+    color: inherit;
+    text-decoration: none;
+    transition: background-color 150ms ease;
+  }
+  .ra-row-link:hover {
+    background: var(--color-muted);
+    text-decoration: none;
   }
   .ra-ts {
     font-family: var(--font-mono);
