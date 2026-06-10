@@ -60,6 +60,15 @@
     }
   ];
 
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    if (filterLabel) return filterLabel;
+    return t('common.reprisalPage.title');
+  })();
+
   $: predicate = activeValue
     ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
         r.status === activeValue
@@ -76,7 +85,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.reprisalPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -91,7 +100,7 @@
   <p class="rep-demo-note muted" data-testid="rep-demo-note">
     {t('reprisal.viewer.demo_note')}
   </p>
-  <p class="rep-footer">
+  <p class="rep-footer" data-print="hide">
     <a href="/" data-testid="reprisal-back-to-home">
       {t('common.reprisalPage.back_to_home_cta')}
     </a>

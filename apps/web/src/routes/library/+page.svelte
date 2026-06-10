@@ -68,6 +68,15 @@
     }
   ];
 
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    if (filterLabel) return filterLabel;
+    return t('common.libraryPage.title');
+  })();
+
   $: predicate = activeValue
     ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
         r.category === activeValue
@@ -84,7 +93,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.libraryPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -99,7 +108,7 @@
   <p class="lib-demo-note muted" data-testid="lib-demo-note">
     {t('library.viewer.demo_note')}
   </p>
-  <p class="lib-footer">
+  <p class="lib-footer" data-print="hide">
     <a href="/" data-testid="library-back-to-home">
       {t('common.libraryPage.back_to_home_cta')}
     </a>

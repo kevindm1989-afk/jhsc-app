@@ -48,6 +48,15 @@
     }
   ];
 
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    if (filterLabel) return filterLabel;
+    return t('common.minutesPage.title');
+  })();
+
   $: predicate = activeValue
     ? /** @param {import('$lib/minutes/demo-minutes').DemoMinutesRow} r */ (r) =>
         r.status === activeValue
@@ -61,7 +70,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.minutesPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -76,7 +85,7 @@
   <p class="min-demo-note muted" data-testid="min-demo-note">
     {t('minutes.viewer.demo_note')}
   </p>
-  <p class="min-footer">
+  <p class="min-footer" data-print="hide">
     <a href="/" data-testid="minutes-back-to-home">
       {t('common.minutesPage.back_to_home_cta')}
     </a>

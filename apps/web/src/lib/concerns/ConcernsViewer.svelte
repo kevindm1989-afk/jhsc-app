@@ -139,7 +139,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('concern.viewer.empty')}
     </p>
   {:else}
-    <div class="con-controls" data-testid="con-controls">
+    <div class="con-controls" data-testid="con-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

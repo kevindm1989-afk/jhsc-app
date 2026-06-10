@@ -138,7 +138,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('audit.viewer.empty')}
     </p>
   {:else}
-    <div class="audit-viewer-controls" data-testid="audit-viewer-controls">
+    <div class="audit-viewer-controls" data-testid="audit-viewer-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

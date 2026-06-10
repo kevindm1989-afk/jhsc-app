@@ -69,6 +69,15 @@
     }
   ];
 
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    if (filterLabel) return filterLabel;
+    return t('common.workRefusalPage.title');
+  })();
+
   $: predicate = activeValue
     ? /** @param {import('$lib/work-refusal/demo-work-refusal').DemoWorkRefusalRow} r */ (r) =>
         r.stage === activeValue
@@ -85,7 +94,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.workRefusalPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -100,7 +109,7 @@
   <p class="wr-demo-note muted" data-testid="wr-demo-note">
     {t('workRefusal.viewer.demo_note')}
   </p>
-  <p class="wr-footer">
+  <p class="wr-footer" data-print="hide">
     <a href="/" data-testid="work-refusal-back-to-home">
       {t('common.workRefusalPage.back_to_home_cta')}
     </a>

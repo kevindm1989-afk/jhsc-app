@@ -54,6 +54,14 @@
     }
   ];
 
+  $: pageTitle = (() => {
+    if (activeValue) {
+      const chip = chips.find((c) => c.value === activeValue);
+      if (chip?.label) return chip.label;
+    }
+    return t('common.sensitiveFeedPage.title');
+  })();
+
   $: predicate = activeValue
     ? /** @param {import('$lib/audit/demo-sensitive-feed').DemoSensitiveRow} r */ (r) =>
         r.sensitivity === activeValue
@@ -67,7 +75,7 @@
 </script>
 
 <svelte:head>
-  <title>{t('common.sensitiveFeedPage.title')} — {t('common.app_name')}</title>
+  <title>{pageTitle} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
@@ -79,7 +87,7 @@
   <p class="sensitive-feed-demo-note muted" data-testid="sensitive-feed-demo-note">
     {t('sensitiveFeed.viewer.demo_note')}
   </p>
-  <p class="sensitive-feed-footer">
+  <p class="sensitive-feed-footer" data-print="hide">
     <a href="/" data-testid="sensitive-feed-back-to-home">
       {t('common.sensitiveFeedPage.back_to_home_cta')}
     </a>

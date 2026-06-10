@@ -31,7 +31,12 @@
   export let activeValue = null;
 </script>
 
-<nav class="fcr-rail" aria-label={t('common.filterChips.aria_label')} data-testid="filter-chips">
+<nav
+  class="fcr-rail"
+  aria-label={t('common.filterChips.aria_label')}
+  data-testid="filter-chips"
+  data-print="hide"
+>
   <ul class="fcr-list">
     {#each chips as chip (chip.value === null ? '__all__' : chip.value)}
       {@const isActive = chip.value === activeValue}

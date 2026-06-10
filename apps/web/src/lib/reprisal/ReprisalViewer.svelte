@@ -136,7 +136,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('reprisal.viewer.empty')}
     </p>
   {:else}
-    <div class="rep-controls" data-testid="rep-controls">
+    <div class="rep-controls" data-testid="rep-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

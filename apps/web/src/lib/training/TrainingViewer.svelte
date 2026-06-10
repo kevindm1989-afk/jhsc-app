@@ -134,7 +134,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('training.viewer.empty')}
     </p>
   {:else}
-    <div class="trn-controls" data-testid="trn-controls">
+    <div class="trn-controls" data-testid="trn-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"

@@ -135,7 +135,7 @@
       {filterActive ? t('common.filterEmptyState.no_matches') : t('s51.viewer.empty')}
     </p>
   {:else}
-    <div class="s51-controls" data-testid="s51-controls">
+    <div class="s51-controls" data-testid="s51-controls" data-print="hide">
       <button
         type="button"
         class="btn-outline"
