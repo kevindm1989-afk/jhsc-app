@@ -1,11 +1,16 @@
-<script lang="ts">
+<script>
   /**
    * Landing page.
    *
    * Offers three states keyed off CURRENT JWT presence:
-   *   - Signed in (`isSignedIn = true`): single "Continue to settings"
-   *     CTA. A returning visitor doesn't need to be told to "sign in"
-   *     when they already have an active session.
+   *   - Signed in (`isSignedIn = true`): the existing welcome-back card
+   *     with the /settings CTA, PLUS the new HomeDashboard digest that
+   *     tiles cross-register "needs attention" counts (open concerns,
+   *     overdue recommendations, expired training, active s. 43
+   *     refusals, s. 51 scenes still preserving). The digest is
+   *     computed from the same demo providers the register surfaces
+   *     use, so the front door reads as a coherent map of the open
+   *     work until each register's real backend is wired.
    *   - Not signed in (`isSignedIn = false`): two CTAs — onboarding
    *     entry (new device) and sign-in entry (returning device).
    *     The already-onboarded ↔ new-device decision COULD be automated
@@ -15,20 +20,41 @@
    *
    * Reactive JWT state (parity with /sign-in and /settings): consumes
    * the `$isSignedIn` Svelte readable store from
-   * `$lib/auth/session-jwt-svelte` (introduced PR #63, this route
-   * migrated PR #64). The wrapper subscribes to the underlying
-   * session-jwt-store once and Svelte's `$`-prefix auto-subscribes /
-   * unsubscribes so any external clear (panic-wipe, 401 revocation,
-   * cross-tab sign-out, future server-side revoke) flips the UI in
-   * real time. Initial value comes from the wrapper's seed
-   * (`getJwt() !== null`) so a returning visitor sees the welcome-back
-   * state at mount without a flash of the two-CTA layout.
+   * `$lib/auth/session-jwt-svelte` (introduced PR #63). The wrapper
+   * subscribes to the underlying session-jwt-store once and Svelte's
+   * `$`-prefix auto-subscribes / unsubscribes so any external clear
+   * (panic-wipe, 401 revocation, cross-tab sign-out, future server-
+   * side revoke) flips the UI in real time. Initial value comes from
+   * the wrapper's seed (`getJwt() !== null`) so a returning visitor
+   * sees the welcome-back state at mount without a flash of the two-
+   * CTA layout.
    *
-   * All visible text resolves via t() per ADR-0009. Layout/colour come
-   * from the shared card + cta classes in app.css (worker-hub language).
+   * All visible text resolves via t() per ADR-0009. Layout/colour
+   * come from the shared card + cta classes in app.css (worker-hub
+   * language).
+   *
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
   import { isSignedIn } from '$lib/auth/session-jwt-svelte';
+  import HomeDashboard from '$lib/home/HomeDashboard.svelte';
+  import { buildHomeSummary } from '$lib/home/home-summary';
+  import { buildDemoConcerns } from '$lib/concerns/demo-concerns';
+  import { buildDemoRecommendations } from '$lib/recommendations/demo-recommendations';
+  import { buildDemoTraining } from '$lib/training/demo-training';
+  import { buildDemoWorkRefusals } from '$lib/work-refusal/demo-work-refusal';
+  import { buildDemoS51Evidence } from '$lib/s51-evidence/demo-s51-evidence';
+
+  // Digest is computed once at mount over the demo providers. When each
+  // register's real backend lands the page swaps these calls for real
+  // queries; the HomeDashboard component itself is provider-agnostic.
+  const summary = buildHomeSummary({
+    concerns: buildDemoConcerns(50),
+    recommendations: buildDemoRecommendations(50),
+    training: buildDemoTraining(50),
+    workRefusals: buildDemoWorkRefusals(50),
+    s51Evidence: buildDemoS51Evidence(30)
+  });
 </script>
 
 <svelte:head>
@@ -49,6 +75,9 @@
         >{t('landing.signed_in.cta')}</a
       >
     </p>
+  </section>
+  <section class="card" data-testid="landing-dashboard">
+    <HomeDashboard {summary} />
   </section>
 {:else}
   <section class="card" data-testid="landing-new-device">

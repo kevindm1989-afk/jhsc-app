@@ -783,6 +783,21 @@
     }
   },
 
+  "home": {
+    "dashboard": {
+      "heading": "Needs attention",
+      "intro": "A snapshot of open work across the registers. Tap any tile to dive in.",
+      "tile": {
+        "open_concerns": "Open concerns",
+        "overdue_recommendations": "Overdue recommendations (>21 days)",
+        "expired_training": "Expired training",
+        "active_refusals": "Active s. 43 refusals",
+        "preserving_scenes": "Scenes preserving (s. 51)"
+      },
+      "see_all_cta": "See all registers"
+    }
+  },
+
   "signOut": {
     "heading": "Session",
     "intro": "Sign out on this device. The server-side session expires within a few minutes; for immediate device cleanup, use Wipe this device's data below.",
