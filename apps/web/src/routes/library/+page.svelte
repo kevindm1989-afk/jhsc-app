@@ -6,10 +6,12 @@
    * with the demo provider so the surface renders realistic content
    * until the library-module backend is wired.
    *
-   * Supports URL-driven filtering:
-   *   - `?filter=offline` narrows to docs cached for offline reading.
-   *     Useful when a worker is about to walk the shop floor and
-   *     wants to confirm what they have without cell signal.
+   * Supports URL-driven filtering on `category` (one of policy /
+   * procedure / training / legislation / template) via
+   * `?filter=<value>`, plus a macro `?filter=offline` (offline_cached
+   * === true) that's orthogonal to category. The chip rail surfaces
+   * each category; the macro doesn't highlight a chip but still shows
+   * the FilterBanner.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
@@ -18,14 +20,58 @@
   import LibraryViewer from '$lib/library/LibraryViewer.svelte';
   import { buildDemoLibrary, fetchDemoLibraryPage } from '$lib/library/demo-library';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoLibrary(50);
 
+  /** Canonical category values supported by `?filter=`. */
+  const CATEGORY_VALUES = /** @type {const} */ ([
+    'policy',
+    'procedure',
+    'training',
+    'legislation',
+    'template'
+  ]);
+
   $: filterParam = $page.url.searchParams.get('filter');
+  $: activeValue =
+    filterParam && CATEGORY_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
   $: filterLabel =
     filterParam === 'offline' ? t('common.filterBanner.label.library_offline') : null;
-  $: predicate =
-    filterParam === 'offline'
+
+  $: chips = [
+    { href: '/library', label: t('common.filterChips.all'), value: null },
+    {
+      href: '/library?filter=policy',
+      label: t('library.viewer.category.policy'),
+      value: 'policy'
+    },
+    {
+      href: '/library?filter=procedure',
+      label: t('library.viewer.category.procedure'),
+      value: 'procedure'
+    },
+    {
+      href: '/library?filter=training',
+      label: t('library.viewer.category.training'),
+      value: 'training'
+    },
+    {
+      href: '/library?filter=legislation',
+      label: t('library.viewer.category.legislation'),
+      value: 'legislation'
+    },
+    {
+      href: '/library?filter=template',
+      label: t('library.viewer.category.template'),
+      value: 'template'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
+        r.category === activeValue
+    : filterParam === 'offline'
       ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
           r.offline_cached === true
       : undefined;
@@ -43,6 +89,7 @@
 </svelte:head>
 
 <section class="card lib-card" data-testid="library-page">
+  <FilterChipsRail {chips} {activeValue} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/library" />
   {/if}

@@ -7,9 +7,11 @@
    * S51EvidenceViewer with the demo provider so the register surface
    * renders realistic content until T14 wires the real backend.
    *
-   * Supports URL-driven filtering:
-   *   - `?filter=preserving` narrows to `scene_state === 'preserving'`,
-   *     matching the "Scenes preserving" home dashboard tile.
+   * Supports URL-driven filtering on `scene_state` (one of preserving /
+   * released_by_inspector / window_expired) via `?filter=<value>`.
+   * A FilterChipsRail above the viewer lets the worker swap chips.
+   * The "Scenes preserving" home dashboard tile deep-links here with
+   * `?filter=preserving` already highlighted.
    *
    * Preserves the destructive-red 4px inline-start border the
    * placeholder card established — every C4 surface in the worker-hub
@@ -25,17 +27,46 @@
     fetchDemoS51EvidencePage
   } from '$lib/s51-evidence/demo-s51-evidence';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoS51Evidence(30);
 
+  /** Canonical scene-state values supported by `?filter=`. */
+  const SCENE_VALUES = /** @type {const} */ ([
+    'preserving',
+    'released_by_inspector',
+    'window_expired'
+  ]);
+
   $: filterParam = $page.url.searchParams.get('filter');
+  $: activeValue =
+    filterParam && SCENE_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
   $: filterLabel =
-    filterParam === 'preserving' ? t('common.filterBanner.label.s51_preserving') : null;
-  $: predicate =
-    filterParam === 'preserving'
-      ? /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (r) =>
-          r.scene_state === 'preserving'
-      : undefined;
+    activeValue === 'preserving' ? t('common.filterBanner.label.s51_preserving') : null;
+
+  $: chips = [
+    { href: '/s51-evidence', label: t('common.filterChips.all'), value: null },
+    {
+      href: '/s51-evidence?filter=preserving',
+      label: t('s51.viewer.chip.preserving'),
+      value: 'preserving'
+    },
+    {
+      href: '/s51-evidence?filter=released_by_inspector',
+      label: t('s51.viewer.chip.released'),
+      value: 'released_by_inspector'
+    },
+    {
+      href: '/s51-evidence?filter=window_expired',
+      label: t('s51.viewer.chip.expired'),
+      value: 'window_expired'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/s51-evidence/demo-s51-evidence').DemoS51EvidenceRow} r */ (r) =>
+        r.scene_state === activeValue
+    : undefined;
   $: fetchPage =
     /**
      * @param {number} p
@@ -50,6 +81,7 @@
 </svelte:head>
 
 <section class="card s51-card" data-testid="s51-page">
+  <FilterChipsRail {chips} {activeValue} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/s51-evidence" />
   {/if}
