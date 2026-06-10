@@ -86,7 +86,7 @@
     <FilterBanner label={filterLabel} clearHref="/reprisal" />
   {/if}
   {#key filterParam}
-    <ReprisalViewer {fetchPage} />
+    <ReprisalViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="rep-demo-note muted" data-testid="rep-demo-note">
     {t('reprisal.viewer.demo_note')}

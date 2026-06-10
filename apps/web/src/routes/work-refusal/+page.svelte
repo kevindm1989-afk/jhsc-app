@@ -95,7 +95,7 @@
     <FilterBanner label={filterLabel} clearHref="/work-refusal" />
   {/if}
   {#key filterParam}
-    <WorkRefusalViewer {fetchPage} />
+    <WorkRefusalViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="wr-demo-note muted" data-testid="wr-demo-note">
     {t('workRefusal.viewer.demo_note')}

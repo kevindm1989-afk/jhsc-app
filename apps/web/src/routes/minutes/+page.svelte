@@ -71,7 +71,7 @@
     <FilterBanner label={filterLabel} clearHref="/minutes" />
   {/if}
   {#key filterParam}
-    <MinutesViewer {fetchPage} />
+    <MinutesViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="min-demo-note muted" data-testid="min-demo-note">
     {t('minutes.viewer.demo_note')}

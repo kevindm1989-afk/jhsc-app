@@ -76,7 +76,7 @@
     <FilterBanner label={filterLabel} clearHref="/concerns" />
   {/if}
   {#key filterParam}
-    <ConcernsViewer {fetchPage} />
+    <ConcernsViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="con-demo-note muted" data-testid="con-demo-note">
     {t('concern.viewer.demo_note')}

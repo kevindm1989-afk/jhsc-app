@@ -41,6 +41,10 @@
 
   export let pageSize = 10;
 
+  /** True when the route page has applied a filter; switches the
+   *  empty state copy to a "no matches for this filter" message. */
+  export let filterActive = false;
+
   /** @type {import('./demo-inspections').DemoInspectionRow[]} */
   let rows = [];
   let total = 0;
@@ -121,7 +125,7 @@
     </p>
   {:else if rows.length === 0}
     <p class="muted" role="status" data-testid="ins-empty">
-      {t('inspection.viewer.empty')}
+      {filterActive ? t('common.filterEmptyState.no_matches') : t('inspection.viewer.empty')}
     </p>
   {:else}
     <div class="ins-controls" data-testid="ins-controls">

@@ -38,6 +38,10 @@
 
   export let pageSize = 10;
 
+  /** True when the route page has applied a filter; switches the
+   *  empty state copy to a "no matches for this filter" message. */
+  export let filterActive = false;
+
   /** @type {import('./demo-work-refusal').DemoWorkRefusalRow[]} */
   let rows = [];
   let total = 0;
@@ -133,7 +137,7 @@
     </p>
   {:else if rows.length === 0}
     <p class="muted" role="status" data-testid="wr-empty">
-      {t('workRefusal.viewer.empty')}
+      {filterActive ? t('common.filterEmptyState.no_matches') : t('workRefusal.viewer.empty')}
     </p>
   {:else}
     <div class="wr-controls" data-testid="wr-controls">

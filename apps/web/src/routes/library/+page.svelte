@@ -94,7 +94,7 @@
     <FilterBanner label={filterLabel} clearHref="/library" />
   {/if}
   {#key filterParam}
-    <LibraryViewer {fetchPage} />
+    <LibraryViewer {fetchPage} filterActive={filterParam !== null} />
   {/key}
   <p class="lib-demo-note muted" data-testid="lib-demo-note">
     {t('library.viewer.demo_note')}
