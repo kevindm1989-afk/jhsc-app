@@ -26,8 +26,15 @@
   import AuditLogViewer from '$lib/audit/AuditLogViewer.svelte';
   import { buildDemoAuditRows, fetchDemoAuditPage } from '$lib/audit/demo-audit-rows';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoAuditRows(50);
+
+  // Note: meta is a record-shaped sub-field per row and is excluded
+  // from the CSV in this snapshot — the real Merkle audit chain (T18)
+  // will get its own canonical export shape.
+  const CSV_FIELDS = /** @type {const} */ (['id', 'ts', 'event_type', 'actor_pseudonym']);
 
   /** Canonical filter values supported by `?filter=`. */
   const FILTER_VALUES = /** @type {const} */ (['sessions', 'workplace', 'committee']);
@@ -91,6 +98,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoAuditPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('audit') };
+  }
 </script>
 
 <svelte:head>
@@ -100,6 +112,7 @@
 
 <section class="audit-page" data-testid="audit-page">
   <FilterChipsRail {chips} {activeValue} />
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <AuditLogViewer
       {fetchPage}

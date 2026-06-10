@@ -20,8 +20,20 @@
   import { buildDemoTraining, fetchDemoTrainingPage } from '$lib/training/demo-training';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoTraining(50);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'certification',
+    'member_pseudonym',
+    'completed_at',
+    'validity',
+    'days_to_expiry',
+    'evidence_attached'
+  ]);
 
   /** Canonical validity values supported by `?filter=`. */
   const VALIDITY_VALUES = /** @type {const} */ (['valid', 'expiring', 'expired']);
@@ -71,6 +83,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoTrainingPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('training') };
+  }
 </script>
 
 <svelte:head>
@@ -83,6 +100,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/training" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <TrainingViewer
       {fetchPage}

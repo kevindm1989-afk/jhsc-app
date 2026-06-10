@@ -21,8 +21,20 @@
   import { buildDemoLibrary, fetchDemoLibraryPage } from '$lib/library/demo-library';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoLibrary(50);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'title',
+    'category',
+    'version',
+    'updated_at',
+    'language',
+    'offline_cached'
+  ]);
 
   /** Canonical category values supported by `?filter=`. */
   const CATEGORY_VALUES = /** @type {const} */ ([
@@ -91,6 +103,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoLibraryPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('library') };
+  }
 </script>
 
 <svelte:head>
@@ -103,6 +120,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/library" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <LibraryViewer
       {fetchPage}

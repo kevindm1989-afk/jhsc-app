@@ -24,8 +24,21 @@
   } from '$lib/recommendations/demo-recommendations';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoRecommendations(50);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'filed_at',
+    'title',
+    'status',
+    'days_elapsed',
+    'traceability_concern_id',
+    'traceability_inspection_id',
+    'actor_pseudonym'
+  ]);
 
   /** Canonical status values supported by `?filter=`. */
   const STATUS_VALUES = /** @type {const} */ (['responded', 'pending', 'overdue', 'archived']);
@@ -81,6 +94,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoRecommendationsPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('recommendations') };
+  }
 </script>
 
 <svelte:head>
@@ -93,6 +111,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/recommendations" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <RecommendationsViewer
       {fetchPage}

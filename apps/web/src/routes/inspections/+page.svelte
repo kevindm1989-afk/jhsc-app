@@ -22,8 +22,22 @@
   } from '$lib/inspections/demo-inspections';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoInspections(50);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'area',
+    'conducted_at',
+    'checklist_item_count',
+    'photo_count',
+    'integrity_status',
+    'was_offline_queued',
+    'notes_preview',
+    'actor_pseudonym'
+  ]);
 
   /** Canonical integrity-status values supported by `?filter=`. */
   const INTEGRITY_VALUES = /** @type {const} */ (['verified', 'quarantined']);
@@ -68,6 +82,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoInspectionsPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('inspections') };
+  }
 </script>
 
 <svelte:head>
@@ -80,6 +99,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/inspections" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <InspectionsViewer
       {fetchPage}

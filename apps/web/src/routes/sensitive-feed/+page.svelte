@@ -28,8 +28,19 @@
   import SensitiveFeedViewer from '$lib/audit/SensitiveFeedViewer.svelte';
   import { buildDemoSensitiveRows, fetchDemoSensitivePage } from '$lib/audit/demo-sensitive-feed';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoSensitiveRows(50);
+
+  // meta excluded (record-shaped); the rest is metadata-only by design.
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'ts',
+    'event_type',
+    'sensitivity',
+    'actor_pseudonym'
+  ]);
 
   /** Canonical sensitivity-tier values supported by `?filter=`. */
   const SENSITIVITY_VALUES = /** @type {const} */ (['c3', 'c4']);
@@ -73,6 +84,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoSensitivePage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('sensitive-feed') };
+  }
 </script>
 
 <svelte:head>
@@ -82,6 +98,7 @@
 
 <section class="card sensitive-feed-card" data-testid="sensitive-feed-page">
   <FilterChipsRail {chips} {activeValue} />
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <SensitiveFeedViewer
       {fetchPage}

@@ -25,8 +25,21 @@
   import { buildDemoReprisals, fetchDemoReprisalPage } from '$lib/reprisal/demo-reprisal';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoReprisals(50);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'filed_at',
+    'title',
+    'status',
+    'per_entry_passphrase_required',
+    'source_revealed',
+    'days_since_filed',
+    'actor_pseudonym'
+  ]);
 
   /** Canonical status values supported by `?filter=`. */
   const STATUS_VALUES = /** @type {const} */ (['filed', 'investigating', 'resolved', 'archived']);
@@ -83,6 +96,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoReprisalPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('reprisal') };
+  }
 </script>
 
 <svelte:head>
@@ -95,6 +113,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/reprisal" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <ReprisalViewer
       {fetchPage}

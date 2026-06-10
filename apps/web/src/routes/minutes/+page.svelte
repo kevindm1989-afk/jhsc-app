@@ -18,8 +18,21 @@
   import { buildDemoMinutes, fetchDemoMinutesPage } from '$lib/minutes/demo-minutes';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
+  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoMinutes(50);
+
+  const CSV_FIELDS = /** @type {const} */ ([
+    'id',
+    'meeting_date',
+    'title',
+    'status',
+    'revision_count',
+    'quoted_concern_count',
+    'quorum_present',
+    'drafter_pseudonym'
+  ]);
 
   /** Canonical status values supported by `?filter=`. */
   const STATUS_VALUES = /** @type {const} */ (['draft', 'approved', 'archived']);
@@ -68,6 +81,11 @@
      * @param {number} ps
      */
     (p, ps) => fetchDemoMinutesPage(p, ps, DEMO_ROWS, predicate);
+
+  function buildDownload() {
+    const rows = predicate ? DEMO_ROWS.filter(predicate) : DEMO_ROWS;
+    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('minutes') };
+  }
 </script>
 
 <svelte:head>
@@ -80,6 +98,7 @@
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/minutes" />
   {/if}
+  <CsvDownloadButton onClick={buildDownload} />
   {#key filterParam}
     <MinutesViewer
       {fetchPage}
