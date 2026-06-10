@@ -5,8 +5,12 @@
    *
    * Replaces the PR #141 coming-soon placeholder. Mounts
    * SensitiveFeedViewer with the demo provider so the surface renders
-   * realistic content until the real backend ships (role-gating +
-   * server-side aggregation of sensitive-tier audit rows + Merkle proofs).
+   * realistic content until the real backend ships.
+   *
+   * Supports URL-driven filtering on sensitivity tier via
+   * `?filter=<value>` (c3 / c4). The chip rail lets the worker narrow
+   * to either tier — useful when a worker co-chair wants to triage
+   * only the highest-sensitivity events.
    *
    * Provider injection (`fetchPage` prop): the viewer is backend-
    * agnostic; T-future swap-in replaces the demo provider with no
@@ -19,17 +23,47 @@
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import SensitiveFeedViewer from '$lib/audit/SensitiveFeedViewer.svelte';
   import { buildDemoSensitiveRows, fetchDemoSensitivePage } from '$lib/audit/demo-sensitive-feed';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoSensitiveRows(50);
 
-  /**
-   * @param {number} page
-   * @param {number} page_size
-   */
-  const fetchPage = (page, page_size) => fetchDemoSensitivePage(page, page_size, DEMO_ROWS);
+  /** Canonical sensitivity-tier values supported by `?filter=`. */
+  const SENSITIVITY_VALUES = /** @type {const} */ (['c3', 'c4']);
+
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: activeValue =
+    filterParam && SENSITIVITY_VALUES.includes(/** @type {any} */ (filterParam))
+      ? filterParam
+      : null;
+
+  $: chips = [
+    { href: '/sensitive-feed', label: t('common.filterChips.all'), value: null },
+    {
+      href: '/sensitive-feed?filter=c3',
+      label: t('sensitiveFeed.viewer.chip.c3'),
+      value: 'c3'
+    },
+    {
+      href: '/sensitive-feed?filter=c4',
+      label: t('sensitiveFeed.viewer.chip.c4'),
+      value: 'c4'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/audit/demo-sensitive-feed').DemoSensitiveRow} r */ (r) =>
+        r.sensitivity === activeValue
+    : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoSensitivePage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -38,7 +72,10 @@
 </svelte:head>
 
 <section class="card sensitive-feed-card" data-testid="sensitive-feed-page">
-  <SensitiveFeedViewer {fetchPage} />
+  <FilterChipsRail {chips} {activeValue} />
+  {#key filterParam}
+    <SensitiveFeedViewer {fetchPage} filterActive={filterParam !== null} />
+  {/key}
   <p class="sensitive-feed-demo-note muted" data-testid="sensitive-feed-demo-note">
     {t('sensitiveFeed.viewer.demo_note')}
   </p>

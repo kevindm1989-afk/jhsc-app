@@ -6,6 +6,14 @@
    * with the demo-data provider so a worker can see what the surface
    * looks like before the real audit-op Edge Function ships (T18).
    *
+   * Supports URL-driven filtering on event-type category via
+   * `?filter=<value>`. The chip rail surfaces three broad categories
+   * that match worker mental models: sessions (session.*, panic_wipe,
+   * recovery_blob.*, identity_keypair.*); workplace (concern.*,
+   * reprisal.*, work_refusal.*, s51_evidence.*); committee
+   * (committee_member.*, audit_log.read). Other events (the few
+   * remaining infra-style enums) appear under "All" only.
+   *
    * Provider injection (`fetchPage` prop): the viewer is backend-
    * agnostic; the demo provider lives in $lib/audit/demo-audit-rows.
    * When T18's SupabaseAuditClient lands, the route swaps the
@@ -13,20 +21,67 @@
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import AuditLogViewer from '$lib/audit/AuditLogViewer.svelte';
   import { buildDemoAuditRows, fetchDemoAuditPage } from '$lib/audit/demo-audit-rows';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
-  // Build the demo dataset once on module load (50 rows spanning the
-  // past 7 days). A future PR replaces this constant with a real
-  // SupabaseAuditClient fetch.
   const DEMO_ROWS = buildDemoAuditRows(50);
 
+  /** Canonical filter values supported by `?filter=`. */
+  const FILTER_VALUES = /** @type {const} */ (['sessions', 'workplace', 'committee']);
+
   /**
-   * @param {number} page
-   * @param {number} page_size
+   * Map a filter value to a predicate over the event_type string.
+   * @param {string} value
+   * @returns {(row: import('$lib/audit/demo-audit-rows').DemoAuditRow) => boolean}
    */
-  const fetchPage = (page, page_size) => fetchDemoAuditPage(page, page_size, DEMO_ROWS);
+  function predicateFor(value) {
+    if (value === 'sessions') {
+      return (r) =>
+        r.event_type.startsWith('session.') ||
+        r.event_type.startsWith('panic_wipe') ||
+        r.event_type.startsWith('recovery_blob') ||
+        r.event_type.startsWith('identity_keypair');
+    }
+    if (value === 'workplace') {
+      return (r) =>
+        r.event_type.startsWith('concern.') ||
+        r.event_type.startsWith('reprisal.') ||
+        r.event_type.startsWith('work_refusal') ||
+        r.event_type.startsWith('s51_evidence');
+    }
+    // committee
+    return (r) => r.event_type.startsWith('committee_member') || r.event_type === 'audit_log.read';
+  }
+
+  $: filterParam = $page.url.searchParams.get('filter');
+  $: activeValue =
+    filterParam && FILTER_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
+
+  $: chips = [
+    { href: '/audit', label: t('common.filterChips.all'), value: null },
+    { href: '/audit?filter=sessions', label: t('audit.viewer.chip.sessions'), value: 'sessions' },
+    {
+      href: '/audit?filter=workplace',
+      label: t('audit.viewer.chip.workplace'),
+      value: 'workplace'
+    },
+    {
+      href: '/audit?filter=committee',
+      label: t('audit.viewer.chip.committee'),
+      value: 'committee'
+    }
+  ];
+
+  $: predicate = activeValue ? predicateFor(activeValue) : undefined;
+  $: fetchPage =
+    /**
+     * @param {number} p
+     * @param {number} ps
+     */
+    (p, ps) => fetchDemoAuditPage(p, ps, DEMO_ROWS, predicate);
 </script>
 
 <svelte:head>
@@ -35,7 +90,10 @@
 </svelte:head>
 
 <section class="audit-page" data-testid="audit-page">
-  <AuditLogViewer {fetchPage} />
+  <FilterChipsRail {chips} {activeValue} />
+  {#key filterParam}
+    <AuditLogViewer {fetchPage} filterActive={filterParam !== null} />
+  {/key}
   <p class="audit-page-demo-note muted" data-testid="audit-page-demo-note">
     {t('audit.viewer.demo_note')}
   </p>

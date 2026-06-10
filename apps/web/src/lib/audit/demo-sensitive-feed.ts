@@ -148,16 +148,21 @@ export function buildDemoSensitiveRows(count: number, seed = 1066): DemoSensitiv
   return rows;
 }
 
-/** Page-based slicer — same contract as fetchDemoAuditPage. */
+/**
+ * Page-based slicer — same contract as fetchDemoAuditPage. Optional
+ * predicate narrows the dataset before pagination (e.g. only C4 rows).
+ */
 export async function fetchDemoSensitivePage(
   page: number,
   page_size: number,
-  all: DemoSensitiveRow[]
+  all: DemoSensitiveRow[],
+  predicate?: (row: DemoSensitiveRow) => boolean
 ): Promise<DemoSensitivePage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };
