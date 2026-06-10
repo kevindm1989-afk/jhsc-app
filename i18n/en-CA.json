@@ -1049,6 +1049,10 @@
       "next": "Next page",
       "page_indicator": "Page {page} of {total}",
       "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (server-side aggregation + role-gating + Merkle proofs) ships with T18 / the sensitive-feed wire-up.",
+      "chip": {
+        "c3": "C3 only",
+        "c4": "C4 only"
+      },
       "column": {
         "actor": "Actor"
       },
@@ -1076,6 +1080,11 @@
       "next": "Next page",
       "page_indicator": "Page {page} of {total}",
       "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real audit-op Edge Function + Merkle integrity chain ship with T18.",
+      "chip": {
+        "sessions": "Sessions",
+        "workplace": "Workplace events",
+        "committee": "Committee"
+      },
       "column": {
         "actor": "Actor"
       },

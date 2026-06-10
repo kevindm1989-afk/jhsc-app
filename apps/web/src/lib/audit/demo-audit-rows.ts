@@ -170,16 +170,21 @@ export function buildDemoAuditRows(count: number, seed = 42): DemoAuditRow[] {
  * Page-based fetch helper. The viewer treats this signature as the
  * provider contract so the real audit-op provider (cursor-based)
  * just needs an adapter when it lands.
+ *
+ * Optional `predicate` narrows the dataset before pagination, so
+ * `total` reflects the filtered count.
  */
 export async function fetchDemoAuditPage(
   page: number,
   page_size: number,
-  all: DemoAuditRow[]
+  all: DemoAuditRow[],
+  predicate?: (row: DemoAuditRow) => boolean
 ): Promise<DemoAuditPage> {
+  const filtered = predicate ? all.filter(predicate) : all;
   const start = page * page_size;
   return {
-    rows: all.slice(start, start + page_size),
-    total: all.length,
+    rows: filtered.slice(start, start + page_size),
+    total: filtered.length,
     page,
     page_size
   };
