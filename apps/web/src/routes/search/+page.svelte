@@ -18,6 +18,7 @@
   import { page } from '$app/stores';
   import { t } from '$lib/i18n';
   import { buildSearchIndex, search } from '$lib/search/search';
+  import { highlightMatches } from '$lib/search/highlight';
 
   /** @type {ReturnType<typeof buildSearchIndex>} */
   let index = [];
@@ -103,11 +104,21 @@
             {#each group.records as record (record.id)}
               <li class="search-result" data-testid="search-result">
                 <a class="search-result-link" href={record.href}>
-                  <span class="search-result-primary" data-testid="search-result-primary"
-                    >{record.primaryText}</span
-                  >
+                  <span class="search-result-primary" data-testid="search-result-primary">
+                    {#each highlightMatches(record.primaryText, query) as seg, i (i)}
+                      {#if seg.match}
+                        <mark class="search-mark">{seg.text}</mark>
+                      {:else}{seg.text}{/if}
+                    {/each}
+                  </span>
                   {#if record.secondaryText}
-                    <span class="search-result-secondary">{record.secondaryText}</span>
+                    <span class="search-result-secondary">
+                      {#each highlightMatches(record.secondaryText, query) as seg, i (i)}
+                        {#if seg.match}
+                          <mark class="search-mark">{seg.text}</mark>
+                        {:else}{seg.text}{/if}
+                      {/each}
+                    </span>
                   {/if}
                   <time class="search-result-date">{record.date.replace(/T.*$/, '')}</time>
                 </a>
@@ -215,5 +226,15 @@
 
   .search-footer {
     margin-block-start: 0.75rem;
+  }
+
+  /* Highlight tint for matched substrings within results.
+     Uses the worker-hub amber tint tokens so the highlight reads as
+     a callout without competing with the destructive C4 accent. */
+  .search-mark {
+    background: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    border-radius: var(--radius-sm);
+    padding: 0 0.125rem;
   }
 </style>

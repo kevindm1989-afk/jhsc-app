@@ -107,6 +107,10 @@
     "pagination": {
       "total_entries": "{count} total"
     },
+    "headerSearch": {
+      "label": "Search the registers",
+      "placeholder": "Search (press /)"
+    },
     "csvDownload": {
       "button": "Download CSV",
       "busy": "Preparing…",
