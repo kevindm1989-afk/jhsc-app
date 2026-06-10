@@ -4,13 +4,14 @@
    *
    * Replaces the PR #138 coming-soon placeholder. Mounts
    * RecommendationsViewer with the demo provider so the surface
-   * renders realistic content until T12 wires the real backend
-   * (recommendations store + 21-day timer state + employer-response
-   * capture + auto-escalation).
+   * renders realistic content until T12 wires the real backend.
    *
-   * Supports URL-driven filtering:
-   *   - `?filter=overdue` narrows to `status === 'overdue'`, matching
-   *     the "Overdue recommendations" home dashboard tile.
+   * Supports URL-driven filtering on `status` (one of responded /
+   * pending / overdue / archived) via `?filter=<value>`. A
+   * FilterChipsRail above the viewer lets the worker swap chips
+   * without typing the URL. The "Overdue recommendations" home
+   * dashboard tile deep-links here with `?filter=overdue` already
+   * highlighted.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
@@ -22,18 +23,48 @@
     fetchDemoRecommendationsPage
   } from '$lib/recommendations/demo-recommendations';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoRecommendations(50);
 
+  /** Canonical status values supported by `?filter=`. */
+  const STATUS_VALUES = /** @type {const} */ (['responded', 'pending', 'overdue', 'archived']);
+
   $: filterParam = $page.url.searchParams.get('filter');
+  $: activeValue =
+    filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
   $: filterLabel =
-    filterParam === 'overdue' ? t('common.filterBanner.label.recommendations_overdue') : null;
-  $: predicate =
-    filterParam === 'overdue'
-      ? /** @param {import('$lib/recommendations/demo-recommendations').DemoRecommendationRow} r */ (
-          r
-        ) => r.status === 'overdue'
-      : undefined;
+    activeValue === 'overdue' ? t('common.filterBanner.label.recommendations_overdue') : null;
+
+  $: chips = [
+    { href: '/recommendations', label: t('common.filterChips.all'), value: null },
+    {
+      href: '/recommendations?filter=responded',
+      label: t('recommendations.viewer.status.responded'),
+      value: 'responded'
+    },
+    {
+      href: '/recommendations?filter=pending',
+      label: t('recommendations.viewer.status.pending'),
+      value: 'pending'
+    },
+    {
+      href: '/recommendations?filter=overdue',
+      label: t('recommendations.viewer.status.overdue'),
+      value: 'overdue'
+    },
+    {
+      href: '/recommendations?filter=archived',
+      label: t('recommendations.viewer.status.archived'),
+      value: 'archived'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/recommendations/demo-recommendations').DemoRecommendationRow} r */ (
+        r
+      ) => r.status === activeValue
+    : undefined;
   $: fetchPage =
     /**
      * @param {number} p
@@ -48,6 +79,7 @@
 </svelte:head>
 
 <section class="card recs-card" data-testid="recommendations-page">
+  <FilterChipsRail {chips} {activeValue} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/recommendations" />
   {/if}

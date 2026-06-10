@@ -6,11 +6,11 @@
    * with the demo provider so the register surface renders realistic
    * content until T08.1 wires the production SupabaseConcernsClient.
    *
-   * Supports URL-driven filtering:
-   *   - `?filter=open` narrows the register to `status === 'open'`,
-   *     matching the "Open concerns" home dashboard tile.
-   * Future filters (severity, hazard) slot in here without changing
-   * the viewer.
+   * Supports URL-driven filtering on `status` (one of open / triaged /
+   * resolved / archived) via `?filter=<value>`. A FilterChipsRail
+   * above the viewer lets the worker swap chips without typing the
+   * URL. The "Open concerns" home dashboard tile deep-links here with
+   * `?filter=open` already highlighted.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
@@ -19,16 +19,44 @@
   import ConcernsViewer from '$lib/concerns/ConcernsViewer.svelte';
   import { buildDemoConcerns, fetchDemoConcernsPage } from '$lib/concerns/demo-concerns';
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
+  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
 
   const DEMO_ROWS = buildDemoConcerns(50);
 
+  /** Canonical status values supported by `?filter=`. */
+  const STATUS_VALUES = /** @type {const} */ (['open', 'triaged', 'resolved', 'archived']);
+
   $: filterParam = $page.url.searchParams.get('filter');
-  $: filterLabel = filterParam === 'open' ? t('common.filterBanner.label.concerns_open') : null;
-  $: predicate =
-    filterParam === 'open'
-      ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) =>
-          r.status === 'open'
-      : undefined;
+  $: activeValue =
+    filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
+  // FilterBanner still shows on the dashboard-tile "Open concerns" path
+  // for clear-filter symmetry; the chip rail also highlights "Open".
+  $: filterLabel = activeValue === 'open' ? t('common.filterBanner.label.concerns_open') : null;
+
+  $: chips = [
+    { href: '/concerns', label: t('common.filterChips.all'), value: null },
+    { href: '/concerns?filter=open', label: t('concern.viewer.status.open'), value: 'open' },
+    {
+      href: '/concerns?filter=triaged',
+      label: t('concern.viewer.status.triaged'),
+      value: 'triaged'
+    },
+    {
+      href: '/concerns?filter=resolved',
+      label: t('concern.viewer.status.resolved'),
+      value: 'resolved'
+    },
+    {
+      href: '/concerns?filter=archived',
+      label: t('concern.viewer.status.archived'),
+      value: 'archived'
+    }
+  ];
+
+  $: predicate = activeValue
+    ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) =>
+        r.status === activeValue
+    : undefined;
   $: fetchPage =
     /**
      * @param {number} p
@@ -43,6 +71,7 @@
 </svelte:head>
 
 <section class="card con-card" data-testid="concerns-page">
+  <FilterChipsRail {chips} {activeValue} />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/concerns" />
   {/if}

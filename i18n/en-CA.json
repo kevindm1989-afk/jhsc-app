@@ -97,6 +97,10 @@
         "library_offline": "Cached for offline"
       }
     },
+    "filterChips": {
+      "aria_label": "Filter by status",
+      "all": "All"
+    },
     "errorPage": {
       "title": "Something went wrong",
       "heading_404": "Page not found",
