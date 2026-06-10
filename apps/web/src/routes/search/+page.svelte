@@ -1,0 +1,219 @@
+<script>
+  /**
+   * /search — cross-register search surface.
+   *
+   * One input. Updates the URL `?q=<query>` so a worker can paste
+   * /share / bookmark a search. Results are grouped by register
+   * (concerns, recommendations, …, audit) with at most 5 records
+   * per group; each result deep-links to its register surface.
+   *
+   * The index is built once at mount over the demo providers; when
+   * each register's real backend lands the page swaps in a real
+   * search adapter without UI changes.
+   *
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
+   */
+  import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
+  import { t } from '$lib/i18n';
+  import { buildSearchIndex, search } from '$lib/search/search';
+
+  /** @type {ReturnType<typeof buildSearchIndex>} */
+  let index = [];
+
+  onMount(() => {
+    index = buildSearchIndex();
+  });
+
+  /** @type {HTMLInputElement | null} */
+  let inputEl = null;
+
+  /** @param {string} value */
+  function updateQuery(value) {
+    const url = new URL($page.url);
+    if (value.trim()) url.searchParams.set('q', value);
+    else url.searchParams.delete('q');
+    void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+  }
+
+  /** @param {Event} ev */
+  function onInput(ev) {
+    const v = /** @type {HTMLInputElement} */ (ev.currentTarget).value;
+    updateQuery(v);
+  }
+
+  $: query = $page.url.searchParams.get('q') ?? '';
+  $: groups = search(index, query);
+  $: totalMatches = groups.reduce((a, g) => a + g.total, 0);
+</script>
+
+<svelte:head>
+  <title>{t('search.page.title')} — {t('common.app_name')}</title>
+  <meta name="robots" content="noindex,nofollow" />
+</svelte:head>
+
+<section class="card search-card" data-testid="search-page">
+  <header class="search-header">
+    <h1 id="search-heading">{t('search.page.heading')}</h1>
+    <p class="muted">{t('search.page.intro')}</p>
+  </header>
+
+  <label class="search-field" for="search-input">
+    <span class="search-label-text">{t('search.page.label')}</span>
+    <input
+      id="search-input"
+      bind:this={inputEl}
+      type="search"
+      autocomplete="off"
+      spellcheck="false"
+      autocapitalize="none"
+      autocorrect="off"
+      value={query}
+      on:input={onInput}
+      placeholder={t('search.page.placeholder')}
+      data-testid="search-input"
+      aria-describedby="search-help"
+    />
+    <span class="muted" id="search-help">{t('search.page.helper')}</span>
+  </label>
+
+  {#if !query.trim()}
+    <p class="muted" role="status" data-testid="search-empty-state">
+      {t('search.page.empty_state')}
+    </p>
+  {:else if groups.length === 0}
+    <p class="muted" role="status" data-testid="search-no-results">
+      {t('search.page.no_results', { query })}
+    </p>
+  {:else}
+    <p class="muted" data-testid="search-summary">
+      {t('search.page.summary', { count: totalMatches, query })}
+    </p>
+    <ul class="search-groups" data-testid="search-groups">
+      {#each groups as group (group.register)}
+        <li class="search-group" data-testid="search-group" data-register={group.register}>
+          <header class="search-group-head">
+            <h2>{t(`search.page.register.${group.register}`)}</h2>
+            <span class="muted" data-testid="search-group-total"
+              >{t('search.page.group_total', { count: group.total })}</span
+            >
+          </header>
+          <ul class="search-result-list">
+            {#each group.records as record (record.id)}
+              <li class="search-result" data-testid="search-result">
+                <a class="search-result-link" href={record.href}>
+                  <span class="search-result-primary" data-testid="search-result-primary"
+                    >{record.primaryText}</span
+                  >
+                  {#if record.secondaryText}
+                    <span class="search-result-secondary">{record.secondaryText}</span>
+                  {/if}
+                  <time class="search-result-date">{record.date.replace(/T.*$/, '')}</time>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
+  <p class="search-footer" data-print="hide">
+    <a href="/" data-testid="search-back-to-home">{t('search.page.back_to_home_cta')}</a>
+  </p>
+</section>
+
+<style>
+  .search-card {
+    margin-block-start: 1rem;
+  }
+  .search-header {
+    margin-block-end: 0.75rem;
+  }
+  .search-header h1 {
+    margin-block: 0 0.25rem;
+  }
+
+  .search-field {
+    display: grid;
+    gap: 0.25rem;
+    margin-block-end: 1rem;
+  }
+  .search-label-text {
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  .search-field input {
+    min-height: 2.5rem;
+    padding-inline: 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-size: 1rem;
+  }
+
+  .search-groups {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.75rem;
+  }
+  .search-group {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-elevated);
+  }
+  .search-group-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.625rem 0.875rem;
+    border-block-end: 1px solid var(--color-border);
+  }
+  .search-group-head h2 {
+    margin: 0;
+    font-size: 0.9375rem;
+  }
+
+  .search-result-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .search-result + .search-result {
+    border-block-start: 1px solid var(--color-border);
+  }
+  .search-result-link {
+    display: grid;
+    gap: 0.125rem;
+    padding: 0.5rem 0.875rem;
+    color: var(--color-fg);
+    text-decoration: none;
+    transition: background-color 150ms ease;
+  }
+  .search-result-link:hover {
+    background: var(--color-muted);
+    text-decoration: none;
+  }
+  .search-result-primary {
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+  .search-result-secondary {
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+  }
+  .search-result-date {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-fg-muted);
+  }
+
+  .search-footer {
+    margin-block-start: 0.75rem;
+  }
+</style>
