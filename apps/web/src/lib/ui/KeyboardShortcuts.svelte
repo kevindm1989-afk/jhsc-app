@@ -128,6 +128,14 @@
       </dl>
       <p class="ks-hint muted">{t('common.keyboardShortcuts.share_hint')}</p>
       <p class="ks-actions">
+        <a
+          href="/help"
+          class="ks-help-link"
+          data-testid="keyboard-shortcuts-help-link"
+          on:click={hide}
+        >
+          {t('common.keyboardShortcuts.open_help')}
+        </a>
         <button type="button" class="btn-outline" on:click={hide}>
           {t('common.keyboardShortcuts.close')}
         </button>
@@ -213,6 +221,15 @@
   .ks-actions {
     margin: 0;
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .ks-help-link {
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+  }
+  .ks-help-link:hover {
+    color: var(--color-fg);
   }
 </style>
