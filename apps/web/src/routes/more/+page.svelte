@@ -162,6 +162,12 @@
           <span>{t('common.morePage.link_privacy_blurb')}</span>
         </a>
       </li>
+      <li>
+        <a href="/help" class="more-link" data-testid="more-link-help">
+          <strong>{t('common.morePage.link_help_label')}</strong>
+          <span>{t('common.morePage.link_help_blurb')}</span>
+        </a>
+      </li>
     </ul>
   </section>
 

@@ -137,6 +137,59 @@
       "copied_announce": "Share URL copied to clipboard.",
       "error_announce": "Could not copy the share URL. Please copy it from the address bar."
     },
+    "activeFilters": {
+      "label": "Active filters:",
+      "region_aria": "Active filters",
+      "remove_aria": "Remove filter: {label}",
+      "clear_all": "Clear all",
+      "axis": {
+        "status": "Status",
+        "severity": "Severity",
+        "hazard": "Hazard",
+        "stage": "Stage",
+        "scene_state": "Scene",
+        "validity": "Validity",
+        "integrity_status": "Integrity",
+        "category": "Category",
+        "event_type": "Category",
+        "sensitivity": "Sensitivity",
+        "sort": "Sort",
+        "date_from": "From",
+        "date_to": "To",
+        "date_range": "Date"
+      }
+    },
+    "keyboardShortcuts": {
+      "trigger_aria": "Open keyboard shortcuts",
+      "heading": "Keyboard shortcuts",
+      "close": "Close",
+      "close_aria": "Close keyboard shortcuts dialog",
+      "rows": {
+        "search": "Open search",
+        "shortcuts": "Open this dialog",
+        "escape": "Close any open dialog",
+        "share": "Copy share URL"
+      },
+      "key": {
+        "slash": "/",
+        "question": "?",
+        "escape": "Esc"
+      },
+      "share_hint": "Look for the “Copy share URL” button on register surfaces."
+    },
+    "helpPage": {
+      "title": "Help",
+      "heading": "Using the committee app",
+      "intro": "Every register surface is URL-driven — the chips, sort, and date range collapse into a shareable URL. Here are the shortcuts and conventions that make day-to-day work faster.",
+      "shortcuts_heading": "Keyboard shortcuts",
+      "urls_heading": "Sharing a view",
+      "urls_body": "After narrowing a register with chips, sort, or a date range, hit “Copy share URL” to put the current URL on your clipboard — paste it into the minutes or a peer chat to send the exact same view.",
+      "csv_heading": "Exporting data",
+      "csv_body": "“Download CSV” exports only the rows currently shown (the same rows the active filter and sort produce). Use this for committee meetings and employer follow-ups.",
+      "report_heading": "Monthly report",
+      "report_body": "/report rolls up activity across every register for a chosen month or year. Each total tile deep-links into the matching register. Use the print stylesheet for paper handouts.",
+      "back_to_home_cta": "Back to home"
+    },
     "errorPage": {
       "title": "Something went wrong",
       "heading_404": "Page not found",
@@ -322,6 +375,8 @@
       "link_settings_blurb": "Sign out, wipe this device, theme preferences.",
       "link_privacy_label": "Privacy",
       "link_privacy_blurb": "What the system can and cannot see.",
+      "link_help_label": "Help & shortcuts",
+      "link_help_blurb": "Keyboard shortcuts, how URLs share filters, CSV export, and the monthly report.",
       "back_to_home_cta": "Back to home"
     }
   },
