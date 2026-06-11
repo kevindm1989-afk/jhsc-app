@@ -39,8 +39,11 @@ describe('T19 — /report sparkline tile markup', () => {
     );
   });
 
-  it('computes trailingMonths only in month mode', () => {
-    expect(src).toMatch(/trailingMonths\s*=\s*isYearView\s*\?\s*null\s*:\s*buildTrailingMonths\(month,\s*12\)/);
+  it('computes trailingMonths in both modes (year mode targets the active year, month mode the trailing window ending at month)', () => {
+    // Month mode: 12 months ending at `month`.
+    expect(src).toContain('buildTrailingMonths(month, 12)');
+    // Year mode: 12 months of `year`, anchored at December.
+    expect(src).toMatch(/buildTrailingMonths\(`\$\{year\}-12`,\s*12\)/);
   });
 
   it('renders an SVG sparkline per tile when trailingSeries is present', () => {

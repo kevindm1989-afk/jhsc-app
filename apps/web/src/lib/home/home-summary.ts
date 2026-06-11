@@ -43,6 +43,11 @@ export interface HomeSummary {
    * /report's tile YoY pattern.
    */
   priorMonthActivity: number;
+  /**
+   * 12-month trailing activity series (oldest → newest). Empty
+   * array suppresses the dashboard tile sparkline.
+   */
+  monthlyActivityTrailing: readonly number[];
 }
 
 export interface HomeSummaryInputs {
@@ -60,6 +65,12 @@ export interface HomeSummaryInputs {
   currentMonthActivity?: number;
   /** Optional same-month-last-year total for the YoY indicator. */
   priorMonthActivity?: number;
+  /**
+   * Optional 12-month trailing activity series (oldest → newest)
+   * ending at the current month. Powers a mini-sparkline on the
+   * /report dashboard tile. Empty array suppresses the sparkline.
+   */
+  monthlyActivityTrailing?: readonly number[];
 }
 
 export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
@@ -70,7 +81,8 @@ export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
     activeRefusals: inputs.workRefusals.filter((r) => r.stage !== 'resolved').length,
     preservingScenes: inputs.s51Evidence.filter((r) => r.scene_state === 'preserving').length,
     currentMonthActivity: inputs.currentMonthActivity ?? 0,
-    priorMonthActivity: inputs.priorMonthActivity ?? 0
+    priorMonthActivity: inputs.priorMonthActivity ?? 0,
+    monthlyActivityTrailing: inputs.monthlyActivityTrailing ?? []
   };
 }
 
@@ -82,5 +94,6 @@ export const ZERO_SUMMARY: HomeSummary = {
   activeRefusals: 0,
   preservingScenes: 0,
   currentMonthActivity: 0,
-  priorMonthActivity: 0
+  priorMonthActivity: 0,
+  monthlyActivityTrailing: []
 };

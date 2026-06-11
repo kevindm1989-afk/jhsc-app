@@ -48,7 +48,12 @@
   import { buildDemoWorkRefusals } from '$lib/work-refusal/demo-work-refusal';
   import { buildDemoS51Evidence } from '$lib/s51-evidence/demo-s51-evidence';
   import { buildDemoAuditRows } from '$lib/audit/demo-audit-rows';
-  import { buildMonthlyReport, shiftMonth, toMonthString } from '$lib/report/aggregate';
+  import {
+    buildMonthlyReport,
+    buildTrailingMonths,
+    shiftMonth,
+    toMonthString
+  } from '$lib/report/aggregate';
 
   // Sum the current month's totals across every register so the
   // "Monthly activity" tile shows one digestible number on the front
@@ -63,6 +68,12 @@
   const priorMonth = buildMonthlyReport(shiftMonth(currentMonthString, -12));
   const priorMonthActivity = Object.values(priorMonth.totals).reduce((acc, n) => acc + n, 0);
 
+  // 12-month trailing sum-of-registers series for the dashboard tile
+  // sparkline. Same aggregator + window as /report's tile sparkline.
+  const monthlyActivityTrailing = buildTrailingMonths(currentMonthString, 12).map((r) =>
+    Object.values(r.totals).reduce((acc, n) => acc + n, 0)
+  );
+
   // Digest is computed once at mount over the demo providers. When each
   // register's real backend lands the page swaps these calls for real
   // queries; the HomeDashboard component itself is provider-agnostic.
@@ -73,7 +84,8 @@
     workRefusals: buildDemoWorkRefusals(50),
     s51Evidence: buildDemoS51Evidence(30),
     currentMonthActivity,
-    priorMonthActivity
+    priorMonthActivity,
+    monthlyActivityTrailing
   });
 
   // Top-5 recent audit rows for the "what just happened" timeline.

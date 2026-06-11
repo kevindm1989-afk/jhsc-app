@@ -21,8 +21,12 @@ const REPORT_PAGE_PATH = resolve(__dirname, '../../src/routes/report/+page.svelt
 const REPORT_SRC = readFileSync(REPORT_PAGE_PATH, 'utf8');
 
 describe('T19 — /report year-over-year tiles', () => {
-  it('computes a priorMonth (same month, one year earlier) only in month mode', () => {
+  it('computes a priorMonth (same month, one year earlier) in month mode', () => {
     expect(REPORT_SRC).toMatch(/priorMonth\s*=\s*isYearView\s*\?\s*null\s*:\s*shiftMonth\(month,\s*-12\)/);
+  });
+
+  it('computes a priorYear in year mode for the YoY indicator', () => {
+    expect(REPORT_SRC).toMatch(/priorYear\s*=\s*isYearView\s*\?\s*shiftYear\(year,\s*-1\)/);
   });
 
   it('loads a priorReport via buildMonthlyReport(priorMonth)', () => {
@@ -35,9 +39,12 @@ describe('T19 — /report year-over-year tiles', () => {
     expect(REPORT_SRC).toContain('report.page.yoy_vs_label');
   });
 
-  it("the YoY indicator tooltip names the prior month", () => {
+  it("the YoY indicator tooltip names the prior period (month-mode or year-mode)", () => {
     expect(REPORT_SRC).toContain('report.page.yoy_tooltip');
-    expect(REPORT_SRC).toMatch(/month:\s*priorMonth/);
+    // The route now routes the priorLabel through a yoyFor helper so
+    // year-mode and month-mode can share the YoY rendering. Pin the
+    // helper consumption rather than the literal priorMonth/year.
+    expect(REPORT_SRC).toMatch(/month:\s*yoy\.priorLabel/);
   });
 
   it('the YoY indicator carries direction classes (up/down/flat) for colour cues', () => {

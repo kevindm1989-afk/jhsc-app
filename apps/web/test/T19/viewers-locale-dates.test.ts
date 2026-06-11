@@ -84,7 +84,11 @@ describe('T19 — /report uses formatMonthShort for the nav label + YoY tooltip'
     expect(src).toMatch(/data-raw=\{isYearView \? year : month\}/);
   });
 
-  it('YoY tile tooltip formats priorMonth via formatMonthShort', () => {
-    expect(src).toMatch(/month:\s*priorMonth\s*\?\s*formatMonthShort\(priorMonth\)/);
+  it('YoY tile tooltip formats priorMonth via formatMonthShort (now routed through yoy.priorLabel)', () => {
+    // The route now computes the priorLabel inside yoyFor() so both
+    // year-mode and month-mode share one rendering branch. Pin the
+    // formatMonthShort consumption on the month-mode branch of that
+    // helper instead of the legacy inline expression.
+    expect(src).toMatch(/priorMonth\s*\?\s*formatMonthShort\(priorMonth\)/);
   });
 });

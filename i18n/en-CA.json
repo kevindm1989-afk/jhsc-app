@@ -955,7 +955,8 @@
         "active_refusals": "Active s. 43 refusals",
         "preserving_scenes": "Scenes preserving (s. 51)",
         "monthly_activity": "Activity this month",
-        "yoy_suffix": "vs last year"
+        "yoy_suffix": "vs last year",
+        "sparkline_aria": "Trailing 12-month activity: {values}"
       },
       "see_all_cta": "See all registers"
     },
