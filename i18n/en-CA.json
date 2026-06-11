@@ -131,7 +131,8 @@
       "placeholder": "Search (press /)",
       "recent_label": "Recent",
       "recent_aria": "Recent searches",
-      "recent_remove_aria": "Remove {query} from recent searches"
+      "recent_remove_aria": "Remove {query} from recent searches",
+      "pinned_label": "Pinned views"
     },
     "csvDownload": {
       "button": "Download CSV",
@@ -966,7 +967,8 @@
         "preserving_scenes": "Scenes preserving (s. 51)",
         "monthly_activity": "Activity this month",
         "yoy_suffix": "vs last year",
-        "sparkline_aria": "Trailing 12-month activity: {values}"
+        "sparkline_aria": "Trailing 12-month activity: {values}",
+        "sparkline_bar_tooltip": "{month}: {value}"
       },
       "see_all_cta": "See all registers"
     },
@@ -999,6 +1001,8 @@
       "placeholder": "Try: forklift, WHMIS, ergonomic, concern…",
       "helper": "Case-insensitive substring match. Pseudonymized actors only; no PI.",
       "empty_state": "Type a query above to search across the registers.",
+      "recents_label": "Recent",
+      "recents_aria": "Recent searches",
       "no_results": "No matches for {query}. Try a different word or check spelling.",
       "summary": "{count} matches for {query}.",
       "group_total": "{count} matches",
