@@ -217,6 +217,8 @@
       "rename_aria": "New name for this saved view",
       "rename_cancel_aria": "Cancel renaming",
       "delete": "Delete",
+      "pin": "Pin to home",
+      "unpin": "Unpin",
       "export": "Export JSON",
       "import": "Import JSON",
       "import_announce": "Imported {added}, skipped {skipped} duplicate(s).",
@@ -973,6 +975,10 @@
     "savedViews": {
       "heading": "Your saved views",
       "manage_link": "Manage all →"
+    },
+    "pinnedViews": {
+      "heading": "Pinned views",
+      "manage_link": "Manage pins →"
     }
   },
 

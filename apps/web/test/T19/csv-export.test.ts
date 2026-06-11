@@ -208,7 +208,9 @@ describe('T19.1 — every register route wires the CSV download button', () => {
       expect(src).toMatch(
         /import\s+CsvDownloadButton\s+from\s+['"]\$lib\/ui\/CsvDownloadButton\.svelte['"]/
       );
-      expect(src).toMatch(/import\s*\{[\s\S]*toCsv[\s\S]*csvFilename[\s\S]*\}\s+from\s+['"]\$lib\/ui\/csv['"]/);
+      // Helpers can appear in any order in the import braces.
+      expect(src).toMatch(/import\s*\{[\s\S]*\btoCsv\b[\s\S]*\}\s+from\s+['"]\$lib\/ui\/csv['"]/);
+      expect(src).toMatch(/import\s*\{[\s\S]*\bcsvFilename\b[\s\S]*\}\s+from\s+['"]\$lib\/ui\/csv['"]/);
       expect(src).toMatch(/CSV_FIELDS\s*=/);
       expect(src).toMatch(/function\s+buildDownload\s*\(/);
       expect(src).toMatch(/<CsvDownloadButton\s+onClick=\{buildDownload\}\s*\/>/);
