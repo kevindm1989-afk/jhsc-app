@@ -33,7 +33,7 @@
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import { buildHref } from '$lib/ui/url-state';
   import { withinRange } from '$lib/ui/date-range';
-  import { toCsv, csvFilename } from '$lib/ui/csv';
+  import { csvFilename, toCsv, withMetadata } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoRecommendations(50);
 
@@ -155,7 +155,10 @@
   function buildDownload() {
     const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return {
-      csv: toCsv(rows, CSV_FIELDS),
+      csv: withMetadata(
+        { route: '/recommendations', filters: activeFilters.map((f) => f.label).join(' · ') },
+        toCsv(rows, CSV_FIELDS)
+      ),
       filename: csvFilename(
         'recommendations',
         new Date(),

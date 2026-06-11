@@ -22,7 +22,8 @@
     hrefForSavedView,
     importSavedViews,
     listSavedViews,
-    renameSavedView
+    renameSavedView,
+    setSavedViewPinned
   } from '$lib/saved-views/saved-views';
 
   /** @type {import('$lib/saved-views/saved-views').SavedView[]} */
@@ -69,6 +70,18 @@
   function remove(id) {
     deleteSavedView(id);
     refresh();
+  }
+
+  /** @param {import('$lib/saved-views/saved-views').SavedView} view */
+  function togglePin(view) {
+    setSavedViewPinned(view.id, !view.pinnedToHome);
+    refresh();
+    // Wake the dashboard cards (SavedViewsCard + PinnedViewsCard) so
+    // a pin or unpin shows up the next time the worker lands on /
+    // without forcing a reload.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('view:saved'));
+    }
   }
 
   /** @param {KeyboardEvent} e @param {string} id */
@@ -241,6 +254,17 @@
               <strong class="svp-name">{v.name}</strong>
               <span class="svp-route">{v.route}{v.search}</span>
             </a>
+            <button
+              type="button"
+              class="svp-action svp-pin"
+              class:is-pinned={v.pinnedToHome}
+              data-testid="saved-views-pin"
+              data-pinned={v.pinnedToHome ? 'true' : 'false'}
+              aria-pressed={v.pinnedToHome ? 'true' : 'false'}
+              on:click={() => togglePin(v)}
+            >
+              {v.pinnedToHome ? t('common.savedViewsPage.unpin') : t('common.savedViewsPage.pin')}
+            </button>
             <button
               type="button"
               class="svp-action"

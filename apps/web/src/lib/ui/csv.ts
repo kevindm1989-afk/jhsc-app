@@ -42,6 +42,48 @@ export function toCsv<T extends Record<string, unknown>>(
   return [header, ...lines].join('\r\n');
 }
 
+export interface CsvMetadata {
+  /** Route the rows came from, e.g. "/concerns". */
+  route: string;
+  /** Plain-English filter description, e.g. "Status: Open · Severity: High". */
+  filters?: string;
+  /** Time of export. Defaults to `new Date()`. */
+  generatedAt?: Date;
+}
+
+/**
+ * Build a single `#`-prefixed metadata line summarizing the export's
+ * provenance. Excel + Sheets + Numbers all surface this row when
+ * opening the file so the recipient can see where the data came
+ * from. The `#` prefix keeps it out of the header detection logic
+ * most spreadsheet apps run on the first row.
+ *
+ * Returns "" when `route` is empty, so the caller can safely
+ * concatenate the result unconditionally.
+ */
+export function csvMetadataLine(meta: CsvMetadata): string {
+  if (!meta.route) return '';
+  const stamp = (meta.generatedAt ?? new Date()).toISOString();
+  const parts = [`route=${meta.route}`, `generated=${stamp}`];
+  if (meta.filters && meta.filters.trim().length > 0) {
+    parts.push(`filters=${meta.filters.trim()}`);
+  }
+  // Single cell, quoted so commas in the filter description survive.
+  const summary = '# ' + parts.join('; ');
+  return csvCell(summary);
+}
+
+/**
+ * Concatenate a metadata comment row + a row body. The metadata is
+ * always followed by a CRLF so the spreadsheet apps treat the
+ * second line as the header. An empty metadata is dropped.
+ */
+export function withMetadata(meta: CsvMetadata, csv: string): string {
+  const line = csvMetadataLine(meta);
+  if (!line) return csv;
+  return line + '\r\n' + csv;
+}
+
 /**
  * Build a YYYY-MM-DD filename suffix from `date` (defaults to now).
  * Mirrors the ISO date prefix worker-side dates use elsewhere.

@@ -33,6 +33,12 @@ export interface SavedView {
   search: string;
   /** ISO timestamp the view was first saved. */
   createdAt: string;
+  /**
+   * Optional flag — when true, the HomeDashboard surfaces this view
+   * as a quick-link tile on the front door. Persisted with the rest
+   * of the view; legacy records without the field default to false.
+   */
+  pinnedToHome?: boolean;
 }
 
 function readAll(): SavedView[] {
@@ -125,6 +131,26 @@ export function deleteSavedView(id: string): boolean {
   if (next.length === all.length) return false;
   writeAll(next);
   return true;
+}
+
+/**
+ * Toggle (or set) the pinned-to-home flag on a saved view. Returns
+ * the updated record, or null if not found.
+ */
+export function setSavedViewPinned(id: string, pinned: boolean): SavedView | null {
+  const all = readAll();
+  const idx = all.findIndex((v) => v.id === id);
+  if (idx < 0) return null;
+  const next: SavedView = { ...all[idx]!, pinnedToHome: pinned };
+  const updated = all.slice();
+  updated[idx] = next;
+  writeAll(updated);
+  return next;
+}
+
+/** All saved views marked pinnedToHome, newest-first. */
+export function listPinnedSavedViews(): SavedView[] {
+  return listSavedViews().filter((v) => v.pinnedToHome === true);
 }
 
 /** Convenience: full href ("/route?…") for a saved view. */
