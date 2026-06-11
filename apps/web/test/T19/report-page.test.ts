@@ -18,9 +18,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildMonthlyReport,
+  buildYearlyReport,
   reportToCsvRows,
   shiftMonth,
-  toMonthString
+  shiftYear,
+  toMonthString,
+  toYearString,
+  yearlyReportToCsvRows
 } from '../../src/lib/report/aggregate';
 
 const PAGE_PATH = resolve(__dirname, '../../src/routes/report/+page.svelte');
@@ -148,6 +152,65 @@ describe('T19 — reportToCsvRows', () => {
   });
 });
 
+describe('T19 — yearly aggregator', () => {
+  it('toYearString formats a Date as YYYY in local time', () => {
+    expect(toYearString(new Date(2026, 4, 15))).toBe('2026');
+    expect(toYearString(new Date(2025, 11, 31))).toBe('2025');
+  });
+
+  it('shiftYear moves forward and backward', () => {
+    expect(shiftYear('2026', 1)).toBe('2027');
+    expect(shiftYear('2026', -1)).toBe('2025');
+    expect(shiftYear('2026', 0)).toBe('2026');
+  });
+
+  it('buildYearlyReport returns 12 months in calendar order', () => {
+    const yr = buildYearlyReport('2026');
+    expect(yr.year).toBe('2026');
+    expect(yr.months.length).toBe(12);
+    expect(yr.months[0]!.month).toBe('2026-01');
+    expect(yr.months[11]!.month).toBe('2026-12');
+  });
+
+  it('yearly totals sum the per-month totals exactly (every register)', () => {
+    const yr = buildYearlyReport('2026');
+    for (const key of Object.keys(yr.totals) as (keyof typeof yr.totals)[]) {
+      const sum = yr.months.reduce((acc, m) => acc + m.totals[key], 0);
+      expect(yr.totals[key]).toBe(sum);
+    }
+  });
+
+  it('yearly concernsBySeverity sums the per-month buckets', () => {
+    const yr = buildYearlyReport('2026');
+    for (const sev of ['low', 'medium', 'high', 'critical'] as const) {
+      const sum = yr.months.reduce((acc, m) => acc + m.concernsBySeverity[sev], 0);
+      expect(yr.concernsBySeverity[sev]).toBe(sum);
+    }
+  });
+
+  it('yearly recommendationsByStatus sums the per-month buckets', () => {
+    const yr = buildYearlyReport('2026');
+    for (const st of ['responded', 'pending', 'overdue', 'archived'] as const) {
+      const sum = yr.months.reduce((acc, m) => acc + m.recommendationsByStatus[st], 0);
+      expect(yr.recommendationsByStatus[st]).toBe(sum);
+    }
+  });
+
+  it('yearlyReportToCsvRows emits 12 monthly slabs + a year roll-up slab', () => {
+    const yr = buildYearlyReport('2026');
+    const rows = yearlyReportToCsvRows(yr);
+    // 12 months × 16 rows each + 16 year-roll-up rows = 208 rows
+    expect(rows.length).toBe(12 * 16 + 16);
+  });
+
+  it('yearlyReportToCsvRows year-roll-up rows tag the month column with _year', () => {
+    const rows = yearlyReportToCsvRows(buildYearlyReport('2026'));
+    const yearTag = '2026_year';
+    const yearRows = rows.filter((r) => r.month === yearTag);
+    expect(yearRows.length).toBe(16);
+  });
+});
+
 describe('T19 — /report route mount', () => {
   it('the +page.svelte component exists at the expected path', () => {
     expect(existsSync(PAGE_PATH)).toBe(true);
@@ -222,13 +285,43 @@ describe('T19 — /report route mount', () => {
       /import\s+CsvDownloadButton\s+from\s+['"]\$lib\/ui\/CsvDownloadButton\.svelte['"]/
     );
     expect(src).toMatch(/<CsvDownloadButton/);
-    expect(src).toMatch(/reportToCsvRows\(report\)/);
+    expect(src).toMatch(/reportToCsvRows\(/);
     expect(src).toMatch(/csvFilename\(`report-\$\{month\}`\)/);
   });
 
   it('carries a noindex meta', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
+  });
+
+  it('reads ?year=YYYY from the URL and switches into year mode', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/searchParams\.get\(['"]year['"]\)/);
+    expect(src).toMatch(/isYearView/);
+    expect(src).toMatch(/buildYearlyReport/);
+  });
+
+  it('renders the mode toggle (month / year) so the worker can swap periods', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/data-testid=["']report-mode-month["']/);
+    expect(src).toMatch(/data-testid=["']report-mode-year["']/);
+  });
+
+  it('renders the per-month strip only in year view', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/\{#if\s+isYearView\}[\s\S]*data-testid=["']report-month-strip["']/);
+    expect(src).toMatch(/data-testid=["']report-month-cell["']/);
+  });
+
+  it('CSV switches to yearlyReportToCsvRows when in year mode', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/yearlyReportToCsvRows/);
+    expect(src).toMatch(/csvFilename\(`report-\$\{year\}`\)/);
+  });
+
+  it('carries a print stylesheet so the page produces a clean handout', () => {
+    const src = readFileSync(PAGE_PATH, 'utf8');
+    expect(src).toMatch(/@media\s+print\s*\{/);
   });
 });
 
@@ -241,6 +334,12 @@ describe('T19 — /report i18n keys', () => {
     expect(cat.report?.page?.month_nav_aria).toBeTruthy();
     expect(cat.report?.page?.prev_month).toBeTruthy();
     expect(cat.report?.page?.next_month).toBeTruthy();
+    expect(cat.report?.page?.prev_year).toBeTruthy();
+    expect(cat.report?.page?.next_year).toBeTruthy();
+    expect(cat.report?.page?.mode_nav_aria).toBeTruthy();
+    expect(cat.report?.page?.mode_month).toBeTruthy();
+    expect(cat.report?.page?.mode_year).toBeTruthy();
+    expect(cat.report?.page?.months_heading).toBeTruthy();
     expect(cat.report?.page?.totals_heading).toBeTruthy();
     expect(cat.report?.page?.concerns_severity_heading).toBeTruthy();
     expect(cat.report?.page?.recs_status_heading).toBeTruthy();

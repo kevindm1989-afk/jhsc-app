@@ -24,6 +24,7 @@ import { buildDemoMinutes, type DemoMinutesRow } from '../minutes/demo-minutes';
 import { buildDemoInspections, type DemoInspectionRow } from '../inspections/demo-inspections';
 
 export type MonthString = `${number}-${number}` | string;
+export type YearString = `${number}` | string;
 
 export interface MonthlyReport {
   month: MonthString;
@@ -48,6 +49,22 @@ export interface MonthlyReport {
 
 function inMonth(iso: string, month: MonthString): boolean {
   return iso.startsWith(month);
+}
+
+/**
+ * Returns the YYYY year string for `date`. Local time, matching
+ * `toMonthString`.
+ */
+export function toYearString(date: Date): YearString {
+  return String(date.getFullYear());
+}
+
+/**
+ * Returns the YYYY year that is `offset` years from `year`.
+ */
+export function shiftYear(year: YearString, offset: number): YearString {
+  const y = parseInt(year, 10);
+  return String(y + offset);
 }
 
 /**
@@ -128,6 +145,50 @@ export function buildMonthlyReport(month: MonthString): MonthlyReport {
   };
 }
 
+export interface YearlyReport {
+  year: YearString;
+  totals: MonthlyReport['totals'];
+  concernsBySeverity: MonthlyReport['concernsBySeverity'];
+  recommendationsByStatus: MonthlyReport['recommendationsByStatus'];
+  months: MonthlyReport[];
+}
+
+/**
+ * Build a yearly report by summing the 12 monthly snapshots of
+ * `year`. The returned `months` array is in calendar order
+ * (Jan → Dec) so consumers can show a per-month sparkline / strip
+ * without re-sorting.
+ */
+export function buildYearlyReport(year: YearString): YearlyReport {
+  const months: MonthlyReport[] = [];
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, '0');
+    months.push(buildMonthlyReport(`${year}-${mm}`));
+  }
+  const totals = {
+    concerns: 0,
+    recommendations: 0,
+    training: 0,
+    workRefusals: 0,
+    s51Evidence: 0,
+    reprisal: 0,
+    minutes: 0,
+    inspections: 0
+  };
+  const concernsBySeverity = { low: 0, medium: 0, high: 0, critical: 0 };
+  const recommendationsByStatus = { responded: 0, pending: 0, overdue: 0, archived: 0 };
+  for (const m of months) {
+    for (const k of Object.keys(totals) as (keyof typeof totals)[]) totals[k] += m.totals[k];
+    for (const k of Object.keys(concernsBySeverity) as (keyof typeof concernsBySeverity)[])
+      concernsBySeverity[k] += m.concernsBySeverity[k];
+    for (const k of Object.keys(
+      recommendationsByStatus
+    ) as (keyof typeof recommendationsByStatus)[])
+      recommendationsByStatus[k] += m.recommendationsByStatus[k];
+  }
+  return { year, totals, concernsBySeverity, recommendationsByStatus, months };
+}
+
 /**
  * Flatten a MonthlyReport into row-shaped records for CSV export. One
  * row per metric, with `section`, `key`, and `count` columns so a
@@ -146,6 +207,32 @@ export function reportToCsvRows(
   }
   for (const [key, count] of Object.entries(report.recommendationsByStatus)) {
     rows.push({ month: report.month, section: 'recs_status', key, count });
+  }
+  return rows;
+}
+
+/**
+ * Flatten a YearlyReport into row-shaped records for CSV export.
+ * Each underlying month contributes its own rows (so the CSV stays
+ * a strict superset of the per-month CSV shape — paste into the same
+ * sheet and pivot). Year-level totals carry the literal year string
+ * in the `month` column with `_year` as a suffix so a pivot can tell
+ * them apart.
+ */
+export function yearlyReportToCsvRows(
+  report: YearlyReport
+): Array<{ month: string; section: string; key: string; count: number }> {
+  const rows: Array<{ month: string; section: string; key: string; count: number }> = [];
+  for (const m of report.months) rows.push(...reportToCsvRows(m));
+  const yearTag = `${report.year}_year`;
+  for (const [key, count] of Object.entries(report.totals)) {
+    rows.push({ month: yearTag, section: 'totals', key, count });
+  }
+  for (const [key, count] of Object.entries(report.concernsBySeverity)) {
+    rows.push({ month: yearTag, section: 'concerns_severity', key, count });
+  }
+  for (const [key, count] of Object.entries(report.recommendationsByStatus)) {
+    rows.push({ month: yearTag, section: 'recs_status', key, count });
   }
   return rows;
 }

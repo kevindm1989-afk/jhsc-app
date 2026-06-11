@@ -18,9 +18,13 @@
   import { t } from '$lib/i18n';
   import {
     buildMonthlyReport,
+    buildYearlyReport,
     reportToCsvRows,
     shiftMonth,
-    toMonthString
+    shiftYear,
+    toMonthString,
+    toYearString,
+    yearlyReportToCsvRows
   } from '$lib/report/aggregate';
   import { buildHref } from '$lib/ui/url-state';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
@@ -28,13 +32,28 @@
 
   const CSV_FIELDS = /** @type {const} */ (['month', 'section', 'key', 'count']);
 
+  // Mode: "year" (`?year=YYYY`) or "month" (default; `?month=YYYY-MM`).
+  // Year wins if both are set so a `?year=YYYY&month=...` URL stays
+  // unambiguous.
+  $: yearParam = $page.url.searchParams.get('year');
   $: monthParam = $page.url.searchParams.get('month');
+  $: isYearView = !!(yearParam && /^\d{4}$/.test(yearParam));
+  $: year = yearParam && /^\d{4}$/.test(yearParam) ? yearParam : toYearString(new Date());
   $: month =
     monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : toMonthString(new Date());
-  $: report = buildMonthlyReport(month);
+  $: report = isYearView ? buildYearlyReport(year) : buildMonthlyReport(month);
 
-  $: prevHref = buildHref('/report', {}, { month: shiftMonth(month, -1) });
-  $: nextHref = buildHref('/report', {}, { month: shiftMonth(month, 1) });
+  $: prevHref = isYearView
+    ? buildHref('/report', {}, { year: shiftYear(year, -1) })
+    : buildHref('/report', {}, { month: shiftMonth(month, -1) });
+  $: nextHref = isYearView
+    ? buildHref('/report', {}, { year: shiftYear(year, 1) })
+    : buildHref('/report', {}, { month: shiftMonth(month, 1) });
+
+  // Mode-toggle hrefs — switching mode preserves nothing (the other
+  // mode's URL param is what disambiguates).
+  $: toYearViewHref = buildHref('/report', {}, { year: toYearString(new Date()) });
+  $: toMonthViewHref = buildHref('/report', {}, { month: toMonthString(new Date()) });
 
   const REGISTERS = /** @type {const} */ ([
     { key: 'concerns', href: '/concerns', label: 'concerns' },
@@ -51,7 +70,11 @@
   const REC_STATUS_KEYS = /** @type {const} */ (['overdue', 'pending', 'responded', 'archived']);
 
   function buildDownload() {
-    const rows = reportToCsvRows(report);
+    if (isYearView) {
+      const rows = yearlyReportToCsvRows(/** @type {any} */ (report));
+      return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename(`report-${year}`) };
+    }
+    const rows = reportToCsvRows(/** @type {any} */ (report));
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename(`report-${month}`) };
   }
 </script>
@@ -67,13 +90,36 @@
     <p class="muted">{t('report.page.intro')}</p>
   </header>
 
+  <nav class="report-mode-nav" aria-label={t('report.page.mode_nav_aria')} data-print="hide">
+    <a
+      href={toMonthViewHref}
+      class="report-mode-link"
+      class:is-active={!isYearView}
+      aria-current={!isYearView ? 'true' : undefined}
+      data-testid="report-mode-month"
+    >
+      {t('report.page.mode_month')}
+    </a>
+    <a
+      href={toYearViewHref}
+      class="report-mode-link"
+      class:is-active={isYearView}
+      aria-current={isYearView ? 'true' : undefined}
+      data-testid="report-mode-year"
+    >
+      {t('report.page.mode_year')}
+    </a>
+  </nav>
+
   <nav class="report-month-nav" aria-label={t('report.page.month_nav_aria')} data-print="hide">
     <a href={prevHref} class="report-month-link" data-testid="report-prev-month">
-      {t('report.page.prev_month')}
+      {isYearView ? t('report.page.prev_year') : t('report.page.prev_month')}
     </a>
-    <span class="report-month-label" data-testid="report-month">{month}</span>
+    <span class="report-month-label" data-testid="report-month">
+      {isYearView ? year : month}
+    </span>
     <a href={nextHref} class="report-month-link" data-testid="report-next-month">
-      {t('report.page.next_month')}
+      {isYearView ? t('report.page.next_year') : t('report.page.next_month')}
     </a>
   </nav>
 
@@ -92,6 +138,34 @@
       </li>
     {/each}
   </ul>
+
+  {#if isYearView}
+    <h2>{t('report.page.months_heading')}</h2>
+    <ul class="report-month-strip" data-testid="report-month-strip">
+      {#each /** @type {any} */ (report).months as m (m.month)}
+        <li>
+          <a
+            href={buildHref('/report', {}, { month: m.month })}
+            class="report-month-cell"
+            data-testid="report-month-cell"
+            data-month={m.month}
+          >
+            <span class="report-month-cell-month">{m.month}</span>
+            <span class="report-month-cell-total" data-testid="report-month-cell-total">
+              {m.totals.concerns +
+                m.totals.recommendations +
+                m.totals.workRefusals +
+                m.totals.s51Evidence +
+                m.totals.reprisal +
+                m.totals.minutes +
+                m.totals.inspections +
+                m.totals.training}
+            </span>
+          </a>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 
   <h2>{t('report.page.concerns_severity_heading')}</h2>
   <ul class="report-breakdown" data-testid="report-concerns-severity">
@@ -134,6 +208,30 @@
   }
   .report-header h1 {
     margin-block: 0 0.25rem;
+  }
+
+  .report-mode-nav {
+    display: flex;
+    gap: 0.25rem;
+    margin-block-end: 0.5rem;
+  }
+  .report-mode-link {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-size: 0.8125rem;
+    text-decoration: none;
+  }
+  .report-mode-link:hover {
+    background: var(--color-muted);
+    text-decoration: none;
+  }
+  .report-mode-link.is-active {
+    background: var(--color-fg);
+    color: var(--color-bg);
+    border-color: var(--color-fg);
   }
 
   .report-month-nav {
@@ -193,6 +291,40 @@
     color: var(--color-fg-muted);
   }
 
+  .report-month-strip {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+    gap: 0.25rem;
+  }
+  .report-month-cell {
+    display: grid;
+    gap: 0.125rem;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    text-decoration: none;
+    text-align: center;
+  }
+  .report-month-cell:hover {
+    background: var(--color-muted);
+    text-decoration: none;
+  }
+  .report-month-cell-month {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-fg-muted);
+  }
+  .report-month-cell-total {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
   .report-breakdown {
     list-style: none;
     padding: 0;
@@ -231,5 +363,53 @@
   }
   .report-footer {
     margin-block-start: 0.75rem;
+  }
+
+  /*
+   * Print stylesheet — committee-meeting deliverable. The worker
+   * co-chair runs /report into a paper handout for the meeting, so we
+   * collapse interactive chrome (mode toggle, prev/next nav, CSV
+   * button, back-to-home — all already carry data-print="hide") and
+   * tighten the tile/breakdown spacing. The amber demo-note callout
+   * stays visible so paper readers see the same "synthetic data"
+   * caveat the screen carries.
+   */
+  @media print {
+    .report-card {
+      margin: 0;
+      border: none;
+      padding: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .report-header h1 {
+      font-size: 1rem;
+    }
+    .report-tiles {
+      gap: 0.25rem;
+    }
+    .report-tile {
+      padding: 0.375rem 0.5rem;
+      page-break-inside: avoid;
+      background: transparent;
+    }
+    .report-tile-count {
+      font-size: 1rem;
+    }
+    .report-month-strip {
+      gap: 0.25rem;
+    }
+    .report-month-cell {
+      padding: 0.25rem 0.375rem;
+      page-break-inside: avoid;
+      background: transparent;
+    }
+    .report-breakdown {
+      background: transparent;
+    }
+    .report-breakdown-row {
+      padding: 0.25rem 0.5rem;
+      page-break-inside: avoid;
+    }
   }
 </style>
