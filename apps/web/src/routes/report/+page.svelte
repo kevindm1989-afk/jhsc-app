@@ -14,7 +14,9 @@
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
+  import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { t } from '$lib/i18n';
   import {
     buildMonthlyReport,
@@ -43,6 +45,13 @@
   $: month =
     monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : toMonthString(new Date());
   $: report = isYearView ? buildYearlyReport(year) : buildMonthlyReport(month);
+
+  // Year-over-year comparison: when in month mode, also load the same
+  // month from a year earlier so each tile can render
+  // "(<delta> vs <YYYY-MM>)". Skip in year mode — the existing
+  // monthly strip already shows the within-year trend.
+  $: priorMonth = isYearView ? null : shiftMonth(month, -12);
+  $: priorReport = priorMonth ? buildMonthlyReport(priorMonth) : null;
 
   $: prevHref = isYearView
     ? buildHref('/report', {}, { year: shiftYear(year, -1) })
@@ -78,6 +87,51 @@
     const rows = reportToCsvRows(/** @type {any} */ (report));
     return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename(`report-${month}`) };
   }
+
+  /**
+   * Tell whether a keystroke originated inside a form field (so the
+   * worker can still type literal `j`/`k` while editing).
+   * @param {EventTarget | null} target
+   */
+  function isTypingTarget(target) {
+    if (!(target instanceof Element)) return false;
+    const tag = target.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    if (target.getAttribute('contenteditable') === 'true') return true;
+    return false;
+  }
+
+  /**
+   * `j` / `k` step the report by one month (or one year in year mode).
+   * Vim-style — the help page surfaces the bindings via the
+   * KeyboardShortcuts modal.
+   *
+   * @param {KeyboardEvent} e
+   */
+  function onReportKey(e) {
+    if (e.defaultPrevented) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (isTypingTarget(e.target)) return;
+    if (e.key === 'j') {
+      e.preventDefault();
+      void goto(prevHref, { replaceState: false });
+    } else if (e.key === 'k') {
+      e.preventDefault();
+      void goto(nextHref, { replaceState: false });
+    }
+  }
+
+  onMount(() => {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('keydown', onReportKey);
+    }
+  });
+
+  onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('keydown', onReportKey);
+    }
+  });
 </script>
 
 <svelte:head>
@@ -130,12 +184,27 @@
   <h2>{t('report.page.totals_heading')}</h2>
   <ul class="report-tiles" data-testid="report-tiles">
     {#each REGISTERS as r (r.key)}
+      {@const current = report.totals[r.key]}
+      {@const prior = priorReport ? priorReport.totals[r.key] : null}
+      {@const delta = prior === null ? null : current - prior}
       <li>
         <a href={r.href} class="report-tile" data-testid="report-tile" data-key={r.key}>
-          <span class="report-tile-count" data-testid="report-tile-count"
-            >{report.totals[r.key]}</span
-          >
+          <span class="report-tile-count" data-testid="report-tile-count">{current}</span>
           <span class="report-tile-label">{t(`report.page.tile.${r.label}`)}</span>
+          {#if delta !== null}
+            <span
+              class="report-tile-yoy"
+              class:is-up={delta > 0}
+              class:is-down={delta < 0}
+              class:is-flat={delta === 0}
+              data-testid="report-tile-yoy"
+              data-delta={delta}
+              title={t('report.page.yoy_tooltip', { month: priorMonth ?? '' })}
+            >
+              {delta > 0 ? '+' : ''}{delta}
+              <span class="report-tile-yoy-suffix">{t('report.page.yoy_vs_label')}</span>
+            </span>
+          {/if}
         </a>
       </li>
     {/each}
@@ -291,6 +360,25 @@
   .report-tile-label {
     font-size: 0.6875rem;
     color: var(--color-fg-muted);
+  }
+  .report-tile-yoy {
+    font-size: 0.625rem;
+    font-family: var(--font-mono);
+    color: var(--color-fg-muted);
+  }
+  .report-tile-yoy.is-up {
+    color: var(--color-tint-red-fg);
+  }
+  .report-tile-yoy.is-down {
+    color: var(--color-tint-green-fg);
+  }
+  .report-tile-yoy.is-flat {
+    color: var(--color-fg-muted);
+  }
+  .report-tile-yoy-suffix {
+    margin-inline-start: 0.125rem;
+    color: var(--color-fg-muted);
+    font-family: inherit;
   }
 
   .report-month-strip {

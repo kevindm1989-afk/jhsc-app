@@ -16,7 +16,9 @@
   const SHORTCUT_ROWS = /** @type {const} */ ([
     { key: 'slash', i18nKey: 'search' },
     { key: 'question', i18nKey: 'shortcuts' },
-    { key: 'escape', i18nKey: 'escape' }
+    { key: 'escape', i18nKey: 'escape' },
+    { key: 'j', i18nKey: 'report_prev' },
+    { key: 'k', i18nKey: 'report_next' }
   ]);
 </script>
 

@@ -141,6 +141,9 @@
       "copied_announce": "Share URL copied to clipboard.",
       "error_announce": "Could not copy the share URL. Please copy it from the address bar."
     },
+    "print": {
+      "generated_at": "Generated {stamp} from the JHSC committee app."
+    },
     "activeFilters": {
       "label": "Active filters:",
       "region_aria": "Active filters",
@@ -173,12 +176,16 @@
         "search": "Open search",
         "shortcuts": "Open this dialog",
         "escape": "Close any open dialog",
-        "share": "Copy share URL"
+        "share": "Copy share URL",
+        "report_prev": "Previous month / year on /report",
+        "report_next": "Next month / year on /report"
       },
       "key": {
         "slash": "/",
         "question": "?",
-        "escape": "Esc"
+        "escape": "Esc",
+        "j": "j",
+        "k": "k"
       },
       "share_hint": "Look for the “Copy share URL” button on register surfaces.",
       "open_help": "Open full help page →"
@@ -1597,6 +1604,10 @@
       "mode_year": "Year",
       "months_heading": "Activity by month",
       "totals_heading": "Totals by register",
+      "yoy_vs_label": "YoY",
+      "yoy_tooltip": "vs same month last year ({month})",
+      "j_step_aria_announce": "Stepped to previous month.",
+      "k_step_aria_announce": "Stepped to next month.",
       "concerns_severity_heading": "Concerns by severity",
       "recs_status_heading": "Recommendations by status",
       "tile": {
