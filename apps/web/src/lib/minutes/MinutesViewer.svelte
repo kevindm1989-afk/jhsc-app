@@ -25,6 +25,7 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import { formatDateShort } from '$lib/ui/date-format';
   import SkeletonRows from '$lib/ui/SkeletonRows.svelte';
 
   /**
@@ -93,11 +94,7 @@
 
   /** @param {string} iso */
   function formatDate(iso) {
-    try {
-      return iso.replace(/T.*$/, '');
-    } catch {
-      return iso;
-    }
+    return formatDateShort(iso) || iso;
   }
 
   /** @param {import('./demo-minutes').MinutesStatus} status */
