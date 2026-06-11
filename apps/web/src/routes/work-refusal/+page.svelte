@@ -172,7 +172,14 @@
 
   function buildDownload() {
     const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
-    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('work-refusal') };
+    return {
+      csv: toCsv(rows, CSV_FIELDS),
+      filename: csvFilename(
+        'work-refusal',
+        new Date(),
+        activeFilters.map((f) => f.key + '-' + f.label)
+      )
+    };
   }
 </script>
 
@@ -207,6 +214,7 @@
       {fetchPage}
       filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
+      clearHref="/work-refusal"
     />
   {/key}
   <p class="wr-demo-note muted" data-testid="wr-demo-note">

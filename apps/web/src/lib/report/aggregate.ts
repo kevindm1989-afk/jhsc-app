@@ -212,6 +212,18 @@ export function reportToCsvRows(
 }
 
 /**
+ * Build `count` consecutive monthly reports ending at `month`, in
+ * calendar order (oldest first). Powers the /report sparkline.
+ */
+export function buildTrailingMonths(month: MonthString, count: number): MonthlyReport[] {
+  const out: MonthlyReport[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    out.push(buildMonthlyReport(shiftMonth(month, -i)));
+  }
+  return out;
+}
+
+/**
  * Flatten a YearlyReport into row-shaped records for CSV export.
  * Each underlying month contributes its own rows (so the CSV stays
  * a strict superset of the per-month CSV shape — paste into the same

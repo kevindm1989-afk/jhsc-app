@@ -154,7 +154,14 @@
 
   function buildDownload() {
     const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
-    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('recommendations') };
+    return {
+      csv: toCsv(rows, CSV_FIELDS),
+      filename: csvFilename(
+        'recommendations',
+        new Date(),
+        activeFilters.map((f) => f.key + '-' + f.label)
+      )
+    };
   }
 </script>
 
@@ -189,6 +196,7 @@
       {fetchPage}
       filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
+      clearHref="/recommendations"
     />
   {/key}
   <p class="recs-demo-note muted" data-testid="recs-demo-note">

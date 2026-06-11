@@ -120,7 +120,8 @@
       "custom_apply": "Apply"
     },
     "filterEmptyState": {
-      "no_matches": "No matches for this filter. Pick a different chip above, or clear the filter."
+      "no_matches": "No matches for this filter. Pick a different chip above, or clear the filter.",
+      "clear_filters": "Clear filters"
     },
     "pagination": {
       "total_entries": "{count} total"
@@ -1606,6 +1607,7 @@
       "totals_heading": "Totals by register",
       "yoy_vs_label": "YoY",
       "yoy_tooltip": "vs same month last year ({month})",
+      "sparkline_aria": "Trailing 12-month series: {values}",
       "j_step_aria_announce": "Stepped to previous month.",
       "k_step_aria_announce": "Stepped to next month.",
       "concerns_severity_heading": "Concerns by severity",

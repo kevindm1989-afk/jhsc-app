@@ -243,7 +243,11 @@
     const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
     return {
       csv: toCsv(rows, CSV_FIELDS),
-      filename: csvFilename('concerns')
+      filename: csvFilename(
+        'concerns',
+        new Date(),
+        activeFilters.map((f) => f.key + '-' + f.label)
+      )
     };
   }
 
@@ -285,7 +289,12 @@
   <ShareUrlButton />
   <SaveViewButton suggestedName={activeFilters.map((f) => f.label).join(' · ')} />
   {#key viewerKey}
-    <ConcernsViewer {fetchPage} filterActive={anyAxisActive} filterLabel={activeFilterLabel} />
+    <ConcernsViewer
+      {fetchPage}
+      filterActive={anyAxisActive}
+      filterLabel={activeFilterLabel}
+      clearHref="/concerns"
+    />
   {/key}
   <p class="con-demo-note muted" data-testid="con-demo-note">
     {t('concern.viewer.demo_note')}
