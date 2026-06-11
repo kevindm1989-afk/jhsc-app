@@ -47,6 +47,13 @@
   /** When non-null, the active filter label echoes in the h1. */
   export let filterLabel = null;
 
+  /**
+   * Route URL to navigate to when the worker clicks "Clear filters"
+   * in the empty state. Empty / null suppresses the link.
+   * @type {string}
+   */
+  export let clearHref = '';
+
   /** @type {import('./demo-recommendations').DemoRecommendationRow[]} */
   let rows = [];
   let total = 0;
@@ -131,9 +138,18 @@
       {t('recommendations.viewer.error.load_failed')}
     </p>
   {:else if rows.length === 0}
-    <p class="muted" role="status" data-testid="recs-empty">
-      {filterActive ? t('common.filterEmptyState.no_matches') : t('recommendations.viewer.empty')}
-    </p>
+    <div class="empty-state" data-testid="recs-empty" role="status">
+      <p class="muted">
+        {filterActive ? t('common.filterEmptyState.no_matches') : t('recommendations.viewer.empty')}
+      </p>
+      {#if filterActive && clearHref}
+        <p class="empty-state-actions">
+          <a href={clearHref} class="empty-state-clear" data-testid="recs-empty-clear">
+            {t('common.filterEmptyState.clear_filters')}
+          </a>
+        </p>
+      {/if}
+    </div>
   {:else}
     <div class="recs-controls" data-testid="recs-controls" data-print="hide">
       <button
@@ -361,5 +377,26 @@
     border-radius: var(--radius-md);
     background: var(--color-tint-red-bg);
     color: var(--color-tint-red-fg);
+  }
+  .empty-state {
+    display: grid;
+    gap: 0.375rem;
+    margin: 0.5rem 0;
+  }
+  .empty-state-actions {
+    margin: 0;
+  }
+  .empty-state-clear {
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    text-decoration: none;
+    padding: 0.25rem 0.625rem;
+    border: 1px dashed var(--color-border);
+    border-radius: 999px;
+  }
+  .empty-state-clear:hover {
+    background: var(--color-muted);
+    color: var(--color-fg);
+    text-decoration: none;
   }
 </style>

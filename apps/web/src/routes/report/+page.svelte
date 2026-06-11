@@ -20,6 +20,7 @@
   import { t } from '$lib/i18n';
   import {
     buildMonthlyReport,
+    buildTrailingMonths,
     buildYearlyReport,
     reportToCsvRows,
     shiftMonth,
@@ -52,6 +53,19 @@
   // monthly strip already shows the within-year trend.
   $: priorMonth = isYearView ? null : shiftMonth(month, -12);
   $: priorReport = priorMonth ? buildMonthlyReport(priorMonth) : null;
+
+  // Trailing-12-month series — also month-mode only. Each tile gets a
+  // small sparkline showing the per-register totals across the
+  // current month and the eleven months before it, oldest first.
+  $: trailingMonths = isYearView ? null : buildTrailingMonths(month, 12);
+  /**
+   * Per-register-key array of integers for the trailing window. Lets
+   * each tile render a sparkline without re-iterating the array.
+   * @type {Record<string, number[]> | null}
+   */
+  $: trailingSeries = trailingMonths
+    ? Object.fromEntries(REGISTERS.map((r) => [r.key, trailingMonths.map((m) => m.totals[r.key])]))
+    : null;
 
   $: prevHref = isYearView
     ? buildHref('/report', {}, { year: shiftYear(year, -1) })
@@ -187,6 +201,8 @@
       {@const current = report.totals[r.key]}
       {@const prior = priorReport ? priorReport.totals[r.key] : null}
       {@const delta = prior === null ? null : current - prior}
+      {@const series = trailingSeries ? trailingSeries[r.key] : null}
+      {@const seriesMax = series ? Math.max(1, ...series) : 0}
       <li>
         <a href={r.href} class="report-tile" data-testid="report-tile" data-key={r.key}>
           <span class="report-tile-count" data-testid="report-tile-count">{current}</span>
@@ -204,6 +220,38 @@
               {delta > 0 ? '+' : ''}{delta}
               <span class="report-tile-yoy-suffix">{t('report.page.yoy_vs_label')}</span>
             </span>
+          {/if}
+          {#if series}
+            <!--
+              12-bar inline sparkline. SVG viewBox is fixed at 60×12;
+              each bar is 4px wide with a 1px gap, normalized to the
+              window's max. The aria-label spells out the series so
+              screen readers convey the trend; sighted users get the
+              visual cue.
+            -->
+            <svg
+              class="report-tile-spark"
+              viewBox="0 0 60 12"
+              role="img"
+              aria-label={t('report.page.sparkline_aria', {
+                values: series.join(', ')
+              })}
+              data-testid="report-tile-spark"
+              data-key={r.key}
+              focusable="false"
+            >
+              {#each series as v, i}
+                {@const h = seriesMax > 0 ? Math.max(1, Math.round((v / seriesMax) * 12)) : 0}
+                <rect
+                  x={i * 5}
+                  y={12 - h}
+                  width="4"
+                  height={h}
+                  class="report-tile-spark-bar"
+                  class:is-current={i === series.length - 1}
+                />
+              {/each}
+            </svg>
           {/if}
         </a>
       </li>
@@ -379,6 +427,20 @@
     margin-inline-start: 0.125rem;
     color: var(--color-fg-muted);
     font-family: inherit;
+  }
+  .report-tile-spark {
+    inline-size: 100%;
+    block-size: 0.75rem;
+    margin-block-start: 0.125rem;
+    overflow: visible;
+  }
+  .report-tile-spark-bar {
+    fill: var(--color-fg-muted);
+    opacity: 0.6;
+  }
+  .report-tile-spark-bar.is-current {
+    fill: var(--color-fg);
+    opacity: 1;
   }
 
   .report-month-strip {

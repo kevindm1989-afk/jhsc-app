@@ -139,7 +139,14 @@
 
   function buildDownload() {
     const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
-    return { csv: toCsv(rows, CSV_FIELDS), filename: csvFilename('training') };
+    return {
+      csv: toCsv(rows, CSV_FIELDS),
+      filename: csvFilename(
+        'training',
+        new Date(),
+        activeFilters.map((f) => f.key + '-' + f.label)
+      )
+    };
   }
 </script>
 
@@ -174,6 +181,7 @@
       {fetchPage}
       filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
+      clearHref="/training"
     />
   {/key}
   <p class="trn-demo-note muted" data-testid="trn-demo-note">

@@ -45,12 +45,39 @@ export function toCsv<T extends Record<string, unknown>>(
 /**
  * Build a YYYY-MM-DD filename suffix from `date` (defaults to now).
  * Mirrors the ISO date prefix worker-side dates use elsewhere.
+ *
+ * When the caller passes a non-empty `axes` array, each axis is
+ * slug-joined into the filename so distinct filtered exports don't
+ * clobber each other on disk:
+ *
+ *   csvFilename('concerns', date) → "concerns-2026-06-11.csv"
+ *   csvFilename('concerns', date, ['open', 'high'])
+ *     → "concerns-open-high-2026-06-11.csv"
+ *
+ * Axes are sanitized to lowercase ASCII (a-z 0-9), collapsed
+ * runs of separators, leading / trailing dashes trimmed, and
+ * capped at 32 chars per axis. Empty axes are dropped.
  */
-export function csvFilename(prefix: string, date: Date = new Date()): string {
+export function csvFilename(
+  prefix: string,
+  date: Date = new Date(),
+  axes: readonly string[] = []
+): string {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
-  return `${prefix}-${yyyy}-${mm}-${dd}.csv`;
+  const slug = axes
+    .map((a) =>
+      String(a)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 32)
+    )
+    .filter(Boolean)
+    .join('-');
+  const middle = slug ? `${slug}-` : '';
+  return `${prefix}-${middle}${yyyy}-${mm}-${dd}.csv`;
 }
 
 /**
