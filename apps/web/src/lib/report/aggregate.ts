@@ -127,3 +127,25 @@ export function buildMonthlyReport(month: MonthString): MonthlyReport {
     recommendationsByStatus: countRecsBy(recommendations)
   };
 }
+
+/**
+ * Flatten a MonthlyReport into row-shaped records for CSV export. One
+ * row per metric, with `section`, `key`, and `count` columns so a
+ * spreadsheet can pivot by section. The month itself goes in column 0
+ * so each row carries its period.
+ */
+export function reportToCsvRows(
+  report: MonthlyReport
+): Array<{ month: string; section: string; key: string; count: number }> {
+  const rows: Array<{ month: string; section: string; key: string; count: number }> = [];
+  for (const [key, count] of Object.entries(report.totals)) {
+    rows.push({ month: report.month, section: 'totals', key, count });
+  }
+  for (const [key, count] of Object.entries(report.concernsBySeverity)) {
+    rows.push({ month: report.month, section: 'concerns_severity', key, count });
+  }
+  for (const [key, count] of Object.entries(report.recommendationsByStatus)) {
+    rows.push({ month: report.month, section: 'recs_status', key, count });
+  }
+  return rows;
+}

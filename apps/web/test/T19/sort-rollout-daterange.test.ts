@@ -205,3 +205,66 @@ describe('T19.1 — /sensitive-feed route wires DateRangeChips + composes the pr
     expect(src).toMatch(/<DateRangeChips/);
   });
 });
+
+describe('T19.1 — DateRangeChips rollout across the 8 register routes', () => {
+  // Each register has a different primary date field — the rollout
+  // pins both the structural wiring AND the per-route date-field name
+  // so a regression where a route accidentally uses the wrong field
+  // (e.g. filed_at vs meeting_date) gets caught.
+  const ROUTES = /** @type {const} */ [
+    { route: 'training', field: 'completed_at' },
+    { route: 'work-refusal', field: 'filed_at' },
+    { route: 's51-evidence', field: 'opened_at' },
+    { route: 'reprisal', field: 'filed_at' },
+    { route: 'minutes', field: 'meeting_date' },
+    { route: 'inspections', field: 'conducted_at' },
+    { route: 'library', field: 'updated_at' },
+    { route: 'recommendations', field: 'filed_at' }
+  ];
+
+  for (const { route, field } of ROUTES) {
+    describe(`/${route}`, () => {
+      const src = readFileSync(
+        resolve(__dirname, `../../src/routes/${route}/+page.svelte`),
+        'utf8'
+      );
+
+      it('imports DateRangeChips + withinRange', () => {
+        expect(src).toMatch(
+          /import\s+DateRangeChips\s+from\s+['"]\$lib\/ui\/DateRangeChips\.svelte['"]/
+        );
+        expect(src).toMatch(
+          /import\s+\{\s*withinRange\s*\}\s+from\s+['"]\$lib\/ui\/date-range['"]/
+        );
+      });
+
+      it('reads fromParam + toParam from the URL', () => {
+        expect(src).toMatch(/\$:\s*fromParam\s*=/);
+        expect(src).toMatch(/\$:\s*toParam\s*=/);
+      });
+
+      it(`composes the date-range predicate against r.${field}`, () => {
+        expect(src).toContain(`withinRange(r.${field}, fromParam, toParam)`);
+      });
+
+      it('mounts <DateRangeChips> + preserves filter+sort through the chips', () => {
+        expect(src).toMatch(/<DateRangeChips/);
+        expect(src).toMatch(/preservedParams=\{\{[^}]*filter:\s*filterParam[^}]*sort:\s*sortParam/);
+      });
+
+      it('SortToggle preserves filter+from+to', () => {
+        expect(src).toMatch(
+          /preservedParams=\{\{[^}]*filter:\s*filterParam[^}]*from:\s*fromParam[^}]*to:\s*toParam/
+        );
+      });
+
+      it('filterActive composes filterParam || fromParam || toParam', () => {
+        expect(src).toMatch(/filterActive=\{[^}]*filterParam\s*!==\s*null[^}]*fromParam[^}]*toParam/);
+      });
+
+      it('{#key} includes fromParam + toParam so the viewer re-mounts on any axis change', () => {
+        expect(src).toMatch(/#key[^`]*`[^`]*fromParam[^`]*toParam/);
+      });
+    });
+  }
+});

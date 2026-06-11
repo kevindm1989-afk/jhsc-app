@@ -27,6 +27,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoReprisals(50);
@@ -84,13 +86,25 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.reprisalPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
-        r.status === activeValue
-    : filterParam === 'active'
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  $: predicate = (() => {
+    const statusPred = activeValue
       ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
-          r.status === 'filed' || r.status === 'investigating'
-      : undefined;
+          r.status === activeValue
+      : filterParam === 'active'
+        ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
+            r.status === 'filed' || r.status === 'investigating'
+        : null;
+    const hasRange = fromParam || toParam;
+    if (!statusPred && !hasRange) return undefined;
+    return /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) => {
+      if (statusPred && !statusPred(r)) return false;
+      if (hasRange && !withinRange(r.filed_at, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: sortParam = $page.url.searchParams.get('sort');
   $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
@@ -114,19 +128,25 @@
 
 <section class="card reprisal-card" data-testid="reprisal-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/reprisal"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/reprisal"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/reprisal" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <ReprisalViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}

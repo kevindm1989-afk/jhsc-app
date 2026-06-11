@@ -23,6 +23,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoLibrary(50);
@@ -91,13 +93,25 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.libraryPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
-        r.category === activeValue
-    : filterParam === 'offline'
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  $: predicate = (() => {
+    const catPred = activeValue
       ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
-          r.offline_cached === true
-      : undefined;
+          r.category === activeValue
+      : filterParam === 'offline'
+        ? /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) =>
+            r.offline_cached === true
+        : null;
+    const hasRange = fromParam || toParam;
+    if (!catPred && !hasRange) return undefined;
+    return /** @param {import('$lib/library/demo-library').DemoLibraryRow} r */ (r) => {
+      if (catPred && !catPred(r)) return false;
+      if (hasRange && !withinRange(r.updated_at, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: sortParam = $page.url.searchParams.get('sort');
   $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
@@ -121,19 +135,25 @@
 
 <section class="card lib-card" data-testid="library-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/library"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/library"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/library" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <LibraryViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}

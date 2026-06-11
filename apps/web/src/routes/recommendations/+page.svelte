@@ -26,6 +26,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoRecommendations(50);
@@ -84,11 +86,25 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.recommendationsPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/recommendations/demo-recommendations').DemoRecommendationRow} r */ (
-        r
-      ) => r.status === activeValue
-    : undefined;
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  $: predicate = (() => {
+    const statusPred = activeValue
+      ? /** @param {import('$lib/recommendations/demo-recommendations').DemoRecommendationRow} r */ (
+          r
+        ) => r.status === activeValue
+      : null;
+    const hasRange = fromParam || toParam;
+    if (!statusPred && !hasRange) return undefined;
+    return /** @param {import('$lib/recommendations/demo-recommendations').DemoRecommendationRow} r */ (
+      r
+    ) => {
+      if (statusPred && !statusPred(r)) return false;
+      if (hasRange && !withinRange(r.filed_at, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: fetchPage =
     /**
      * @param {number} p
@@ -112,19 +128,25 @@
 
 <section class="card recs-card" data-testid="recommendations-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/recommendations"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/recommendations"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/recommendations" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <RecommendationsViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}

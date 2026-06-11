@@ -24,6 +24,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoInspections(50);
@@ -73,10 +75,22 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.inspectionsPage.title');
 
-  $: predicate = activeValue
-    ? /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) =>
-        r.integrity_status === activeValue
-    : undefined;
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
+
+  $: predicate = (() => {
+    const integrityPred = activeValue
+      ? /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) =>
+          r.integrity_status === activeValue
+      : null;
+    const hasRange = fromParam || toParam;
+    if (!integrityPred && !hasRange) return undefined;
+    return /** @param {import('$lib/inspections/demo-inspections').DemoInspectionRow} r */ (r) => {
+      if (integrityPred && !integrityPred(r)) return false;
+      if (hasRange && !withinRange(r.conducted_at, fromParam, toParam)) return false;
+      return true;
+    };
+  })();
   $: sortParam = $page.url.searchParams.get('sort');
   $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
 
@@ -100,19 +114,25 @@
 
 <section class="card ins-card" data-testid="inspections-page">
   <FilterChipsRail {chips} {activeValue} />
+  <DateRangeChips
+    baseHref="/inspections"
+    {fromParam}
+    {toParam}
+    preservedParams={{ filter: filterParam, sort: sortParam }}
+  />
   <SortToggle
     baseHref="/inspections"
     activeSort={sortParam}
-    preservedParams={{ filter: filterParam }}
+    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   {#if filterLabel}
     <FilterBanner label={filterLabel} clearHref="/inspections" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}`}
+  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <InspectionsViewer
       {fetchPage}
-      filterActive={filterParam !== null}
+      filterActive={filterParam !== null || !!fromParam || !!toParam}
       filterLabel={activeFilterLabel}
     />
   {/key}
