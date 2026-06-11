@@ -32,6 +32,7 @@
   import BottomTabBar from '$lib/ui/BottomTabBar.svelte';
   import HeaderSearch from '$lib/ui/HeaderSearch.svelte';
   import KeyboardShortcuts from '$lib/ui/KeyboardShortcuts.svelte';
+  import PrintGeneratedAt from '$lib/ui/PrintGeneratedAt.svelte';
   import '../app.css';
 
   // Trigger feature-flag setup (no-op at scaffold; T-feature-flag wires).
@@ -126,6 +127,7 @@
 <main id="main-content" tabindex="-1">
   <div class="container">
     <slot />
+    <PrintGeneratedAt />
   </div>
 </main>
 
