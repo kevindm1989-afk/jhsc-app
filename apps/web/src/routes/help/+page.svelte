@@ -18,7 +18,9 @@
     { key: 'question', i18nKey: 'shortcuts' },
     { key: 'escape', i18nKey: 'escape' },
     { key: 'j', i18nKey: 'report_prev' },
-    { key: 'k', i18nKey: 'report_next' }
+    { key: 'k', i18nKey: 'report_next' },
+    { key: 'arrows', i18nKey: 'navigate_list' },
+    { key: 'enter', i18nKey: 'activate_item' }
   ]);
 </script>
 

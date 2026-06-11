@@ -36,9 +36,38 @@
   /** Whether the dropdown panel is open. */
   let recentsOpen = false;
 
+  /**
+   * Active row index across the combined dropdown (pinned views,
+   * then recent searches). -1 means no row is active. Reset
+   * whenever the panel opens, the source data changes, or the
+   * worker types into the input.
+   */
+  let activeIndex = -1;
+
+  /**
+   * Build the flat ordered list of dropdown items so keyboard
+   * navigation can walk a single array. Pinned views come first
+   * (matching the panel's render order), then recent searches.
+   *
+   * @type {Array<{ kind: 'pinned', href: string, query?: string }
+   *               | { kind: 'recent', href: string, query: string }>}
+   */
+  function buildItems() {
+    /** @type {Array<{ kind: 'pinned' | 'recent', href: string, query?: string }>} */
+    const items = [];
+    for (const v of pinnedViews) {
+      items.push({ kind: 'pinned', href: hrefForSavedView(v) });
+    }
+    for (const q of recents) {
+      items.push({ kind: 'recent', href: `/search?q=${encodeURIComponent(q)}`, query: q });
+    }
+    return items;
+  }
+
   function refreshRecents() {
     recents = listRecentSearches();
     pinnedViews = listPinnedSavedViews();
+    activeIndex = -1;
   }
 
   async function openRecents() {
@@ -111,6 +140,56 @@
     }
   }
 
+  /**
+   * Arrow / Enter handling on the input itself. Reads from the
+   * combined `buildItems()` array so the order matches the panel
+   * render order. Wraps at both ends so a worker reaching the last
+   * row + ArrowDown lands back on the first.
+   *
+   * @param {KeyboardEvent} ev
+   */
+  function onInputKeydown(ev) {
+    if (!recentsOpen) {
+      // Reopen on ArrowDown when there's a payload to show.
+      if (ev.key === 'ArrowDown') {
+        const items = buildItems();
+        if (items.length > 0) {
+          ev.preventDefault();
+          void openRecents();
+          activeIndex = 0;
+        }
+      }
+      return;
+    }
+    const items = buildItems();
+    if (items.length === 0) return;
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      activeIndex = activeIndex < items.length - 1 ? activeIndex + 1 : 0;
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      activeIndex = activeIndex > 0 ? activeIndex - 1 : items.length - 1;
+    } else if (ev.key === 'Enter' && activeIndex >= 0) {
+      const item = items[activeIndex];
+      if (!item) return;
+      ev.preventDefault();
+      if (item.kind === 'recent' && item.query) recordRecentSearch(item.query);
+      closeRecents();
+      if (typeof window !== 'undefined') {
+        window.location.href = item.href;
+      }
+    }
+  }
+
+  /**
+   * Reset the active row when the worker types — once they're
+   * editing the query, arrow-down should land on the first item,
+   * not wherever the previous selection was.
+   */
+  function onInputInput() {
+    activeIndex = -1;
+  }
+
   onMount(() => {
     refreshRecents();
     document.addEventListener('keydown', onGlobalKeydown);
@@ -146,12 +225,20 @@
       autocorrect="off"
       placeholder={t('common.headerSearch.placeholder')}
       aria-label={t('common.headerSearch.label')}
+      role="combobox"
+      aria-autocomplete="list"
+      aria-controls="header-search-recents-panel"
+      aria-expanded={recentsOpen ? 'true' : 'false'}
+      aria-activedescendant={activeIndex >= 0 ? `header-search-item-${activeIndex}` : undefined}
       data-testid="header-search-input"
       on:focus={onFocus}
+      on:keydown={onInputKeydown}
+      on:input={onInputInput}
     />
   </label>
   {#if recentsOpen && (recents.length > 0 || pinnedViews.length > 0)}
     <div
+      id="header-search-recents-panel"
       class="hs-recents"
       role="listbox"
       aria-label={t('common.headerSearch.recent_aria')}
@@ -160,13 +247,21 @@
       {#if pinnedViews.length > 0}
         <p class="hs-recents-label">{t('common.headerSearch.pinned_label')}</p>
         <ul class="hs-recents-list" data-testid="header-search-pinned">
-          {#each pinnedViews as v (v.id)}
-            <li class="hs-recents-row" data-testid="header-search-pinned-row">
+          {#each pinnedViews as v, i (v.id)}
+            <li
+              class="hs-recents-row"
+              class:is-active={activeIndex === i}
+              data-testid="header-search-pinned-row"
+              data-active={activeIndex === i ? 'true' : 'false'}
+            >
               <a
+                id={`header-search-item-${i}`}
                 href={hrefForSavedView(v)}
                 class="hs-recents-link hs-pinned-link"
                 data-testid="header-search-pinned-link"
                 data-id={v.id}
+                role="option"
+                aria-selected={activeIndex === i ? 'true' : 'false'}
                 on:click={closeRecents}
               >
                 <span class="hs-pinned-name">{v.name}</span>
@@ -179,13 +274,22 @@
       {#if recents.length > 0}
         <p class="hs-recents-label">{t('common.headerSearch.recent_label')}</p>
         <ul class="hs-recents-list">
-          {#each recents as q (q)}
-            <li class="hs-recents-row" data-testid="header-search-recent-row">
+          {#each recents as q, j (q)}
+            {@const flatIdx = pinnedViews.length + j}
+            <li
+              class="hs-recents-row"
+              class:is-active={activeIndex === flatIdx}
+              data-testid="header-search-recent-row"
+              data-active={activeIndex === flatIdx ? 'true' : 'false'}
+            >
               <a
+                id={`header-search-item-${flatIdx}`}
                 href={`/search?q=${encodeURIComponent(q)}`}
                 class="hs-recents-link"
                 data-testid="header-search-recent-link"
                 data-q={q}
+                role="option"
+                aria-selected={activeIndex === flatIdx ? 'true' : 'false'}
                 on:click={() => {
                   recordRecentSearch(q);
                   closeRecents();
@@ -275,6 +379,10 @@
   .hs-recents-row {
     display: flex;
     align-items: center;
+  }
+  .hs-recents-row.is-active,
+  .hs-recents-row.is-active .hs-recents-link {
+    background: var(--color-muted);
   }
   .hs-recents-link {
     flex: 1;
