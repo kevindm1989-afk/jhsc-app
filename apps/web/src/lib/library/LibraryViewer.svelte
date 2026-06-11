@@ -165,7 +165,7 @@
 
     <ul class="lib-list" data-testid="lib-list">
       {#each rows as row (row.id)}
-        <li class="lib-row" data-testid="lib-row" data-category={row.category}>
+        <li class="lib-row" data-testid="lib-row" data-category={row.category} data-print="row">
           <div class="lib-row-head">
             <span class="lib-category-pin" data-testid="lib-category-pin">
               {categoryLabel(row.category)}

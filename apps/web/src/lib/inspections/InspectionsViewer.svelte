@@ -171,6 +171,7 @@
           class:quarantined={row.integrity_status === 'quarantined'}
           data-testid="ins-row"
           data-status={row.integrity_status}
+          data-print="row"
         >
           <div class="ins-row-head">
             <span

@@ -171,7 +171,7 @@
 
     <ul class="trn-list" data-testid="trn-list">
       {#each rows as row (row.id)}
-        <li class="trn-row" data-testid="trn-row" data-validity={row.validity}>
+        <li class="trn-row" data-testid="trn-row" data-validity={row.validity} data-print="row">
           <div class="trn-row-head">
             <span
               class="trn-validity-pin"

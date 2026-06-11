@@ -165,7 +165,7 @@
 
     <ul class="min-list" data-testid="min-list">
       {#each rows as row (row.id)}
-        <li class="min-row" data-testid="min-row" data-status={row.status}>
+        <li class="min-row" data-testid="min-row" data-status={row.status} data-print="row">
           <div class="min-row-head">
             <span
               class="min-status-pin"
