@@ -183,14 +183,18 @@
         "escape": "Close any open dialog",
         "share": "Copy share URL",
         "report_prev": "Previous month / year on /report",
-        "report_next": "Next month / year on /report"
+        "report_next": "Next month / year on /report",
+        "navigate_list": "Move through the dropdown / results",
+        "activate_item": "Open the highlighted item"
       },
       "key": {
         "slash": "/",
         "question": "?",
         "escape": "Esc",
         "j": "j",
-        "k": "k"
+        "k": "k",
+        "arrows": "↑↓",
+        "enter": "Enter"
       },
       "share_hint": "Look for the “Copy share URL” button on register surfaces.",
       "open_help": "Open full help page →"

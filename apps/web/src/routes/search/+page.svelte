@@ -13,7 +13,7 @@
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { t } from '$lib/i18n';
@@ -30,6 +30,9 @@
   onMount(() => {
     index = buildSearchIndex();
     recents = listRecentSearches();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('keydown', onSearchKeydown);
+    }
   });
 
   // Record the query whenever it transitions from empty → non-empty.
@@ -66,6 +69,73 @@
   $: query = $page.url.searchParams.get('q') ?? '';
   $: groups = search(index, query);
   $: totalMatches = groups.reduce((a, g) => a + g.total, 0);
+
+  /**
+   * Flat list of every result record across every group. Used by
+   * the j/k keyboard nav so a single index walks the rendered
+   * order. Re-derived whenever groups change.
+   */
+  $: flatResults = groups.flatMap((g) => g.records);
+
+  /**
+   * Active result index for keyboard navigation. -1 means no result
+   * is active; resets when the query changes.
+   */
+  let activeResultIndex = -1;
+  $: if (query) activeResultIndex = -1;
+
+  /**
+   * `j` / `k` (vim-style) + ArrowDown / ArrowUp step through the
+   * flattened result list. Enter opens the active result. Ignored
+   * when focus is inside a typing target (so typing the literal
+   * "j" in the search input still works) or when a modifier is
+   * held (so Cmd/Ctrl+K stays the browser default).
+   *
+   * @param {KeyboardEvent} ev
+   */
+  function onSearchKeydown(ev) {
+    if (ev.defaultPrevented) return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const target = ev.target;
+    if (target instanceof Element) {
+      const tag = target.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if (target.getAttribute('contenteditable') === 'true') return;
+    }
+    if (flatResults.length === 0) return;
+    if (ev.key === 'j' || ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      activeResultIndex = activeResultIndex < flatResults.length - 1 ? activeResultIndex + 1 : 0;
+    } else if (ev.key === 'k' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      activeResultIndex = activeResultIndex > 0 ? activeResultIndex - 1 : flatResults.length - 1;
+    } else if (ev.key === 'Enter' && activeResultIndex >= 0) {
+      const item = flatResults[activeResultIndex];
+      if (!item) return;
+      ev.preventDefault();
+      if (typeof window !== 'undefined') {
+        window.location.href = item.href;
+      }
+    }
+  }
+
+  /**
+   * Map a (groupIdx, recordIdx) pair to the flat index so the
+   * markup can stamp the right `is-active` class.
+   * @param {number} groupIdx
+   * @param {number} recordIdx
+   */
+  function flatIndex(groupIdx, recordIdx) {
+    let off = 0;
+    for (let g = 0; g < groupIdx; g++) off += groups[g]?.records.length ?? 0;
+    return off + recordIdx;
+  }
+
+  onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('keydown', onSearchKeydown);
+    }
+  });
 </script>
 
 <svelte:head>
@@ -134,7 +204,7 @@
       {t('search.page.summary', { count: totalMatches, query })}
     </p>
     <ul class="search-groups" data-testid="search-groups">
-      {#each groups as group (group.register)}
+      {#each groups as group, groupIdx (group.register)}
         <li class="search-group" data-testid="search-group" data-register={group.register}>
           <header class="search-group-head">
             <h2>{t(`search.page.register.${group.register}`)}</h2>
@@ -143,9 +213,15 @@
             >
           </header>
           <ul class="search-result-list">
-            {#each group.records as record (record.id)}
-              <li class="search-result" data-testid="search-result">
-                <a class="search-result-link" href={record.href}>
+            {#each group.records as record, recordIdx (record.id)}
+              {@const flatIdx = flatIndex(groupIdx, recordIdx)}
+              <li
+                class="search-result"
+                class:is-active={activeResultIndex === flatIdx}
+                data-testid="search-result"
+                data-active={activeResultIndex === flatIdx ? 'true' : 'false'}
+              >
+                <a class="search-result-link" href={record.href} data-testid="search-result-link">
                   <span class="search-result-primary" data-testid="search-result-primary">
                     {#each highlightMatches(record.primaryText, query) as seg, i (i)}
                       {#if seg.match}
@@ -247,6 +323,9 @@
     color: var(--color-fg);
     text-decoration: none;
     transition: background-color 150ms ease;
+  }
+  .search-result.is-active {
+    background: var(--color-muted);
   }
   .search-result-link:hover {
     background: var(--color-muted);
