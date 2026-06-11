@@ -28,6 +28,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
+  import SaveViewButton from '$lib/ui/SaveViewButton.svelte';
+  import SavedViewsRail from '$lib/ui/SavedViewsRail.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import ActiveFiltersBar from '$lib/ui/ActiveFiltersBar.svelte';
@@ -164,6 +166,7 @@
 
 <section class="audit-page" data-testid="audit-page">
   <ActiveFiltersBar baseHref="/audit" filters={activeFilters} />
+  <SavedViewsRail route="/audit" />
   <FilterChipsRail {chips} {activeValue} />
   <DateRangeChips
     baseHref="/audit"
@@ -178,6 +181,7 @@
   />
   <CsvDownloadButton onClick={buildDownload} />
   <ShareUrlButton />
+  <SaveViewButton />
   {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <AuditLogViewer
       {fetchPage}

@@ -188,6 +188,29 @@
       "text_suffix": "for keyboard shortcuts.",
       "dismiss_aria": "Dismiss keyboard shortcuts hint"
     },
+    "savedViews": {
+      "save_button": "Save view",
+      "save_confirm": "Save",
+      "name_placeholder": "Name this view…",
+      "name_aria": "Name the view you want to save",
+      "cancel_aria": "Cancel saving this view",
+      "saved_announce": "Saved ✓",
+      "rail_aria": "Saved views",
+      "rail_label": "Saved:",
+      "manage_link": "Manage →"
+    },
+    "savedViewsPage": {
+      "title": "Saved views",
+      "heading": "Saved views",
+      "intro": "Filtered register views you've bookmarked on this device. Click a name to jump back into that view, rename to relabel, or delete to remove.",
+      "empty": "No saved views yet. From any register, narrow the filters you want and click \"Save view\".",
+      "rename": "Rename",
+      "rename_confirm": "Save",
+      "rename_aria": "New name for this saved view",
+      "rename_cancel_aria": "Cancel renaming",
+      "delete": "Delete",
+      "back_to_home_cta": "Back to home"
+    },
     "helpPage": {
       "title": "Help",
       "heading": "Using the committee app",
@@ -388,6 +411,8 @@
       "link_privacy_blurb": "What the system can and cannot see.",
       "link_help_label": "Help & shortcuts",
       "link_help_blurb": "Keyboard shortcuts, how URLs share filters, CSV export, and the monthly report.",
+      "link_saved_views_label": "Saved views",
+      "link_saved_views_blurb": "Bookmark filtered register views and reuse them on this device.",
       "back_to_home_cta": "Back to home"
     }
   },
