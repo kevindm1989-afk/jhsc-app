@@ -21,6 +21,8 @@
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import ActiveFiltersBar from '$lib/ui/ActiveFiltersBar.svelte';
   import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
+  import SaveViewButton from '$lib/ui/SaveViewButton.svelte';
+  import SavedViewsRail from '$lib/ui/SavedViewsRail.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import { buildHref } from '$lib/ui/url-state';
@@ -144,6 +146,7 @@
 
 <section class="card min-card" data-testid="minutes-page">
   <ActiveFiltersBar baseHref="/minutes" filters={activeFilters} />
+  <SavedViewsRail route="/minutes" />
   <FilterChipsRail {chips} {activeValue} />
   <DateRangeChips
     baseHref="/minutes"
@@ -161,6 +164,7 @@
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
   <ShareUrlButton />
+  <SaveViewButton />
   {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <MinutesViewer
       {fetchPage}

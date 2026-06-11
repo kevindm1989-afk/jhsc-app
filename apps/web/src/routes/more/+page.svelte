@@ -168,6 +168,12 @@
           <span>{t('common.morePage.link_help_blurb')}</span>
         </a>
       </li>
+      <li>
+        <a href="/saved-views" class="more-link" data-testid="more-link-saved-views">
+          <strong>{t('common.morePage.link_saved_views_label')}</strong>
+          <span>{t('common.morePage.link_saved_views_blurb')}</span>
+        </a>
+      </li>
     </ul>
   </section>
 

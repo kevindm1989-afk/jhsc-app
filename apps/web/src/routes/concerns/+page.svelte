@@ -25,6 +25,8 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
+  import SaveViewButton from '$lib/ui/SaveViewButton.svelte';
+  import SavedViewsRail from '$lib/ui/SavedViewsRail.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import ActiveFiltersBar from '$lib/ui/ActiveFiltersBar.svelte';
@@ -257,6 +259,7 @@
 
 <section class="card con-card" data-testid="concerns-page">
   <ActiveFiltersBar baseHref="/concerns" filters={activeFilters} />
+  <SavedViewsRail route="/concerns" />
   <FilterChipsRail chips={statusChips} activeValue={activeStatus} />
   <FilterChipsRail
     chips={severityChips}
@@ -280,6 +283,7 @@
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
   <ShareUrlButton />
+  <SaveViewButton />
   {#key viewerKey}
     <ConcernsViewer {fetchPage} filterActive={anyAxisActive} filterLabel={activeFilterLabel} />
   {/key}
