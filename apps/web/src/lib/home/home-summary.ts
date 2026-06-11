@@ -30,6 +30,13 @@ export interface HomeSummary {
   expiredTraining: number;
   activeRefusals: number;
   preservingScenes: number;
+  /**
+   * Total rows across every register filed in the current calendar
+   * month. Populated by the route page using
+   * `buildMonthlyReport(toMonthString(new Date()))`. Powers the
+   * "Monthly activity" tile that deep-links into /report.
+   */
+  currentMonthActivity: number;
 }
 
 export interface HomeSummaryInputs {
@@ -38,6 +45,13 @@ export interface HomeSummaryInputs {
   training: readonly DemoTrainingRow[];
   workRefusals: readonly DemoWorkRefusalRow[];
   s51Evidence: readonly DemoS51EvidenceRow[];
+  /**
+   * Optional pre-computed current-month activity total. Passed in
+   * rather than computed here so this module stays free of the
+   * cross-register `$lib/report/aggregate` import (which would pull
+   * in all eight demo providers transitively).
+   */
+  currentMonthActivity?: number;
 }
 
 export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
@@ -46,7 +60,8 @@ export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
     overdueRecommendations: inputs.recommendations.filter((r) => r.status === 'overdue').length,
     expiredTraining: inputs.training.filter((r) => r.validity === 'expired').length,
     activeRefusals: inputs.workRefusals.filter((r) => r.stage !== 'resolved').length,
-    preservingScenes: inputs.s51Evidence.filter((r) => r.scene_state === 'preserving').length
+    preservingScenes: inputs.s51Evidence.filter((r) => r.scene_state === 'preserving').length,
+    currentMonthActivity: inputs.currentMonthActivity ?? 0
   };
 }
 
@@ -56,5 +71,6 @@ export const ZERO_SUMMARY: HomeSummary = {
   overdueRecommendations: 0,
   expiredTraining: 0,
   activeRefusals: 0,
-  preservingScenes: 0
+  preservingScenes: 0,
+  currentMonthActivity: 0
 };

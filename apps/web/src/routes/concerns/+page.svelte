@@ -24,6 +24,7 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import { buildHref } from '$lib/ui/url-state';
@@ -223,6 +224,7 @@
     <FilterBanner label={filterLabel} clearHref="/concerns" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
+  <ShareUrlButton />
   {#key viewerKey}
     <ConcernsViewer {fetchPage} filterActive={anyAxisActive} filterLabel={activeFilterLabel} />
   {/key}

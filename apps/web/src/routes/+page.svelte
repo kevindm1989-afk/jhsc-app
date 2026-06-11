@@ -46,6 +46,14 @@
   import { buildDemoWorkRefusals } from '$lib/work-refusal/demo-work-refusal';
   import { buildDemoS51Evidence } from '$lib/s51-evidence/demo-s51-evidence';
   import { buildDemoAuditRows } from '$lib/audit/demo-audit-rows';
+  import { buildMonthlyReport, toMonthString } from '$lib/report/aggregate';
+
+  // Sum the current month's totals across every register so the
+  // "Monthly activity" tile shows one digestible number on the front
+  // door. We re-use the same aggregator /report renders so the two
+  // surfaces agree.
+  const currentMonth = buildMonthlyReport(toMonthString(new Date()));
+  const currentMonthActivity = Object.values(currentMonth.totals).reduce((acc, n) => acc + n, 0);
 
   // Digest is computed once at mount over the demo providers. When each
   // register's real backend lands the page swaps these calls for real
@@ -55,7 +63,8 @@
     recommendations: buildDemoRecommendations(50),
     training: buildDemoTraining(50),
     workRefusals: buildDemoWorkRefusals(50),
-    s51Evidence: buildDemoS51Evidence(30)
+    s51Evidence: buildDemoS51Evidence(30),
+    currentMonthActivity
   });
 
   // Top-5 recent audit rows for the "what just happened" timeline.
