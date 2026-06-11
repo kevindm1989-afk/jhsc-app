@@ -103,18 +103,33 @@
       counts that read "neutral" reinforce the distinction between
       "needs attention" tiles (above) and the periodic roll-up.
     -->
-    <li>
-      <a
-        href="/report"
-        class="hd-tile"
-        class:active={summary.currentMonthActivity > 0}
-        data-testid="hd-tile-report"
-        data-active={summary.currentMonthActivity > 0}
-      >
-        <span class="hd-count" data-testid="hd-count-report">{summary.currentMonthActivity}</span>
-        <span class="hd-label">{t('home.dashboard.tile.monthly_activity')}</span>
-      </a>
-    </li>
+    {#each [summary.currentMonthActivity - summary.priorMonthActivity] as yoyDelta}
+      <li>
+        <a
+          href="/report"
+          class="hd-tile"
+          class:active={summary.currentMonthActivity > 0}
+          data-testid="hd-tile-report"
+          data-active={summary.currentMonthActivity > 0}
+        >
+          <span class="hd-count" data-testid="hd-count-report">{summary.currentMonthActivity}</span>
+          <span class="hd-label">{t('home.dashboard.tile.monthly_activity')}</span>
+          {#if summary.priorMonthActivity > 0 || summary.currentMonthActivity > 0}
+            <span
+              class="hd-yoy"
+              class:is-up={yoyDelta > 0}
+              class:is-down={yoyDelta < 0}
+              class:is-flat={yoyDelta === 0}
+              data-testid="hd-tile-report-yoy"
+              data-delta={yoyDelta}
+            >
+              {yoyDelta > 0 ? '+' : ''}{yoyDelta}
+              <span class="hd-yoy-suffix">{t('home.dashboard.tile.yoy_suffix')}</span>
+            </span>
+          {/if}
+        </a>
+      </li>
+    {/each}
   </ul>
 
   <p class="hd-more">
@@ -193,6 +208,25 @@
   }
   .hd-tile:not(.active) .hd-count {
     color: var(--color-fg-muted);
+  }
+  .hd-yoy {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    color: var(--color-fg-muted);
+  }
+  .hd-yoy.is-up {
+    color: var(--color-tint-red-fg);
+  }
+  .hd-yoy.is-down {
+    color: var(--color-tint-green-fg);
+  }
+  .hd-yoy.is-flat {
+    color: var(--color-fg-muted);
+  }
+  .hd-yoy-suffix {
+    margin-inline-start: 0.125rem;
+    color: var(--color-fg-muted);
+    font-family: inherit;
   }
 
   .hd-more {

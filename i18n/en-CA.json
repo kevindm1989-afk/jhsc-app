@@ -954,7 +954,8 @@
         "expired_training": "Expired training",
         "active_refusals": "Active s. 43 refusals",
         "preserving_scenes": "Scenes preserving (s. 51)",
-        "monthly_activity": "Activity this month"
+        "monthly_activity": "Activity this month",
+        "yoy_suffix": "vs last year"
       },
       "see_all_cta": "See all registers"
     },
@@ -962,6 +963,8 @@
       "heading": "Recent activity",
       "intro": "The latest entries in the worker-side audit log. Pseudonymized actors; no PI.",
       "empty": "No recent activity yet.",
+      "empty_filtered": "No recent activity in this category.",
+      "chips_aria": "Filter recent activity by category",
       "actor_label": "Actor",
       "see_all_cta": "See the full audit log",
       "row_aria": "{event} at {ts}. Open the related register."

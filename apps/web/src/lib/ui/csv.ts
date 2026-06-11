@@ -81,11 +81,21 @@ export function csvFilename(
 }
 
 /**
+ * UTF-8 byte-order-mark. Prepended to the blob payload so Microsoft
+ * Excel reads the file as UTF-8 by default (without the BOM, Excel
+ * for Windows defaults to ANSI / Windows-1252 and garbles accented
+ * characters even when the HTTP/Blob charset claims utf-8). Modern
+ * Google Sheets / Numbers / LibreOffice all tolerate the BOM
+ * transparently — pure win for the Excel-heavy committee audience.
+ */
+const UTF8_BOM = '﻿';
+
+/**
  * Trigger a CSV download via a temporary anchor. Browser-only; the
  * function returns void.
  */
 export function triggerCsvDownload(opts: { csv: string; filename: string }): void {
-  const blob = new Blob([opts.csv], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([UTF8_BOM, opts.csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement('a');
