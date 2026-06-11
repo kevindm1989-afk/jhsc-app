@@ -48,17 +48,52 @@
     monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : toMonthString(new Date());
   $: report = isYearView ? buildYearlyReport(year) : buildMonthlyReport(month);
 
-  // Year-over-year comparison: when in month mode, also load the same
-  // month from a year earlier so each tile can render
-  // "(<delta> vs <YYYY-MM>)". Skip in year mode — the existing
-  // monthly strip already shows the within-year trend.
+  // Year-over-year comparison.
+  //   Month mode: load the same month from a year earlier so each
+  //               tile renders "(<delta> vs <YYYY-MM>)".
+  //   Year mode:  load the prior calendar year and render the same
+  //               kind of indicator on each tile.
   $: priorMonth = isYearView ? null : shiftMonth(month, -12);
   $: priorReport = priorMonth ? buildMonthlyReport(priorMonth) : null;
+  $: priorYear = isYearView ? shiftYear(year, -1) : null;
+  $: priorYearlyReport = priorYear ? buildYearlyReport(priorYear) : null;
 
-  // Trailing-12-month series — also month-mode only. Each tile gets a
-  // small sparkline showing the per-register totals across the
-  // current month and the eleven months before it, oldest first.
-  $: trailingMonths = isYearView ? null : buildTrailingMonths(month, 12);
+  /**
+   * Per-tile YoY context shared between modes. `current` is the
+   * tile total in the active period; `prior` is the same-period
+   * total one year earlier. `priorLabel` is the human-readable
+   * comparison ("Jun 2025" / "2025").
+   *
+   * @type {(key: string) => { current: number, prior: number | null,
+   *                           priorLabel: string }}
+   */
+  $: yoyFor = (key) => {
+    const current = report.totals[/** @type {keyof typeof report.totals} */ (key)];
+    if (isYearView && priorYearlyReport) {
+      return {
+        current,
+        prior: priorYearlyReport.totals[/** @type {keyof typeof priorYearlyReport.totals} */ (key)],
+        priorLabel: priorYear ?? ''
+      };
+    }
+    if (!isYearView && priorReport) {
+      return {
+        current,
+        prior: priorReport.totals[/** @type {keyof typeof priorReport.totals} */ (key)],
+        priorLabel: priorMonth ? formatMonthShort(priorMonth) : ''
+      };
+    }
+    return { current, prior: null, priorLabel: '' };
+  };
+
+  // Trailing-12-month sparkline series.
+  //   Month mode: the 12 months ending at `month` (oldest first).
+  //   Year mode:  the 12 months of `year` (Jan → Dec). This makes
+  //               the sparkline parallel to the existing month strip
+  //               but compact enough to live inside each tile.
+  $: trailingMonths = isYearView
+    ? buildTrailingMonths(`${year}-12`, 12)
+    : buildTrailingMonths(month, 12);
   /**
    * Per-register-key array of integers for the trailing window. Lets
    * each tile render a sparkline without re-iterating the array.
@@ -203,14 +238,13 @@
   <h2>{t('report.page.totals_heading')}</h2>
   <ul class="report-tiles" data-testid="report-tiles">
     {#each REGISTERS as r (r.key)}
-      {@const current = report.totals[r.key]}
-      {@const prior = priorReport ? priorReport.totals[r.key] : null}
-      {@const delta = prior === null ? null : current - prior}
+      {@const yoy = yoyFor(r.key)}
+      {@const delta = yoy.prior === null ? null : yoy.current - yoy.prior}
       {@const series = trailingSeries ? trailingSeries[r.key] : null}
       {@const seriesMax = series ? Math.max(1, ...series) : 0}
       <li>
         <a href={r.href} class="report-tile" data-testid="report-tile" data-key={r.key}>
-          <span class="report-tile-count" data-testid="report-tile-count">{current}</span>
+          <span class="report-tile-count" data-testid="report-tile-count">{yoy.current}</span>
           <span class="report-tile-label">{t(`report.page.tile.${r.label}`)}</span>
           {#if delta !== null}
             <span
@@ -220,9 +254,7 @@
               class:is-flat={delta === 0}
               data-testid="report-tile-yoy"
               data-delta={delta}
-              title={t('report.page.yoy_tooltip', {
-                month: priorMonth ? formatMonthShort(priorMonth) : ''
-              })}
+              title={t('report.page.yoy_tooltip', { month: yoy.priorLabel })}
             >
               {delta > 0 ? '+' : ''}{delta}
               <span class="report-tile-yoy-suffix">{t('report.page.yoy_vs_label')}</span>

@@ -34,7 +34,9 @@ describe('T19.1 — HomeDashboard', () => {
       expiredTraining: 4,
       activeRefusals: 1,
       preservingScenes: 1,
-      currentMonthActivity: 23
+      currentMonthActivity: 23,
+      priorMonthActivity: 0,
+      monthlyActivityTrailing: []
     };
     render(HomeDashboard, { props: { summary } });
     expect(screen.getByTestId('hd-count-concerns').textContent).toBe('7');
@@ -52,7 +54,9 @@ describe('T19.1 — HomeDashboard', () => {
       expiredTraining: 0,
       activeRefusals: 2,
       preservingScenes: 0,
-      currentMonthActivity: 11
+      currentMonthActivity: 11,
+      priorMonthActivity: 0,
+      monthlyActivityTrailing: []
     };
     render(HomeDashboard, { props: { summary } });
     expect(screen.getByTestId('hd-tile-concerns').getAttribute('data-active')).toBe('false');

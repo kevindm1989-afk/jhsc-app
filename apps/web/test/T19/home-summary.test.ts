@@ -106,14 +106,20 @@ describe('T19.1 — buildHomeSummary', () => {
       workRefusals: buildDemoWorkRefusals(50),
       s51Evidence: buildDemoS51Evidence(30)
     });
-    // None of the counts can be negative; at least one count should be
-    // nonzero across this sample size (the demo distributions guarantee
-    // a realistic mix of in-progress states).
-    for (const value of Object.values(summary)) {
+    // None of the numeric counts can be negative; at least one count
+    // should be nonzero across this sample size (the demo distributions
+    // guarantee a realistic mix of in-progress states). The array
+    // field (monthlyActivityTrailing) is filtered out of the numeric
+    // assertions but still asserted as an array.
+    const numericValues = Object.values(summary).filter(
+      (v): v is number => typeof v === 'number'
+    );
+    for (const value of numericValues) {
       expect(value).toBeGreaterThanOrEqual(0);
     }
-    const totalNonZero = Object.values(summary).reduce((acc, n) => acc + (n > 0 ? 1 : 0), 0);
+    const totalNonZero = numericValues.reduce((acc, n) => acc + (n > 0 ? 1 : 0), 0);
     expect(totalNonZero).toBeGreaterThan(0);
+    expect(Array.isArray(summary.monthlyActivityTrailing)).toBe(true);
   });
 });
 

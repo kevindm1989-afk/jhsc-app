@@ -104,6 +104,8 @@
       "needs attention" tiles (above) and the periodic roll-up.
     -->
     {#each [summary.currentMonthActivity - summary.priorMonthActivity] as yoyDelta}
+      {@const sparkSeries = summary.monthlyActivityTrailing}
+      {@const sparkMax = sparkSeries.length > 0 ? Math.max(1, ...sparkSeries) : 0}
       <li>
         <a
           href="/report"
@@ -126,6 +128,30 @@
               {yoyDelta > 0 ? '+' : ''}{yoyDelta}
               <span class="hd-yoy-suffix">{t('home.dashboard.tile.yoy_suffix')}</span>
             </span>
+          {/if}
+          {#if sparkSeries.length > 0}
+            <svg
+              class="hd-spark"
+              viewBox="0 0 60 12"
+              role="img"
+              aria-label={t('home.dashboard.tile.sparkline_aria', {
+                values: sparkSeries.join(', ')
+              })}
+              data-testid="hd-tile-report-spark"
+              focusable="false"
+            >
+              {#each sparkSeries as v, i}
+                {@const h = sparkMax > 0 ? Math.max(1, Math.round((v / sparkMax) * 12)) : 0}
+                <rect
+                  x={i * 5}
+                  y={12 - h}
+                  width="4"
+                  height={h}
+                  class="hd-spark-bar"
+                  class:is-current={i === sparkSeries.length - 1}
+                />
+              {/each}
+            </svg>
           {/if}
         </a>
       </li>
@@ -227,6 +253,20 @@
     margin-inline-start: 0.125rem;
     color: var(--color-fg-muted);
     font-family: inherit;
+  }
+  .hd-spark {
+    inline-size: 100%;
+    block-size: 0.75rem;
+    margin-block-start: 0.125rem;
+    overflow: visible;
+  }
+  .hd-spark-bar {
+    fill: var(--color-fg-muted);
+    opacity: 0.5;
+  }
+  .hd-spark-bar.is-current {
+    fill: var(--color-fg);
+    opacity: 1;
   }
 
   .hd-more {
