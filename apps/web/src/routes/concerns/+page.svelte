@@ -27,6 +27,7 @@
   import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import ActiveFiltersBar from '$lib/ui/ActiveFiltersBar.svelte';
   import { buildHref } from '$lib/ui/url-state';
   import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
@@ -161,6 +162,59 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.concernsPage.title');
 
+  // ActiveFiltersBar descriptors. One entry per currently-active axis,
+  // each with a removeHref that returns the URL minus that one axis.
+  $: activeFilters = (() => {
+    /** @type {Array<{ key: string, label: string, removeHref: string }>} */
+    const list = [];
+    if (activeStatus) {
+      list.push({
+        key: 'status',
+        label: `${t('common.activeFilters.axis.status')}: ${t(`concern.viewer.status.${activeStatus}`)}`,
+        removeHref: buildHref('/concerns', preservedForStatus, { filter: null })
+      });
+    }
+    if (activeSeverity) {
+      list.push({
+        key: 'severity',
+        label: `${t('common.activeFilters.axis.severity')}: ${t(`concern.viewer.severity.${activeSeverity}`)}`,
+        removeHref: buildHref('/concerns', preservedForSeverity, { severity: null })
+      });
+    }
+    if (activeHazard) {
+      list.push({
+        key: 'hazard',
+        label: `${t('common.activeFilters.axis.hazard')}: ${t(`concern.viewer.hazard.${activeHazard}`)}`,
+        removeHref: buildHref('/concerns', preservedForHazard, { hazard: null })
+      });
+    }
+    if (fromParam || toParam) {
+      list.push({
+        key: 'date',
+        label: `${t('common.activeFilters.axis.date_range')}: ${fromParam ?? '…'} → ${toParam ?? '…'}`,
+        removeHref: buildHref(
+          '/concerns',
+          { filter: activeStatus, severity: activeSeverity, hazard: activeHazard, sort: sortParam },
+          { from: null, to: null }
+        )
+      });
+    }
+    if (sortParam === 'oldest') {
+      list.push({
+        key: 'sort',
+        label: `${t('common.activeFilters.axis.sort')}: ${t('common.sortToggle.oldest')}`,
+        removeHref: buildHref('/concerns', {
+          filter: activeStatus,
+          severity: activeSeverity,
+          hazard: activeHazard,
+          from: fromParam,
+          to: toParam
+        })
+      });
+    }
+    return list;
+  })();
+
   /** Composed multi-axis predicate (status, severity, hazard, date range). */
   $: predicate = anyAxisActive
     ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) => {
@@ -202,6 +256,7 @@
 </svelte:head>
 
 <section class="card con-card" data-testid="concerns-page">
+  <ActiveFiltersBar baseHref="/concerns" filters={activeFilters} />
   <FilterChipsRail chips={statusChips} activeValue={activeStatus} />
   <FilterChipsRail
     chips={severityChips}
