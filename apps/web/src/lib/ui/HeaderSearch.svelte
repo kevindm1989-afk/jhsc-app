@@ -45,6 +45,21 @@
   let activeIndex = -1;
 
   /**
+   * When the active row changes via the keyboard, scroll the matching
+   * dropdown row into view. Same anchor-by-id trick as `/search` —
+   * the rendered `<a>` carries `header-search-item-${i}` so the
+   * lookup survives Svelte's keyed loop.
+   */
+  $: if (typeof document !== 'undefined' && recentsOpen && activeIndex >= 0) {
+    const el = document.getElementById(`header-search-item-${activeIndex}`);
+    // scrollIntoView is missing on some jsdom builds; guard so tests
+    // and headless environments don't crash on the reactive update.
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  /**
    * Build the flat ordered list of dropdown items so keyboard
    * navigation can walk a single array. Pinned views come first
    * (matching the panel's render order), then recent searches.

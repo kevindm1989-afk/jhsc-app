@@ -29,6 +29,20 @@
   /** @type {import('$lib/saved-views/saved-views').SavedView[]} */
   let views = [];
 
+  /**
+   * Worker-typed filter. Case-insensitive substring match against the
+   * view's name + route. When empty (or whitespace), every view shows.
+   */
+  let nameFilter = '';
+  $: nameFilterNorm = nameFilter.trim().toLowerCase();
+  $: filteredViews = nameFilterNorm
+    ? views.filter(
+        (v) =>
+          v.name.toLowerCase().includes(nameFilterNorm) ||
+          v.route.toLowerCase().includes(nameFilterNorm)
+      )
+    : views;
+
   /** @type {HTMLInputElement | null} */
   let importInput = null;
 
@@ -208,13 +222,31 @@
     {/if}
   </div>
 
+  {#if views.length > 0}
+    <label class="svp-filter" data-print="hide">
+      <span class="svp-filter-label">{t('common.savedViewsPage.filter_label')}</span>
+      <input
+        type="search"
+        class="svp-filter-input"
+        bind:value={nameFilter}
+        placeholder={t('common.savedViewsPage.filter_placeholder')}
+        data-testid="saved-views-filter-input"
+        aria-label={t('common.savedViewsPage.filter_aria')}
+      />
+    </label>
+  {/if}
+
   {#if views.length === 0}
     <p class="svp-empty muted" data-testid="saved-views-empty">
       {t('common.savedViewsPage.empty')}
     </p>
+  {:else if filteredViews.length === 0}
+    <p class="svp-empty muted" data-testid="saved-views-filter-empty">
+      {t('common.savedViewsPage.filter_empty', { query: nameFilter.trim() })}
+    </p>
   {:else}
     <ul class="svp-list" data-testid="saved-views-list">
-      {#each views as v (v.id)}
+      {#each filteredViews as v (v.id)}
         <li class="svp-row" data-testid="saved-views-row" data-id={v.id}>
           {#if renamingId === v.id}
             <input
@@ -306,6 +338,24 @@
   }
   .svp-empty {
     font-size: 0.875rem;
+  }
+  .svp-filter {
+    display: grid;
+    gap: 0.25rem;
+    margin-block-end: 0.75rem;
+  }
+  .svp-filter-label {
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+  }
+  .svp-filter-input {
+    min-height: 2rem;
+    padding-inline: 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-size: 0.8125rem;
   }
   .svp-io {
     display: flex;

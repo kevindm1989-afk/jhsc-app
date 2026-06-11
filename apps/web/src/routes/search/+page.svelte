@@ -85,6 +85,20 @@
   $: if (query) activeResultIndex = -1;
 
   /**
+   * When the active row changes via the keyboard, scroll the matching
+   * `<li>` into view if it's off-screen. We anchor by id so the DOM
+   * lookup is O(1) and survives the `{#each ... (record.id)}` keyed
+   * loop. `block: 'nearest'` keeps the view stable when the row is
+   * already visible (no flash).
+   */
+  $: if (typeof document !== 'undefined' && activeResultIndex >= 0) {
+    const el = document.getElementById(`search-result-${activeResultIndex}`);
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+
+  /**
    * `j` / `k` (vim-style) + ArrowDown / ArrowUp step through the
    * flattened result list. Enter opens the active result. Ignored
    * when focus is inside a typing target (so typing the literal
@@ -216,6 +230,7 @@
             {#each group.records as record, recordIdx (record.id)}
               {@const flatIdx = flatIndex(groupIdx, recordIdx)}
               <li
+                id={`search-result-${flatIdx}`}
                 class="search-result"
                 class:is-active={activeResultIndex === flatIdx}
                 data-testid="search-result"
