@@ -140,7 +140,7 @@
   .ks-backdrop {
     position: fixed;
     inset: 0;
-    background: rgb(0 0 0 / 50%);
+    background: var(--color-modal-backdrop, rgb(0 0 0 / 50%));
     display: grid;
     place-items: center;
     z-index: 1000;
@@ -153,7 +153,7 @@
     padding: 1rem 1.25rem;
     max-inline-size: min(90vw, 28rem);
     inline-size: 100%;
-    box-shadow: 0 10px 30px rgb(0 0 0 / 25%);
+    box-shadow: var(--shadow-lg);
   }
   .ks-header {
     display: flex;
