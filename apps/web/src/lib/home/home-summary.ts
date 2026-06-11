@@ -37,6 +37,12 @@ export interface HomeSummary {
    * "Monthly activity" tile that deep-links into /report.
    */
   currentMonthActivity: number;
+  /**
+   * Total for the same month a year earlier. Optional; when present
+   * the dashboard tile renders a YoY delta indicator matching
+   * /report's tile YoY pattern.
+   */
+  priorMonthActivity: number;
 }
 
 export interface HomeSummaryInputs {
@@ -52,6 +58,8 @@ export interface HomeSummaryInputs {
    * in all eight demo providers transitively).
    */
   currentMonthActivity?: number;
+  /** Optional same-month-last-year total for the YoY indicator. */
+  priorMonthActivity?: number;
 }
 
 export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
@@ -61,7 +69,8 @@ export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
     expiredTraining: inputs.training.filter((r) => r.validity === 'expired').length,
     activeRefusals: inputs.workRefusals.filter((r) => r.stage !== 'resolved').length,
     preservingScenes: inputs.s51Evidence.filter((r) => r.scene_state === 'preserving').length,
-    currentMonthActivity: inputs.currentMonthActivity ?? 0
+    currentMonthActivity: inputs.currentMonthActivity ?? 0,
+    priorMonthActivity: inputs.priorMonthActivity ?? 0
   };
 }
 
@@ -72,5 +81,6 @@ export const ZERO_SUMMARY: HomeSummary = {
   expiredTraining: 0,
   activeRefusals: 0,
   preservingScenes: 0,
-  currentMonthActivity: 0
+  currentMonthActivity: 0,
+  priorMonthActivity: 0
 };

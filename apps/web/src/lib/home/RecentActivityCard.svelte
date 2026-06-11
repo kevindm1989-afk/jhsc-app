@@ -24,6 +24,53 @@
   export let rows = [];
 
   /**
+   * Active filter chip — null shows every row (default), 'sessions'
+   * narrows to session/panic-wipe/recovery events, 'workplace' to
+   * concern/reprisal/work_refusal/s51 events, 'committee' to
+   * committee_member + audit_log.read. Matches the /audit chip
+   * taxonomy so home and the audit log surface the same axis.
+   *
+   * @type {null | 'sessions' | 'workplace' | 'committee'}
+   */
+  let activeCategory = null;
+
+  /**
+   * Categorize an audit event_type into one of the home-chip
+   * buckets. Pure; mirrors the /audit predicateFor logic.
+   *
+   * @param {string} event_type
+   * @returns {'sessions' | 'workplace' | 'committee' | 'other'}
+   */
+  function categoryFor(event_type) {
+    if (
+      event_type.startsWith('session.') ||
+      event_type.startsWith('panic_wipe') ||
+      event_type.startsWith('recovery_blob') ||
+      event_type.startsWith('identity_keypair')
+    ) {
+      return 'sessions';
+    }
+    if (
+      event_type.startsWith('concern.') ||
+      event_type.startsWith('reprisal.') ||
+      event_type.startsWith('work_refusal') ||
+      event_type.startsWith('s51_evidence')
+    ) {
+      return 'workplace';
+    }
+    if (event_type.startsWith('committee_member') || event_type === 'audit_log.read') {
+      return 'committee';
+    }
+    return 'other';
+  }
+
+  const CATEGORY_VALUES = /** @type {const} */ (['sessions', 'workplace', 'committee']);
+
+  $: visibleRows = activeCategory
+    ? rows.filter((r) => categoryFor(r.event_type) === activeCategory)
+    : rows;
+
+  /**
    * Format an ISO timestamp for display. We layer over the locale-
    * aware `formatDateTime` helper (e.g. "Jun 11, 2026, 09:42" in
    * en-CA) and fall back to the raw ISO when the input can't be
@@ -42,11 +89,49 @@
     <p class="muted">{t('home.recent.intro')}</p>
   </header>
 
+  {#if rows.length > 0}
+    <nav
+      class="ra-chips"
+      aria-label={t('home.recent.chips_aria')}
+      data-testid="ra-chips"
+      data-print="hide"
+    >
+      <button
+        type="button"
+        class="ra-chip"
+        class:is-active={activeCategory === null}
+        aria-pressed={activeCategory === null ? 'true' : 'false'}
+        data-testid="ra-chip"
+        data-value=""
+        on:click={() => (activeCategory = null)}
+      >
+        {t('common.filterChips.all')}
+      </button>
+      {#each CATEGORY_VALUES as value (value)}
+        <button
+          type="button"
+          class="ra-chip"
+          class:is-active={activeCategory === value}
+          aria-pressed={activeCategory === value ? 'true' : 'false'}
+          data-testid="ra-chip"
+          data-value={value}
+          on:click={() => (activeCategory = value)}
+        >
+          {t(`audit.viewer.chip.${value}`)}
+        </button>
+      {/each}
+    </nav>
+  {/if}
+
   {#if rows.length === 0}
     <p class="muted" role="status" data-testid="ra-empty">{t('home.recent.empty')}</p>
+  {:else if visibleRows.length === 0}
+    <p class="muted" role="status" data-testid="ra-empty-filtered">
+      {t('home.recent.empty_filtered')}
+    </p>
   {:else}
     <ul class="ra-list" data-testid="ra-list">
-      {#each rows as row (row.id)}
+      {#each visibleRows as row (row.id)}
         <li class="ra-row" data-testid="ra-row">
           <a
             href={eventTypeToHref(row.event_type)}
@@ -83,6 +168,34 @@
   }
   .ra-header h2 {
     margin-block: 0 0.25rem;
+  }
+  .ra-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-block-end: 0.5rem;
+  }
+  .ra-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.1875rem 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg-muted);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .ra-chip:hover {
+    background: var(--color-muted);
+  }
+  .ra-chip.is-active {
+    background: var(--color-tint-blue-bg);
+    color: var(--color-tint-blue-fg);
+    border-color: var(--color-tint-blue-border);
+    font-weight: 600;
   }
 
   .ra-list {
