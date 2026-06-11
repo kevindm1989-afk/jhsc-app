@@ -175,7 +175,7 @@
 
     <ul class="audit-viewer-list" data-testid="audit-viewer-list">
       {#each rows as row (row.id)}
-        <li class="audit-row" data-testid="audit-row">
+        <li class="audit-row" data-testid="audit-row" data-print="row">
           <div class="audit-row-head">
             <time class="audit-row-ts" data-testid="audit-row-ts">{formatTimestamp(row.ts)}</time>
             <code class="audit-row-event" data-testid="audit-row-event">{row.event_type}</code>

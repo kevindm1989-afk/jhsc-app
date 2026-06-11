@@ -38,6 +38,16 @@
 </script>
 
 {#if filters.length > 0}
+  <!--
+    Print-only summary — the paper handout needs to carry the scope
+    too, otherwise a meeting attendee can't tell which subset of rows
+    they're looking at. Hidden on screen; revealed in print via the
+    global `data-print="print-only"` selector in app.html.
+  -->
+  <p class="afb-print-summary" data-testid="active-filters-print-summary" data-print="print-only">
+    <strong>{t('common.activeFilters.print_summary_label')}</strong>
+    {filters.map((f) => f.label).join(' · ')}
+  </p>
   <div
     class="afb"
     role="region"
@@ -77,6 +87,18 @@
     align-items: center;
     gap: 0.375rem;
     margin-block-end: 0.5rem;
+  }
+  .afb-print-summary {
+    /* Default to off-screen; the global `data-print="print-only"`
+       rule in app.html flips display on at print time. */
+    display: none;
+    margin: 0;
+    margin-block-end: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--color-fg);
+  }
+  .afb-print-summary strong {
+    margin-inline-end: 0.25rem;
   }
   .afb-label {
     font-size: 0.75rem;

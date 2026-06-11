@@ -178,7 +178,7 @@
 
     <ul class="wr-list" data-testid="wr-list">
       {#each rows as row (row.id)}
-        <li class="wr-row" data-testid="wr-row" data-stage={row.stage}>
+        <li class="wr-row" data-testid="wr-row" data-stage={row.stage} data-print="row">
           <div class="wr-row-head">
             <span
               class="wr-stage-pin"

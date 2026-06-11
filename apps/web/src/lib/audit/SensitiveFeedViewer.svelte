@@ -181,6 +181,7 @@
           class:c4={row.sensitivity === 'c4'}
           data-testid="sensitive-row"
           data-sensitivity={row.sensitivity}
+          data-print="row"
         >
           <div class="sensitive-row-head">
             <span class="sensitivity-badge" data-testid="sensitivity-badge"

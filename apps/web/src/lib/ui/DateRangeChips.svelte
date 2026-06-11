@@ -1,12 +1,20 @@
 <script>
   /**
-   * DateRangeChips — quick-range chip rail for time-series register
-   * surfaces (currently /audit; /sensitive-feed can opt in).
+   * DateRangeChips — quick-range chip rail + typeable custom range
+   * for time-series register surfaces.
    *
-   * Renders four chips: All time, Today, Last 7 days, Last 30 days.
+   * Renders four chips (All time, Today, Last 7 days, Last 30 days)
+   * plus a pair of `<input type="date">` controls + an Apply link
+   * for custom YYYY-MM-DD ranges. The Apply link is a plain `<a>` so
+   * navigation flows through SvelteKit's router without any
+   * imperative `goto` — its `href` is reactively assembled from the
+   * inputs' bound values + `preservedParams`.
+   *
    * Each chip composes its href via `buildHref` so other URL params
    * survive. The active chip is determined by `detectQuickRange`
-   * against the current `?from=` / `?to=` URL state.
+   * against the current `?from=` / `?to=` URL state. When the worker
+   * is on a custom (non-canonical) range, none of the chips show
+   * `active` and the input pair carries the active values.
    *
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
@@ -27,6 +35,19 @@
   export let preservedParams = {};
 
   $: activeRange = detectQuickRange(fromParam, toParam);
+
+  // Local bindings so the worker can type a custom range without
+  // navigating mid-keystroke. The Apply link's href reactively
+  // composes the new URL.
+  let localFrom = '';
+  let localTo = '';
+  $: localFrom = fromParam ?? '';
+  $: localTo = toParam ?? '';
+
+  $: customApplyHref = buildHref(baseHref, preservedParams, {
+    from: localFrom || null,
+    to: localTo || null
+  });
 
   $: rangeChips = [
     {
@@ -74,6 +95,35 @@
   {/each}
 </nav>
 
+<div
+  class="drc-custom"
+  aria-label={t('common.dateRange.custom_aria')}
+  data-testid="date-range-custom"
+  data-print="hide"
+>
+  <label class="drc-custom-field">
+    <span class="drc-custom-label">{t('common.dateRange.custom_from_label')}</span>
+    <input
+      type="date"
+      class="drc-custom-input"
+      data-testid="date-range-custom-from"
+      bind:value={localFrom}
+    />
+  </label>
+  <label class="drc-custom-field">
+    <span class="drc-custom-label">{t('common.dateRange.custom_to_label')}</span>
+    <input
+      type="date"
+      class="drc-custom-input"
+      data-testid="date-range-custom-to"
+      bind:value={localTo}
+    />
+  </label>
+  <a href={customApplyHref} class="drc-custom-apply" data-testid="date-range-custom-apply">
+    {t('common.dateRange.custom_apply')}
+  </a>
+</div>
+
 <style>
   .drc-rail {
     display: flex;
@@ -102,5 +152,50 @@
     color: var(--color-tint-blue-fg);
     border-color: var(--color-tint-blue-border);
     font-weight: 600;
+  }
+
+  .drc-custom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.375rem;
+    margin-block-end: 0.5rem;
+  }
+  .drc-custom-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  .drc-custom-label {
+    font-size: 0.625rem;
+    color: var(--color-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .drc-custom-input {
+    min-height: 1.75rem;
+    padding-inline: 0.375rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }
+  .drc-custom-apply {
+    min-height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    padding-inline: 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-size: 0.75rem;
+    text-decoration: none;
+  }
+  .drc-custom-apply:hover {
+    background: var(--color-muted);
+    text-decoration: none;
   }
 </style>

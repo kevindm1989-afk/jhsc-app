@@ -164,7 +164,7 @@
 
     <ul class="recs-list" data-testid="recs-list">
       {#each rows as row (row.id)}
-        <li class="recs-row" data-testid="recs-row" data-status={row.status}>
+        <li class="recs-row" data-testid="recs-row" data-status={row.status} data-print="row">
           <div class="recs-row-head">
             <span
               class="recs-status-chip"

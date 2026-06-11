@@ -297,6 +297,9 @@
         [data-print='hide'] {
           display: none !important;
         }
+        [data-print='print-only'] {
+          display: block !important;
+        }
         main {
           padding: 0 !important;
         }
@@ -304,6 +307,13 @@
           border-color: #999999 !important;
           box-shadow: none !important;
           break-inside: avoid;
+        }
+        /* Register-row break protection — the viewers stamp
+           data-print="row" on each row so the paper handout splits
+           cleanly between rows instead of mid-row. */
+        [data-print='row'] {
+          break-inside: avoid;
+          page-break-inside: avoid;
         }
         @page {
           margin: 0.75in;

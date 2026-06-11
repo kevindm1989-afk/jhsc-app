@@ -177,7 +177,7 @@
 
     <ul class="con-list" data-testid="con-list">
       {#each rows as row (row.id)}
-        <li class="con-row" data-testid="con-row" data-status={row.status}>
+        <li class="con-row" data-testid="con-row" data-status={row.status} data-print="row">
           <div class="con-row-head">
             <span
               class="con-status-pin"

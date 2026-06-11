@@ -173,7 +173,7 @@
 
     <ul class="rep-list" data-testid="rep-list">
       {#each rows as row (row.id)}
-        <li class="rep-row" data-testid="rep-row" data-status={row.status}>
+        <li class="rep-row" data-testid="rep-row" data-status={row.status} data-print="row">
           <div class="rep-row-head">
             <span
               class="rep-status-pin"

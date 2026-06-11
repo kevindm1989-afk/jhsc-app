@@ -172,7 +172,12 @@
 
     <ul class="s51-list" data-testid="s51-list">
       {#each rows as row (row.id)}
-        <li class="s51-row" data-testid="s51-row" data-scene-state={row.scene_state}>
+        <li
+          class="s51-row"
+          data-testid="s51-row"
+          data-scene-state={row.scene_state}
+          data-print="row"
+        >
           <div class="s51-row-head">
             <span
               class="s51-scene-pin"
