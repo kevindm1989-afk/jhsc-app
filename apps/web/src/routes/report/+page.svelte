@@ -18,6 +18,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { t } from '$lib/i18n';
+  import { formatMonthShort } from '$lib/ui/date-format';
   import {
     buildMonthlyReport,
     buildTrailingMonths,
@@ -242,14 +243,29 @@
             >
               {#each series as v, i}
                 {@const h = seriesMax > 0 ? Math.max(1, Math.round((v / seriesMax) * 12)) : 0}
-                <rect
-                  x={i * 5}
-                  y={12 - h}
-                  width="4"
-                  height={h}
-                  class="report-tile-spark-bar"
-                  class:is-current={i === series.length - 1}
-                />
+                {@const m = trailingMonths ? trailingMonths[i].month : ''}
+                <g class="report-tile-spark-bar-g" data-testid="report-tile-spark-bar">
+                  <!--
+                    SVG <title> renders as a native hover tooltip in
+                    every modern browser without any JS — perfect for
+                    a precise "Jun 2026: 12" readout that complements
+                    the visual bar.
+                  -->
+                  <title
+                    >{t('report.page.sparkline_bar_tooltip', {
+                      month: formatMonthShort(m),
+                      value: String(v)
+                    })}</title
+                  >
+                  <rect
+                    x={i * 5}
+                    y={12 - h}
+                    width="4"
+                    height={h}
+                    class="report-tile-spark-bar"
+                    class:is-current={i === series.length - 1}
+                  />
+                </g>
               {/each}
             </svg>
           {/if}

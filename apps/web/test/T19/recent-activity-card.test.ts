@@ -59,8 +59,13 @@ describe('T19.1 — RecentActivityCard', () => {
     ];
     render(RecentActivityCard, { props: { rows: sample } });
     const ts = screen.getByTestId('ra-row-ts').textContent ?? '';
-    // "2026-06-09 10:30:00Z" — no T, no .000.
-    expect(ts).toBe('2026-06-09 10:30:00Z');
+    // Locale-aware format (en-CA). The card now layers over Intl.
+    // DateTimeFormat; pin the year + month abbreviation appear and
+    // that the raw ISO Z / .000 markers do not.
+    expect(ts).toMatch(/2026/);
+    expect(ts).toMatch(/Jun/);
+    expect(ts).not.toContain('.000');
+    expect(ts).not.toContain('T');
   });
 
   it('takes a deterministic top-5 slice of buildDemoAuditRows without throwing', () => {

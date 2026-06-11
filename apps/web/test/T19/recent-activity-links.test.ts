@@ -99,8 +99,11 @@ describe('T19.1 — RecentActivityCard rows render as links', () => {
     const link = screen.getAllByTestId('ra-row-link')[0]!;
     const aria = link.getAttribute('aria-label') ?? '';
     expect(aria).toMatch(/concern\.created/);
-    // The formatted timestamp (T flattened to space, ms stripped) is included.
-    expect(aria).toMatch(/2026-06-10 10:00:00Z/);
+    // The formatted timestamp is locale-aware (en-CA) now. Pin the
+    // year + month abbreviation appear, not the raw ISO shape.
+    expect(aria).toMatch(/2026/);
+    expect(aria).toMatch(/Jun/);
+    expect(aria).not.toContain('.000');
   });
 
   it('an empty rows array renders the empty state and no row links', () => {
