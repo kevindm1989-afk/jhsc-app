@@ -98,6 +98,23 @@
         <span class="hd-label">{t('home.dashboard.tile.preserving_scenes')}</span>
       </a>
     </li>
+    <!--
+      /report is informational, not urgent — no tint class. Activity
+      counts that read "neutral" reinforce the distinction between
+      "needs attention" tiles (above) and the periodic roll-up.
+    -->
+    <li>
+      <a
+        href="/report"
+        class="hd-tile"
+        class:active={summary.currentMonthActivity > 0}
+        data-testid="hd-tile-report"
+        data-active={summary.currentMonthActivity > 0}
+      >
+        <span class="hd-count" data-testid="hd-count-report">{summary.currentMonthActivity}</span>
+        <span class="hd-label">{t('home.dashboard.tile.monthly_activity')}</span>
+      </a>
+    </li>
   </ul>
 
   <p class="hd-more">

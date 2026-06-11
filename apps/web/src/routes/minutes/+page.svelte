@@ -19,6 +19,7 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import { withinRange } from '$lib/ui/date-range';
@@ -128,6 +129,7 @@
     <FilterBanner label={filterLabel} clearHref="/minutes" />
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
+  <ShareUrlButton />
   {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <MinutesViewer
       {fetchPage}

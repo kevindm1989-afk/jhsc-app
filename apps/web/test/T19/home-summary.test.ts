@@ -88,6 +88,16 @@ describe('T19.1 — buildHomeSummary', () => {
     expect(result.preservingScenes).toBe(1);
   });
 
+  it('currentMonthActivity defaults to 0 when not supplied (so the field is always defined)', () => {
+    const result = buildHomeSummary(EMPTY_INPUTS);
+    expect(result.currentMonthActivity).toBe(0);
+  });
+
+  it('currentMonthActivity passes through verbatim when supplied', () => {
+    const result = buildHomeSummary({ ...EMPTY_INPUTS, currentMonthActivity: 42 });
+    expect(result.currentMonthActivity).toBe(42);
+  });
+
   it('produces a stable summary against the real demo providers (smoke test)', () => {
     const summary = buildHomeSummary({
       concerns: buildDemoConcerns(50),

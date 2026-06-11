@@ -27,6 +27,7 @@
   import { buildDemoAuditRows, fetchDemoAuditPage } from '$lib/audit/demo-audit-rows';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import { withinRange } from '$lib/ui/date-range';
@@ -145,6 +146,7 @@
     preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
   />
   <CsvDownloadButton onClick={buildDownload} />
+  <ShareUrlButton />
   {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <AuditLogViewer
       {fetchPage}

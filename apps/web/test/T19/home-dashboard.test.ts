@@ -12,14 +12,15 @@ afterEach(() => {
 });
 
 describe('T19.1 — HomeDashboard', () => {
-  it('renders all five tiles plus the see-all link', () => {
+  it('renders the six tiles plus the see-all link', () => {
     render(HomeDashboard, { props: { summary: ZERO_SUMMARY } });
     for (const id of [
       'hd-tile-concerns',
       'hd-tile-recommendations',
       'hd-tile-training',
       'hd-tile-work-refusal',
-      'hd-tile-s51'
+      'hd-tile-s51',
+      'hd-tile-report'
     ]) {
       expect(screen.getByTestId(id)).toBeDefined();
     }
@@ -32,7 +33,8 @@ describe('T19.1 — HomeDashboard', () => {
       overdueRecommendations: 2,
       expiredTraining: 4,
       activeRefusals: 1,
-      preservingScenes: 1
+      preservingScenes: 1,
+      currentMonthActivity: 23
     };
     render(HomeDashboard, { props: { summary } });
     expect(screen.getByTestId('hd-count-concerns').textContent).toBe('7');
@@ -40,6 +42,7 @@ describe('T19.1 — HomeDashboard', () => {
     expect(screen.getByTestId('hd-count-training').textContent).toBe('4');
     expect(screen.getByTestId('hd-count-work-refusal').textContent).toBe('1');
     expect(screen.getByTestId('hd-count-s51').textContent).toBe('1');
+    expect(screen.getByTestId('hd-count-report').textContent).toBe('23');
   });
 
   it('marks tiles with counts > 0 as active and zero-count tiles as inactive', () => {
@@ -48,7 +51,8 @@ describe('T19.1 — HomeDashboard', () => {
       overdueRecommendations: 3,
       expiredTraining: 0,
       activeRefusals: 2,
-      preservingScenes: 0
+      preservingScenes: 0,
+      currentMonthActivity: 11
     };
     render(HomeDashboard, { props: { summary } });
     expect(screen.getByTestId('hd-tile-concerns').getAttribute('data-active')).toBe('false');
@@ -56,6 +60,7 @@ describe('T19.1 — HomeDashboard', () => {
     expect(screen.getByTestId('hd-tile-training').getAttribute('data-active')).toBe('false');
     expect(screen.getByTestId('hd-tile-work-refusal').getAttribute('data-active')).toBe('true');
     expect(screen.getByTestId('hd-tile-s51').getAttribute('data-active')).toBe('false');
+    expect(screen.getByTestId('hd-tile-report').getAttribute('data-active')).toBe('true');
   });
 
   it('each tile deep-links to its register surface WITH the matching filter param', () => {
@@ -79,6 +84,7 @@ describe('T19.1 — HomeDashboard', () => {
     expect(screen.getByTestId('hd-tile-s51').getAttribute('href')).toBe(
       '/s51-evidence?filter=preserving'
     );
+    expect(screen.getByTestId('hd-tile-report').getAttribute('href')).toBe('/report');
     expect(screen.getByTestId('hd-more-link').getAttribute('href')).toBe('/more');
   });
 });

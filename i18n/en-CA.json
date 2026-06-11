@@ -130,6 +130,13 @@
       "busy": "Preparing…",
       "helper": "Downloads a CSV of the rows currently shown (filter-aware)."
     },
+    "shareUrl": {
+      "button": "Copy share URL",
+      "copied": "Copied ✓",
+      "error": "Copy failed",
+      "copied_announce": "Share URL copied to clipboard.",
+      "error_announce": "Could not copy the share URL. Please copy it from the address bar."
+    },
     "errorPage": {
       "title": "Something went wrong",
       "heading_404": "Page not found",
@@ -843,7 +850,8 @@
         "overdue_recommendations": "Overdue recommendations (>21 days)",
         "expired_training": "Expired training",
         "active_refusals": "Active s. 43 refusals",
-        "preserving_scenes": "Scenes preserving (s. 51)"
+        "preserving_scenes": "Scenes preserving (s. 51)",
+        "monthly_activity": "Activity this month"
       },
       "see_all_cta": "See all registers"
     },

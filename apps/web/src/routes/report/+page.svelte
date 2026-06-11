@@ -28,6 +28,7 @@
   } from '$lib/report/aggregate';
   import { buildHref } from '$lib/ui/url-state';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const CSV_FIELDS = /** @type {const} */ (['month', 'section', 'key', 'count']);
@@ -124,6 +125,7 @@
   </nav>
 
   <CsvDownloadButton onClick={buildDownload} />
+  <ShareUrlButton />
 
   <h2>{t('report.page.totals_heading')}</h2>
   <ul class="report-tiles" data-testid="report-tiles">
