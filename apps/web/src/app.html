@@ -317,6 +317,18 @@
         }
         @page {
           margin: 0.75in;
+          /*
+            Page numbering: bottom-right of every printed page.
+            CSS counter(page) is well-supported across modern
+            print engines (Chrome / Firefox / Safari ≥ 16). The
+            string is rendered by the print engine, not the DOM,
+            so it doesn't depend on JS at print time.
+          */
+          @bottom-right {
+            content: counter(page) ' / ' counter(pages);
+            font-size: 9pt;
+            color: #555555;
+          }
         }
       }
     </style>

@@ -1608,6 +1608,7 @@
       "yoy_vs_label": "YoY",
       "yoy_tooltip": "vs same month last year ({month})",
       "sparkline_aria": "Trailing 12-month series: {values}",
+      "sparkline_bar_tooltip": "{month}: {value}",
       "j_step_aria_announce": "Stepped to previous month.",
       "k_step_aria_announce": "Stepped to next month.",
       "concerns_severity_heading": "Concerns by severity",

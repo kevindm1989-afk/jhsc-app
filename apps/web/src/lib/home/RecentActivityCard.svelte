@@ -17,18 +17,22 @@
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import { formatDateTime } from '$lib/ui/date-format';
   import { eventTypeToHref } from './recent-activity-targets';
 
   /** @type {import('../audit/demo-audit-rows').DemoAuditRow[]} */
   export let rows = [];
 
-  /** @param {string} iso */
+  /**
+   * Format an ISO timestamp for display. We layer over the locale-
+   * aware `formatDateTime` helper (e.g. "Jun 11, 2026, 09:42" in
+   * en-CA) and fall back to the raw ISO when the input can't be
+   * parsed so screen readers still get something useful.
+   *
+   * @param {string} iso
+   */
   function formatTimestamp(iso) {
-    try {
-      return iso.replace('T', ' ').replace(/\.\d{3}Z$/, 'Z');
-    } catch {
-      return iso;
-    }
+    return formatDateTime(iso) || iso;
   }
 </script>
 
