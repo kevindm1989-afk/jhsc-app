@@ -25,7 +25,9 @@
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
+  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
   import { buildHref } from '$lib/ui/url-state';
+  import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
   const DEMO_ROWS = buildDemoConcerns(50);
@@ -56,6 +58,8 @@
   $: severityParam = $page.url.searchParams.get('severity');
   $: hazardParam = $page.url.searchParams.get('hazard');
   $: sortParam = $page.url.searchParams.get('sort');
+  $: fromParam = $page.url.searchParams.get('from');
+  $: toParam = $page.url.searchParams.get('to');
 
   $: activeStatus =
     filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
@@ -66,16 +70,46 @@
   $: activeHazard =
     hazardParam && HAZARD_VALUES.includes(/** @type {any} */ (hazardParam)) ? hazardParam : null;
 
-  $: anyAxisActive = !!(activeStatus || activeSeverity || activeHazard);
+  $: anyAxisActive = !!(activeStatus || activeSeverity || activeHazard || fromParam || toParam);
 
   $: filterLabel = activeStatus === 'open' ? t('common.filterBanner.label.concerns_open') : null;
 
   // Preserved-param sets for each chip rail's hrefs. Each rail's chips
   // change THEIR axis; the other axes survive verbatim.
-  $: preservedForStatus = { severity: activeSeverity, hazard: activeHazard, sort: sortParam };
-  $: preservedForSeverity = { filter: activeStatus, hazard: activeHazard, sort: sortParam };
-  $: preservedForHazard = { filter: activeStatus, severity: activeSeverity, sort: sortParam };
-  $: preservedForSort = { filter: activeStatus, severity: activeSeverity, hazard: activeHazard };
+  $: preservedForStatus = {
+    severity: activeSeverity,
+    hazard: activeHazard,
+    sort: sortParam,
+    from: fromParam,
+    to: toParam
+  };
+  $: preservedForSeverity = {
+    filter: activeStatus,
+    hazard: activeHazard,
+    sort: sortParam,
+    from: fromParam,
+    to: toParam
+  };
+  $: preservedForHazard = {
+    filter: activeStatus,
+    severity: activeSeverity,
+    sort: sortParam,
+    from: fromParam,
+    to: toParam
+  };
+  $: preservedForSort = {
+    filter: activeStatus,
+    severity: activeSeverity,
+    hazard: activeHazard,
+    from: fromParam,
+    to: toParam
+  };
+  $: preservedForDateRange = {
+    filter: activeStatus,
+    severity: activeSeverity,
+    hazard: activeHazard,
+    sort: sortParam
+  };
 
   $: statusChips = [
     {
@@ -126,12 +160,13 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.concernsPage.title');
 
-  /** Composed multi-axis predicate. */
+  /** Composed multi-axis predicate (status, severity, hazard, date range). */
   $: predicate = anyAxisActive
     ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) => {
         if (activeStatus && r.status !== activeStatus) return false;
         if (activeSeverity && r.severity !== activeSeverity) return false;
         if (activeHazard && r.hazard_class !== activeHazard) return false;
+        if ((fromParam || toParam) && !withinRange(r.filed_at, fromParam, toParam)) return false;
         return true;
       }
     : undefined;
@@ -157,7 +192,7 @@
 
   // The {#key} block remounts the viewer when ANY axis or the sort
   // changes — resets the page indicator to page 1.
-  $: viewerKey = `${filterParam ?? ''}|${severityParam ?? ''}|${hazardParam ?? ''}|${sortParam ?? ''}`;
+  $: viewerKey = `${filterParam ?? ''}|${severityParam ?? ''}|${hazardParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`;
 </script>
 
 <svelte:head>
@@ -176,6 +211,12 @@
     chips={hazardChips}
     activeValue={activeHazard}
     ariaLabelKey="common.filterChips.hazard_aria_label"
+  />
+  <DateRangeChips
+    baseHref="/concerns"
+    {fromParam}
+    {toParam}
+    preservedParams={preservedForDateRange}
   />
   <SortToggle baseHref="/concerns" activeSort={sortParam} preservedParams={preservedForSort} />
   {#if filterLabel}

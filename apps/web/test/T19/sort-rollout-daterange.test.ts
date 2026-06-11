@@ -206,6 +206,49 @@ describe('T19.1 — /sensitive-feed route wires DateRangeChips + composes the pr
   });
 });
 
+describe('T19.1 — /concerns route wires DateRangeChips into its multi-axis predicate', () => {
+  const src = readFileSync(
+    resolve(__dirname, '../../src/routes/concerns/+page.svelte'),
+    'utf8'
+  );
+
+  it('imports DateRangeChips + withinRange', () => {
+    expect(src).toMatch(
+      /import\s+DateRangeChips\s+from\s+['"]\$lib\/ui\/DateRangeChips\.svelte['"]/
+    );
+    expect(src).toMatch(/import\s+\{\s*withinRange\s*\}\s+from\s+['"]\$lib\/ui\/date-range['"]/);
+  });
+
+  it('reads fromParam + toParam from the URL', () => {
+    expect(src).toMatch(/\$:\s*fromParam\s*=/);
+    expect(src).toMatch(/\$:\s*toParam\s*=/);
+  });
+
+  it('extends anyAxisActive to include the date range', () => {
+    expect(src).toMatch(/anyAxisActive\s*=[\s\S]*fromParam[\s\S]*toParam/);
+  });
+
+  it('composes withinRange into the multi-axis predicate against r.filed_at', () => {
+    expect(src).toContain('withinRange(r.filed_at, fromParam, toParam)');
+  });
+
+  it('mounts <DateRangeChips> with its own preservedParams set', () => {
+    expect(src).toMatch(/<DateRangeChips/);
+    expect(src).toMatch(/preservedForDateRange/);
+  });
+
+  it('every existing axis preserves from + to in its chip hrefs', () => {
+    for (const name of ['preservedForStatus', 'preservedForSeverity', 'preservedForHazard', 'preservedForSort']) {
+      const re = new RegExp(`${name}[\\s\\S]*?from:\\s*fromParam[\\s\\S]*?to:\\s*toParam`);
+      expect(src).toMatch(re);
+    }
+  });
+
+  it('viewerKey includes fromParam + toParam so the viewer re-mounts on date-range change', () => {
+    expect(src).toMatch(/viewerKey\s*=\s*`[^`]*fromParam[^`]*toParam/);
+  });
+});
+
 describe('T19.1 — DateRangeChips rollout across the 8 register routes', () => {
   // Each register has a different primary date field — the rollout
   // pins both the structural wiring AND the per-route date-field name
