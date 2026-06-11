@@ -128,7 +128,10 @@
     },
     "headerSearch": {
       "label": "Search the registers",
-      "placeholder": "Search (press /)"
+      "placeholder": "Search (press /)",
+      "recent_label": "Recent",
+      "recent_aria": "Recent searches",
+      "recent_remove_aria": "Remove {query} from recent searches"
     },
     "csvDownload": {
       "button": "Download CSV",
@@ -205,7 +208,8 @@
       "saved_announce": "Saved ✓",
       "rail_aria": "Saved views",
       "rail_label": "Saved:",
-      "manage_link": "Manage →"
+      "manage_link": "Manage →",
+      "pin_on_save": "Pin to home"
     },
     "savedViewsPage": {
       "title": "Saved views",
@@ -236,6 +240,10 @@
       "csv_body": "“Download CSV” exports only the rows currently shown (the same rows the active filter and sort produce). Use this for committee meetings and employer follow-ups.",
       "report_heading": "Monthly report",
       "report_body": "/report rolls up activity across every register for a chosen month or year. Each total tile deep-links into the matching register. Use the print stylesheet for paper handouts.",
+      "saved_views_heading": "Saved & pinned views",
+      "saved_views_body": "Click “Save view” on any register to bookmark its filtered URL under a name. Tick “Pin to home” to promote that view to the dashboard. Manage every saved view at /saved-views — rename, delete, pin/unpin, or export the whole set as JSON for another device.",
+      "recent_searches_heading": "Recent searches",
+      "recent_searches_body": "The header search keeps your last five queries on this device. Focus the input to surface them as a dropdown and re-run with one click; the × removes a single entry. Searches are stored locally — no committee data leaves your device.",
       "back_to_home_cta": "Back to home"
     },
     "errorPage": {

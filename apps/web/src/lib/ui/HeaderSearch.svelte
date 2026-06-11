@@ -15,11 +15,73 @@
    * `.svelte.d.ts` declares the component type so .ts importers
    * (the root +layout.svelte) resolve cleanly.
    */
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { t } from '$lib/i18n';
+  import {
+    deleteRecentSearch,
+    listRecentSearches,
+    recordRecentSearch
+  } from '$lib/search/recent-searches';
 
   /** @type {HTMLInputElement | null} */
   let inputEl = null;
+
+  /** @type {string[]} */
+  let recents = [];
+
+  /** Whether the recent-searches dropdown is open. */
+  let recentsOpen = false;
+
+  function refreshRecents() {
+    recents = listRecentSearches();
+  }
+
+  async function openRecents() {
+    refreshRecents();
+    if (recents.length > 0) {
+      recentsOpen = true;
+      await tick();
+    }
+  }
+
+  function closeRecents() {
+    recentsOpen = false;
+  }
+
+  function onFocus() {
+    void openRecents();
+  }
+
+  /**
+   * Close the dropdown when focus leaves the search region. Wrapped
+   * in a microtask so a click on a recent-search link inside the
+   * panel still fires before the panel is unmounted.
+   * @param {FocusEvent} ev
+   */
+  function onBlur(ev) {
+    const next = /** @type {Element | null} */ (ev.relatedTarget);
+    if (next && next.closest('[data-testid="header-search"]')) return;
+    setTimeout(closeRecents, 100);
+  }
+
+  /**
+   * On submit, record the query and let the native GET proceed so
+   * the no-JS fallback survives. SvelteKit's navigation picks it up
+   * on the destination route.
+   */
+  function onSubmit() {
+    const raw = inputEl?.value ?? '';
+    if (raw.trim().length > 0) {
+      recordRecentSearch(raw);
+    }
+  }
+
+  /** @param {string} q */
+  function onRemoveRecent(q) {
+    deleteRecentSearch(q);
+    refreshRecents();
+    if (recents.length === 0) recentsOpen = false;
+  }
 
   /** @param {EventTarget | null} target */
   function isTypingTarget(target) {
@@ -40,10 +102,12 @@
     }
     if (ev.key === 'Escape' && document.activeElement === inputEl) {
       inputEl?.blur();
+      closeRecents();
     }
   }
 
   onMount(() => {
+    refreshRecents();
     document.addEventListener('keydown', onGlobalKeydown);
   });
 
@@ -61,6 +125,8 @@
   method="get"
   data-testid="header-search"
   data-print="hide"
+  on:submit={onSubmit}
+  on:focusout={onBlur}
 >
   <label class="hs-label" for="header-search-input">
     <span class="hs-visually-hidden">{t('common.headerSearch.label')}</span>
@@ -76,8 +142,46 @@
       placeholder={t('common.headerSearch.placeholder')}
       aria-label={t('common.headerSearch.label')}
       data-testid="header-search-input"
+      on:focus={onFocus}
     />
   </label>
+  {#if recentsOpen && recents.length > 0}
+    <div
+      class="hs-recents"
+      role="listbox"
+      aria-label={t('common.headerSearch.recent_aria')}
+      data-testid="header-search-recents"
+    >
+      <p class="hs-recents-label">{t('common.headerSearch.recent_label')}</p>
+      <ul class="hs-recents-list">
+        {#each recents as q (q)}
+          <li class="hs-recents-row" data-testid="header-search-recent-row">
+            <a
+              href={`/search?q=${encodeURIComponent(q)}`}
+              class="hs-recents-link"
+              data-testid="header-search-recent-link"
+              data-q={q}
+              on:click={() => {
+                recordRecentSearch(q);
+                closeRecents();
+              }}
+            >
+              {q}
+            </a>
+            <button
+              type="button"
+              class="hs-recents-remove"
+              data-testid="header-search-recent-remove"
+              aria-label={t('common.headerSearch.recent_remove_aria', { query: q })}
+              on:click={() => onRemoveRecent(q)}
+            >
+              ×
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
 </form>
 
 <style>
@@ -110,6 +214,65 @@
     background: var(--color-bg-elevated);
     color: var(--color-fg);
     font-size: 0.8125rem;
+  }
+
+  .hs-form {
+    position: relative;
+  }
+  .hs-recents {
+    position: absolute;
+    inset-block-start: 100%;
+    inset-inline-end: 0;
+    margin-block-start: 0.25rem;
+    min-inline-size: 12rem;
+    max-inline-size: 18rem;
+    padding: 0.375rem 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    box-shadow: var(--shadow-md);
+    z-index: 50;
+  }
+  .hs-recents-label {
+    margin: 0;
+    padding: 0.125rem 0.625rem;
+    font-size: 0.625rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-fg-muted);
+  }
+  .hs-recents-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .hs-recents-row {
+    display: flex;
+    align-items: center;
+  }
+  .hs-recents-link {
+    flex: 1;
+    padding: 0.25rem 0.625rem;
+    color: var(--color-fg);
+    text-decoration: none;
+    font-size: 0.8125rem;
+  }
+  .hs-recents-link:hover {
+    background: var(--color-muted);
+    text-decoration: none;
+  }
+  .hs-recents-remove {
+    background: transparent;
+    border: none;
+    color: var(--color-fg-muted);
+    font-size: 0.875rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+  }
+  .hs-recents-remove:hover {
+    color: var(--color-fg);
+    background: var(--color-muted);
   }
   /* Hide on very narrow viewports — the worker has /search reachable
      from /more + a bottom-tab. */

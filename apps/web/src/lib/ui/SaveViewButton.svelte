@@ -19,7 +19,7 @@
    */
   import { tick } from 'svelte';
   import { t } from '$lib/i18n';
-  import { addSavedView } from '$lib/saved-views/saved-views';
+  import { addSavedView, setSavedViewPinned } from '$lib/saved-views/saved-views';
 
   /**
    * Optional human-readable label the host route page derives from
@@ -38,6 +38,8 @@
    */
   let mode = 'idle';
   let name = '';
+  /** Whether to set pinnedToHome on the newly-saved view. */
+  let pinOnSave = false;
   /** @type {HTMLInputElement | null} */
   let nameInput = null;
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -52,6 +54,7 @@
     // Prefill with the suggested name (if any). The worker can hit
     // Enter to accept or type over the prefill.
     name = suggestedName.trim().slice(0, 80);
+    pinOnSave = false;
     await tick();
     nameInput?.focus();
     nameInput?.select();
@@ -60,6 +63,7 @@
   function cancel() {
     mode = 'idle';
     name = '';
+    pinOnSave = false;
   }
 
   function saveNow() {
@@ -77,11 +81,17 @@
     const route = window.location.pathname;
     const search = window.location.search;
     const saved = addSavedView({ name: trimmed, route, search });
-    // Cross-component refresh: SavedViewsRail listens on window for
-    // this event so a newly-saved view appears without a reload.
-    window.dispatchEvent(new CustomEvent('view:saved', { detail: saved }));
+    // Optional pin: when the worker checked the box, mark the new
+    // view as pinned-to-home before broadcasting so the dashboard
+    // card sees it on its refresh.
+    const finalRecord = pinOnSave ? (setSavedViewPinned(saved.id, true) ?? saved) : saved;
+    // Cross-component refresh: SavedViewsRail + PinnedViewsCard
+    // listen on window for this event so a newly-saved view appears
+    // without a reload.
+    window.dispatchEvent(new CustomEvent('view:saved', { detail: finalRecord }));
     mode = 'saved';
     name = '';
+    pinOnSave = false;
     resetTimer = setTimeout(() => {
       mode = 'idle';
       resetTimer = null;
@@ -131,6 +141,15 @@
     >
       {t('common.savedViews.save_confirm')}
     </button>
+    <label class="svb-pin-label">
+      <input
+        type="checkbox"
+        class="svb-pin-checkbox"
+        data-testid="save-view-pin-checkbox"
+        bind:checked={pinOnSave}
+      />
+      <span>{t('common.savedViews.pin_on_save')}</span>
+    </label>
     <button
       type="button"
       class="svb-cancel"
@@ -170,6 +189,17 @@
     color: var(--color-fg);
     font-size: 0.8125rem;
     min-inline-size: 12rem;
+  }
+  .svb-pin-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+    cursor: pointer;
+  }
+  .svb-pin-checkbox {
+    margin: 0;
   }
   .svb-cancel {
     background: transparent;
