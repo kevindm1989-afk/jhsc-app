@@ -227,10 +227,11 @@ describe('T19 — SaveViewButton + SavedViewsRail rollout across the 11 register
       expect(src).toMatch(
         /import\s+SavedViewsRail\s+from\s+['"]\$lib\/ui\/SavedViewsRail\.svelte['"]/
       );
-      expect(src).toContain('<SaveViewButton />');
-      expect(src).toMatch(
-        /<SavedViewsRail\s+route=["']\/[a-z0-9-]+["']\s*\/>/
-      );
+      // SaveViewButton may be mounted with or without a suggestedName
+      // prop — the follow-up bundle adds suggestedName=activeFilters…
+      // to every route.
+      expect(src).toMatch(/<SaveViewButton[\s>]/);
+      expect(src).toMatch(/<SavedViewsRail\s+route=["']\/[a-z0-9-]+["']\s*\/>/);
     });
   }
 });

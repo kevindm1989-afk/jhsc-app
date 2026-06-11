@@ -193,7 +193,7 @@
   {/if}
   <CsvDownloadButton onClick={buildDownload} />
   <ShareUrlButton />
-  <SaveViewButton />
+  <SaveViewButton suggestedName={activeFilters.map((f) => f.label).join(' · ')} />
   {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
     <LibraryViewer
       {fetchPage}
