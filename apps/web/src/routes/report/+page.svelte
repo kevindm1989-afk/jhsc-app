@@ -185,8 +185,12 @@
     <a href={prevHref} class="report-month-link" data-testid="report-prev-month">
       {isYearView ? t('report.page.prev_year') : t('report.page.prev_month')}
     </a>
-    <span class="report-month-label" data-testid="report-month">
-      {isYearView ? year : month}
+    <span
+      class="report-month-label"
+      data-testid="report-month"
+      data-raw={isYearView ? year : month}
+    >
+      {isYearView ? year : formatMonthShort(month)}
     </span>
     <a href={nextHref} class="report-month-link" data-testid="report-next-month">
       {isYearView ? t('report.page.next_year') : t('report.page.next_month')}
@@ -216,7 +220,9 @@
               class:is-flat={delta === 0}
               data-testid="report-tile-yoy"
               data-delta={delta}
-              title={t('report.page.yoy_tooltip', { month: priorMonth ?? '' })}
+              title={t('report.page.yoy_tooltip', {
+                month: priorMonth ? formatMonthShort(priorMonth) : ''
+              })}
             >
               {delta > 0 ? '+' : ''}{delta}
               <span class="report-tile-yoy-suffix">{t('report.page.yoy_vs_label')}</span>

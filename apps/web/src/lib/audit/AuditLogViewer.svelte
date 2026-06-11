@@ -30,6 +30,7 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import { formatDateTime } from '$lib/ui/date-format';
   import SkeletonRows from '$lib/ui/SkeletonRows.svelte';
 
   /**
@@ -103,11 +104,7 @@
 
   /** @param {string} iso */
   function formatTimestamp(iso) {
-    try {
-      return iso.replace('T', ' ').replace(/\.\d{3}Z$/, 'Z');
-    } catch {
-      return iso;
-    }
+    return formatDateTime(iso) || iso;
   }
 
   /** @param {Record<string, string | number | boolean | null>} meta */
