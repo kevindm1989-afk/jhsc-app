@@ -39,6 +39,7 @@
   import { isSignedIn } from '$lib/auth/session-jwt-svelte';
   import HomeDashboard from '$lib/home/HomeDashboard.svelte';
   import RecentActivityCard from '$lib/home/RecentActivityCard.svelte';
+  import ShortcutsHintPill from '$lib/ui/ShortcutsHintPill.svelte';
   import { buildHomeSummary } from '$lib/home/home-summary';
   import { buildDemoConcerns } from '$lib/concerns/demo-concerns';
   import { buildDemoRecommendations } from '$lib/recommendations/demo-recommendations';
@@ -93,6 +94,7 @@
   </section>
   <section class="card" data-testid="landing-dashboard">
     <HomeDashboard {summary} />
+    <ShortcutsHintPill />
   </section>
   <section class="card" data-testid="landing-recent">
     <RecentActivityCard rows={recentRows} />

@@ -29,9 +29,11 @@
   import FilterBanner from '$lib/ui/FilterBanner.svelte';
   import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
   import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
+  import ActiveFiltersBar from '$lib/ui/ActiveFiltersBar.svelte';
   import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
   import SortToggle from '$lib/ui/SortToggle.svelte';
   import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
+  import { buildHref } from '$lib/ui/url-state';
   import { withinRange } from '$lib/ui/date-range';
   import { toCsv, csvFilename } from '$lib/ui/csv';
 
@@ -92,6 +94,40 @@
   })();
   $: pageTitle = activeFilterLabel ?? t('common.s51Page.title');
 
+  // ActiveFiltersBar descriptors — one entry per active axis.
+  $: activeFilters = (() => {
+    /** @type {Array<{ key: string, label: string, removeHref: string }>} */
+    const list = [];
+    if (activeValue) {
+      const VALUE_LABEL_REMAP = { released_by_inspector: 'released', window_expired: 'expired' };
+      const labelKeyValue = VALUE_LABEL_REMAP[activeValue] ?? activeValue;
+      list.push({
+        key: 'filter',
+        label: `${t('common.activeFilters.axis.scene_state')}: ${t(`s51.viewer.chip.${labelKeyValue}`)}`,
+        removeHref: buildHref('/s51-evidence', { sort: sortParam, from: fromParam, to: toParam })
+      });
+    }
+    if (fromParam || toParam) {
+      list.push({
+        key: 'date',
+        label: `${t('common.activeFilters.axis.date_range')}: ${fromParam ?? '…'} → ${toParam ?? '…'}`,
+        removeHref: buildHref('/s51-evidence', { filter: filterParam, sort: sortParam })
+      });
+    }
+    if (sortParam === 'oldest') {
+      list.push({
+        key: 'sort',
+        label: `${t('common.activeFilters.axis.sort')}: ${t('common.sortToggle.oldest')}`,
+        removeHref: buildHref('/s51-evidence', {
+          filter: filterParam,
+          from: fromParam,
+          to: toParam
+        })
+      });
+    }
+    return list;
+  })();
+
   $: fromParam = $page.url.searchParams.get('from');
   $: toParam = $page.url.searchParams.get('to');
 
@@ -132,6 +168,7 @@
 </svelte:head>
 
 <section class="card s51-card" data-testid="s51-page">
+  <ActiveFiltersBar baseHref="/s51-evidence" filters={activeFilters} />
   <FilterChipsRail {chips} {activeValue} />
   <DateRangeChips
     baseHref="/s51-evidence"

@@ -175,7 +175,13 @@
         "question": "?",
         "escape": "Esc"
       },
-      "share_hint": "Look for the “Copy share URL” button on register surfaces."
+      "share_hint": "Look for the “Copy share URL” button on register surfaces.",
+      "open_help": "Open full help page →"
+    },
+    "shortcutsHint": {
+      "text_prefix": "Tip: press",
+      "text_suffix": "for keyboard shortcuts.",
+      "dismiss_aria": "Dismiss keyboard shortcuts hint"
     },
     "helpPage": {
       "title": "Help",
