@@ -22,6 +22,7 @@
     listRecentSearches,
     recordRecentSearch
   } from '$lib/search/recent-searches';
+  import { hrefForSavedView, listPinnedSavedViews } from '$lib/saved-views/saved-views';
 
   /** @type {HTMLInputElement | null} */
   let inputEl = null;
@@ -29,16 +30,20 @@
   /** @type {string[]} */
   let recents = [];
 
-  /** Whether the recent-searches dropdown is open. */
+  /** @type {import('$lib/saved-views/saved-views').SavedView[]} */
+  let pinnedViews = [];
+
+  /** Whether the dropdown panel is open. */
   let recentsOpen = false;
 
   function refreshRecents() {
     recents = listRecentSearches();
+    pinnedViews = listPinnedSavedViews();
   }
 
   async function openRecents() {
     refreshRecents();
-    if (recents.length > 0) {
+    if (recents.length > 0 || pinnedViews.length > 0) {
       recentsOpen = true;
       await tick();
     }
@@ -145,41 +150,62 @@
       on:focus={onFocus}
     />
   </label>
-  {#if recentsOpen && recents.length > 0}
+  {#if recentsOpen && (recents.length > 0 || pinnedViews.length > 0)}
     <div
       class="hs-recents"
       role="listbox"
       aria-label={t('common.headerSearch.recent_aria')}
       data-testid="header-search-recents"
     >
-      <p class="hs-recents-label">{t('common.headerSearch.recent_label')}</p>
-      <ul class="hs-recents-list">
-        {#each recents as q (q)}
-          <li class="hs-recents-row" data-testid="header-search-recent-row">
-            <a
-              href={`/search?q=${encodeURIComponent(q)}`}
-              class="hs-recents-link"
-              data-testid="header-search-recent-link"
-              data-q={q}
-              on:click={() => {
-                recordRecentSearch(q);
-                closeRecents();
-              }}
-            >
-              {q}
-            </a>
-            <button
-              type="button"
-              class="hs-recents-remove"
-              data-testid="header-search-recent-remove"
-              aria-label={t('common.headerSearch.recent_remove_aria', { query: q })}
-              on:click={() => onRemoveRecent(q)}
-            >
-              ×
-            </button>
-          </li>
-        {/each}
-      </ul>
+      {#if pinnedViews.length > 0}
+        <p class="hs-recents-label">{t('common.headerSearch.pinned_label')}</p>
+        <ul class="hs-recents-list" data-testid="header-search-pinned">
+          {#each pinnedViews as v (v.id)}
+            <li class="hs-recents-row" data-testid="header-search-pinned-row">
+              <a
+                href={hrefForSavedView(v)}
+                class="hs-recents-link hs-pinned-link"
+                data-testid="header-search-pinned-link"
+                data-id={v.id}
+                on:click={closeRecents}
+              >
+                <span class="hs-pinned-name">{v.name}</span>
+                <span class="hs-pinned-route">{v.route}</span>
+              </a>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if recents.length > 0}
+        <p class="hs-recents-label">{t('common.headerSearch.recent_label')}</p>
+        <ul class="hs-recents-list">
+          {#each recents as q (q)}
+            <li class="hs-recents-row" data-testid="header-search-recent-row">
+              <a
+                href={`/search?q=${encodeURIComponent(q)}`}
+                class="hs-recents-link"
+                data-testid="header-search-recent-link"
+                data-q={q}
+                on:click={() => {
+                  recordRecentSearch(q);
+                  closeRecents();
+                }}
+              >
+                {q}
+              </a>
+              <button
+                type="button"
+                class="hs-recents-remove"
+                data-testid="header-search-recent-remove"
+                aria-label={t('common.headerSearch.recent_remove_aria', { query: q })}
+                on:click={() => onRemoveRecent(q)}
+              >
+                ×
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   {/if}
 </form>
@@ -260,6 +286,18 @@
   .hs-recents-link:hover {
     background: var(--color-muted);
     text-decoration: none;
+  }
+  .hs-pinned-link {
+    display: grid;
+    gap: 0.125rem;
+  }
+  .hs-pinned-name {
+    font-weight: 600;
+  }
+  .hs-pinned-route {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-fg-muted);
   }
   .hs-recents-remove {
     background: transparent;

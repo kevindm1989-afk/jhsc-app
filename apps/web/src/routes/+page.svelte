@@ -71,9 +71,13 @@
 
   // 12-month trailing sum-of-registers series for the dashboard tile
   // sparkline. Same aggregator + window as /report's tile sparkline.
-  const monthlyActivityTrailing = buildTrailingMonths(currentMonthString, 12).map((r) =>
+  // Track the parallel month strings so the dashboard can render
+  // "Jun 2026: 12"-style tooltips per bar.
+  const trailingReports = buildTrailingMonths(currentMonthString, 12);
+  const monthlyActivityTrailing = trailingReports.map((r) =>
     Object.values(r.totals).reduce((acc, n) => acc + n, 0)
   );
+  const monthlyActivityTrailingMonths = trailingReports.map((r) => r.month);
 
   // Digest is computed once at mount over the demo providers. When each
   // register's real backend lands the page swaps these calls for real
@@ -86,7 +90,8 @@
     s51Evidence: buildDemoS51Evidence(30),
     currentMonthActivity,
     priorMonthActivity,
-    monthlyActivityTrailing
+    monthlyActivityTrailing,
+    monthlyActivityTrailingMonths
   });
 
   // Top-5 recent audit rows for the "what just happened" timeline.

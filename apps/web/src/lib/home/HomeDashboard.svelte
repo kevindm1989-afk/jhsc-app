@@ -19,6 +19,7 @@
    * `<script>` (no lang="ts") + JSDoc per G-T07-13.
    */
   import { t } from '$lib/i18n';
+  import { formatMonthShort } from '$lib/ui/date-format';
 
   /** @type {import('./home-summary').HomeSummary} */
   export let summary;
@@ -142,14 +143,25 @@
             >
               {#each sparkSeries as v, i}
                 {@const h = sparkMax > 0 ? Math.max(1, Math.round((v / sparkMax) * 12)) : 0}
-                <rect
-                  x={i * 5}
-                  y={12 - h}
-                  width="4"
-                  height={h}
-                  class="hd-spark-bar"
-                  class:is-current={i === sparkSeries.length - 1}
-                />
+                {@const m = summary.monthlyActivityTrailingMonths[i] ?? ''}
+                <g data-testid="hd-tile-report-spark-bar">
+                  {#if m}
+                    <title
+                      >{t('home.dashboard.tile.sparkline_bar_tooltip', {
+                        month: formatMonthShort(m),
+                        value: String(v)
+                      })}</title
+                    >
+                  {/if}
+                  <rect
+                    x={i * 5}
+                    y={12 - h}
+                    width="4"
+                    height={h}
+                    class="hd-spark-bar"
+                    class:is-current={i === sparkSeries.length - 1}
+                  />
+                </g>
               {/each}
             </svg>
           {/if}

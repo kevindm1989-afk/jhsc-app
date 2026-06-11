@@ -19,13 +19,32 @@
   import { t } from '$lib/i18n';
   import { buildSearchIndex, search } from '$lib/search/search';
   import { highlightMatches } from '$lib/search/highlight';
+  import { listRecentSearches, recordRecentSearch } from '$lib/search/recent-searches';
 
   /** @type {ReturnType<typeof buildSearchIndex>} */
   let index = [];
 
+  /** @type {string[]} */
+  let recents = [];
+
   onMount(() => {
     index = buildSearchIndex();
+    recents = listRecentSearches();
   });
+
+  // Record the query whenever it transitions from empty → non-empty.
+  // The header SubmitEvent path already records, but workers landing
+  // on /search?q=… (via share link, browser autocomplete, or our own
+  // chip click) should still get their query into the history.
+  let lastRecorded = '';
+  $: {
+    const q = $page.url.searchParams.get('q')?.trim() ?? '';
+    if (q && q !== lastRecorded) {
+      recordRecentSearch(q);
+      recents = listRecentSearches();
+      lastRecorded = q;
+    }
+  }
 
   /** @type {HTMLInputElement | null} */
   let inputEl = null;
@@ -83,6 +102,29 @@
     <p class="muted" role="status" data-testid="search-empty-state">
       {t('search.page.empty_state')}
     </p>
+    {#if recents.length > 0}
+      <nav
+        class="search-recents"
+        aria-label={t('search.page.recents_aria')}
+        data-testid="search-recents"
+      >
+        <p class="search-recents-label">{t('search.page.recents_label')}</p>
+        <ul class="search-recents-list">
+          {#each recents as r (r)}
+            <li>
+              <a
+                class="search-recents-chip"
+                href={`/search?q=${encodeURIComponent(r)}`}
+                data-testid="search-recents-chip"
+                data-q={r}
+              >
+                {r}
+              </a>
+            </li>
+          {/each}
+        </ul>
+      </nav>
+    {/if}
   {:else if groups.length === 0}
     <p class="muted" role="status" data-testid="search-no-results">
       {t('search.page.no_results', { query })}
@@ -236,5 +278,39 @@
     color: var(--color-tint-amber-fg);
     border-radius: var(--radius-sm);
     padding: 0 0.125rem;
+  }
+
+  .search-recents {
+    display: block;
+    margin-block-start: 1rem;
+  }
+  .search-recents-label {
+    margin: 0 0 0.375rem;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-fg-muted);
+  }
+  .search-recents-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .search-recents-chip {
+    display: inline-block;
+    padding: 0.1875rem 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-size: 0.75rem;
+    text-decoration: none;
+  }
+  .search-recents-chip:hover {
+    background: var(--color-muted);
+    text-decoration: none;
   }
 </style>

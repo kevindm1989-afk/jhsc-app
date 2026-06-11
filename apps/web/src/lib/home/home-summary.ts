@@ -48,6 +48,12 @@ export interface HomeSummary {
    * array suppresses the dashboard tile sparkline.
    */
   monthlyActivityTrailing: readonly number[];
+  /**
+   * Parallel YYYY-MM labels for the sparkline series, oldest → newest.
+   * Powers per-bar tooltips on the dashboard sparkline matching
+   * /report's pattern. Empty → no tooltips.
+   */
+  monthlyActivityTrailingMonths: readonly string[];
 }
 
 export interface HomeSummaryInputs {
@@ -71,6 +77,8 @@ export interface HomeSummaryInputs {
    * /report dashboard tile. Empty array suppresses the sparkline.
    */
   monthlyActivityTrailing?: readonly number[];
+  /** Optional parallel YYYY-MM labels for the sparkline series. */
+  monthlyActivityTrailingMonths?: readonly string[];
 }
 
 export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
@@ -82,7 +90,8 @@ export function buildHomeSummary(inputs: HomeSummaryInputs): HomeSummary {
     preservingScenes: inputs.s51Evidence.filter((r) => r.scene_state === 'preserving').length,
     currentMonthActivity: inputs.currentMonthActivity ?? 0,
     priorMonthActivity: inputs.priorMonthActivity ?? 0,
-    monthlyActivityTrailing: inputs.monthlyActivityTrailing ?? []
+    monthlyActivityTrailing: inputs.monthlyActivityTrailing ?? [],
+    monthlyActivityTrailingMonths: inputs.monthlyActivityTrailingMonths ?? []
   };
 }
 
@@ -95,5 +104,6 @@ export const ZERO_SUMMARY: HomeSummary = {
   preservingScenes: 0,
   currentMonthActivity: 0,
   priorMonthActivity: 0,
-  monthlyActivityTrailing: []
+  monthlyActivityTrailing: [],
+  monthlyActivityTrailingMonths: []
 };
