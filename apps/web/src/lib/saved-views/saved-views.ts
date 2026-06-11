@@ -131,3 +131,62 @@ export function deleteSavedView(id: string): boolean {
 export function hrefForSavedView(view: SavedView): string {
   return view.route + view.search;
 }
+
+export interface SavedViewsExport {
+  /** Discriminator so importers can spot a malformed/foreign file. */
+  kind: 'jhsc-saved-views';
+  /** Wire format version; bump if the shape ever changes. */
+  version: 1;
+  /** ISO timestamp the file was produced. */
+  exportedAt: string;
+  views: SavedView[];
+}
+
+/** Serialize every saved view to a JSON-stable export envelope. */
+export function exportSavedViews(): SavedViewsExport {
+  return {
+    kind: 'jhsc-saved-views',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    views: listSavedViews()
+  };
+}
+
+export interface ImportResult {
+  /** Views actually merged into storage. */
+  added: SavedView[];
+  /** Views skipped because they collided with an existing id. */
+  skipped: number;
+}
+
+/**
+ * Merge a parsed export envelope into local storage. Existing views
+ * with the same id win — import is additive and idempotent. A
+ * malformed envelope throws so the caller can surface a friendly
+ * error.
+ */
+export function importSavedViews(input: unknown): ImportResult {
+  if (!input || typeof input !== 'object') {
+    throw new Error('saved-views/import: not a JSON object');
+  }
+  const env = input as Record<string, unknown>;
+  if (env.kind !== 'jhsc-saved-views') {
+    throw new Error('saved-views/import: not a saved-views export file');
+  }
+  if (env.version !== 1) {
+    throw new Error('saved-views/import: unsupported version');
+  }
+  if (!Array.isArray(env.views)) {
+    throw new Error('saved-views/import: missing views array');
+  }
+  const incoming = env.views.filter(isSavedView);
+  const existing = readAll();
+  const existingIds = new Set(existing.map((v) => v.id));
+  const added: SavedView[] = [];
+  for (const v of incoming) {
+    if (existingIds.has(v.id)) continue;
+    added.push({ ...v, name: normalizeName(v.name) });
+  }
+  if (added.length > 0) writeAll([...existing, ...added]);
+  return { added, skipped: incoming.length - added.length };
+}

@@ -22,6 +22,16 @@
   import { addSavedView } from '$lib/saved-views/saved-views';
 
   /**
+   * Optional human-readable label the host route page derives from
+   * the current active filters (e.g. "Open · Severity High · Last 7
+   * days"). Prefilled into the name input on `Save view` click so
+   * the worker can hit Enter for a sensible default — or edit it.
+   *
+   * @type {string}
+   */
+  export let suggestedName = '';
+
+  /**
    * UI state machine. `idle` shows the trigger button; `naming`
    * shows the inline input; `saved` shows a brief confirmation.
    * @type {'idle' | 'naming' | 'saved'}
@@ -39,9 +49,12 @@
       resetTimer = null;
     }
     mode = 'naming';
-    name = '';
+    // Prefill with the suggested name (if any). The worker can hit
+    // Enter to accept or type over the prefill.
+    name = suggestedName.trim().slice(0, 80);
     await tick();
     nameInput?.focus();
+    nameInput?.select();
   }
 
   function cancel() {

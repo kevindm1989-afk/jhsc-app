@@ -209,6 +209,10 @@
       "rename_aria": "New name for this saved view",
       "rename_cancel_aria": "Cancel renaming",
       "delete": "Delete",
+      "export": "Export JSON",
+      "import": "Import JSON",
+      "import_announce": "Imported {added}, skipped {skipped} duplicate(s).",
+      "import_error": "Couldn't read that file. Make sure it's a saved-views export.",
       "back_to_home_cta": "Back to home"
     },
     "helpPage": {
@@ -953,6 +957,10 @@
       "actor_label": "Actor",
       "see_all_cta": "See the full audit log",
       "row_aria": "{event} at {ts}. Open the related register."
+    },
+    "savedViews": {
+      "heading": "Your saved views",
+      "manage_link": "Manage all →"
     }
   },
 

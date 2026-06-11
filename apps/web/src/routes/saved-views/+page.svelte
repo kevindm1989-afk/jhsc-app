@@ -18,13 +18,24 @@
   import { t } from '$lib/i18n';
   import {
     deleteSavedView,
+    exportSavedViews,
     hrefForSavedView,
+    importSavedViews,
     listSavedViews,
     renameSavedView
   } from '$lib/saved-views/saved-views';
 
   /** @type {import('$lib/saved-views/saved-views').SavedView[]} */
   let views = [];
+
+  /** @type {HTMLInputElement | null} */
+  let importInput = null;
+
+  /** @type {'idle' | 'imported' | 'error'} */
+  let importState = 'idle';
+  let importMessage = '';
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let importResetTimer = null;
 
   /** Id of the view currently being renamed (or null). */
   let renamingId = null;
@@ -71,6 +82,64 @@
     }
   }
 
+  function flashImportState(state, message) {
+    importState = state;
+    importMessage = message;
+    if (importResetTimer) clearTimeout(importResetTimer);
+    importResetTimer = setTimeout(() => {
+      importState = 'idle';
+      importMessage = '';
+      importResetTimer = null;
+    }, 2500);
+  }
+
+  function downloadExport() {
+    if (typeof window === 'undefined') return;
+    const env = exportSavedViews();
+    const blob = new Blob([JSON.stringify(env, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    });
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `jhsc-saved-views-${env.exportedAt.slice(0, 10)}.json`;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function triggerImport() {
+    importInput?.click();
+  }
+
+  /** @param {Event} event */
+  async function onImportFile(event) {
+    const target = /** @type {HTMLInputElement} */ (event.target);
+    const file = target.files?.[0];
+    target.value = ''; // allow re-importing the same file later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const result = importSavedViews(parsed);
+      refresh();
+      flashImportState(
+        'imported',
+        t('common.savedViewsPage.import_announce', {
+          added: String(result.added.length),
+          skipped: String(result.skipped)
+        })
+      );
+    } catch {
+      flashImportState('error', t('common.savedViewsPage.import_error'));
+    }
+  }
+
   onMount(() => {
     refresh();
   });
@@ -86,6 +155,45 @@
     <h1>{t('common.savedViewsPage.heading')}</h1>
     <p class="muted">{t('common.savedViewsPage.intro')}</p>
   </header>
+
+  <div class="svp-io" data-testid="saved-views-io" data-print="hide">
+    <button
+      type="button"
+      class="btn-outline svp-io-btn"
+      data-testid="saved-views-export"
+      on:click={downloadExport}
+    >
+      {t('common.savedViewsPage.export')}
+    </button>
+    <button
+      type="button"
+      class="btn-outline svp-io-btn"
+      data-testid="saved-views-import"
+      on:click={triggerImport}
+    >
+      {t('common.savedViewsPage.import')}
+    </button>
+    <input
+      type="file"
+      accept="application/json,.json"
+      class="svp-io-file"
+      data-testid="saved-views-import-input"
+      bind:this={importInput}
+      on:change={onImportFile}
+    />
+    {#if importState !== 'idle'}
+      <span
+        class="svp-io-status"
+        class:is-error={importState === 'error'}
+        class:is-ok={importState === 'imported'}
+        data-testid="saved-views-import-status"
+        data-state={importState}
+        aria-live="polite"
+      >
+        {importMessage}
+      </span>
+    {/if}
+  </div>
 
   {#if views.length === 0}
     <p class="svp-empty muted" data-testid="saved-views-empty">
@@ -174,6 +282,40 @@
   }
   .svp-empty {
     font-size: 0.875rem;
+  }
+  .svp-io {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+    margin-block-end: 0.75rem;
+  }
+  .svp-io-btn {
+    min-height: 2.25rem;
+    padding-inline: 0.875rem;
+    font-size: 0.8125rem;
+  }
+  .svp-io-file {
+    display: none;
+  }
+  .svp-io-status {
+    font-size: 0.8125rem;
+    padding-inline: 0.625rem;
+    padding-block: 0.25rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+  }
+  .svp-io-status.is-error {
+    background: var(--color-tint-red-bg);
+    border-color: var(--color-tint-red-border);
+    color: var(--color-tint-red-fg);
+  }
+  .svp-io-status.is-ok {
+    background: var(--color-tint-green-bg);
+    border-color: var(--color-tint-green-border);
+    color: var(--color-tint-green-fg);
   }
   .svp-list {
     list-style: none;
