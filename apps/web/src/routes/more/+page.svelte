@@ -26,7 +26,15 @@
    * is reachable by URL; surfacing it in the tab bar / header is a
    * separate user-driven design call (4 tabs vs add-a-More-tab).
    */
+  import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
+  import { listRecentRoutes, type RecentRoute } from '$lib/nav/recent-routes';
+
+  let recentRoutes: RecentRoute[] = [];
+
+  onMount(() => {
+    recentRoutes = listRecentRoutes();
+  });
 </script>
 
 <svelte:head>
@@ -45,6 +53,30 @@
       >{t('common.morePage.link_search_cta')}</a
     >
   </p>
+
+  {#if recentRoutes.length > 0}
+    <section
+      class="card more-recent-routes"
+      data-testid="more-recent-routes"
+      aria-labelledby="more-recent-routes-heading"
+    >
+      <h2 id="more-recent-routes-heading">{t('common.morePage.recent_routes_heading')}</h2>
+      <ul class="more-recent-routes-list">
+        {#each recentRoutes as r (r.route)}
+          <li>
+            <a
+              class="more-recent-route-chip"
+              href={r.route}
+              data-testid="more-recent-route-chip"
+              data-route={r.route}
+            >
+              {r.route}
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   <section class="card more-group" data-testid="more-group-intake">
     <h2>{t('common.morePage.group_intake_heading')}</h2>
@@ -235,5 +267,37 @@
 
   .more-footer {
     margin-block-start: 0.75rem;
+  }
+
+  .more-recent-routes {
+    margin-block-end: 1rem;
+  }
+  .more-recent-routes h2 {
+    margin-block-start: 0;
+    margin-block-end: 0.5rem;
+    font-size: 1rem;
+  }
+  .more-recent-routes-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+  .more-recent-route-chip {
+    display: inline-block;
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    text-decoration: none;
+  }
+  .more-recent-route-chip:hover {
+    background: var(--color-muted);
+    text-decoration: none;
   }
 </style>
