@@ -45,6 +45,12 @@ const SAFE_FIELDS: ReadonlySet<string> = new Set([
   'auth.result',
   'auth.totp_consumed',
   'auth.session_id_pseudonym',
+  // ADR-0023 Amendment A / F-128 (mint-session race-loss detector).
+  // ADR-0024 §2 (cold-start parity check outcome).
+  // Both values are closed-set literals; no PI surface.
+  'auth.mint.outcome',
+  'key_parity.outcome',
+  'key_parity.surface',
   'audit.event_type',
   'audit.target_class',
   'audit.target_id_pseudonym',
