@@ -136,6 +136,32 @@ jobs:
         # cannot catch.
         run: bash scripts/check-onboarding-test-props-stripped.sh
 
+      - name: KEY_PARITY entropy invariant (ADR-0024 §6 / F-124 M-124a)
+        # Asserts the length floor on a SYNTHETIC fixture (NEVER against the
+        # real production secret — that's the deploy job's job). The fixture
+        # below is fixed-shape so the arithmetic is verified, not the value.
+        env:
+          VERIFY_KEY_ENTROPY_TARGET: 'synthetic-ci-fixture-64-hex-chars-0123456789abcdef0123456789ab'
+        run: bash scripts/verify-key-entropy.sh
+
+      - name: KEY_PARITY no-SHA-in-logs gate (ADR-0024 §4 / F-124 M-124b)
+        # Greps log emission surfaces for the SHA-bearing variable names
+        # from key-parity.ts. Fail-closed on any reference.
+        run: bash scripts/verify-no-sha-in-logs.sh
+
+      - name: KEY_PARITY EF import coverage (ADR-0024 §2)
+        # Each Edge Function MUST import + call assertKeyParity, OR be on
+        # the rollout-exempt list with a rollout-PR comment. New EFs must
+        # do one or the other.
+        run: bash scripts/verify-key-parity-import.sh
+
+      - name: KEY_PARITY deploy-time check (ADR-0024 §1 / informational on PR)
+        # The deploy-time parity check. In PR CI the script runs in
+        # informational mode (no DEPLOY_DB_URL set) — it asserts its own
+        # invocation contract without touching production. The production
+        # deploy workflow MUST set DEPLOY_DB_URL + HMAC_PSEUDONYM_KEY.
+        run: bash scripts/verify-key-parity-deploy.sh
+
       - name: Run verify.sh (informational)
         run: bash scripts/verify.sh
 
