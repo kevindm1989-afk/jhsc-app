@@ -25,6 +25,261 @@ pointing to the new one. The history is the value.
 
 ---
 
+## 2026-06-12 — Production-deploy readiness roadmap: milestones, ordering, estimate
+
+**Context:** the user asked "how many PRs left to ship this app complete." The last ~15 PRs (#184–#198) have been worker-hub client-side polish (HeaderSearch, saved-views, /search, /more, keyboard shortcuts) on top of in-memory stores and `localStorage`. None of that polish moved the production-deploy needle. This section is the candid roadmap from "where we are" to "first deploy carrying real PI."
+
+This is not an ADR — it ratifies no architectural choice. It is the milestone ordering + estimate the orchestrator uses to route subsequent work. Architect-level adjudications inside it become their own ADRs at the moment the user picks one of the options.
+
+### A. Snapshot of "where we are" (discovery, 2026-06-12)
+
+Cross-referenced against `.context/known-gaps.md` (48 entries, ~24 closed, the rest open or deferred), the 15 migrations under `supabase/migrations/`, the 7 Edge Functions under `supabase/functions/`, and the 21 routes under `apps/web/src/routes/`:
+
+- **What is real end-to-end (library + Edge Function + migration + pgTAP):** auth (T05 / T05.1 substantially closed except F-116 + key-parity reframe), committee membership (T06 / T06.1, ADR-0022), identity keys + recovery blob (T07 / T07.1 closed in 4 migrations), concerns intake (T08 / T08.1), reprisal (T13 / T13.1), work-refusal + s.51 evidence (T14 / T14.1), GoTrue identity + mint-session foundation (ADR-0023, mint handler deferred to T05.1).
+- **What is library-only (no migration, no Edge Function):** T11/T12 (export pipeline + 21-day timer), T16 (retention sweep), T17 (backup object-lock), T18 (audit-log integrity), T10.1 (inspections SupabaseStore + real canvas re-encode), T19 production wire-up (route mount + `BrowserWipeStore.emitAudit`).
+- **What is viewer-placeholder-only (demo data, NO library, NO store, NO migration, NO intake form):** `/recommendations`, `/training`, `/minutes`, `/library`, `/sensitive-feed`, `/audit`. The original briefing called this "in-memory scaffold + viewer placeholder"; on inspection these surfaces have NO `*-core.ts`, NO `*-store.ts`, NO `Memory*Store`, NO `Supabase*Client`, NO `*IntakeForm.svelte`, NO migration. They render `demo-*.ts` arrays through paginated viewers with filter chips, CSV download, save-view, share-URL. Useful as design fixtures; not useful as production scaffolding for the intake.
+- **Role enforcement is not wired anywhere.** `/more` page header comment is explicit: "Role visibility is NOT enforced in the markup — every signed-in member sees every link." `/sensitive-feed` (worker co-chair + certified-member only) has no gate. The RLS server-side gates exist for concerns / reprisal / work-refusal / s.51 / committee but the UI does not consult them before rendering links or routes.
+- **`hooks.server.ts` runs at build/prerender time only** under adapter-static + ssr=false. F-116 session-revocation middleware "in `hooks.server.ts`" cannot land in its original framing; this is one of the three architect adjudications (see §D).
+- **No retention sweep exists.** T16 ships library-only; T16.1's pg_cron + SQL function + advisory lock has not landed. PIPEDA Principle 4.5 (Limiting Retention) is not enforced.
+- **No production audit-log integrity check.** T18 / T18.1 not started.
+- **CI is robust.** Four parallel jobs: build/typecheck/vitest; hardening-gates (semgrep / gitleaks / verify.sh / bundle strip); committee DB tests (pgTAP); Supabase live stack (GoTrue + real PostgREST + pgTAP); mint live-trust e2e. The verifier stack is mature; what's missing is end-to-end browser tests against a deployed environment.
+
+### B. Hard NOT-DOING list (explicitly out of scope of this roadmap)
+
+So the scope below isn't soft-sold. These do not appear in any milestone:
+
+1. **Native mobile shell.** PWA install-prompt is in (G-T19-13 closed). No iOS / Android native wrapper.
+2. **Server-side PDF generation.** T11.1 keeps the hand-rolled zero-dependency PDF emitter or swaps to a vetted client-side library (G-T11-3). No server-rendered PDF pipeline.
+3. **Push notifications.** Post-export rep notification (G-T11-6) lands as in-app `sensitive_activity_feed` row or Supabase Realtime fanout — no Web Push / APNs / FCM.
+4. **Real-time collaborative editing.** Concerns / reprisal / minutes / work-refusal are submit-then-read. No concurrent-editor presence, no operational transforms.
+5. **FR-CA bilingual content.** G-T19-1 explicitly deferred; constraints.md says no Quebec users in scope. Adding fr-CA is its own task and is not in this roadmap.
+6. **Cross-province expansion.** BC PIPA / Alberta PIPA / Nova Scotia PIIDPA / Quebec Law 25 all out of scope per constraints.md. PHIPA / FIPPA layers only apply if specific data types appear — they don't yet.
+7. **Self-serve org / multi-committee tenancy.** ADR-0021 locked single-tenant — `committee_id` column literally banned in `lib/committee/` by a CI test. Multi-committee is a different product.
+8. **Public-write surfaces (anonymous submission).** Every register is auth-gated; no anonymous intake path.
+9. **First-class employer-side surfaces.** This is the WORKER-SIDE app. Employer co-chair receives notifications; employer-side composition is a sibling product.
+10. **Native passkey "sync" across devices.** Each device is its own enrollment per ADR-0008 personal-device posture. Cross-device sync via cloud passkey vault is out.
+11. **Audit-log export to SIEM.** Audit log is in-app + Sentry breadcrumbs only.
+12. **Server-cascade panic-wipe.** G-T19-3 deferred — wipe is local-only in v1.
+13. **fr-CA, server-side PDF, push notifications, native shell, SIEM** are all individually 4–10 PR efforts. Excluding them is what makes the estimate below honest.
+
+### C. Milestone ordering — production-readiness roadmap
+
+Ordering rule: anything that touches authn / session liveness comes first because every milestone after that depends on it. Anything that enforces PIPEDA retention before real PII is written comes second. Per-register stores are next because role enforcement is meaningless without persistence. Role enforcement, retention-sweep, audit-integrity, and observability come next. Finally a hardening pass, AODA / pen-test / privacy / legal — then the human-gated "first PI deploy."
+
+Each milestone names: **deliverable** / **done definition** / **agents** / **PR-count estimate** / **calendar-week estimate** / **dependencies** / **architect-adjudication status**.
+
+#### M0 — Architect adjudications + policy ratifications (PRE-WORK)
+- **Deliverable:** user-side decisions on the five forks in §D below. Tech-writer regenerates HG-10 copy packet (G-T19-12 status update); HG-15 packets prepared for T16.1 / T17.1 / T18.1 / per-register migrations.
+- **Done:** each of the 5 forks has a decision recorded as an ADR amendment in this file; labour-lawyer (HG-10) has ratified concern intake purpose copy (G-T08-11), reprisal consent surface wording (G-T13-13), export interstitial recipient-identity copy (G-T11-17) and four-bullet parity (G-T11-18); deploy region + subprocessor list ratified by user (HG-12 / HG-15).
+- **Agents:** architect, tech-writer (HG-10 packet), user (adjudication), external labour-lawyer (HG-10 sign-off), external privacy-lawyer (privacy-policy / DPA review — see §D fork 5).
+- **PR-count:** 2–4 small (ADR amendments + packet regeneration).
+- **Weeks:** 1–3 elapsed (gated by external lawyer turnaround, NOT engineering time).
+- **Depends on:** nothing inside the repo.
+- **CANNOT be ground out by implementer alone.** This is policy, not code.
+
+#### M1 — F-116 session-revocation enforcement (auth liveness)
+- **Deliverable:** every privileged path consults `auth_sessions.revoked_at` ≤5s after revocation. Under adapter-static + ssr=false this CANNOT live in `hooks.server.ts` at request time — see §D fork 1 for the three viable homes.
+- **Done:** the chosen home is wired across every Edge Function dispatcher (auth-op, committee-op, concern-op, reprisal-op, t14-op, t07-op, mint-session); F-39 `auth_sessions` query runs on every privileged op; 401 propagation loop in `createEdgeFnFetchTransport` exercised by integration test; revocation-latency pgTAP test asserts ≤5s budget.
+- **Agents:** architect (adjudicate §D-1), threat-modeler (re-pass on chosen home), implementer, verifier, second-opinion-reviewer (auth-adjacent gate).
+- **PR-count:** 2–4 (depends on which fork is chosen — Edge-Function-side check is one PR; if cron-based "drained-sessions" + alert is added that's another).
+- **Weeks:** 1–2.
+- **Depends on:** §D-1 fork.
+
+#### M2 — KEY_PARITY reframe + boot smoke test posture (auth correctness)
+- **Deliverable:** the deploy-time SHA-of-key parity check runs against the LIVE Postgres GUC, not a mirrored env var. Per §D fork 2, this lands as either (a) Edge Function cold-start check, or (b) deploy-time CI step using `supabase db query`. The boot-smoke-test activation rule (G-T05-8) also gets a final answer here.
+- **Done:** any HMAC-key mismatch fails CI / refuses traffic; staging environments cannot accidentally accept real PI under a misconfigured key; pgTAP / CI assertion proves the round-trip.
+- **Agents:** architect, implementer, verifier.
+- **PR-count:** 1–2.
+- **Weeks:** 0.5–1.
+- **Depends on:** §D-2 fork.
+
+#### M3 — Per-register production wire-up for the 4 already-libraried sensitive registers (T08.1, T13.1, T14.1, T10.1)
+- **Deliverable:** close out the open G-T08-* / G-T13-* / G-T14-* / G-T10-* entries that are tagged "blocker for production deploy" or "BLOCKING-IN-Tnn.1." This is a substantial debt — counting only the open or partially-closed gaps explicitly marked production blockers:
+  - **T08.1 (concerns):** G-T08-11 (HG-10 purpose copy), G-T08-14 (`received_at_ts: now()+1` library shim removal), G-T08-16 (F-30 timing-budget pgTAP). Most T08 SQL already shipped; this is cleanup + HG-10.
+  - **T10.1 (inspections):** G-T10-1 (real canvas re-encode), G-T10-2 (raw user_id leak), G-T10-3 (HEIC/PNG/WebP UI rejection), G-T10-4 (SQL migration), G-T10-5 (IndexedDBInspectionStore), G-T10-6 (real Supabase tests), G-T10-7 (ADR-0016 rows), G-T10-8 (`/api/audit/queue/+server.ts` reframed for adapter-static), G-T10-9 (real ServiceWorker — mostly closed in G-T19-14), G-T10-10 (PhotoCaptureSurface UI), G-T10-13/14/15 (sec advisories), G-T10-19 (quarantine UI). T10.1 is the biggest single-task chunk because almost nothing shipped for inspections beyond library + viewer.
+  - **T13.1 (reprisal):** G-T13-1 through G-T13-14 — SQL migration, SupabaseReprisalStore, pgTAP, route inventory, F-30 budget test, per-record passphrase argon2id, HG-10 wording, 4-eyes pending modal, 6-event enum amendment.
+  - **T14.1 (work-refusal + s.51):** G-T14-1 through G-T14-18 — SQL migration, two Supabase stores, pgTAP, GRANT enumeration, passphrase verify, per-record reveal flow attempt, rate-limited decision, photo unsupported-format audit + UI.
+- **Done:** every gap tagged "blocker for T*.1 PR submission" or "blocker for production deploy" with real PI in the corresponding table is closed; pgTAP coverage runs in CI under the existing Committee DB tests job; for each register the Edge Function rejects unauthorized callers structurally (not by application code).
+- **Agents per register:** test-writer → implementer → verifier → second-opinion-reviewer → privacy-reviewer (any PI touchpoint) → threat-modeler (any new RLS or SECURITY DEFINER function).
+- **PR-count:** 12–20 across the four tasks. T08.1 ~2 PRs; T10.1 ~5–7 PRs; T13.1 ~3–4 PRs; T14.1 ~3–4 PRs.
+- **Weeks:** 4–7. Can partially parallelize (T08.1 and T13.1/T14.1 share architectural shape so a single architect pass amortizes; T10.1 is mostly independent and biggest).
+- **Depends on:** M1 (F-116 must land before sensitive-register reads commit real PI), M2 (HMAC key parity), §D fork 3 (does the F-30 ≤60s budget hold in production? — implies whether the timing test is real or relaxed).
+
+#### M4 — Build out the six viewer-placeholder registers (recommendations, training, minutes, library, sensitive-feed, audit) — design + library + SQL + production wire-up
+- **Deliverable:** each of these 6 surfaces gets the same end-to-end treatment T08/T13/T14 got: types + Memory*Store + *-core.ts + intake form (where applicable) + Edge Function + SQL migration with RLS + pgTAP + Supabase*Client + viewer swap from demo provider to real provider. Several have natural shapes:
+  - **/recommendations:** intake (worker / co-chair files written recommendation to employer), 21-day OHSA s.9(20) timer (G-T12-1), responded-state lifecycle, exports via T11/T12 pipeline.
+  - **/minutes:** finalized-minutes table, drafter / approver workflow, export via T11. NOT real-time collaborative editing — see §B.
+  - **/training:** training records table (PHIPA-adjacent? — see §D fork 4 for the PI-class call), certification expiry timer, attachment.
+  - **/library:** document store + version + offline-cache marker; this is the lightest — most of it is read-only content management.
+  - **/sensitive-feed:** read-only feed of C3/C4 audit events filtered to worker co-chair + certified-member; depends on M5's role enforcement to be meaningful AND on the export-fanout writer from G-T11-6.
+  - **/audit:** read-only audit-log surface — depends on T18 / T18.1 audit-integrity surfacing and (for non-trivial volume) a paginated reader against the live `audit_log` table. Currently the demo provider conflates this with sensitive-feed; production needs to separate them.
+- **Done:** each register has the same six-surface contract concerns/reprisal/work-refusal have: intake (where applicable), viewer against real data, RLS-gated read, audit-emit-before-side-effect ordering, per-event audit enum extension (6-mirror dance per ADR-0003 Amendment A), HG-10 purpose copy where worker-facing.
+- **Agents per register:** architect (initial design ADR per register), designer (intake-form surfaces), test-writer, implementer, verifier, privacy-reviewer, threat-modeler (RLS surface), second-opinion-reviewer.
+- **PR-count:** 18–30. Each register is ~3–5 PRs (1 design ADR + 1–2 library + 1 SQL + 1 wire-up + 1 cleanup). The lighter ones (library, training read-only) are ~2 PRs; the heaviest (recommendations with the 21-day timer + export-binding, minutes with the export-binding) are ~5 PRs.
+- **Weeks:** 6–12. The 21-day timer for recommendations is the load-bearing OHSA s.9(20) compliance feature; everything else is meaningful but less time-sensitive.
+- **Depends on:** M1, M2, M3 (so the architectural patterns for SQL migration + Edge Function + pgTAP are dialed in before the next 6 are written).
+- **Cannot be parallelized within itself** at first — first register through this milestone is essentially a re-pass of the Amendment H sibling-task pattern with the new shapes. After the first is through, the remaining 5 can run in parallel-ish sessions (one register per session).
+
+#### M5 — Role enforcement across UI + Edge Function dispatch
+- **Deliverable:** every link in `/more`, every viewer, every intake form consults the worker's role-set (`worker_member` / `worker_co_chair` / `certified_member`) at render time AND at Edge-Function-call time. The `/sensitive-feed` "you don't have access" graceful-degradation path that the `/more` page header comment promises actually exists.
+- **Done:** unauthorized member loads `/sensitive-feed` and sees a structured 403-with-explanation, not the surface; the Edge Function denies the underlying op with `rls_denied` regardless of UI bypass; a CI test asserts every route + every Edge Function op has a declared role-set requirement; the role-set is read from the live `committee_membership.role[]` (T06.1) not from a cached JWT claim.
+- **Agents:** architect (role-enforcement ADR — does it live in the JWT, in a per-op DB lookup, or both?), implementer, verifier, threat-modeler, second-opinion-reviewer.
+- **PR-count:** 4–7.
+- **Weeks:** 2–4.
+- **Depends on:** M3 (real RLS surfaces to enforce on), M4 (for the registers added there to inherit the pattern). Role enforcement should land BEFORE M4 substantially completes if any of M4's new registers (sensitive-feed especially) carries real PI before M5 lands.
+
+#### M6 — T16 retention sweep (PIPEDA Principle 4.5 enforcement)
+- **Deliverable:** the daily 03:30 ET pg_cron job runs `retention_sweep_runner()` which:
+  - Holds `pg_try_advisory_xact_lock(hashtext('retention_sweep'))` for the pass (G-T16-1)
+  - Runs with `statement_timeout='60s'` + `lock_timeout='5s'` (G-T16-2)
+  - Sweeps audit_log + each operational table per its retention class
+  - Emits `retention.deleted` audit row with `per_event_counts` (G-T16-RECONCILE-CEILING)
+  - Wires A-RETENTION-001 alert (G-T16-5)
+  - HG-15 ratification for two new physical tables `retention_sweep_runs` + `audit_log_retention_schedule` (G-T16-6)
+- **Done:** the open or deferred G-T16-* gaps are closed; pgTAP cross-mirror drift test enumerates TS const ↔ SQL function ↔ SQL table and asserts triple-equality (G-T16-4); first dry-run pass in staging deletes zero rows but the audit row + structured-log emission is correct.
+- **Agents:** test-writer, implementer, verifier, privacy-reviewer, second-opinion-reviewer.
+- **PR-count:** 3–5.
+- **Weeks:** 2–3.
+- **Depends on:** M3 (operational tables exist with their event types properly categorized), HG-15 ratification under M0.
+- **HARD GATE on real-PI deploy.** No real PI can be written into any operational table until T16.1 ships and the retention class for that table has at least one sweep pass behind it (i.e., the deletion path proved to work, not just compile).
+
+#### M7 — T11/T12 export pipeline + recommendations 21-day timer
+- **Deliverable:** SQL migration for `minutes_final` + `recommendations` + `export_audit_log` projection view + `export_record_with_audit()` SECURITY DEFINER + recipient-identity narrowing (G-T11-12) + 4-bullet HG-10 consent copy (G-T11-18) + post-export rep notification fanout via Supabase Realtime or `sensitive_activity_feed` (G-T11-6) + RA-1 trigger #5 monitoring (G-T11-25) + 21-day timer SQL + `A-REC-001` overdue alert (G-T12-1) + WebAuthn re-auth assertion verification (G-T11-5) + recipient identity copy (G-T11-17) + byte-grep regression test for PDF metadata absence (G-T11-16) + closed-allowlist projection enforcement.
+- **Done:** open or deferred G-T11-* / G-T12-* entries closed; the OHSA s.9(20) 21-day clock is enforceable; PDFs produced are minimal, metadata-free, and produced by a server-side or vetted client-side library (per §D fork 3 if a PDF lib swap is chosen).
+- **Agents:** architect (re-auth + recipient-identity + PDF library), test-writer, implementer, privacy-reviewer (HG-10 mandated), threat-modeler (new RLS + new Edge Function), second-opinion-reviewer, verifier.
+- **PR-count:** 5–8.
+- **Weeks:** 3–5.
+- **Depends on:** M3 (concerns must be live; recommendations / minutes from M4 must exist; export draws from both), M5 (role enforcement for who-can-export), §D fork 3 (PDF library decision).
+
+#### M8 — T17 backup object-lock + T18 audit-log integrity (PIPEDA Safeguards + reconstructability)
+- **Deliverable:** T17.1's `backup_manifests` table + `backups-ca-central-1` Supabase Storage bucket with object-lock (42-day governance mode) + `backup_writer_role` + monthly restore drill (G-T17-5). T18.1's `integrity_check_runs` table + pg_cron 04:30 ET daily integrity job + `audit_chain_anchors` weekly off-app email to worker co-chair (G-T18-12) + `A-AUDIT-001` / `A-INTEGRITY-001` / `A-INTEGRITY-002` alerts (G-T18-8) + reconciliation join between live chain and backup manifests.
+- **Done:** open G-T17-* / G-T18-* entries closed; first restore drill passes on staging; weekly anchor email arrives at the configured co-chair address; PIPEDA s.10.1 breach-window reconstructability is provable.
+- **Agents:** test-writer, implementer, verifier, privacy-reviewer, threat-modeler (B6.2 boundary — new non-login role), observability-setup.
+- **PR-count:** 5–8.
+- **Weeks:** 3–5.
+- **Depends on:** M3, M6 (T16 reconciliation feeds T18 attribution per G-T16-8).
+
+#### M9 — Observability + alerting end-to-end (Sentry beforeSend allowlist extensions, alert sinks)
+- **Deliverable:** every `would_fire_alert: 'A-*'` symbol returned by libraries has a real sink with on-call routing. The Sentry breadcrumb scrubber's path-allowlist covers `lib/onboarding/*`, `lib/lock/*`, `lib/audit-integrity/*`, `lib/retention/*`, `lib/backup/*`, `lib/export/*` (G-T19-7 extended). PI-canary tests verify scrubbing for each surface. T02 `/api/log/ingest` lands or its absence is explicitly accepted (decision recorded).
+- **Done:** alerts route to a single on-call surface; runbooks exist for each `A-*`; SLOs defined for the load-bearing flows (export fanout p95 ≤60s, session-revocation ≤5s, retention sweep daily-pass success, weekly anchor email delivery).
+- **Agents:** observability-setup, implementer, verifier.
+- **PR-count:** 3–5.
+- **Weeks:** 2–3.
+- **Depends on:** M3, M6, M7, M8 (the alert symbols come from those milestones).
+
+#### M10 — Hardening pass: AODA / accessibility audit, penetration test, full privacy review, legal sign-off
+- **Deliverable:**
+  - **AODA / WCAG 2.0 AA audit** across every shipped route, including the 4-eyes modal, the recovery-passphrase ceremony, the panic-wipe type-back, the export interstitial, every intake form. axe-core is already a dev dep — wire it into a smoke job + run a manual pass.
+  - **External penetration test** of the deployed staging environment (in scope: authn flows, RLS, panic-wipe, export, the 7 Edge Functions). External vendor.
+  - **End-to-end privacy review** of the WHOLE app at scope, not per-task. The 18 existing `privacy-review-t*.md` files are per-task; the full-scope review catches cross-cutting issues none of the per-task reviews could have seen.
+  - **Privacy policy + terms of service drafted and approved by external privacy lawyer.** PIPEDA Principle 8 (Openness). HG-7 / HG-9 / HG-10 / HG-12 / HG-15 backlog cleared.
+  - **DPA and vendor risk assessment** for every subprocessor (Supabase, Sentry, hosting provider, anything else introduced). HG-12 enforcement.
+  - **Incident response plan written and tabletop-exercised.** PIPEDA s.10.1 readiness; breach notification template ready in advance.
+- **Done:** sign-off from each external review; remediation PRs merged for any high-severity findings; documented residual risks with acceptance.
+- **Agents:** accessibility-specialist (internal), external pen-test vendor, external privacy lawyer, external labour-lawyer, threat-modeler (review pen-test findings), architect (review remediation design).
+- **PR-count:** 4–8 (remediation PRs depending on findings; estimate is the median).
+- **Weeks:** 4–8 elapsed (heavily gated by external vendor turnaround).
+- **Depends on:** M1–M9 substantially complete. Cannot be done in parallel because the auditors are auditing the AS-DEPLOYED app.
+- **CANNOT be ground out by implementer alone.** This is policy + external review.
+
+#### M11 — Production CI/CD, canary, rollback runbook, on-call setup, deploy itself
+- **Deliverable:** the deploy pipeline that the mint-live-e2e CI job foreshadows but doesn't quite have: PR-approved-→-staging-→-soak-→-canary-→-prod with explicit human-gate on auth / billing / PI touch (per constraints.md §Human Gates). Rollback runbook tested. On-call rotation + escalation defined. First production deploy.
+- **Done:** the deploy happens, with a real human at the wheel, against the constraints.md "production deploys of changes touching auth, billing, or personal data" hard gate. A documented rollback works on the first try (because it was practiced).
+- **Agents:** architect (deploy-pipeline ADR), implementer, observability-setup, user (deploy approval).
+- **PR-count:** 2–4 (pipeline + runbook + the deploy itself).
+- **Weeks:** 1–2.
+- **Depends on:** M10 substantially complete.
+- **HUMAN GATE PER CONSTRAINTS.MD.** This is the only milestone that ends with a production-deploy human approval.
+
+### D. Architect-level forks the user must adjudicate before downstream work can autonomously close them
+
+These are the gates that block autonomous implementer / verifier work. Each one has 2–3 options the user picks among; once picked, the choice lands as an ADR amendment in this file and downstream agents can proceed.
+
+#### Fork 1 — F-116 session-revocation middleware home (G-T05-1 remaining)
+The `hooks.server.ts` placement assumed in the original gap framing doesn't run at request time under adapter-static + ssr=false.
+- **Option A — Per-Edge-Function pre-check (recommended).** Every Edge Function dispatcher (auth-op, committee-op, concern-op, reprisal-op, t14-op, t07-op, mint-session) calls `session_is_live(jti)` as its first DB query inside the SECURITY DEFINER op. The browser-side `createEdgeFnFetchTransport` already handles 401-on-revoked via a propagation loop. Latency: ≤1 DB roundtrip per op, well under F-39's 5s budget. Adds a uniform pattern across every Edge Function.
+- **Option B — JWT short-TTL only (no liveness check at all).** Drop `jwt_expiry` from 300s to ≤30s; rely on the next mint requiring a passkey assertion to walk the live `auth_sessions` row. Cheap but it means a stolen-JWT window of up-to-30s is acceptable. Threat-model would need to re-pass on whether 30s is tolerable (F-39 originally argued ≤5s).
+- **Option C — Realtime channel from `auth_sessions.revoked_at` → live client.** Each authenticated client subscribes to a Supabase Realtime channel; revocation publishes to the channel; client invalidates JWT locally on receipt. Server-side check still needed as defense-in-depth, so this layers on top of A or B; doesn't replace.
+
+**Recommendation: Option A.** It matches the existing 401-propagation pattern, doesn't expand the trust surface, and the per-op DB query overhead is bounded. Document residual surface: any Edge Function that forgets to call the check is a footgun, so a CI grep asserting every op dispatcher invokes `session_is_live(...)` is mandatory.
+
+#### Fork 2 — KEY_PARITY check home (G-T05-2)
+Where does the SHA-of-key parity check run, given `hooks.server.ts` is prerender-only?
+- **Option A — Per-Edge-Function cold-start check.** Each Edge Function on first invocation issues `SELECT encode(digest(current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex')` and compares to the SHA-of-its-own-env-var. Mismatch → refuse traffic + emit `key_parity.mismatch` audit row + alert. Cold-start adds one query.
+- **Option B — Deploy-time CI assertion.** A new CI step (after `supabase db push` and before promoting traffic) runs `supabase db query "SELECT encode(...)"` against the production GUC and asserts equality with the value in the deployed environment's secret. Cleanest separation of concerns; doesn't add per-request overhead; but requires the deploy pipeline to have GUC read access, which means another credential.
+- **Option C — Both A and B (belt-and-braces).** Deploy-time gates the deploy; cold-start defends against the GUC being rotated out from under a running Edge Function.
+
+**Recommendation: Option C** if the deploy pipeline's credential cost is acceptable; otherwise **Option A** alone. Cold-start check is cheap and catches the actual drift class. The G-T05-8 boot-smoke activation rule collapses into this same fork — answer it once here.
+
+#### Fork 3 — PDF rendering posture (G-T11-3)
+The current hand-rolled emitter ships a non-typeset PDF. Production needs typesetting that an employer co-chair can read. F-19 closed-allowlist projection is the load-bearing privacy invariant — the PDF carries only allowlist fields.
+- **Option A — Keep the hand-rolled emitter, improve typesetting in-place.** Add Unicode font subsetting + line wrapping + headers/footers as additions to the existing emitter. Zero new dependencies. Most work; least risk of bundle bloat or telemetry.
+- **Option B — Adopt `pdf-lib` (vendored, audited).** Mature, no telemetry, no `window`/`console` dependencies — passes ADR-0010 no-third-party-JS gate. Bundle adds ~150KB. Reduces engineering load substantially. Add to the bundle-scan grep allowlist; pgTAP a byte-grep regression test that the emitter still produces no `/Info` dictionary (G-T11-16).
+- **Option C — Server-side render via Edge Function + headless typesetting.** Out of scope per §B item 2.
+
+**Recommendation: Option B.** The 150KB bundle add is acceptable given how much engineering it saves and `pdf-lib` is the de-facto vetted choice. Mandatory follow-on: the byte-grep regression test (G-T11-16) MUST pass against the new library; G-T11-23's hash determinism pin AND a new bundle-scan rule for `pdf-lib` source telemetry land in the same PR.
+
+#### Fork 4 — Training records PI class (G-T17-PRIV-6 architect deferral)
+The `/training` register tracks certifications (JHSC-certified-member training, WHMIS, first-aid, etc.) tied to identifiable members. Is this PHIPA-relevant?
+- **Option A — C2 (PI but not health information).** Treat it like committee membership. Standard PIPEDA retention. No PHIPA layer. Justification: certification status is occupational data, not health-information-about-an-identifiable-individual.
+- **Option B — C3 (sensitive PI; encrypted at rest beyond AES-default).** Encrypt with the committee data key like concerns; reveal flow + per-record passphrase. Justification: a cumulative training-completion record about a worker is sensitive enough that the worker should consent to its disclosure to a future employer's co-chair if they move committees.
+- **Option C — Defer — don't ship `/training` in v1; pull it from M4.** Acceptable if scope contraction is preferred over the PHIPA-class call.
+
+**Recommendation: Option A** absent specific worker pushback. The training data is operationally similar to "this worker holds first-aid certificate" — a credential, not a health record. If a future jurisdiction (Quebec Law 25, PHIPA expansion) brings health-class data into scope, revisit. Document the decision; HG-9 ratifies the retention class.
+
+#### Fork 5 — Subprocessor list + DPA + hosting region final ratification (HG-12 + HG-15)
+ADR-0001 named ca-central-1 as residency for Supabase. ADR-0010 named Sentry as the only third-party JS subprocessor. Are there others by the time of first PI deploy?
+- **Option A — Lock the list at {Supabase ca-central-1, Sentry US} only.** Anything else is rejected. Requires that every alert sink (M9), the on-call surface (M11), the deploy pipeline (M11), the AODA audit (M10), and the pen-test (M10) NOT be done via SaaS that processes PI. On-call can be email + a generic webhook to a self-hosted sink; CI is already GitHub-Actions which is itself a cross-border subprocessor that needs HG-12 ratification (this may already be implicit but should be made explicit).
+- **Option B — Allow a curated extension list.** GitHub Actions (CI; PI exposure: none in the build artifacts), email provider for breach notification + weekly anchor (PI exposure: co-chair email + anchor head — both already classified as not-PI), pen-test vendor (PI exposure: scope-limited to staging fixtures with synthetic PI only), AODA auditor (same posture).
+- **Option C — Explicit privacy-lawyer review of every subprocessor with a DPA in place.** Mandatory for production deploy; this is the M10 deliverable.
+
+**Recommendation: Option B + Option C combined.** The curated list goes into an ADR amendment; the DPA work happens in M10. List explicitly all current + planned subprocessors before M11 deploy approval.
+
+### E. Estimate summary
+
+| Milestone | PR-count | Calendar weeks | Parallelizable with | Architect-decision needed? |
+|---|---|---|---|---|
+| M0 — Adjudications + HG-10 packets | 2–4 | 1–3 elapsed | (none) | YES (this IS the decisions) |
+| M1 — F-116 session-revocation | 2–4 | 1–2 | M2 | YES (Fork 1) |
+| M2 — KEY_PARITY reframe | 1–2 | 0.5–1 | M1, M0 | YES (Fork 2) |
+| M3 — T08.1/T10.1/T13.1/T14.1 wire-up | 12–20 | 4–7 | M2 partial | partial (Fork 3 for export touch, but mostly implementer-grindable) |
+| M4 — 6 viewer-only register builds | 18–30 | 6–12 | M5 (interleave) | YES (Fork 4, plus per-register design ADRs) |
+| M5 — Role enforcement | 4–7 | 2–4 | M4 partial | YES (role-enforcement architecture ADR) |
+| M6 — T16 retention sweep | 3–5 | 2–3 | (serial after M3) | partial (G-T16-SO-2 alarm scope decision) |
+| M7 — T11/T12 export + 21-day timer | 5–8 | 3–5 | (serial after M4 recommendations) | YES (Fork 3) |
+| M8 — T17/T18 backup + integrity | 5–8 | 3–5 | M9 | NO (mostly implementer) |
+| M9 — Observability + alerts | 3–5 | 2–3 | M8 | NO |
+| M10 — Hardening + external reviews | 4–8 | 4–8 elapsed | (mostly serial) | Reviewers, not architect |
+| M11 — Deploy pipeline + first deploy | 2–4 | 1–2 | (final) | Human gate |
+
+**Total PR-count:** 61–105.
+**Total calendar weeks:** 30–55 elapsed, assuming 1 substantive PR per session × ~5 sessions per week × the documented cadence holds. Parallelization where called out shaves perhaps 8–12 weeks off the upper end; external-vendor calendar (M10) is the dominant uncertainty.
+**Honest headline:** "about 6 months of focused work on the low end; closer to a year if any of the external reviews require substantive remediation, if any of the architect adjudications take >1 week elapsed, or if the implementer cadence slows below the current 1-PR-per-session rate." This is months-of-work, not days.
+
+**What CANNOT be ground out by implementer alone:** M0 (policy + lawyer turnaround); the architect adjudications inside M1, M2, M4, M5, M7 (the 5 forks above); M10 (external reviewers); M11's deploy human gate. Everything else is implementer-grindable once the gates are open.
+
+### F. Critical-path serial chain (the milestones that CANNOT be parallelized)
+M0 → M1 → M2 → M3 (partial — first register can start during M2) → M5 (must lock before M4 ships sensitive-feed) → M6 (HARD GATE before any real PI write) → M10 (must wait for substantially-complete system) → M11.
+
+M4 / M7 / M8 / M9 can interleave with the above after M3 starts. M4 and M7 share the recommendations 21-day timer dependency, so M4-recommendations must precede M7.
+
+### G. Mandatory handoff
+
+Per agent-os convention, this design hands off explicitly to:
+
+- **threat-modeler** — required at the start of: M1 (F-116 home — chosen option's trust-boundary impact, especially Option C Realtime layer), M2 (key-parity check home — secret-handling boundary on the deploy pipeline if Fork 2 Option B/C picked), M4 (each of the 6 new registers introduces new RLS surfaces — threat-modeler reviews EACH per-register design ADR before SQL ships, paralleling the T08 / T13 / T14 model), M5 (role-enforcement architecture is auth-adjacent), M7 (export pipeline introduces new SECURITY DEFINER and the recipient-identity narrowing per G-T11-12 changes the audit-shape boundary), M8 (T18 introduces B6.2 boundary; T17 introduces new `backup_writer_role`). Threat-modeler is OPTIONAL but recommended for M3 closing PRs (gaps already through threat-model once each) and M6 (the T16 SQL signature is largely structural).
+- **privacy-reviewer** — required at every milestone that writes new PI to a column not previously inventoried (per the HG-15 hard rule). At minimum: M3 (each of T08.1/T10.1/T13.1/T14.1 closure carries §PI inventory amendments), M4 (each of 6 registers — recommendations, training, minutes, library, sensitive-feed, audit — needs §PI inventory rows; training requires the PI-class adjudication per Fork 4), M6 (two new tables `retention_sweep_runs` + `audit_log_retention_schedule`, no PI but inventory rows required), M7 (recipient-identity narrowing G-T11-12; HG-10 copy review G-T11-17/18/19), M8 (no new PI but the off-app anchor email is a new disclosure surface), M10 (whole-app scope review).
+- **observability-setup** — required at M6 (A-RETENTION-001 sink), M7 (A-EXPORT-002 sink, A-REC-001 sink, recipient-identity meta routing), M8 (A-BACKUP-001/002/003 + A-AUDIT-001 + A-INTEGRITY-001/002 sinks), M9 (full pass — every `would_fire_alert` symbol gets a real sink; Sentry beforeSend extension G-T19-7).
+- **second-opinion-reviewer** — required at any auth-adjacent change per the §11 Phase-2 rule: M1 (F-116), M2 (key parity), M5 (role enforcement), and every closing PR of M3 / M4 sensitive-register intake.
+
+The orchestrator routes from here.
+
+**Reversibility:** the milestone ordering is high-reversibility — re-ordering individual milestones doesn't undo work, just changes when the human gates open. The architect-level decisions in §D are each medium-to-hard reversibility because they bind downstream PR shapes; that's why they're called out as decisions, not assumptions.
+
+**Superseded by:** none yet — this is the roadmap of record as of 2026-06-12. Future revisions append below as `## 2026-MM-DD — Roadmap revision: <reason>` and link to this entry.
+
+---
+
 ## ADR-0023 — Production Supabase foundation: GoTrue identity + Edge Functions + SupabaseCommitteeClient
 
 **Status:** Proposed (human gates: HG-15 new server↔DB trust boundary + §PI-inventory re-ratification for `auth.users`; auth-model change → **second-opinion-reviewer + threat-model required at PR**). User adjudicated the four scoping questions on 2026-05-26; threat-modeler returned **GO-WITH-CONDITIONS** (F-116–F-120, see threat-model.md §3.12).
