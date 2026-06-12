@@ -131,6 +131,24 @@ async function handleAssert(
       if (error || !data) throw new Error('create_session_failed');
       return { session_id: String(data) };
     },
+    // F-128: post-mint EXISTS check. Closes the TOCTOU race against a
+    // concurrent revoke_all_sessions landing between createSession() and
+    // signJwt(). Returns true if the jti is still live; false if it was
+    // revoked in the gap. Caller (mintSessionFromAssertion) maps false
+    // to the 'revoked_during_mint' MintResult variant and the handler
+    // below emits the auth.mint.revoked_during_mint audit row.
+    checkSessionLive: async ({ session_id }) => {
+      const { data, error } = await supabase.rpc('mint_is_session_live', {
+        p_session_id: session_id
+      });
+      if (error) {
+        // Treat lookup failure as fail-closed: assume not-live so we
+        // don't sign a JWT we cannot verify. The dispatcher logs the
+        // same way as a real race-loss (defense in depth).
+        return false;
+      }
+      return data === true;
+    },
     signJwt: (claims) => signSessionJwt(claims),
     now: () => Date.now()
   };
@@ -146,7 +164,25 @@ async function handleAssert(
   const result = await mintSessionFromAssertion(deps, input);
   if (!result.ok) {
     log.warn({ event: 'mint.assert', attributes: { route: 'assert', outcome: result.reason }, request_id: requestId });
-    return json({ ok: false, error: result.reason }, result.status);
+    // F-128: on 'revoked_during_mint', emit the durable audit row before
+    // returning. The wrapper hard-codes the event_type so the EF cannot
+    // mis-shape the row. Best-effort: a failure to emit the audit row
+    // does NOT change the 401 we owe the caller.
+    if (result.reason === 'revoked_during_mint') {
+      const { error: emitErr } = await supabase.rpc('mint_emit_revoked_during_mint', {
+        p_user_id: result.user_id,
+        p_request_id: requestId ?? null,
+        p_session_id: result.session_id
+      });
+      if (emitErr) {
+        log.error({ event: 'mint.assert', attributes: { route: 'assert', outcome: 'audit_emit_failed' }, request_id: requestId });
+      }
+    }
+    // Map 'revoked_during_mint' to the same client-facing shape as the
+    // existing post-revoke 401 — no information disclosure about the race.
+    const clientReason =
+      result.reason === 'revoked_during_mint' ? 'assertion_invalid' : result.reason;
+    return json({ ok: false, error: clientReason }, result.status);
   }
 
   // Persist the monotonic counter post-auth (clone-detection bookkeeping).

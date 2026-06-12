@@ -124,3 +124,93 @@ Deno.test('F-116 — the jti row is written before the token is signed', async (
   assert(res.ok);
   assertEquals(order, ['createSession', 'signJwt']);
 });
+
+// ===========================================================================
+// F-128 (ADR-0023 Amendment A) — post-mint EXISTS check closes the TOCTOU
+// race between createSession() and signJwt() against a concurrent
+// revoke_all_sessions landing in the gap.
+// ===========================================================================
+
+Deno.test('F-128 — checkSessionLive runs AFTER createSession AND BEFORE signJwt', async () => {
+  const order: string[] = [];
+  const deps = makeDeps({
+    createSession: async () => {
+      order.push('createSession');
+      return { session_id: 'sess-1' };
+    },
+    checkSessionLive: async () => {
+      order.push('checkSessionLive');
+      return true;
+    },
+    signJwt: async () => {
+      order.push('signJwt');
+      return 'x';
+    }
+  });
+  const res = await mintSessionFromAssertion(deps, INPUT);
+  assert(res.ok);
+  assertEquals(order, ['createSession', 'checkSessionLive', 'signJwt']);
+});
+
+Deno.test('F-128 — checkSessionLive returns false ⇒ MintResult is revoked_during_mint, signJwt is NEVER called', async () => {
+  let signerCalled = false;
+  const deps = makeDeps({
+    createSession: async () => ({ session_id: 'sess-1' }),
+    checkSessionLive: async () => false, // race lost
+    signJwt: async () => {
+      signerCalled = true;
+      return 'x';
+    }
+  });
+  const res = await mintSessionFromAssertion(deps, INPUT);
+  assertEquals(res.ok, false);
+  if (!res.ok) {
+    assertEquals(res.reason, 'revoked_during_mint');
+    assertEquals(res.status, 401);
+    // session_id + user_id are surfaced so the dispatcher can emit
+    // the audit row with the right target_id + actor (HMAC-derived
+    // pseudonym from user_id).
+    if (res.reason === 'revoked_during_mint') {
+      assertEquals(res.session_id, 'sess-1');
+      assertEquals(res.user_id, 'user-real-1');
+    }
+  }
+  assert(!signerCalled, 'signJwt must NOT be called when checkSessionLive returns false');
+});
+
+Deno.test('F-128 — when checkSessionLive is omitted (legacy fixture), the mint still completes', async () => {
+  // Backwards-compat: pre-Amendment-A test fixtures don't supply
+  // checkSessionLive. The core MUST behave identically to "always live"
+  // so existing harnesses don't break.
+  const deps = makeDeps({
+    createSession: async () => ({ session_id: 'sess-1' })
+    // checkSessionLive deliberately omitted
+  });
+  const res = await mintSessionFromAssertion(deps, INPUT);
+  assert(res.ok);
+  assertEquals(res.session_id, 'sess-1');
+});
+
+Deno.test('F-128 — checkSessionLive throws ⇒ propagates (dispatcher decides; no swallow)', async () => {
+  // Defense-in-depth: if the EXISTS check itself errors (db down),
+  // the core does NOT swallow it and pretend live=true. The throw
+  // bubbles up to the dispatcher, which decides whether to map to
+  // 503 / 401 / retry. The dispatcher in production maps the RPC
+  // error to live=false via its own fail-closed catch (see
+  // mint-session/index.ts checkSessionLive impl).
+  const deps = makeDeps({
+    createSession: async () => ({ session_id: 'sess-1' }),
+    checkSessionLive: async () => {
+      throw new Error('rpc_error');
+    }
+  });
+  let threw = false;
+  try {
+    await mintSessionFromAssertion(deps, INPUT);
+  } catch (e) {
+    threw = true;
+    assert(e instanceof Error);
+    assertEquals(e.message, 'rpc_error');
+  }
+  assert(threw, 'mintSessionFromAssertion must propagate checkSessionLive errors');
+});
