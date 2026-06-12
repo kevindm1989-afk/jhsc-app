@@ -221,6 +221,7 @@ jobs:
              supabase/migrations/00000000000015_adr0015_amend_i_retention_classes.sql \
              supabase/migrations/00000000000016_adr0024_key_parity_check.sql \
              supabase/migrations/00000000000017_adr0023_amend_a_f128.sql \
+             supabase/migrations/00000000000018_adr0024_key_parity_service_role_grant.sql \
              supabase/test/committee_rls.sql \
              supabase/test/mint_rls.sql \
              supabase/test/concerns_rls.sql \
@@ -254,7 +255,8 @@ jobs:
             00000000000011_t19_panic_wipe.sql \
             00000000000015_adr0015_amend_i_retention_classes.sql \
             00000000000016_adr0024_key_parity_check.sql \
-            00000000000017_adr0023_amend_a_f128.sql; do
+            00000000000017_adr0023_amend_a_f128.sql \
+            00000000000018_adr0024_key_parity_service_role_grant.sql; do
             echo "applying $f"
             sudo -u postgres psql -v ON_ERROR_STOP=1 -d jhsc_test -f "/tmp/dbtest/$f"
           done
