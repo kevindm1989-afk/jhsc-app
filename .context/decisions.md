@@ -346,6 +346,105 @@ Threat-modeler's §3.14 addendum (commit `6499f18`) produced the testable mitiga
 
 ---
 
+## ADR-0023 Amendment A (2026-06-12, M0 closure for M1) — F-116 enforcement uniformity + F-128 mint-session race post-mint EXISTS check
+
+**Amends ADR-0023** above (Decision 2 — "GoTrue is the RLS identity source, `auth_sessions` is the revocation authority"). Trigger: user adjudicated Fork 1 = **Option A** (per-EF `session_is_live(jti)` precheck) on 2026-06-12 + architect re-review of F-128 returned **Option 1** (bake post-mint EXISTS check into M1). Cross-references the production-deploy roadmap (`decisions.md` "2026-06-12 — Production-deploy readiness roadmap" + "2026-06-12 — Fork 1 + Fork 2 ratifications"), **ADR-0015 Amendment I** (the `auth.mint.revoked_during_mint` retention class), and **threat-model.md §3.14** F-116 / F-121 / F-122 / F-123 / F-128 (testable mitigations).
+
+### The problem ADR-0023 left open
+
+Decision 2 named `session_is_live(jti)` as the revocation authority but did NOT specify WHERE the call happens. The original threat-model §3.12 F-116 entry surfaced this as a residual — every privileged path "MUST" check `session_is_live`, but without a structural enforcement mechanism the rule decays to "best-effort" the moment a new op dispatcher gets added without a code-review catch. The §3.14 follow-up pass (M1 scope) named three options; the user chose Option A. This amendment binds Option A as durable architecture.
+
+A sibling-flaw was also surfaced by the threat-modeler in the same pass but NOT scoped by the architect's original fork: F-128 (mint-session race). The mint path is the ONE legitimate exemption from `session_is_live`, and that creates a TOCTOU window between `mint_create_session` inserting the jti row and `signSessionJwt` actually signing. A concurrent `revoke_all_sessions` between those two ops mints an already-revoked JWT. The architect re-reviewed on 2026-06-12 and chose Option 1 — bake the post-mint EXISTS check into M1. This amendment binds that decision as well.
+
+### The amendment
+
+#### 1. F-116 enforcement is structural via CI grep, not policy
+
+Every Edge Function op dispatcher MUST call `session_is_live(jti)` at the top of every privileged op. The check is enforced by `scripts/verify-session-live-uniformity.sh` (lands in M1 alongside the dispatcher changes). The script walks `supabase/functions/*/index.ts` and asserts that each exported op handler either:
+
+- (a) calls `session_is_live(jti)` before any other privileged work (the inspector pattern matches `\bsession_is_live\s*\(` appearing before the first `await this.deps.` or `await rpc\(` call), OR
+- (b) is named in the allowlist constant `MINT_SESSION_PATHS = ['mint-session/challenge', 'mint-session/assert']`.
+
+**Fail-closed:** the grep returns non-zero if a new op is added that fits neither category. The allowlist constant lives in `scripts/verify-session-live-uniformity.sh` and `supabase/functions/_shared/session-live-allowlist.ts` (referenced from both). Drift between the two is an additional CI assertion in the same script.
+
+**Allowlist comment-block invariant:** the allowlist constant MUST carry an adjacent comment block naming F-122 (the closed-set invariant) AND F-128 (the compensating EXISTS check the mint path performs instead). The comment block is matched by the CI grep; removing or weakening it fails the gate.
+
+#### 2. F-128 mint-session post-mint EXISTS check
+
+The mint path is the ONE allowlist entry and so does NOT call `session_is_live` (the jti was just minted by the same dispatcher; pre-checking would be tautological — it always returns true). To close the race between `mint_create_session` and `signSessionJwt`, the dispatcher MUST issue:
+
+```sql
+SELECT EXISTS (SELECT 1 FROM auth_sessions WHERE session_id = $1 AND revoked_at IS NULL)
+```
+
+immediately after `mint_create_session` returns and immediately before `signSessionJwt` runs. If the result is **false** — meaning a concurrent `revoke_all_sessions` landed in the gap — the dispatcher MUST:
+
+1. Return 401 to the caller (with a body shape matching the existing post-revoke 401 to avoid information disclosure about the race).
+2. Emit one `auth.mint.revoked_during_mint` audit row via `audit_emit`.
+3. NOT call `signSessionJwt` — the JWT is never minted.
+
+The EXISTS check is one indexed PK lookup (auth_sessions(session_id) is the primary key) on the connection the dispatcher already holds. The check moves INTO the `MintDeps.createSession` shape (post-RPC, pre-return) per the architect's re-review handoff, so the existing core-test signature is unchanged.
+
+#### 3. Orphan-row sub-rule
+
+A `signSessionJwt` throw between `mint_create_session` and the EXISTS check leaves an `auth_sessions` row with no live JWT. These orphans are bounded by the existing TTL-sweep against `auth_sessions.expires_at ≤ now()` — the same `exp ≤ 300s` boundary the live JWT would have used. The architect re-review explicitly ratified this as the sufficient compensating control:
+
+- Orphans are NOT queryable by `auth.uid()` (RLS policy `auth_sessions_select_self` gates on the requesting jti, not arbitrary jtis), so they leak no information to authenticated users.
+- The only information they leak is row-count to `service_role`, which already sees the full table.
+- T16.1 retention sweep covers the long-tail beyond the 300s TTL.
+
+No additional cleanup work for M1 — the existing TTL + RLS controls are the answer.
+
+#### 4. Allowlist-invariant expansion rule
+
+Expanding `MINT_SESSION_PATHS` beyond the two `mint-session` paths requires a new ADR-0023 amendment. No expansion via comment, no expansion via global pattern, no `// allowlist: dispatcher-X` annotations. The constant is named, exact, and reviewed.
+
+### Reversibility
+
+**Medium.** Removing the per-EF check is easy (one delete in each dispatcher + one CI gate removal), but reopens G-T05-1 (the residual the architect's M1 was scoped to close). The F-128 EXISTS check is one indexed SELECT — its cost is noise against the existing mint round-trips and its removal would reopen the documented race. The combined posture is the M1-locked baseline; weakening either half requires a successor ADR.
+
+## Consequences
+
+### Positive
+
+- F-116 moves from "design-time only" to "CI-enforced + grep-blocking." Every PR that adds a new privileged op fails CI until the dispatcher includes the check or the allowlist amendment lands.
+- F-128 closes the only race the architect's original Fork 1 left open. The audit row `auth.mint.revoked_during_mint` is a real-traffic detector for the race; without it, the F-116 reject on the second hop looks identical to a normal stale-jti reject in logs.
+- Asymmetry between mint and other paths is documented and bounded — the allowlist comment block names the compensating mechanism in-line.
+
+### Negative / accepted
+
+- One additional indexed PK lookup per mint (cost noise; the mint dispatcher already round-trips for `mint_create_session` at `mint-session/index.ts:127-134` and `mint_bump_counter` at `:154`).
+- CI grep adds ~30s to the hardening-gates job.
+
+### Risks
+
+- The grep is regex-based and a clever attacker writing a new dispatcher could route around it (e.g., importing `session_is_live` under an alias and calling it after the first RPC). Mitigation: the grep checks both that `session_is_live` appears AND that it appears before the first `await this.deps.` / `await rpc\(` call. Adversarial-reviewer signs off on the grep at M1 PR.
+- A new op added to an existing dispatcher might miss the precheck if the dispatcher's top-level entry point handles the routing rather than each op having its own function. Mitigation: M1 implementer normalizes every dispatcher to one-function-per-op so the grep's "before first RPC" semantics applies cleanly.
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.7 (Safeguards): the per-EF check is the structural enforcement of the session-revocation invariant; CI grep is the structural enforcement of the per-EF check.
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+- [x] No new trust boundary (B1 unchanged; the CI grep is a development-time check, not a runtime boundary).
+- [x] ADR-0023's "second-opinion-reviewer + threat-model re-pass required at PR" gate is preserved unchanged and extends to this amendment's M1 PR.
+
+## Cross-references
+
+- **`decisions.md` "2026-06-12 — Fork 1 + Fork 2 ratifications"** — the source decisions this amendment serves; HG-NEW-1/2/3 ratified by user.
+- **ADR-0015 Amendment I** — adds the `auth.mint.revoked_during_mint` retention class (separate PR, 24mo).
+- **threat-model.md §3.14** — F-116 (the original residual), F-121/F-122/F-123 (the testable mitigations the CI grep + allowlist serve), F-128 (the race + the EXISTS check mitigation).
+- **threat-model.md §3.12** — F-116 original entry, now closed by this amendment.
+
+## Follow-ups
+
+- [ ] **Implementer (M1 PR):** the per-EF check + allowlist constant + F-128 EXISTS check land in the single M1 PR (per F-121 scope). New CI script `scripts/verify-session-live-uniformity.sh` ships in the same PR.
+- [ ] **Test-writer (M1 PR):** must-fail-first tests for the F-116 uniformity grep + the F-128 race per threat-model.md §3.14 F-128 (both: deno test + live-stack integration). Both tests already specified in the threat model; no new test types.
+- [ ] **second-opinion-reviewer (M1 PR):** ADR-0023's existing "auth-model change" gate extends; second-opinion-reviewer signs off on the F-116 grep regex + the F-128 EXISTS check placement.
+- [ ] **security-reviewer (M1 PR):** signs off on the allowlist comment-block invariant and the regex coverage (alias-bypass scenario above).
+
+---
+
 ## ADR-0022 — T06.1 committee server: committee_membership migration + RLS + SupabaseCommitteeStore
 
 **Status:** Proposed (human gates: HG-15 new physical tables + §PI-inventory ack; second-opinion-reviewer at PR; pgTAP/Supabase integration). User adjudicated the four open questions on 2026-05-26.
