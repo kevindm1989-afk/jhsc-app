@@ -29,19 +29,78 @@
   /** @type {import('$lib/saved-views/saved-views').SavedView[]} */
   let views = [];
 
+  /** Sort mode for the rendered list. Persisted to localStorage. */
+  const SORT_STORAGE_KEY = 'jhsc-saved-views-sort';
+
+  /** @type {'newest' | 'oldest' | 'name-asc' | 'name-desc'} */
+  let sortMode = 'newest';
+
+  /** Pinned-only filter. Off by default. */
+  let pinnedOnly = false;
+
   /**
    * Worker-typed filter. Case-insensitive substring match against the
    * view's name + route. When empty (or whitespace), every view shows.
    */
   let nameFilter = '';
   $: nameFilterNorm = nameFilter.trim().toLowerCase();
-  $: filteredViews = nameFilterNorm
-    ? views.filter(
+
+  // Compose every active narrowing pass into the rendered list:
+  // pinned filter → name filter → sort.
+  $: narrowedViews = pinnedOnly ? views.filter((v) => v.pinnedToHome) : views;
+  $: nameFilteredViews = nameFilterNorm
+    ? narrowedViews.filter(
         (v) =>
           v.name.toLowerCase().includes(nameFilterNorm) ||
           v.route.toLowerCase().includes(nameFilterNorm)
       )
-    : views;
+    : narrowedViews;
+
+  $: filteredViews = sortViews(nameFilteredViews, sortMode);
+
+  /**
+   * Pure sort helper. Doesn't mutate input. Stable across re-renders
+   * because we always slice() first.
+   *
+   * @param {readonly import('$lib/saved-views/saved-views').SavedView[]} list
+   * @param {'newest' | 'oldest' | 'name-asc' | 'name-desc'} mode
+   */
+  function sortViews(list, mode) {
+    const arr = list.slice();
+    switch (mode) {
+      case 'oldest':
+        return arr.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      case 'name-asc':
+        return arr.sort((a, b) => a.name.localeCompare(b.name));
+      case 'name-desc':
+        return arr.sort((a, b) => b.name.localeCompare(a.name));
+      case 'newest':
+      default:
+        return arr.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    }
+  }
+
+  function persistSort() {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SORT_STORAGE_KEY, sortMode);
+      }
+    } catch {
+      // ignore — sort defaults to "newest" on the next mount
+    }
+  }
+
+  function loadSort() {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw === 'newest' || raw === 'oldest' || raw === 'name-asc' || raw === 'name-desc') {
+        sortMode = raw;
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   /** @type {HTMLInputElement | null} */
   let importInput = null;
@@ -168,8 +227,13 @@
   }
 
   onMount(() => {
+    loadSort();
     refresh();
   });
+
+  function onSortChange() {
+    persistSort();
+  }
 </script>
 
 <svelte:head>
@@ -223,17 +287,44 @@
   </div>
 
   {#if views.length > 0}
-    <label class="svp-filter" data-print="hide">
-      <span class="svp-filter-label">{t('common.savedViewsPage.filter_label')}</span>
-      <input
-        type="search"
-        class="svp-filter-input"
-        bind:value={nameFilter}
-        placeholder={t('common.savedViewsPage.filter_placeholder')}
-        data-testid="saved-views-filter-input"
-        aria-label={t('common.savedViewsPage.filter_aria')}
-      />
-    </label>
+    <div class="svp-controls" data-print="hide">
+      <label class="svp-filter">
+        <span class="svp-filter-label">{t('common.savedViewsPage.filter_label')}</span>
+        <input
+          type="search"
+          class="svp-filter-input"
+          bind:value={nameFilter}
+          placeholder={t('common.savedViewsPage.filter_placeholder')}
+          data-testid="saved-views-filter-input"
+          aria-label={t('common.savedViewsPage.filter_aria')}
+        />
+      </label>
+      <label class="svp-sort">
+        <span class="svp-sort-label">{t('common.savedViewsPage.sort_label')}</span>
+        <select
+          class="svp-sort-select"
+          bind:value={sortMode}
+          on:change={onSortChange}
+          data-testid="saved-views-sort-select"
+          aria-label={t('common.savedViewsPage.sort_aria')}
+        >
+          <option value="newest">{t('common.savedViewsPage.sort_newest')}</option>
+          <option value="oldest">{t('common.savedViewsPage.sort_oldest')}</option>
+          <option value="name-asc">{t('common.savedViewsPage.sort_name_asc')}</option>
+          <option value="name-desc">{t('common.savedViewsPage.sort_name_desc')}</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        class="svp-pinned-chip"
+        class:is-active={pinnedOnly}
+        data-testid="saved-views-pinned-only"
+        aria-pressed={pinnedOnly ? 'true' : 'false'}
+        on:click={() => (pinnedOnly = !pinnedOnly)}
+      >
+        {t('common.savedViewsPage.pinned_only')}
+      </button>
+    </div>
   {/if}
 
   {#if views.length === 0}
@@ -283,7 +374,18 @@
               data-route={v.route}
               data-id={v.id}
             >
-              <strong class="svp-name">{v.name}</strong>
+              <strong class="svp-name">
+                {v.name}
+                {#if v.pinnedToHome}
+                  <span
+                    class="svp-pinned-badge"
+                    data-testid="saved-views-pinned-badge"
+                    aria-label={t('common.savedViewsPage.pinned_badge_aria')}
+                  >
+                    {t('common.savedViewsPage.pinned_badge')}
+                  </span>
+                {/if}
+              </strong>
               <span class="svp-route">{v.route}{v.search}</span>
             </a>
             <button
@@ -339,10 +441,66 @@
   .svp-empty {
     font-size: 0.875rem;
   }
+  .svp-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.5rem;
+    margin-block-end: 0.75rem;
+  }
   .svp-filter {
     display: grid;
     gap: 0.25rem;
-    margin-block-end: 0.75rem;
+    flex: 1 1 auto;
+    min-inline-size: 12rem;
+  }
+  .svp-sort {
+    display: grid;
+    gap: 0.25rem;
+  }
+  .svp-sort-label {
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+  }
+  .svp-sort-select {
+    min-height: 2rem;
+    padding-inline: 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-fg);
+    font-size: 0.8125rem;
+  }
+  .svp-pinned-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    padding-inline: 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-bg-elevated);
+    color: var(--color-fg-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .svp-pinned-chip.is-active {
+    background: var(--color-tint-blue-bg);
+    color: var(--color-tint-blue-fg);
+    border-color: var(--color-tint-blue-border);
+    font-weight: 600;
+  }
+  .svp-pinned-badge {
+    display: inline-block;
+    margin-inline-start: 0.375rem;
+    padding-inline: 0.375rem;
+    border-radius: var(--radius-sm);
+    background: var(--color-tint-blue-bg);
+    color: var(--color-tint-blue-fg);
+    font-size: 0.625rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
   .svp-filter-label {
     font-size: 0.75rem;
