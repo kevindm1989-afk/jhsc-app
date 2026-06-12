@@ -280,6 +280,30 @@ The orchestrator routes from here.
 
 ---
 
+## 2026-06-12 — Fork 1 + Fork 2 ratifications (M0 closure for M1 + M2)
+
+User adjudicated the two architect-level forks from the production-deploy roadmap (§D above) on 2026-06-12:
+
+- **Fork 1 (M1 — F-116 session-revocation middleware home) = Option A.** Per-Edge-Function pre-check via `session_is_live(jti)` at the top of every op dispatcher. CI grep `scripts/verify-session-live-uniformity.sh` enforces uniformity; allowlist constant pins `mint-session/{challenge,assert}` as the only legitimate gate-skip. Closes G-T05-1 (remaining).
+- **Fork 2 (M2 — KEY_PARITY check home) = Option C (belt-and-braces).** BOTH a per-Edge-Function cold-start parity check AND a new deploy-time CI step running `supabase db query` against a SECURITY DEFINER fn `key_parity_server_sha()`. Both halves are fail-closed (no `--force` / `KEY_PARITY_SKIP` / `if: false` bypass). The G-T05-8 boot-smoke posture collapses into this same fork. Closes G-T05-2 + G-T05-8.
+
+Threat-modeler's §3.14 addendum (commit `6499f18`) produced the testable mitigations (F-121 through F-128). Three new human gates were ratified by the user in the same session:
+
+- **HG-NEW-1 (ratified 2026-06-12).** Approves the introduction of a new GitHub Actions secret carrying the production HMAC pseudonym key (or its derived SHA), classified `deploy-pipeline secret, privacy-adjacent`. Closes F-124 M-124b.
+- **HG-NEW-2 (ratified 2026-06-12).** Approves the new trust boundary **B9** (deploy-pipeline ↔ production-DB SHA-read path). Documented in `threat-model.md §1` alongside B1–B5 (the threat-modeler initially proposed "B6" but that identifier is taken by the retention service-role boundary; renumbered to B9). Closes F-125 boundary clarification.
+- **HG-NEW-3 (ratified 2026-06-12).** Approves the rotation atomic-swap-window policy: `$HMAC_PSEUDONYM_KEY` and Postgres `app.hmac_pseudonym_key` GUC rotate in lockstep; the deploy-time CI parity check is allowed to fail-and-retry-once before failing the deploy. Full runbook ships in M11; policy locked at M0. Closes F-124 M-124c.
+
+**Architect re-review queued (F-128 mint-session race).** Threat-modeler discovered a race between `mint_create_session` jti-insert and `signSessionJwt`: a concurrent `revoke_all_sessions` call during legitimate co-chair traffic can mint an already-revoked JWT. Proposed mitigation: post-mint `SELECT EXISTS … WHERE revoked_at IS NULL` check before signing. The architect was NOT asked to scope this in the original Fork 1 — sending back for ratification (does it become a hard requirement on M1, or is F-39's 5s client-side propagation enough residual?).
+
+**F-128 ratification (architect re-review, 2026-06-12)**: Option 1 — bake the post-mint integrity check into M1. Three drivers force the bundle: (a) the mint path is the ONE legitimate F-122 allowlist entry, so it's the ONE path the F-116-uniformity story explicitly does NOT cover — punting F-128 to M1.1 leaves a known race in the only un-gated dispatcher, which is the worst possible asymmetry for a security-reviewer to discover; (b) the cost is a single indexed PK lookup on a connection the dispatcher already holds (`mint-session/index.ts:127-134` already round-trips for `mint_create_session`, then again for `mint_bump_counter` at :154 — adding one EXISTS in between is noise against the existing chatter), so the M1 scope-creep is negligible; (c) the audit row `auth.mint.revoked_during_mint` gives us a real-traffic detector for the race, which we otherwise have no way to observe (the F-116 reject on the second hop looks identical to a normal stale-jti reject in logs). On the orphan-row sub-question: ratify the existing TTL-on-`auth_sessions` sweep as the sufficient compensating control — orphans from a `signSessionJwt` throw expire at the same `exp ≤ 300s` boundary the live JWT would have, they're not queryable by `auth.uid()` (RLS gates `auth_sessions_select_self` on the requesting jti, not arbitrary jtis), and the only information they leak is row-count to the service role, which already sees the full table. No additional cleanup work for M1; T16.1 retention sweep covers the long-tail. Bundling consequences for M0: ADR-0015 amendment adds three event-types (`key_parity.mismatch`, `key_parity.deploy_ok`, `auth.mint.revoked_during_mint`) in ONE migration + `retention_class_for()` update, all `'24mo'`. ADR-0023 amendment's F-122 allowlist comment names F-128 as the required compensating check (already drafted in F-123 M-123b / F-128 M-128b). M1 estimate unchanged (the check is ~5 LOC in the dispatcher + 2 tests; folds inside the existing F-121 PR scope).
+
+**ADR amendments needed in M0 before M1/M2 implementation kicks off (per threat-modeler §3.14 §5):**
+1. ADR-0015 amendment — add `key_parity.mismatch` + `key_parity.deploy_ok` to retention schedule (`'24mo'` class). Closes F-127.
+2. ADR-0023 amendment — formalize the CI grep `verify-session-live-uniformity.sh` as the F-116 enforcement-uniformity mechanism.
+3. NEW ADR-0024 — KEY_PARITY check posture (binds Fork 2 Option C as durable architecture). Lists the GH-Actions secret in the secret inventory.
+
+---
+
 ## ADR-0023 — Production Supabase foundation: GoTrue identity + Edge Functions + SupabaseCommitteeClient
 
 **Status:** Proposed (human gates: HG-15 new server↔DB trust boundary + §PI-inventory re-ratification for `auth.users`; auth-model change → **second-opinion-reviewer + threat-model required at PR**). User adjudicated the four scoping questions on 2026-05-26; threat-modeler returned **GO-WITH-CONDITIONS** (F-116–F-120, see threat-model.md §3.12).
