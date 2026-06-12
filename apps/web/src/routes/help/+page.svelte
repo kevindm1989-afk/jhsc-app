@@ -60,6 +60,9 @@
   <h2>{t('common.helpPage.recent_searches_heading')}</h2>
   <p>{t('common.helpPage.recent_searches_body')}</p>
 
+  <h2>{t('common.helpPage.recent_visits_heading')}</h2>
+  <p>{t('common.helpPage.recent_visits_body')}</p>
+
   <p class="help-footer" data-print="hide">
     <a href="/" data-testid="help-back-to-home">{t('common.helpPage.back_to_home_cta')}</a>
   </p>

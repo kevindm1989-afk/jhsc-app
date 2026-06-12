@@ -16,7 +16,7 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
-  import { listRecentRoutes } from '$lib/nav/recent-routes';
+  import { clearRecentRoutes, listRecentRoutes } from '$lib/nav/recent-routes';
   import { formatDateShort } from '$lib/ui/date-format';
 
   /** @type {import('$lib/nav/recent-routes').RecentRoute[]} */
@@ -24,6 +24,11 @@
 
   function refresh() {
     entries = listRecentRoutes();
+  }
+
+  function onClear() {
+    clearRecentRoutes();
+    refresh();
   }
 
   /**
@@ -60,6 +65,14 @@
   >
     <header class="rrc-header">
       <h2 id="rrc-heading">{t('home.recentRoutes.heading')}</h2>
+      <button
+        type="button"
+        class="rrc-clear"
+        data-testid="home-recent-routes-clear"
+        on:click={onClear}
+      >
+        {t('home.recentRoutes.clear')}
+      </button>
     </header>
     <ul class="rrc-list" data-testid="home-recent-routes-list">
       {#each entries as e (e.route)}
@@ -87,11 +100,27 @@
     margin-block-start: 1rem;
   }
   .rrc-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
     margin-block-end: 0.5rem;
   }
   .rrc-header h2 {
     margin: 0;
     font-size: 1rem;
+  }
+  .rrc-clear {
+    background: transparent;
+    border: none;
+    color: var(--color-fg-muted);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 0.125rem 0.25rem;
+    border-radius: var(--radius-sm);
+  }
+  .rrc-clear:hover {
+    color: var(--color-fg);
+    background: var(--color-muted);
   }
   .rrc-list {
     list-style: none;
