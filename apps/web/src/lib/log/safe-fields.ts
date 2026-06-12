@@ -34,7 +34,7 @@ export const SAFE_FIELDS: ReadonlySet<string> = new Set([
   // SHA values NEVER appear in any log emission (verify-no-sha-in-logs.sh
   // enforces this structurally).
   'key_parity.outcome',
-  'key_parity.surface',  // 'cold_start' | 'deploy_time' — never the SHA
+  'key_parity.surface', // 'cold_start' | 'deploy_time' — never the SHA
 
   // Audit-log echo
   'audit.event_type',
