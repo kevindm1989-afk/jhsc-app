@@ -245,7 +245,11 @@
       "import": "Import JSON",
       "import_announce": "Imported {added}, skipped {skipped} duplicate(s).",
       "import_error": "Couldn't read that file. Make sure it's a saved-views export.",
-      "back_to_home_cta": "Back to home"
+      "back_to_home_cta": "Back to home",
+      "duplicate": "Duplicate",
+      "copy_url": "Copy URL",
+      "copy_url_copied": "Copied",
+      "copy_url_failed": "Copy failed"
     },
     "helpPage": {
       "title": "Help",
@@ -259,7 +263,7 @@
       "report_heading": "Monthly report",
       "report_body": "/report rolls up activity across every register for a chosen month or year. Each total tile deep-links into the matching register. Use the print stylesheet for paper handouts.",
       "saved_views_heading": "Saved & pinned views",
-      "saved_views_body": "Click “Save view” on any register to bookmark its filtered URL under a name. Tick “Pin to home” to promote that view to the dashboard. Manage every saved view at /saved-views — rename, delete, pin/unpin, or export the whole set as JSON for another device.",
+      "saved_views_body": "Save the current URL — register, filter, sort, date range — under a worker-chosen label from the Save button on each register surface, or by visiting /saved-views to manage them all. Each row offers Pin (surfaces it on the home dashboard), Rename, Duplicate (forks the view so you can tweak the filter), Copy URL (clipboard the absolute deep link to share), and Delete. Saved views are per-device, stored locally; the Export / Import buttons move them between devices via a JSON file.",
       "recent_searches_heading": "Recent searches",
       "recent_searches_body": "The header search keeps your last five queries on this device. Focus the input to surface them as a dropdown and re-run with one click; the × removes a single entry. Searches are stored locally — no committee data leaves your device.",
       "recent_visits_heading": "Recently visited",
