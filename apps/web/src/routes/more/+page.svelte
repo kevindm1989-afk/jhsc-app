@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
   /**
    * /more — directory of every product surface in the app, grouped by
    * purpose. Bridges the discoverability gap between the small bottom
@@ -28,9 +28,10 @@
    */
   import { onMount } from 'svelte';
   import { t } from '$lib/i18n';
-  import { listRecentRoutes, type RecentRoute } from '$lib/nav/recent-routes';
+  import { listRecentRoutes } from '$lib/nav/recent-routes';
 
-  let recentRoutes: RecentRoute[] = [];
+  /** @type {import('$lib/nav/recent-routes').RecentRoute[]} */
+  let recentRoutes = [];
 
   onMount(() => {
     recentRoutes = listRecentRoutes();
