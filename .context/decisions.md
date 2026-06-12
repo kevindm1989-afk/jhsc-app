@@ -304,6 +304,201 @@ Threat-modeler's §3.14 addendum (commit `6499f18`) produced the testable mitiga
 
 ---
 
+## ADR-0024 — KEY_PARITY check posture: deploy-time + cold-start fail-closed parity for the production HMAC pseudonym key
+
+**Status:** Proposed (HG-NEW-1 + HG-NEW-2 + HG-NEW-3 ratified by user on 2026-06-12; this ADR awaits user merge as the durable architecture binding Fork 2 Option C of the production-deploy roadmap).
+
+**Date:** 2026-06-12
+
+**Decider(s):** architect + threat-modeler. User adjudicated Fork 2 = Option C ("belt-and-braces") on 2026-06-12.
+
+**Source:** `decisions.md` "2026-06-12 — Production-deploy readiness roadmap" §D Fork 2; `decisions.md` "2026-06-12 — Fork 1 + Fork 2 ratifications"; threat-model.md §3.14 F-124 / F-125 / F-126 / F-127; HG-NEW-1 (GH-Actions secret classification) / HG-NEW-2 (new trust boundary B9) / HG-NEW-3 (rotation atomic-swap window).
+
+## Context
+
+**ADR-0016** introduced the HMAC pseudonymization standard for Postgres + audit-log meta. The pseudonym key (`$HMAC_PSEUDONYM_KEY` in env, `app.hmac_pseudonym_key` GUC in Postgres) MUST match across all three derivation surfaces — Postgres (via the GUC), TypeScript application code (via `apps/web/src/lib/audit/pseudonym.ts` and the shared `key-parity.ts` self-test), and the audit-log meta written by SECURITY DEFINER functions. Equality at all three surfaces is what makes the cross-surface pseudonym property work: a row's pseudonym is the same regardless of which surface emitted it, so a forensic join across audit_log ↔ structured log ↔ Sentry is reproducible.
+
+**A mismatch silently corrupts the audit trail.** A row written under env-var-key X gets pseudonym(X, row_id); a row written under GUC-key Y gets pseudonym(Y, row_id). The two pseudonyms LOOK valid (both opaque hex strings) but a forensic join across them returns zero matches when there should be many. **Severity CRITICAL** per the original G-T05-2 framing and re-affirmed by threat-model.md §3.14 F-125.
+
+**The pre-existing safeguard** — the runtime self-test in `key-parity.ts` that checks `HMAC(known_input, key)` against an agreed canonical output — runs per-node-process at first request. If env-var X and GUC Y are mismatched, the first request that races through is detected, but a corrupted audit row may already exist. The race is also asymmetric: Edge Function processes recycle at vendor whim, so each new process re-runs the self-test, but a successful self-test in one process does NOT prevent a subsequent rotation half-completion from drifting the keys mid-deploy.
+
+**The two attack surfaces** the existing self-test misses:
+1. **Deploy-time drift.** Operator updates the GitHub Actions secret but forgets the GUC (or vice versa); the deploy ships, no request triggers a process boot until traffic arrives, and meanwhile any process that DOES boot writes corrupted rows under the new env key against the old GUC.
+2. **Runtime drift.** The GUC is `ALTER SYSTEM SET … RELOAD`-able at runtime by a privileged operator outside the deploy flow. The env var is fixed at deploy. A runtime GUC change without a redeploy creates a drift the cold-start check never sees because the process is already booted.
+
+## Decision drivers
+
+- **F-125 / G-T05-2 CRITICAL severity:** silent audit-trail corruption is the worst failure mode of the pseudonymization design and the load-bearing safeguard for ADR-0003 Amendment D (pseudonymized reprisal-feed projection) + ADR-0016 (operational-table HMAC standard).
+- **Deploy-time vs cold-start tradeoff:** deploy-time catches mismatches before any user traffic; cold-start catches mismatches that arise mid-deploy (rotation window, EF instance recycling, runtime GUC changes).
+- **No KMS / no external signer:** per ADR-0007 + ADR-0010, the key lives in-app and in Postgres GUC. There's no third-party authority to consult, so the check is structural between deploy pipeline and DB only.
+- **Annual rotation cadence (ADR-0016):** rotation is the load-bearing failure window. The deploy-time check MUST tolerate a brief drift during atomic-swap windows (HG-NEW-3 / M-125c) — exactly one retry with a documented backoff.
+- **Constraints baseline (`.context/constraints.md` §Application security):** input validation at every trust boundary; B9 is a new trust boundary under HG-NEW-2.
+
+## Options considered
+
+### Option A: cold-start check only (rejected)
+
+Each Edge Function runs `key_parity_check()` on first invocation per process; mismatch fails the request. Catches runtime drift on every process boot but leaves a window between deploy and the first cold-start where bad traffic can land. Most importantly, the FIRST request that boots a process is the one whose audit row gets corrupted — there is no "look before you write" path.
+
+### Option B: deploy-time check only (rejected)
+
+CI step runs `SELECT key_parity_server_sha()` against production Postgres post-deploy and compares to `sha256($HMAC_PSEUDONYM_KEY)` from the deploy env. Mismatch fails the deploy. Catches deploy-time drift cleanly but misses runtime drift (e.g., an operator runs `ALTER SYSTEM SET app.hmac_pseudonym_key = '...'; SELECT pg_reload_conf()` after deploy — architecturally possible on Supabase).
+
+### Option C: belt-and-braces (chosen)
+
+**Both** a deploy-time CI step AND a cold-start check inside each Edge Function on first invocation. The two halves are complementary: deploy-time catches the most common mistake (rotation half-completion at deploy); cold-start catches the rare-but-architecturally-possible runtime GUC change.
+
+## Decision (Option C)
+
+### 1. Deploy-time CI step
+
+On every production deploy, after `supabase functions deploy` and `supabase db push` complete, a GitHub Actions step `scripts/verify-key-parity-deploy.sh` runs:
+
+```bash
+# pseudo: actual script ships in M2 PR
+local_sha=$(printf '%s' "$HMAC_PSEUDONYM_KEY" | sha256sum | awk '{print $1}')
+server_sha=$(supabase db query --output csv "SELECT key_parity_server_sha()" | tail -1)
+[ "$local_sha" = "$server_sha" ] || { echo "KEY_PARITY MISMATCH"; exit 1; }
+```
+
+The DB function is:
+
+```sql
+CREATE FUNCTION key_parity_server_sha() RETURNS text
+  LANGUAGE plpgsql SECURITY DEFINER
+  AS $$
+  BEGIN
+    RETURN encode(
+      digest(current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'),
+      'hex'
+    );
+  END;
+  $$;
+ALTER FUNCTION key_parity_server_sha() OWNER TO migration_role;
+REVOKE EXECUTE ON FUNCTION key_parity_server_sha() FROM public;
+GRANT EXECUTE ON FUNCTION key_parity_server_sha() TO deploy_reader_role;
+```
+
+The function returns the SHA-256 of the GUC value — it does NOT return the key. `deploy_reader_role` is a new non-login role with EXECUTE on this function and nothing else (no BYPASSRLS, no SELECT on tables, no other GRANTs).
+
+**Mismatch ⇒ fail the deploy.** Hard requirement. No `--force` flag, no `KEY_PARITY_SKIP` env var, no `if: false` workflow gate (per F-126 M-126 the GitHub Actions workflow's `if:` is grep-asserted to be either absent or `if: success() && github.ref == 'refs/heads/main'`).
+
+**Audit emission on every call.** The function body emits `key_parity.deploy_ok` on success and `key_parity.mismatch` on failure (the latter is also the value the CI bash assertion fires on). Both event types carry retention class `'24mo'` per **ADR-0015 Amendment I**.
+
+### 2. Cold-start check inside every Edge Function
+
+Each Edge Function imports `_shared/key-parity.ts` (existing) and calls `assertKeyParity()` once per process on first invocation. The function:
+
+1. Reads `$HMAC_PSEUDONYM_KEY` from the EF environment.
+2. Calls `key_parity_server_sha()` against the project DB (re-uses the same SECURITY DEFINER function the deploy-time CI uses).
+3. Compares SHAs.
+4. **Mismatch ⇒ fail-closed the request with 500** + emit `key_parity.mismatch` audit row.
+5. Memoizes the result per-process so subsequent requests are not slowed.
+
+**No bypass.** The check is in the shared boot module; every EF imports it; a CI grep test asserts every `supabase/functions/*/index.ts` imports the shared module (per F-126 M-126b).
+
+### 3. New trust boundary B9 (ratified as HG-NEW-2 on 2026-06-12)
+
+The deploy-pipeline ↔ production-DB SHA-read path is **B9** per threat-model.md §1 (numbered B9 because B6/B6.1/B6.2 are the retention/backup/integrity service-role boundaries, B7/B8 are the backup-bucket + staging-egress boundaries). Credentials in scope: the new `deploy_reader_role` connection. Audit row emitted on every call (`key_parity.deploy_ok` on success, `key_parity.mismatch` on failure). No SELECT path beyond the one SECURITY DEFINER function; no BYPASSRLS; no GRANT on base tables.
+
+### 4. GitHub Actions secret classification (HG-NEW-1)
+
+The new GitHub Actions secret carrying `$HMAC_PSEUDONYM_KEY` (or its derived SHA — both classifications apply equivalently since the SHA narrows brute-force per F-124) is classified **`deploy-pipeline secret, privacy-adjacent`** in the secret inventory at `.context/secret-inventory.md` (lands in M2 PR alongside the migration). The SHA-of-key is non-secret-but-sensitive: never logged, never echoed in CI output, never in audit-log meta, never in Sentry breadcrumbs. `scripts/verify-no-sha-in-logs.sh` greps the structured-log emit surfaces (`apps/web/src/lib/log/`, `supabase/functions/_shared/log.ts`) for any code path that emits a SHA-of-key value; fail-closed.
+
+Privacy-reviewer signs off on the classification at the M2 PR.
+
+### 5. Rotation atomic-swap window (HG-NEW-3)
+
+Annual rotation per ADR-0016 cadence. The rotation procedure MUST update the GitHub Actions secret + Postgres GUC **in lockstep** within a documented atomic-swap window during which the deploy-time CI parity check is allowed to **fail-and-retry-once** before failing the deploy:
+
+- Attempt 1: compute local_sha, call `key_parity_server_sha()`, compare.
+- On mismatch: wait 30s, attempt 2 (single retry).
+- On mismatch again: fail the deploy.
+
+The retry window exists for the one corner-case where the operator updates the GUC after the GH-Actions secret in a rotation, and the secret-rotation has propagated to the runner but the GUC RELOAD lags by < 30s. Any larger drift IS a configuration error and the deploy should fail.
+
+The full rotation runbook ships in M11 (per the production-deploy roadmap); the **policy** is locked here at M0. No `KEY_PARITY_SKIP` escape hatch even during rotation windows.
+
+### 6. Entropy invariant
+
+`$HMAC_PSEUDONYM_KEY` MUST be ≥256 bits of OS-CSPRNG entropy at generation. `scripts/verify-key-entropy.sh` asserts:
+
+```bash
+[ "${#HMAC_PSEUDONYM_KEY}" -ge 64 ] || { echo "key too short — need ≥64 hex chars / 256 bits"; exit 1; }
+```
+
+(64 hex chars = 256 bits when hex-encoded; if base64-encoded, the equivalent length is 44 chars / ≥256 bits — the script accepts either encoding via length check on each.)
+
+The script runs in the `hardening-gates` CI job under a **synthetic key fixture**, NOT against the real production secret. The real secret is never read by CI outside the deploy job.
+
+Per F-124 M-124a.
+
+### Reversibility
+
+**Medium.** Removing the deploy-time step (falling back to Option A) reopens F-125 silent-corruption window. Removing the cold-start check (falling back to Option B) reopens the runtime-drift window. The combined posture is the M0-locked baseline; weakening either half requires a successor ADR. The migration that creates `key_parity_server_sha()` + `deploy_reader_role` is reversible only as long as no `key_parity.*` audit rows exist (their retention class is `'24mo'` per ADR-0015 Amendment I, so once rows exist the role + function must remain referenceable).
+
+## Consequences
+
+### Positive
+
+- G-T05-2 (silent audit-trail corruption) and G-T05-8 (boot-smoke posture coverage) are structurally closed at both the deploy boundary and the runtime boundary.
+- The audit row `key_parity.deploy_ok` is a positive heartbeat: forensic queries can establish "deploy X passed parity check at time T" with the same query path as any other audit event.
+- The new trust boundary B9 is minimal — one SECURITY DEFINER function, one non-login role, one EXECUTE grant. No expansion possible without an ADR amendment.
+- The entropy invariant catches the lowest-cost class of key-generation mistake (operator copy-pastes a 16-char dev key into production).
+
+### Negative / accepted tradeoffs
+
+- A deploy now requires a successful DB connection during CI. The CI step takes ~1-2s in steady state; up to ~33s during a rotation atomic-swap window (30s retry).
+- The GitHub Actions secret inventory expands by one entry. Privacy-reviewer adds the classification on the M2 PR.
+- One extra SECURITY DEFINER function + one extra role on the production project (B9 surface). Migration-handler signs off on the role-grant chain at M2 PR.
+- Cold-start adds one DB round-trip per EF process boot. Memoized; not per-request.
+
+### Risks
+
+- A new Edge Function added without importing `_shared/key-parity.ts` would bypass the runtime half. **Mitigation:** CI grep `scripts/verify-key-parity-import.sh` asserts every `supabase/functions/*/index.ts` imports the shared boot module. Adversarial-reviewer signs off on the grep at M2 PR.
+- The GH-Actions secret could leak via CI log misuse (e.g., a workflow step that `echo $HMAC_PSEUDONYM_KEY`s by mistake). **Mitigation:** F-124 M-124b classification + `verify-no-sha-in-logs.sh` grep test. Secret-inventory drift CI assertion.
+- A future rotation procedure that violates the atomic-swap window (e.g., updates GUC without updating GH-Actions secret) will fail the deploy by design; if operator panics and tries to bypass, there is no bypass path — they MUST complete the rotation. This is the intended behavior, recorded here so an on-call operator finds it in the runbook.
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.5 (Limiting Retention): no new PI retained — the SHA-of-key is non-PI (and SHA-of-key emission is forbidden per F-124 M-124b).
+- [x] PIPEDA Principle 4.7 (Safeguards): structurally protects the pseudonymization invariant that underpins ADR-0003 Amendment D + ADR-0016. The two-half check is the safeguard's enforcement mechanism.
+- [x] PIPEDA Principle 4.9 (Individual Access): the audit rows `key_parity.deploy_ok` and `key_parity.mismatch` are queryable through the standard audit-log access path; no extra access mechanism needed.
+- [x] PIPEDA s.10.1 breach-record floor (24mo): both audit event types are at 24mo per ADR-0015 Amendment I, matching the breach-record floor.
+- [x] No new third-party processor (parity check uses the same Supabase project + GitHub Actions surface already in scope).
+- [x] No new cross-border flow (`ca-central-1` Postgres only).
+- [x] New trust boundary B9 disclosed in threat-model.md §1 and ratified under HG-NEW-2.
+- [x] `.context/constraints.md` §Application security ("Input validation at every trust boundary"): the SHA-comparison IS the validation at B9.
+- [x] ADR-0007 (concern-intake committee-members-only) and ADR-0010 (Sentry strict scrubbing) unchanged — SHA-of-key is added to the Sentry breadcrumb scrub list.
+
+## Cross-references
+
+- **ADR-0016** — HMAC pseudonymization standard (the surface this ADR hardens).
+- **ADR-0015 Amendment I** — retention class for `key_parity.mismatch` + `key_parity.deploy_ok` (separate PR).
+- **ADR-0023 + Amendment A** — Edge Functions + per-EF enforcement uniformity (the CI grep family this ADR's `verify-key-parity-import.sh` joins).
+- **ADR-0003 Amendment D** — pseudonymized reprisal-feed projection (the user-facing surface whose forensic equality property this ADR's parity check protects).
+- **ADR-0010** — Sentry breadcrumb scrub list (extended in M2 PR to include SHA-of-key).
+- **threat-model.md §3.14** — F-124 (HMAC entropy invariant) / F-125 (deploy-time mismatch) / F-126 (no bypass / no `if: false`) / F-127 (retention-class anchor).
+- **`decisions.md` "2026-06-12 — Fork 1 + Fork 2 ratifications"** — the source ratifications block; HG-NEW-1/2/3 ratified there.
+
+## Follow-ups
+
+- [ ] **Migration PR (M0, separate, lands before M2 implementation):** creates `key_parity_server_sha()` + `deploy_reader_role` + GRANT EXECUTE + REVOKE FROM public. Migration-handler signs off on the role-grant chain.
+- [ ] **M2 PR (deploy CI step + EF cold-start integration):**
+  - `scripts/verify-key-parity-deploy.sh` — the deploy-time bash script.
+  - `scripts/verify-key-entropy.sh` — the entropy CI gate (hardening-gates job, synthetic-key fixture).
+  - `scripts/verify-no-sha-in-logs.sh` — the SHA-emission grep gate.
+  - `scripts/verify-key-parity-import.sh` — the EF-import grep gate.
+  - `supabase/functions/_shared/key-parity.ts` — extended to call `key_parity_server_sha()` on cold-start and memoize.
+  - GitHub Actions workflow update: add `key-parity-check` step to deploy job; remove any `if:` clauses that bypass it.
+  - Secret-inventory PR amends `.context/secret-inventory.md` with the new entry.
+- [ ] **M11 PR (rotation runbook):** atomic-swap-window procedure ships as `docs/runbooks/hmac-key-rotation.md`. The policy here is the load-bearing constraint; the runbook is the operator's procedure.
+- [ ] **Test-writer:** must-fail-first tests for the four CI scripts; an integration test that simulates a parity mismatch and asserts the deploy fails + the audit row lands; an EF cold-start test that simulates a mid-process GUC change (rare but architecturally possible).
+- [ ] **security-reviewer + second-opinion-reviewer (M2 PR):** the existing ADR-0023 "auth-model change → second-opinion-reviewer required" gate extends to this ADR's M2 PR because the cross-surface pseudonym property is the load-bearing safeguard for the auth-model's privacy posture.
+- [ ] **privacy-reviewer (M2 PR):** signs off on the secret classification + the audit-log meta surface for the two new event types.
+
+---
+
 ## ADR-0023 — Production Supabase foundation: GoTrue identity + Edge Functions + SupabaseCommitteeClient
 
 **Status:** Proposed (human gates: HG-15 new server↔DB trust boundary + §PI-inventory re-ratification for `auth.users`; auth-model change → **second-opinion-reviewer + threat-model required at PR**). User adjudicated the four scoping questions on 2026-05-26; threat-modeler returned **GO-WITH-CONDITIONS** (F-116–F-120, see threat-model.md §3.12).
