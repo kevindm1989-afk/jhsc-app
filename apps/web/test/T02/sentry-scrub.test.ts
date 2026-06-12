@@ -125,6 +125,45 @@ describe('T02 / ADR-0010 / F-09 — Sentry scrubber', () => {
     expect(scrubbed2).not.toContain(CANARY_PRIVKEY_SHAPE);
   });
 
+  // --- ADR-0024 §4 / F-124 M-124b SHA-of-key denylist ------------------
+
+  it('T02 / ADR-0024 §4 — redacts hmac_pseudonym_key value in `extra`', () => {
+    const ev: SentryEvent = {
+      extra: {
+        // A foreign exception path could shovel an env-var snapshot
+        // through the SDK. The denylist match wins regardless of value.
+        hmac_pseudonym_key: 'fake-key-value-must-be-redacted-not-passed-through',
+        innocent: 'kept'
+      }
+    };
+    const out = beforeSend(ev);
+    expect(out).not.toBeNull();
+    const serialized = JSON.stringify(out!);
+    expect(serialized).not.toContain('fake-key-value-must-be-redacted-not-passed-through');
+    expect(serialized).toContain('innocent');
+  });
+
+  it('T02 / ADR-0024 §4 — redacts SHA-bearing variable names (_envKeyShaHex, _tsKeyShaHex)', () => {
+    const ev: SentryEvent = {
+      extra: {
+        _envKeyShaHex: 'a'.repeat(64), // 64-hex SHA shape
+        _tsKeyShaHex: 'b'.repeat(64),
+        serverShaHex: 'c'.repeat(64),
+        envSha: 'd'.repeat(64),
+        serverSha: 'e'.repeat(64)
+      }
+    };
+    const out = beforeSend(ev);
+    expect(out).not.toBeNull();
+    const serialized = JSON.stringify(out!);
+    // None of the synthetic SHA values land in the serialized event.
+    expect(serialized).not.toContain('a'.repeat(64));
+    expect(serialized).not.toContain('b'.repeat(64));
+    expect(serialized).not.toContain('c'.repeat(64));
+    expect(serialized).not.toContain('d'.repeat(64));
+    expect(serialized).not.toContain('e'.repeat(64));
+  });
+
   // --- User object hygiene ---------------------------------------------
 
   it('T02 / ADR-0010 — strips user.email / user.username / user.ip_address; keeps only pseudonym in user.id', () => {

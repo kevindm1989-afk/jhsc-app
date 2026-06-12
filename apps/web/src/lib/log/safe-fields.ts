@@ -26,6 +26,15 @@ export const SAFE_FIELDS: ReadonlySet<string> = new Set([
   'auth.result',
   'auth.totp_consumed',
   'auth.session_id_pseudonym',
+  // ADR-0023 Amendment A / F-128: mint-session race-loss detector. The
+  // value is a closed-set literal ('mismatch' | 'ok'); no PI surface.
+  'auth.mint.outcome',
+  // ADR-0024 §2: cold-start HMAC pseudonym key parity check outcome.
+  // The value is a closed-set literal ('mismatch' | 'ok'); the actual
+  // SHA values NEVER appear in any log emission (verify-no-sha-in-logs.sh
+  // enforces this structurally).
+  'key_parity.outcome',
+  'key_parity.surface',  // 'cold_start' | 'deploy_time' — never the SHA
 
   // Audit-log echo
   'audit.event_type',

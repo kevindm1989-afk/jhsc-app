@@ -165,7 +165,24 @@ export const PI_KEY_DENYLIST: ReadonlySet<string> = new Set([
   'form_data',
   'formdata',
   'req_body',
-  'request_body'
+  'request_body',
+
+  // ADR-0024 §4 / F-124 M-124b (HG-NEW-1 ratified 2026-06-12):
+  // The HMAC pseudonym key value, its SHA, and the env-var name MUST
+  // NEVER land in Sentry breadcrumbs / events. The static gate
+  // scripts/verify-no-sha-in-logs.sh prevents these names from
+  // appearing in log emission surfaces at all; the runtime denylist
+  // entries below are defense-in-depth for the case where a foreign
+  // path (e.g., an unexpected exception with a captured local scope)
+  // tries to ship one of these as a key:value pair to Sentry.
+  // Lowercased — the denylist match at the redactInPlace call site uses
+  // `key.toLowerCase()`, so add entries pre-lowered to avoid drift.
+  'hmac_pseudonym_key',
+  '_envkeyshahex',
+  '_tskeyshahex',
+  'servershahex',
+  'envsha',
+  'serversha'
 ]);
 
 export const C4_KEY_PANIC: ReadonlySet<string> = new Set([
