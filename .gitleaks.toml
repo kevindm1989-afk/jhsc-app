@@ -29,4 +29,5 @@ paths = [
   '''apps/web/test/T02/sentry-scrub\.test\.ts''',
   '''supabase/functions/_shared/test/key-parity\.test\.ts''',
   '''\.github/workflows/ci\.yml''',
+  '''\.github/workflows/deploy-production\.yml''',
 ]
