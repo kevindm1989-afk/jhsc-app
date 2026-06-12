@@ -23,6 +23,7 @@
     recordRecentSearch
   } from '$lib/search/recent-searches';
   import { hrefForSavedView, listPinnedSavedViews } from '$lib/saved-views/saved-views';
+  import { listRecentRoutes } from '$lib/nav/recent-routes';
 
   /** @type {HTMLInputElement | null} */
   let inputEl = null;
@@ -32,6 +33,9 @@
 
   /** @type {import('$lib/saved-views/saved-views').SavedView[]} */
   let pinnedViews = [];
+
+  /** @type {import('$lib/nav/recent-routes').RecentRoute[]} */
+  let recentRoutes = [];
 
   /** Whether the dropdown panel is open. */
   let recentsOpen = false;
@@ -68,10 +72,13 @@
    *               | { kind: 'recent', href: string, query: string }>}
    */
   function buildItems() {
-    /** @type {Array<{ kind: 'pinned' | 'recent', href: string, query?: string }>} */
+    /** @type {Array<{ kind: 'pinned' | 'route' | 'recent', href: string, query?: string }>} */
     const items = [];
     for (const v of pinnedViews) {
       items.push({ kind: 'pinned', href: hrefForSavedView(v) });
+    }
+    for (const r of recentRoutes) {
+      items.push({ kind: 'route', href: r.route });
     }
     for (const q of recents) {
       items.push({ kind: 'recent', href: `/search?q=${encodeURIComponent(q)}`, query: q });
@@ -82,12 +89,13 @@
   function refreshRecents() {
     recents = listRecentSearches();
     pinnedViews = listPinnedSavedViews();
+    recentRoutes = listRecentRoutes();
     activeIndex = -1;
   }
 
   async function openRecents() {
     refreshRecents();
-    if (recents.length > 0 || pinnedViews.length > 0) {
+    if (recents.length > 0 || pinnedViews.length > 0 || recentRoutes.length > 0) {
       recentsOpen = true;
       await tick();
     }
@@ -251,7 +259,7 @@
       on:input={onInputInput}
     />
   </label>
-  {#if recentsOpen && (recents.length > 0 || pinnedViews.length > 0)}
+  {#if recentsOpen && (recents.length > 0 || pinnedViews.length > 0 || recentRoutes.length > 0)}
     <div
       id="header-search-recents-panel"
       class="hs-recents"
@@ -286,11 +294,38 @@
           {/each}
         </ul>
       {/if}
+      {#if recentRoutes.length > 0}
+        <p class="hs-recents-label">{t('common.headerSearch.routes_label')}</p>
+        <ul class="hs-recents-list" data-testid="header-search-routes">
+          {#each recentRoutes as r, j (r.route)}
+            {@const flatIdx = pinnedViews.length + j}
+            <li
+              class="hs-recents-row"
+              class:is-active={activeIndex === flatIdx}
+              data-testid="header-search-route-row"
+              data-active={activeIndex === flatIdx ? 'true' : 'false'}
+            >
+              <a
+                id={`header-search-item-${flatIdx}`}
+                href={r.route}
+                class="hs-recents-link hs-route-link"
+                data-testid="header-search-route-link"
+                data-route={r.route}
+                role="option"
+                aria-selected={activeIndex === flatIdx ? 'true' : 'false'}
+                on:click={closeRecents}
+              >
+                {r.route}
+              </a>
+            </li>
+          {/each}
+        </ul>
+      {/if}
       {#if recents.length > 0}
         <p class="hs-recents-label">{t('common.headerSearch.recent_label')}</p>
         <ul class="hs-recents-list">
           {#each recents as q, j (q)}
-            {@const flatIdx = pinnedViews.length + j}
+            {@const flatIdx = pinnedViews.length + recentRoutes.length + j}
             <li
               class="hs-recents-row"
               class:is-active={activeIndex === flatIdx}

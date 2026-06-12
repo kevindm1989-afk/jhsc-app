@@ -132,7 +132,8 @@
       "recent_label": "Recent",
       "recent_aria": "Recent searches",
       "recent_remove_aria": "Remove {query} from recent searches",
-      "pinned_label": "Pinned views"
+      "pinned_label": "Pinned views",
+      "routes_label": "Recently visited"
     },
     "csvDownload": {
       "button": "Download CSV",
@@ -262,6 +263,8 @@
       "saved_views_body": "Click “Save view” on any register to bookmark its filtered URL under a name. Tick “Pin to home” to promote that view to the dashboard. Manage every saved view at /saved-views — rename, delete, pin/unpin, or export the whole set as JSON for another device.",
       "recent_searches_heading": "Recent searches",
       "recent_searches_body": "The header search keeps your last five queries on this device. Focus the input to surface them as a dropdown and re-run with one click; the × removes a single entry. Searches are stored locally — no committee data leaves your device.",
+      "recent_visits_heading": "Recently visited",
+      "recent_visits_body": "Every time you navigate to a register, your device remembers the route. The dashboard's “Recently visited” card and the header search dropdown both surface the last five so you can jump back into surfaces you were working with. Stored locally; press “Clear” on the card to wipe the history.",
       "back_to_home_cta": "Back to home"
     },
     "errorPage": {
@@ -1009,6 +1012,7 @@
     },
     "recentRoutes": {
       "heading": "Recently visited",
+      "clear": "Clear",
       "just_now": "just now",
       "minutes_ago": "{n}m ago",
       "hours_ago": "{n}h ago"
