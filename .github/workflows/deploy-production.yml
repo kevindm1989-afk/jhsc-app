@@ -1,0 +1,112 @@
+name: Deploy production
+
+# M11 stub — production deploy workflow.
+#
+# This workflow is MANUAL-ONLY (workflow_dispatch). It is NOT scheduled,
+# NOT triggered on push, and NOT triggered on PR. The hard human gate
+# from the architect's M11 row in the production-deploy readiness
+# roadmap is enforced at the start-button:
+#
+#   - The workflow only runs when a maintainer clicks "Run workflow"
+#     from the Actions tab AND confirms the environment.
+#   - GitHub's `environment: production` gate adds a second human
+#     confirmation in the GitHub UI (required reviewers, wait timer,
+#     and deployment branch policies — configured in repo settings).
+#
+# What this workflow ACTUALLY does today (the stub):
+#   1. Checkout + setup.
+#   2. Run scripts/verify-key-parity-deploy.sh against $DEPLOY_DB_URL
+#      with $HMAC_PSEUDONYM_KEY from the production secret store.
+#      This is ADR-0024 §1 / F-125 / F-126: the deploy fails closed
+#      on key-parity mismatch.
+#
+# What this workflow does NOT do yet (M11 follow-ups):
+#   - Actually run `supabase functions deploy` / `supabase db push`.
+#   - Run the smoke test against the deployed stack.
+#   - Wire the rollback path (rollback-orchestrator + the M11 runbook).
+#   - Wire post-deploy observability check-ins.
+#   - Sentry release tagging.
+#
+# Each is its own M11.x follow-up. This stub establishes the workflow
+# shape + the verify-key-parity-deploy contract; the deploy steps land
+# in subsequent PRs.
+#
+# Authority: ADR-0024 §1 + §5 + HG-NEW-1/2/3; docs/runbooks/
+# hmac-key-rotation.md; .context/secret-inventory.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: "Type PRODUCTION to confirm you mean production"
+        required: true
+        type: string
+      reason:
+        description: "Short reason for this deploy (free-form, surfaces in the audit log)"
+        required: true
+        type: string
+
+# The `production` environment is configured in repo Settings →
+# Environments with required reviewers + wait timer. The
+# environment: declaration here is what binds the run to that gate.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never auto-cancel a deploy mid-flight
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Confirm input — refuse the run if the operator did not type PRODUCTION
+        # Belt-and-braces alongside GitHub's required-reviewer gate. The
+        # required: true on workflow_dispatch ensures a value is provided,
+        # but does NOT enforce the literal value. Enforced here at step
+        # exit — fail-closed before checkout.
+        if: ${{ inputs.confirm_production != 'PRODUCTION' }}
+        run: |
+          echo "::error::confirm_production input must be exactly 'PRODUCTION', got '${{ inputs.confirm_production }}'"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install psql + sha256sum dependencies
+        # verify-key-parity-deploy.sh needs psql + sha256sum. The
+        # ubuntu-22.04 runner ships sha256sum; psql comes from
+        # postgresql-client.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: KEY_PARITY deploy-time check (ADR-0024 §1 / F-125 / F-126)
+        # The one thing this stub actually does. Fails closed on a
+        # mismatch; allows one 30s retry per ADR-0024 §5 (HG-NEW-3
+        # atomic-swap allowance). No bypass.
+        env:
+          HMAC_PSEUDONYM_KEY: ${{ secrets.HMAC_PSEUDONYM_KEY }}
+          DEPLOY_DB_URL: ${{ secrets.DEPLOY_DB_URL }}
+        run: bash scripts/verify-key-parity-deploy.sh
+
+      - name: Deploy artifacts (PLACEHOLDER — M11.x follow-up)
+        # Subsequent M11 PRs replace this step with the real deploy
+        # mechanics: supabase functions deploy + supabase db push +
+        # post-deploy smoke test. Today this step echoes the deploy
+        # context so a maintainer can confirm the workflow shape
+        # without actually pushing anything to production.
+        run: |
+          echo "M11 stub — no actual deploy performed yet."
+          echo "Reason: ${{ inputs.reason }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "When the real deploy lands, this step:"
+          echo "  - Runs 'supabase functions deploy --project-ref \$SUPABASE_PROJECT_REF' for each EF"
+          echo "  - Runs 'supabase db push --linked' for migrations"
+          echo "  - Runs the post-deploy smoke test against the deployed stack"
+          echo "  - Tags the Sentry release"
+          echo "  - Emits an 'audit.deploy.production' audit row (event_type not yet in the closed enum)"
