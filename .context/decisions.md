@@ -3746,6 +3746,65 @@ The retention pass continues to emit exactly one `retention.deleted` summary row
 
 ---
 
+# ADR-0015 Amendment I (2026-06-12, M0 closure for M1 mint-session race + M2 KEY_PARITY check): three new event-types added to retention schedule (all 24mo)
+
+**Amends ADR-0015** above. Trigger: the user's adjudication of Fork 1 = Option A (M1) and Fork 2 = Option C (M2) on 2026-06-12, plus the architect's re-review of F-128 returning Option 1 (post-mint EXISTS check baked into M1). Cross-references the production-deploy roadmap (`decisions.md` "2026-06-12 — Production-deploy readiness roadmap" + "2026-06-12 — Fork 1 + Fork 2 ratifications"), **ADR-0023 Amendment A** (F-116 enforcement uniformity + the F-128 EXISTS check is what emits `auth.mint.revoked_during_mint`), **ADR-0024** (KEY_PARITY check posture is what emits `key_parity.mismatch` and `key_parity.deploy_ok`), and **threat-model.md §3.14** F-124 / F-125 / F-127 / F-128 (the testable mitigations the new event-types serve).
+
+### The three new rows (added to the ADR-0015 schedule table)
+
+| Event type | Retention | PIPEDA 4.5 justification |
+|---|---|---|
+| `key_parity.mismatch` | **24 months** | F-125 forensic anchor. A parity mismatch is a structural safeguard failure (Principle 4.7): it means the cross-surface pseudonym equality property (Postgres ↔ TS ↔ audit-log meta ↔ Sentry) is broken and an unknown number of audit rows landed under a wrong-key pseudonym. The audit row is the ONLY durable trace of when the failure window opened and closed. Forensic value runs to the next breach-detection cycle + one full ADR-0016 annual rotation window, giving 24 months as the minimum needed to defend against "did the deploy-time check actually run, and what did it find?" challenges in a post-incident review. 24 months also matches the PIPEDA s.10.1 breach-record floor since a parity mismatch IS a breach-relevant safeguard event. |
+| `key_parity.deploy_ok` | **24 months** | The success counterpart of `key_parity.mismatch`. Forensic asymmetry is the failure mode this row protects against: absence of a `deploy_ok` row in a forensic window IS the breach signal ("we cannot prove the parity check ran on deploy X"). Symmetric 24-month retention is mandatory — a shorter window on the success row would create an "untestable safeguard" gap during a post-incident review of an old deploy. |
+| `auth.mint.revoked_during_mint` | **24 months** | F-128 race detector. The audit row fires when the mint-session post-mint EXISTS check rejects a JWT because a concurrent `revoke_all_sessions` landed between `mint_create_session` and `signSessionJwt`. Forensic purpose: (1) detecting persistent racing patterns (an attacker timing revokes against mints, or a buggy rotation flow); (2) explaining a user-facing "your session expired immediately after login" complaint. 24 months matches `alert.fired` because the row is alert-adjacent — every emission represents a deliberately rejected mint, which feeds the same breach-response workflow as other auth-stage alerts. Note: this row is NOT linked via `target_id` to a single record (the auth_sessions row whose minting was rejected has already been hard-revoked); the underlying-record-ceiling rule in ADR-0015 §3.5 does NOT apply, so the 24-month floor governs absolutely. |
+
+### Migration scope (M0, lands before M1 and M2)
+
+ONE migration adds:
+1. Three new rows to `audit_log_retention_schedule` with the values above.
+2. Three new values to the `event_type` CHECK constraint / enum (per ADR-0003 Amendment A "closed enum" rule).
+3. Three new `WHEN` branches in `retention_class_for()` mapping each to `'24mo'`.
+
+The migration is one PR, separate from this ADR, and ships before any M1 or M2 implementation code (per the Fork 1+2 ratifications block in `decisions.md`).
+
+### Schema invariants preserved (no change from ADR-0015)
+
+- **`audit_log.retention_class text NOT NULL`** continues to be populated by `audit_emit` at write time; the three new emit-sites (M1 mint dispatcher for `revoked_during_mint`; M2 deploy CI step for `deploy_ok`; M2 EF cold-start for `mismatch`) all call `audit_emit` and the function looks up the class from the schedule.
+- **CI drift assertion** continues to enforce: every value in the `event_type` CHECK has exactly one row in `audit_log_retention_schedule`; the three new values are covered by the same assertion.
+- **Underlying-record-ceiling rule (ADR-0015 §3.5)** is preserved unchanged. None of the three new event types links to a `target_id` in a way that the ceiling rule could prune: `key_parity.*` are deploy / runtime events with no target record; `auth.mint.revoked_during_mint` carves out per the table note above.
+- **`retention.deleted` summary row's `audit_log_per_event_type` jsonb** now includes the three new keys when rows are aged out.
+
+### Reversibility
+
+**Easy** on values (three additional rows in the schedule table; reversing is a downgrade migration removing the rows + enum values, safe as long as no rows of those types exist yet). **Hard** to roll back after rows exist (per ADR-0015's reversibility note, which applies recursively).
+
+## Compliance check
+
+- [x] PIPEDA Principle 4.5 (Limiting Retention): each row has a documented purpose; none exceeds the 24-month floor needed for its forensic purpose.
+- [x] PIPEDA Principle 4.7 (Safeguards): the `key_parity.*` rows are themselves the durable evidence of the safeguard's operation; minimizing them below 24 months would defeat the safeguard.
+- [x] PIPEDA Principle 4.9 (Individual Access): `auth.mint.revoked_during_mint` is queryable through the audit-log access path; no extra access mechanism needed.
+- [x] PIPEDA s.10.1 breach-record floor (24 months): all three rows meet or exceed.
+- [x] `.context/constraints.md` "at least 1 year" audit-log floor: all three meet or exceed.
+- [x] No new third-party processor.
+- [x] No new cross-border flow.
+- [x] Coherent with ADR-0012 crypto-shred-on-retention: 24 months is well within the longest backup-retained content window.
+
+## Cross-references
+
+- **`decisions.md` "2026-06-12 — Production-deploy readiness roadmap"** + **"2026-06-12 — Fork 1 + Fork 2 ratifications"** — the source decisions this amendment serves.
+- **ADR-0023 Amendment A** — the M1 deliverable that emits `auth.mint.revoked_during_mint`.
+- **ADR-0024** — the M2 deliverable that emits `key_parity.mismatch` and `key_parity.deploy_ok`.
+- **threat-model.md §3.14** — F-124 (HMAC entropy invariant) / F-125 (deploy-time mismatch) / F-127 (retention-class anchor) / F-128 (mint-session race) are the testable mitigations whose audit anchors this amendment ratifies.
+- **HG-NEW-1 / HG-NEW-2 / HG-NEW-3** — ratified 2026-06-12 in `decisions.md` Fork 1+2 ratifications block; this amendment is the retention-side surface of HG-NEW-1 (secret classification audit anchor) and HG-NEW-3 (rotation atomic-swap-window audit anchor).
+
+## Follow-ups
+
+- [ ] **Migration PR (separate, lands at M0 before M1+M2):** adds the three rows + enum values + `retention_class_for()` branches in one migration.
+- [ ] **Test-writer:** extends the schedule-vs-enum drift CI assertion test to cover the three new values; adds one assertion per new event type that the `audit_emit` SECURITY DEFINER path populates `retention_class` correctly.
+- [ ] **observability-setup:** no change to `observability/audit-log.md` or `observability/README.md` beyond regenerating the auto-generated retention table if one exists.
+
+---
+
 # ADR-0014: Offline queue HMAC integrity for IndexedDB inspection queue
 
 **Status:** Accepted
