@@ -66,9 +66,19 @@ jobs:
         # required: true on workflow_dispatch ensures a value is provided,
         # but does NOT enforce the literal value. Enforced here at step
         # exit — fail-closed before checkout.
+        #
+        # SECURITY: the input value is passed via `env:` (NOT interpolated
+        # directly into the run script) per Semgrep's
+        # yaml.github-actions.security.run-shell-injection rule. Using
+        # ${{ inputs.X }} inside `run:` would let a crafted input string
+        # contain shell metacharacters and break out of the echo. The
+        # env-var path treats the value as opaque shell data referenced
+        # via the quoted "$VAR" syntax.
         if: ${{ inputs.confirm_production != 'PRODUCTION' }}
+        env:
+          CONFIRM_PRODUCTION_INPUT: ${{ inputs.confirm_production }}
         run: |
-          echo "::error::confirm_production input must be exactly 'PRODUCTION', got '${{ inputs.confirm_production }}'"
+          echo "::error::confirm_production input must be exactly 'PRODUCTION', got: \"$CONFIRM_PRODUCTION_INPUT\""
           exit 1
 
       - name: Checkout
@@ -99,11 +109,20 @@ jobs:
         # post-deploy smoke test. Today this step echoes the deploy
         # context so a maintainer can confirm the workflow shape
         # without actually pushing anything to production.
+        #
+        # SECURITY: same shell-injection prevention as the input-confirm
+        # step above — `github.*` and `inputs.*` context values are
+        # passed via `env:` and referenced as quoted "$VAR" inside the
+        # script.
+        env:
+          DEPLOY_REASON: ${{ inputs.reason }}
+          DEPLOY_ACTOR: ${{ github.actor }}
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
           echo "M11 stub — no actual deploy performed yet."
-          echo "Reason: ${{ inputs.reason }}"
-          echo "Triggered by: ${{ github.actor }}"
-          echo "Commit: ${{ github.sha }}"
+          echo "Reason: \"$DEPLOY_REASON\""
+          echo "Triggered by: \"$DEPLOY_ACTOR\""
+          echo "Commit: \"$DEPLOY_SHA\""
           echo "When the real deploy lands, this step:"
           echo "  - Runs 'supabase functions deploy --project-ref \$SUPABASE_PROJECT_REF' for each EF"
           echo "  - Runs 'supabase db push --linked' for migrations"
