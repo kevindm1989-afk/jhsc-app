@@ -43,18 +43,21 @@ DB_URL="${DEPLOY_DB_URL:-}"
 TIMEOUT_S="${KEY_PARITY_DEPLOY_TIMEOUT_S:-10}"
 RETRY_WAIT_S="${KEY_PARITY_DEPLOY_RETRY_WAIT_S:-30}"
 
-if [ -z "$KEY" ]; then
-  echo "verify-key-parity-deploy: \$HMAC_PSEUDONYM_KEY is unset" >&2
-  exit 2
-fi
+# Informational-mode gate FIRST: in PR CI neither $HMAC_PSEUDONYM_KEY nor
+# $DEPLOY_DB_URL is set (the real secrets never reach PR runners). Skip
+# cleanly so the gate is a no-op on PR runs. The production deploy workflow
+# MUST set BOTH — a future CI grep on the deploy workflow file enforces this.
 if [ -z "$DB_URL" ]; then
-  # Informational mode: ship the script but don't fail when there's no
-  # DEPLOY_DB_URL configured (e.g. in PR CI on a branch that has no
-  # production deploy access). The deploy workflow itself MUST supply
-  # DEPLOY_DB_URL — CI grep on the workflow file enforces this.
   echo "verify-key-parity-deploy: \$DEPLOY_DB_URL not set; skipping (informational mode)."
-  echo "verify-key-parity-deploy: NOTE — the production deploy workflow MUST set DEPLOY_DB_URL."
+  echo "verify-key-parity-deploy: NOTE — the production deploy workflow MUST set DEPLOY_DB_URL + HMAC_PSEUDONYM_KEY."
   exit 0
+fi
+if [ -z "$KEY" ]; then
+  # $DEPLOY_DB_URL is set, but $HMAC_PSEUDONYM_KEY is not — this is a
+  # misconfigured deploy job (the workflow must supply both). Fail loudly.
+  echo "verify-key-parity-deploy: \$DEPLOY_DB_URL is set but \$HMAC_PSEUDONYM_KEY is unset" >&2
+  echo "verify-key-parity-deploy: deploy workflow MUST set both — refusing to proceed" >&2
+  exit 2
 fi
 if ! command -v psql >/dev/null 2>&1; then
   echo "verify-key-parity-deploy: psql not found on PATH" >&2
