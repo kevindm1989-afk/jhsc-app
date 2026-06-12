@@ -17,6 +17,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { log, withFunctionName } from '../_shared/log.ts';
+import { assertSessionLive, SessionNotLiveError } from '../_shared/session-live-precheck.ts';
 import { handleAuthOp, type AuthOpInput } from './core.ts';
 import type { CredentialRow, SessionRow, UserRow } from './types.ts';
 
@@ -59,6 +60,23 @@ Deno.serve(async (req) => {
   }
 
   const supabase = callerClient(req.headers.get('authorization'));
+
+  // F-116 / ADR-0023 Amendment A — dispatcher-side session_is_live precheck.
+  // BELT-AND-BRACES with the existing SECURITY DEFINER RPCs that also check
+  // session_is_live() internally. Fails fast on a revoked session BEFORE any
+  // other DB round-trip. The CI grep scripts/verify-session-live-uniformity.sh
+  // structurally requires this call before the first privileged RPC.
+  try {
+    await assertSessionLive(async () => {
+      const { data, error } = await supabase.rpc('session_is_live');
+      return !error && data === true;
+    });
+  } catch (e) {
+    if (e instanceof SessionNotLiveError) {
+      return json({ ok: false, reason: 'rls_denied', status: 401 }, 401);
+    }
+    throw e;
+  }
 
   const result = await handleAuthOp(input, {
     async getUserById(user_id: string): Promise<UserRow | null> {

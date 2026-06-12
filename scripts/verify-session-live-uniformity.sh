@@ -49,8 +49,7 @@ ALLOWLIST_FILE="$EF_DIR/_shared/session-live-allowlist.ts"
 # (the slug between supabase/functions/ and /index.ts). One per
 # array entry. Comments allowed on adjacent lines.
 EXEMPT_DURING_ROLLOUT=(
-  "auth-op"        # rollout: M1.1
-  "committee-op"   # rollout: M1.1
+  # auth-op + committee-op wired in M1.1 — removed from this list.
   "concern-op"     # rollout: M1.2
   "reprisal-op"    # rollout: M1.2
   "t07-op"         # rollout: M1.2
