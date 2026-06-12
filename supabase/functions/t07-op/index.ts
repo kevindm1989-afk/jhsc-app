@@ -19,6 +19,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import _sodium from 'npm:libsodium-wrappers-sumo@0.7.15';
 import { log, withFunctionName } from '../_shared/log.ts';
+import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
 import {
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
@@ -120,6 +121,17 @@ function sodiumReady(): Promise<typeof _sodium> {
 Deno.serve(async (req) => {
   const requestId = req.headers.get('X-Request-ID') ?? undefined;
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+
+  // ADR-0024 §2 — cold-start HMAC pseudonym key parity check.
+  try {
+    await assertKeyParity();
+  } catch (e) {
+    if (e instanceof KeyParityError) {
+      log.error({ event: 't07.key_parity.fail', outcome: 'mismatch' });
+      return json({ error: 'service_unavailable' }, 503);
+    }
+    throw e;
+  }
 
   const authorization = req.headers.get('Authorization') ?? '';
   if (!authorization.toLowerCase().startsWith('bearer ')) return json({ error: 'rls_denied' }, 401);
