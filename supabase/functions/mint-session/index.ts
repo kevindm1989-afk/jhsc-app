@@ -28,6 +28,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { verifyWebAuthnAssertion } from './assertion.ts';
 import { log, withFunctionName } from '../_shared/log.ts';
+import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
 import { mintSessionFromAssertion, type AssertionInput, type MintDeps } from './core.ts';
 import { signMintWriterToken, signSessionJwt } from './signing.ts';
 import { evaluateCounter } from './webauthn.ts';
@@ -209,6 +210,21 @@ async function handleAssert(
 Deno.serve(async (req) => {
   const requestId = req.headers.get('X-Request-ID') ?? undefined;
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+
+  // ADR-0024 §2 — cold-start HMAC pseudonym key parity check.
+  // Even the mint path refuses to serve under a mismatched key: a corrupted
+  // pseudonym key would break the cross-surface forensic-join property the
+  // moment the minted JWT is used to write any audit row. Failing closed
+  // here is safer than minting a token the system cannot audit correctly.
+  try {
+    await assertKeyParity();
+  } catch (e) {
+    if (e instanceof KeyParityError) {
+      log.error({ event: 'mint.key_parity.fail', attributes: { route: 'boot', outcome: 'mismatch' }, request_id: requestId });
+      return json({ ok: false, error: 'service_unavailable' }, 503);
+    }
+    throw e;
+  }
 
   let body: Record<string, unknown>;
   try {
