@@ -49,11 +49,8 @@ ALLOWLIST_FILE="$EF_DIR/_shared/session-live-allowlist.ts"
 # (the slug between supabase/functions/ and /index.ts). One per
 # array entry. Comments allowed on adjacent lines.
 EXEMPT_DURING_ROLLOUT=(
-  # auth-op + committee-op wired in M1.1 — removed from this list.
-  "concern-op"     # rollout: M1.2
-  "reprisal-op"    # rollout: M1.2
-  "t07-op"         # rollout: M1.2
-  "t14-op"         # rollout: M1.2
+  # auth-op + committee-op wired in M1.1 — removed.
+  # concern-op + reprisal-op + t07-op + t14-op wired in M1.2 — removed.
   # mint-session is on the FORMAL ALLOWLIST below, not the rollout
   # exempt list — its exemption is permanent (compensated by F-128).
 )

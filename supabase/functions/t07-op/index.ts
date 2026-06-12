@@ -17,6 +17,7 @@
  */
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { assertSessionLive, SessionNotLiveError } from '../_shared/session-live-precheck.ts';
 import _sodium from 'npm:libsodium-wrappers-sumo@0.7.15';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
@@ -141,6 +142,19 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_ANON_KEY') ?? '',
     { global: { headers: { Authorization: authorization } }, auth: { persistSession: false } }
   );
+
+  // F-116 / ADR-0023 Amendment A — dispatcher-side session_is_live precheck.
+  try {
+    await assertSessionLive(async () => {
+      const { data, error } = await supabase.rpc('session_is_live');
+      return !error && data === true;
+    });
+  } catch (e) {
+    if (e instanceof SessionNotLiveError) {
+      return json({ error: 'rls_denied' }, 401);
+    }
+    throw e;
+  }
 
   const rpc: RpcPort = async (fn, args) => {
     const { data, error } = await supabase.rpc(fn, args);
