@@ -31,7 +31,19 @@
  * Sentry events, or any other emission surface. The SHA-256 of the key
  * is computed at first-call and held in-process; comparison surfaces
  * only a boolean outcome (`ok` / `mismatch`) to the structured logger.
+ *
+ * Crypto-primitive invariant (ADR-0003 §Invariant 4 + Amendment H):
+ * SHA-256 here comes from `node:crypto.createHash` — the same primitive
+ * the SvelteKit-side key-parity.ts uses (apps/web/src/lib/auth/server/
+ * key-parity.ts line ~29 `import { createHash } from 'node:crypto'`).
+ * We do NOT use `crypto.subtle.X(...)` (which the .semgrep rule
+ * no-non-libsodium-crypto forbids outside the single Amendment H
+ * carve-out for mint-session/signing.ts) nor a third-party JS crypto
+ * library. node:crypto is a platform-native, audited implementation
+ * available in both Node + Deno (Deno's node-compat layer).
  */
+
+import { createHash } from 'node:crypto';
 
 // The env-var name is split across two literals to (a) avoid tripping
 // the `verify-no-third-party-js.sh` bundle scanner's literal-string
@@ -62,17 +74,14 @@ export class KeyParityError extends Error {
 let _envKeyShaHex: string | null = null;
 
 /**
- * Compute SHA-256 of the env value via WebCrypto (Deno-native).
+ * Compute SHA-256 of the input via node:crypto.createHash.
+ *
+ * Synchronous under the hood; we keep the async signature to match the
+ * SvelteKit-side `verifyKeyParity` shape and to leave room for a future
+ * Worker-thread offload if profiles surface a hotspot.
  */
-async function sha256Hex(input: string): Promise<string> {
-  const buf = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  const arr = new Uint8Array(digest);
-  let hex = '';
-  for (let i = 0; i < arr.length; i++) {
-    hex += arr[i].toString(16).padStart(2, '0');
-  }
-  return hex;
+function sha256Hex(input: string): string {
+  return createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
 /**
@@ -131,7 +140,7 @@ export async function assertKeyParity(
       `${KEY_ENV_NAME} is unset or empty in this Edge Function process; refusing to serve.`
     );
   }
-  const envSha = await sha256Hex(raw);
+  const envSha = sha256Hex(raw);
 
   let serverSha: string;
   try {

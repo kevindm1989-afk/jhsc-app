@@ -9,16 +9,14 @@
  */
 
 import { assert, assertEquals, assertRejects } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { createHash } from 'node:crypto';
 import { __resetForTests, assertKeyParity, KeyParityError } from '../key-parity.ts';
 
-// Helper: SHA-256 hex of a UTF-8 string (mirrors the production helper).
-async function sha256Hex(s: string): Promise<string> {
-  const buf = new TextEncoder().encode(s);
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  const arr = new Uint8Array(digest);
-  let hex = '';
-  for (let i = 0; i < arr.length; i++) hex += arr[i].toString(16).padStart(2, '0');
-  return hex;
+// Helper: SHA-256 hex of a UTF-8 string (mirrors the production helper —
+// node:crypto.createHash, same primitive both halves of the parity story
+// agree on, so test fixtures cannot drift from production behaviour).
+function sha256Hex(s: string): string {
+  return createHash('sha256').update(s, 'utf8').digest('hex');
 }
 
 const TEST_KEY = 'synthetic-test-key-not-secret-1234567890abcdef';
@@ -26,7 +24,7 @@ const TEST_KEY = 'synthetic-test-key-not-secret-1234567890abcdef';
 Deno.test('match: env SHA equals server SHA ⇒ assertKeyParity resolves', async () => {
   __resetForTests();
   Deno.env.set('HMAC_PSEUDONYM_KEY', TEST_KEY);
-  const serverSha = await sha256Hex(TEST_KEY);
+  const serverSha = sha256Hex(TEST_KEY);
   let emitterCalls = 0;
   await assertKeyParity(
     () => Promise.resolve(serverSha),
@@ -39,7 +37,7 @@ Deno.test('match: env SHA equals server SHA ⇒ assertKeyParity resolves', async
 Deno.test('memoisation: second call short-circuits without re-fetching', async () => {
   __resetForTests();
   Deno.env.set('HMAC_PSEUDONYM_KEY', TEST_KEY);
-  const serverSha = await sha256Hex(TEST_KEY);
+  const serverSha = sha256Hex(TEST_KEY);
   let fetchCalls = 0;
   const fetcher = () => {
     fetchCalls += 1;
@@ -132,7 +130,7 @@ Deno.test('key value NEVER appears in thrown error message', async () => {
 Deno.test('mismatch SHA values NEVER appear in thrown error message', async () => {
   __resetForTests();
   Deno.env.set('HMAC_PSEUDONYM_KEY', TEST_KEY);
-  const envSha = await sha256Hex(TEST_KEY);
+  const envSha = sha256Hex(TEST_KEY);
   const wrongSha = 'deadbeef'.repeat(8);
   try {
     await assertKeyParity(

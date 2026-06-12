@@ -1,14 +1,26 @@
 # gitleaks configuration for jhsc-app.
 #
-# Extends gitleaks' default ruleset (useDefault = true) and allowlists a
-# known-synthetic, non-secret test fixture that is deliberately shaped like
-# a credential so the Sentry-scrub test can prove scrubFreeText() collapses
-# key-shaped blobs. This is NOT a real secret.
+# Extends gitleaks' default ruleset (useDefault = true) and allowlists
+# known-synthetic, non-secret test fixtures that are deliberately shaped
+# like credentials so the corresponding tests/CI gates can prove their
+# defensive logic. None of these are real secrets.
 
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Synthetic 40-char base64-shaped fixture in the T02 Sentry-scrub test — hand-typed test data proving the scrubber collapses key-shaped blobs; not a credential."
 paths = ['''apps/web/test/T02/sentry-scrub\.test\.ts''']
 regexes = ['''AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCd''']
+
+[[allowlists]]
+description = "ADR-0024 / M2 KEY_PARITY infrastructure — synthetic fixtures in (1) the EF cold-start parity-check test (assert that the SHA-of-key never appears in error messages, the key-value-never-leaks invariant, etc.), (2) the CI hardening-gates job that runs verify-key-entropy.sh against a length-only fixture (the real $HMAC_PSEUDONYM_KEY is never read by CI outside the deploy job). Not credentials — see .context/secret-inventory.md $HMAC_PSEUDONYM_KEY entry for the classification + emission-surface denylist that DO apply to the real secret."
+paths = [
+  '''supabase/functions/_shared/test/key-parity\.test\.ts''',
+  '''\.github/workflows/ci\.yml''',
+]
+regexes = [
+  '''synthetic-test-key-not-secret-[0-9a-f]+''',
+  '''CANARY-KEY-VALUE-MUST-NOT-LEAK-[0-9a-f]+''',
+  '''synthetic-ci-fixture-64-hex-chars-[0-9a-f]+''',
+]
