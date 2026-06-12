@@ -20,6 +20,7 @@
   import { buildSearchIndex, search } from '$lib/search/search';
   import { highlightMatches } from '$lib/search/highlight';
   import { listRecentSearches, recordRecentSearch } from '$lib/search/recent-searches';
+  import { listRecentRoutes } from '$lib/nav/recent-routes';
 
   /** @type {ReturnType<typeof buildSearchIndex>} */
   let index = [];
@@ -27,9 +28,13 @@
   /** @type {string[]} */
   let recents = [];
 
+  /** @type {import('$lib/nav/recent-routes').RecentRoute[]} */
+  let recentRoutes = [];
+
   onMount(() => {
     index = buildSearchIndex();
     recents = listRecentSearches();
+    recentRoutes = listRecentRoutes();
     if (typeof document !== 'undefined') {
       document.addEventListener('keydown', onSearchKeydown);
     }
@@ -186,6 +191,29 @@
     <p class="muted" role="status" data-testid="search-empty-state">
       {t('search.page.empty_state')}
     </p>
+    {#if recentRoutes.length > 0}
+      <nav
+        class="search-recents"
+        aria-label={t('search.page.recent_routes_label')}
+        data-testid="search-recents-routes"
+      >
+        <p class="search-recents-label">{t('search.page.recent_routes_label')}</p>
+        <ul class="search-recents-list">
+          {#each recentRoutes as r (r.route)}
+            <li>
+              <a
+                class="search-recents-chip"
+                href={r.route}
+                data-testid="search-recents-route-chip"
+                data-route={r.route}
+              >
+                {r.route}
+              </a>
+            </li>
+          {/each}
+        </ul>
+      </nav>
+    {/if}
     {#if recents.length > 0}
       <nav
         class="search-recents"

@@ -21,7 +21,6 @@
       "audit.action.*"
     ]
   },
-
   "common": {
     "app_name": "JHSC App",
     "header": {
@@ -264,7 +263,7 @@
       "recent_searches_heading": "Recent searches",
       "recent_searches_body": "The header search keeps your last five queries on this device. Focus the input to surface them as a dropdown and re-run with one click; the × removes a single entry. Searches are stored locally — no committee data leaves your device.",
       "recent_visits_heading": "Recently visited",
-      "recent_visits_body": "Every time you navigate to a register, your device remembers the route. The dashboard's “Recently visited” card and the header search dropdown both surface the last five so you can jump back into surfaces you were working with. Stored locally; press “Clear” on the card to wipe the history.",
+      "recent_visits_body": "Every time you navigate to a register, your device remembers the route. The dashboard’s “Recently visited” card, the header search dropdown, the /search page, and the /more launcher all surface the last five so you can jump back into surfaces you were working with. Stored locally; press “Clear” on the card to wipe the history.",
       "back_to_home_cta": "Back to home"
     },
     "errorPage": {
@@ -456,10 +455,10 @@
       "link_help_blurb": "Keyboard shortcuts, how URLs share filters, CSV export, and the monthly report.",
       "link_saved_views_label": "Saved views",
       "link_saved_views_blurb": "Bookmark filtered register views and reuse them on this device.",
-      "back_to_home_cta": "Back to home"
+      "back_to_home_cta": "Back to home",
+      "recent_routes_heading": "Recently visited"
     }
   },
-
   "nav": {
     "inspections": "Inspections",
     "concerns": "Concerns",
@@ -475,7 +474,6 @@
     "settings": "Settings",
     "more": "More"
   },
-
   "onboarding": {
     "page_title": "Set up",
     "device": {
@@ -537,7 +535,6 @@
       "continue": "Open the app"
     }
   },
-
   "print": {
     "recovery": {
       "title": "JHSC App — Recovery sheet for {display_name}",
@@ -549,7 +546,6 @@
       "footer_build_label": "Build"
     }
   },
-
   "concern": {
     "page": {
       "title": "Concerns",
@@ -654,7 +650,6 @@
       }
     }
   },
-
   "reprisal": {
     "page": {
       "title": "Reprisal log",
@@ -757,32 +752,32 @@
       }
     }
   },
-
   "sensitiveFeed": {
-    "page": {
-      "title": "Recent sensitive activity",
-      "subtitle": "Reads of reprisal entries, exports to the employer co-chair, and other sensitive events from across the committee."
-    },
-    "empty": {
-      "heading": "No recent sensitive activity",
-      "body": "When another member reads a reprisal entry or exports anything to the employer co-chair, you will see it here."
-    },
-    "row": {
-      "read_action": "{actor} read {target_type} entry {target_id}",
-      "export_action": "{actor} exported {target_type} to the employer co-chair",
-      "update_action": "{actor} updated {target_type} entry {target_id}",
-      "timestamp_relative": "{relative}",
-      "timestamp_absolute": "{absolute}"
-    },
-    "muted": {
-      "banner": "Notification pop-ups paused. The feed still updates. Audit logging is unaffected.",
-      "toggle_label": "Pause notifications"
-    },
-    "error": {
-      "load_failed": "Unable to load recent activity. Retry."
+    "viewer": {
+      "heading": "Recent sensitive activity",
+      "intro": "Metadata for recent C3 and C4 sensitivity-tier events. Narratives stay encrypted; this surface shows only what action was taken, by whom (pseudonymized), and when.",
+      "role": {
+        "label": "Who can see this",
+        "value": "Visibility is limited to the worker co-chair and the worker certified member. An ordinary worker member sees only their own actions in this feed."
+      },
+      "loading": "Loading sensitive activity…",
+      "empty": "No recent sensitive activity.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page_indicator": "Page {page} of {total}",
+      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (server-side aggregation + role-gating + Merkle proofs) ships with T18 / the sensitive-feed wire-up.",
+      "chip": {
+        "c3": "C3 only",
+        "c4": "C4 only"
+      },
+      "column": {
+        "actor": "Actor"
+      },
+      "error": {
+        "load_failed": "Couldn't load the sensitive-activity feed. Try again."
+      }
     }
   },
-
   "export": {
     "button": {
       "label": "Export to employer co-chair",
@@ -839,7 +834,6 @@
       "integrity_body": "The list of fields about to be exported does not match the renderer. The export was cancelled and an audit row was written. Try again — if this keeps happening, contact the worker co-chair."
     }
   },
-
   "photo": {
     "capture": {
       "heading": "Photo capture",
@@ -869,7 +863,6 @@
       "integrity_failed_body": "This entry could not be verified and was not saved. A malicious extension may have modified the queue. Please re-take and re-enter."
     }
   },
-
   "offline": {
     "banner": {
       "heading": "Offline — entries are being queued",
@@ -889,7 +882,6 @@
       "view_link": "View failed entries"
     }
   },
-
   "lock": {
     "heading": "Locked — confirm it's you to continue",
     "body": "Your committee data is protected and was cleared from memory.",
@@ -898,7 +890,6 @@
     "now_button": "Lock now",
     "auto_lock_after": "Auto-lock after {minutes} minutes of inactivity"
   },
-
   "panic": {
     "trigger_button": "Wipe this device's data",
     "heading": "Wipe this device's data",
@@ -910,7 +901,6 @@
     "complete_heading": "Local data wiped",
     "complete_body": "Sign in again to continue, or close this tab to leave the app."
   },
-
   "session": {
     "page": {
       "title": "Sessions on this account",
@@ -935,7 +925,6 @@
       "confirm_body": "You will be signed out of this device. You can sign back in with your passkey."
     }
   },
-
   "signIn": {
     "title": "Sign in",
     "intro": "Use the passkey on this device to sign in to JHSC.",
@@ -955,7 +944,6 @@
     "already_signed_in": "You're already signed in on this device.",
     "go_to_settings_cta": "Go to settings"
   },
-
   "landing": {
     "subtitle": "Health and safety, for the people doing the work.",
     "new_device": {
@@ -974,7 +962,6 @@
       "cta": "Continue to settings"
     }
   },
-
   "home": {
     "dashboard": {
       "heading": "Needs attention",
@@ -1018,7 +1005,6 @@
       "hours_ago": "{n}h ago"
     }
   },
-
   "search": {
     "page": {
       "title": "Search",
@@ -1046,10 +1032,10 @@
         "audit": "Audit log",
         "sensitive-feed": "Recent sensitive activity"
       },
-      "back_to_home_cta": "Back to home"
+      "back_to_home_cta": "Back to home",
+      "recent_routes_label": "Recently visited"
     }
   },
-
   "signOut": {
     "heading": "Session",
     "intro": "Sign out on this device. The server-side session expires within a few minutes; for immediate device cleanup, use Wipe this device's data below.",
@@ -1057,7 +1043,6 @@
     "signed_out": "Signed out. You can sign back in with your passkey.",
     "sign_in_again_cta": "Sign in again"
   },
-
   "settings": {
     "title": "Settings",
     "device_data": {
@@ -1198,7 +1183,6 @@
       }
     }
   },
-
   "minutes": {
     "viewer": {
       "heading": "Meeting minutes register",
@@ -1227,7 +1211,6 @@
       }
     }
   },
-
   "recommendations": {
     "viewer": {
       "heading": "Recommendations register",
@@ -1257,34 +1240,6 @@
       }
     }
   },
-
-  "sensitiveFeed": {
-    "viewer": {
-      "heading": "Recent sensitive activity",
-      "intro": "Metadata for recent C3 and C4 sensitivity-tier events. Narratives stay encrypted; this surface shows only what action was taken, by whom (pseudonymized), and when.",
-      "role": {
-        "label": "Who can see this",
-        "value": "Visibility is limited to the worker co-chair and the worker certified member. An ordinary worker member sees only their own actions in this feed."
-      },
-      "loading": "Loading sensitive activity…",
-      "empty": "No recent sensitive activity.",
-      "prev": "Previous page",
-      "next": "Next page",
-      "page_indicator": "Page {page} of {total}",
-      "demo_note": "This is synthetic demo data so you can see what the surface will look like. The real backend (server-side aggregation + role-gating + Merkle proofs) ships with T18 / the sensitive-feed wire-up.",
-      "chip": {
-        "c3": "C3 only",
-        "c4": "C4 only"
-      },
-      "column": {
-        "actor": "Actor"
-      },
-      "error": {
-        "load_failed": "Couldn't load the sensitive-activity feed. Try again."
-      }
-    }
-  },
-
   "audit": {
     "page": {
       "title": "Audit log",
@@ -1372,7 +1327,6 @@
       "queue.integrity_fail": "An offline-queued entry failed verification and was rejected"
     }
   },
-
   "inspection": {
     "page": {
       "title": "Inspections",
@@ -1419,13 +1373,11 @@
       }
     }
   },
-
   "form": {
     "common": {
       "required_indicator_sr": "required"
     }
   },
-
   "a11y": {
     "skip_to_content": "Skip to main content",
     "menu_open": "Open menu",
@@ -1436,7 +1388,6 @@
     "loading_complete": "{action_label} complete",
     "toast_announce": "{severity}: {body}",
     "feed_new_item": "New activity: {description}",
-
     "export": {
       "reauth": {
         "success": "Passkey confirmed. Reviewing export fields."
@@ -1494,7 +1445,6 @@
       "muted": "Sensitive-activity pop-ups paused. The feed still updates."
     }
   },
-
   "library": {
     "page": {
       "title": "Document library",
@@ -1535,7 +1485,6 @@
       }
     }
   },
-
   "workRefusal": {
     "viewer": {
       "heading": "Work refusal register",
@@ -1571,7 +1520,6 @@
       }
     }
   },
-
   "s51": {
     "viewer": {
       "heading": "Critical-injury evidence (s. 51)",
@@ -1609,7 +1557,6 @@
       }
     }
   },
-
   "training": {
     "viewer": {
       "heading": "Training records",
@@ -1638,7 +1585,6 @@
       }
     }
   },
-
   "report": {
     "page": {
       "title": "Monthly report",
