@@ -2364,3 +2364,187 @@ Source: architect + threat-modeler passes 2026-05-26. **B1 redefinition:** GoTru
 **Handoffs:** → security-reviewer + second-opinion-reviewer at the ADR-0023 PR (verify F-116 liveness gate present on every privileged path; F-117 atomic verify+mint; F-118 key isolation). → privacy-reviewer (HG-15 §PI-inventory for `auth.users`). → observability-setup (A-AUTH orphan-uid alert; the `auth_sessions`↔GoTrue revocation backstop).
 
 ---
+
+## §3.14 — F-116 enforcement uniformity + KEY_PARITY check posture (M1 + M2, 2026-06-12)
+
+Source: threat-modeler addendum 2026-06-12, driven by the architect's "Production-deploy readiness roadmap" §D Fork 1 (M1) and Fork 2 (M2) adjudications. The forks are locked: **M1 = Option A (per-EF `session_is_live()` first-query call) + CI grep uniformity gate**; **M2 = Option C (cold-start EF parity check AND deploy-time CI parity assertion)**. The §3.12 entries F-116…F-120 stand as-is and are referenced, not modified. New findings F-121…F-128 below pin every call-site, every credential surface, and every fail-safe direction for the two milestones. Verdict: **GO-WITH-CONDITIONS** — every Mitigation below is implementation-blocking.
+
+### Scope reconciliation against existing entries
+
+- **F-116 (E)** already names the principle ("every privileged path consults `session_is_live(jti)`"). What §3.12 did not pin: WHICH Edge Function ops in the actually-shipped dispatcher set (`auth-op`, `committee-op`, `concern-op`, `reprisal-op`, `t14-op`, `t07-op`, `mint-session`) carry the obligation, which legitimately do not, and what stops a future op from being added without the check. F-121–F-123 below close that gap.
+- **F-30 (S)** established the ≤5s revocation-propagation budget on the `reprisal_log` surface; this section extends that budget to every op dispatcher uniformly. The budget remains satisfied because `session_is_live()` resolves to a single-row PK lookup on `auth_sessions.session_id` (the table's PRIMARY KEY at `migrations/00000000000001_auth.sql:346`), with the `auth_sessions_user_idx` partial index as a defense-in-depth for the `revoked_at IS NULL` predicate (auth.sql:356–357). One indexed roundtrip per op; the architect's "≤1 DB roundtrip" budget holds.
+- **F-118 (I/E)** named the isolated mint-signing-key blast radius. F-124–F-128 below add a parallel, non-overlapping credential surface: the GitHub Actions secret that holds the SHA-of-key (NOT the key itself) for the M2 Option C deploy-time parity check.
+
+### 1. F-116 enforcement uniformity per Edge Function op (Fork 1 Option A pins)
+
+For each currently-deployed op dispatcher under `supabase/functions/*-op/` plus `mint-session/`, the table below records: whether the op MUST call `session_is_live()` before any privileged DB call, the rationale, and the testable mitigation. The `session_is_live()` SQL function (committee.sql:130–143) reads the jti from `current_setting('request.jwt.claims', true)::jsonb ->> 'session_id'` and returns boolean; it MAY be invoked from inside the SECURITY DEFINER RPC (the current pattern in `committee-op`, `concern-op`, `reprisal-op`, `t14-op`, `t07-op`) or as a separate guard call. Both shapes are acceptable; the grep below accepts either.
+
+| Dispatcher / op | Pre-check required? | Rationale | Current state |
+|---|---|---|---|
+| `auth-op` `getUser` / `getSession` / `listActiveSessions` / `listCredentialsForUser` | YES | Read paths against `users` / `auth_sessions` / `webauthn_credentials` with caller's JWT — a revoked-but-unexpired JWT must NOT enumerate the caller's own sessions/credentials in the reprisal window. RLS does NOT today gate `auth_sessions_select_self` or `webauthn_credentials_select_self` on `session_is_live()` (auth.sql:361–363, 333–335). | NOT GATED — F-121. |
+| `auth-op` `revokeMySession` / `revokeAllMySessions` / `revokeMyPasskey` | YES (defense-in-depth) | The `revoke_my_*` wrappers (migrations 12+13) check `auth.uid()` ownership but NOT session liveness. A stolen JWT used after the session was already revoked by another device must not be able to invoke further revoke ops. | NOT GATED — F-121. |
+| `committee-op` `invite` / `activate` / `set_roles` / `remove` / `reactivate` | YES | Already gated at the canonical SECURITY DEFINER body (committee.sql:218, 226, plus siblings). Verified in §3.12 F-116. | GATED. Carry-forward CI assertion under F-122. |
+| `concern-op` `submit` / `update` / `reveal` | YES | Already gated at the canonical SECURITY DEFINER body per ADR-0023 increment 5. | GATED. Carry-forward CI assertion under F-122. |
+| `concern-op` `list` | YES | The op short-circuits to a `concerns_default_view` SELECT (concern-op/index.ts:71–79) and does NOT route through a SECURITY DEFINER function. The view's underlying RLS today gates on `is_active_member` only; a revoked-but-unexpired JWT can read the default view. | NOT GATED — F-121 (view-read variant). |
+| `reprisal-op` (all ops) | YES | Already gated at the canonical SECURITY DEFINER body. | GATED. Carry-forward CI assertion under F-122. |
+| `t14-op` (all ops) | YES | Already gated. | GATED. Carry-forward CI assertion under F-122. |
+| `t07-op` (all ops) | YES | Already gated (migrations 7–10). | GATED. Carry-forward CI assertion under F-122. |
+| `mint-session` `challenge` | NO (legitimate skip) | NO session exists at this point — the action issues a single-use challenge for a pre-session passkey assertion. The `mint_issue_challenge` RPC is granted to `mint_writer` only and runs under a self-minted writer token, not an authenticated JWT. Calling `session_is_live()` here would always return false because there is no `request.jwt.claims.session_id` to look up. | LEGITIMATELY SKIPS — F-123. |
+| `mint-session` `assert` | NO at entry, **YES post-mint as an integrity check** | The action verifies the WebAuthn assertion, resolves the uid, and emits the jti BEFORE signing the JWT — there is no session_id to gate the entry call on. AFTER `mint_create_session` returns the jti and BEFORE the token is signed-and-returned, the function MUST round-trip `SELECT EXISTS(... auth_sessions WHERE session_id = $jti AND revoked_at IS NULL)` to prove the row landed and was not concurrently revoked by an async path. | LEGITIMATELY SKIPS at entry; new post-mint assertion under F-128. |
+
+#### F-121 | E | Read-path Edge Function ops do not gate on `session_is_live()`
+The `auth-op` read ops (`getUser`, `getSession`, `listActiveSessions`, `listCredentialsForUser`) and the `concern-op` `list` view-read run as the caller's JWT-bound supabase client and rely on RLS policies that gate on `auth.uid() = user_id` (auth.sql:361, 333) and on `is_active_member` (concerns view), but NOT on `session_is_live()`. A revoked-but-unexpired JWT continues to enumerate the caller's own sessions, passkey credentials, and the default concerns view for up to `jwt_expiry` seconds (300s per F-116 design) — extending the reprisal-window attack surface beyond what §3.12 documented.
+- **Affected:** `auth-op/index.ts` getUser, getSession, listActiveSessionsForUser, listCredentialsForUser; `concern-op/index.ts` list branch (line 71–79); the `concerns_default_view` and `webauthn_credentials_select_self` / `auth_sessions_select_self` RLS policies.
+- **Severity:** HIGH (matches F-116 since this is its missed surface).
+- **Mitigation M-121a (SQL-policy):** Extend the three RLS policies (`auth_sessions_select_self`, `webauthn_credentials_select_self`, the `concerns_default_view` underlying SELECT) to `USING (public.session_is_live() AND <existing predicate>)`. This is the canonical fix because RLS runs uniformly regardless of whether the op handler is read-via-Edge-Function or read-via-anon-RLS in a future PR.
+- **Mitigation M-121b (op-handler explicit):** EVERY op dispatcher under `supabase/functions/*-op/` MUST issue a `session_is_live()` round-trip as its first DB call before any privileged read, even when RLS already gates. Belt-and-braces: the RLS policy is the load-bearing gate; the Edge Function call is the defense-in-depth observable assertion that the grep below (F-122) can enforce.
+- **Testable mitigation:**
+  - *pgTAP (extends `supabase/test/concerns_rls.sql`, `committee_rls.sql`, T05 RLS tests):* mint a JWT with session_id=$X; revoke the row (UPDATE auth_sessions SET revoked_at=now() WHERE session_id=$X); SELECT against `auth_sessions`, `webauthn_credentials`, and `concerns_default_view` AS the caller — assert all three return 0 rows within the same connection (no caching). Run within the existing live-stack pgTAP CI job so real RLS is exercised, not the local shim.
+  - *deno test (per op handler):* mock the supabase-js client; assert the FIRST `.rpc(...)` or `.from(...)` call after request parsing is the `session_is_live()` gate (or a call into a SECURITY DEFINER whose body grep-asserts the gate exists).
+  - *vitest (browser-side `createEdgeFnFetchTransport`):* a 401 response with `error: 'rls_denied'` from any *-op endpoint triggers the existing F-39 propagation loop within ≤5s; budget assertion `total_roundtrip_ms ≤ 5000` on the revoke-then-call scenario.
+
+#### F-122 | E | Future op handler ships without `session_is_live()` (the footgun)
+A new op handler added to an existing dispatcher, or a new dispatcher entirely, is forgotten in the F-116/F-121 sweep. Author has no compile-time signal; reviewers have no automated signal.
+- **Affected:** every existing dispatcher AND every future dispatcher under `supabase/functions/*-op/`.
+- **Severity:** MEDIUM (the footgun is latent until exercised, but the failure mode is identical to F-121).
+- **Mitigation M-122a (CI grep):** New script `scripts/verify-session-live-uniformity.sh` runs in the `hardening-gates` CI job. Algorithm:
+  1. Enumerate every directory matching `supabase/functions/*-op/` AND `supabase/functions/mint-session/`.
+  2. For each, parse `index.ts` for the set of dispatched ops (the type union or switch arms).
+  3. For each op that is NOT in the **mint-session allowlist** (the two `challenge` and `assert` entry-paths per F-123), assert either: (a) the op's handler body contains a literal `session_is_live` reference in the dispatcher, OR (b) the canonical RPC it calls is in the **gated-RPC list** the script maintains by grepping `supabase/migrations/*.sql` for `IF NOT public.session_is_live()` inside the named function body.
+  4. Fail-closed: any op not matching either condition fails the build with a message naming the offending op + dispatcher.
+  - The script keeps the **mint-session allowlist** as an explicit constant inside the script body (commented), so adding to the allowlist requires touching the script and is reviewable.
+- **Mitigation M-122b (developer doc):** A README block at `supabase/functions/_shared/SESSION_LIVE_GATE.md` (one paragraph) names F-116/F-121/F-122 and points at the script. Optional but reduces re-discovery cost.
+- **Testable mitigation:**
+  - *CI integration test:* a fixture op (`supabase/functions/_shared/test/fixtures/ungated-op-fixture.ts.fixture`) — NOT a `.ts` file the deploy picks up, but a fixture the grep script's own test exercises — asserts the script EXITS NON-ZERO when an ungated op is detected. The fixture file's extension keeps it out of the actual deploy bundle.
+  - *script self-test:* `scripts/verify-session-live-uniformity.sh --self-test` runs against the fixture and against the real tree, asserting fail-closed-on-fixture + pass-on-real.
+
+#### F-123 | I | `mint-session` legitimately skips the check; documenting why
+The mint-session entry-path runs BEFORE any session exists. The dispatcher's `challenge` action issues a pre-session challenge; the `assert` action verifies a passkey assertion and is the FIRST point at which a session is minted. Neither has a `request.jwt.claims.session_id` to look up. A naive CI grep that forces every op to call `session_is_live()` would either short-circuit-deny the mint path (breaking login entirely) or force the author to add a no-op call that obscures the real invariant.
+- **Affected:** `supabase/functions/mint-session/index.ts`.
+- **Severity:** LOW (informational; documents an intentional skip).
+- **Mitigation M-123a:** The F-122 grep script maintains an **explicit allowlist constant** naming `mint-session/challenge` and `mint-session/assert` as the only entries that legitimately skip. Any addition to the allowlist requires a threat-model re-pass (this section); the script's own header comment names the re-pass requirement.
+- **Mitigation M-123b:** The `mint-session/assert` post-mint integrity check (F-128 below) replaces the missing entry-time `session_is_live()` call: AFTER `mint_create_session` returns the jti and BEFORE the token is signed-and-returned, the function MUST verify the row exists + is unrevoked. This catches a race where an async path revokes the freshly-minted row between insert and sign.
+- **Testable mitigation:** the F-122 script's self-test fixture INCLUDES a mint-session-shaped fixture asserting the allowlist entries pass without the gate. CI integration: deno test for `mint-session/index.ts` asserts the post-mint integrity check is present (F-128).
+
+### 2. KEY_PARITY check — new trust boundary + new credential surface (Fork 2 Option C)
+
+The architect's Option C introduces a **new trust boundary B6 (CI deploy pipeline ↔ production Postgres)**: the GitHub Actions runner must, at deploy-time, read `SELECT encode(digest(current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex')` against the production Postgres and compare to the SHA computed from `$HMAC_PSEUDONYM_KEY` in the deploy environment. The cold-start half re-runs the same comparison inside each Edge Function on first invocation.
+
+**B6 (new trust boundary, added to §1 by reference):** the deploy-pipeline ↔ production-DB path. Credentials in scope: a deploy-time DB connection that has `EXECUTE` on a new SECURITY DEFINER fn `key_parity_server_sha()` (NOT `current_setting` directly — that would require the deploy role to be a superuser or have `SET` privilege on the GUC, both unacceptable). The function returns the SHA, never the key. Audit row emitted on every call.
+
+#### F-124 | I | GitHub Actions secret carrying the SHA-of-key narrows brute-force search
+The deploy-time CI step compares `$HMAC_PSEUDONYM_KEY`'s SHA to the Postgres GUC's SHA. To do this, the runner must read `$HMAC_PSEUDONYM_KEY` (or its SHA equivalent) from a GitHub Actions secret. SHA-256 is one-way, but the SHA narrows offline brute-force: an attacker who exfiltrates the SHA can confirm key candidates against it without further interaction. The SHA's classification (PI / secret / non-secret) drives the audit-log retention class, the alert-on-leak posture, and the Sentry breadcrumb scrub list.
+- **Affected:** the new GitHub Actions secret carrying the production HMAC key (or its SHA). Blast radius: read of the SHA → offline brute-force candidate confirmation; the key itself is NOT exposed, but a high-entropy random 256-bit key is impractical to brute-force, so the effective blast radius depends on the key's entropy at generation.
+- **Severity:** MEDIUM. SHA-of-a-high-entropy-key is effectively non-recoverable; SHA-of-a-low-entropy-key is offline-recoverable. The deploy procedure MUST gate on entropy.
+- **Mitigation M-124a (key generation invariant):** the production `$HMAC_PSEUDONYM_KEY` MUST be ≥256 bits of OS-CSPRNG entropy at generation (current `key-parity.ts` already enforces non-empty; this tightens to a minimum length). Documented in the M0 ADR amendment (see §5 below).
+- **Mitigation M-124b (secret classification):** the GitHub Actions secret holding the production key is classified **"deploy-pipeline secret, privacy-adjacent"** in the secret inventory. The SHA-of-key is classified non-secret-but-sensitive (never logged, never echoed in CI output, never in audit-log meta). Privacy-reviewer signs off on the classification at M2 PR (see §4 handoffs).
+- **Mitigation M-124c (rotation cadence):** annual rotation per the existing key-management ADR; rotation procedure MUST update GitHub Actions secret + Postgres GUC in lockstep, with a documented atomic-swap window during which the CI parity check is allowed to fail-and-retry-once before failing the deploy.
+- **Testable mitigation:**
+  - *CI invariant test:* `scripts/verify-key-entropy.sh` asserts `${#HMAC_PSEUDONYM_KEY} >= 32` (32 hex chars = 128 bits; tighten to 64 = 256 bits if hex-encoded). Runs in `hardening-gates` job under a synthetic key fixture, NOT against the real secret.
+  - *grep test:* `scripts/verify-no-sha-in-logs.sh` greps the structured-log emit surfaces (`apps/web/src/lib/log/`, `supabase/functions/_shared/log.ts`) for any code path that emits a SHA-of-key value. Fail-closed.
+  - *secret-inventory drift test:* the existing secret-inventory doc gets a new row; pgTAP-adjacent script asserts the row's classification matches `deploy-pipeline secret, privacy-adjacent`.
+
+#### F-125 | T | Deploy-time parity mismatch with no fail-closed path
+The CI step ships GUC=A but env-var-SHA=B (operator fat-fingers one or the other; rotation half-completed). Without a hard fail-closed gate, the deploy proceeds and the running app silently produces mismatched pseudonyms across Postgres / TS / Sentry / audit-log layers (G-T05-2's original concern).
+- **Affected:** the new deploy-time CI step (M2 deliverable) + the deploy pipeline itself.
+- **Severity:** CRITICAL (matches G-T05-2's original framing; a mismatch silently corrupts the audit trail).
+- **Mitigation M-125a (CI step is fail-closed):** the new step `scripts/verify-key-parity-deploy.sh` (runs AFTER `supabase db push` and BEFORE any traffic promotion) issues the parity check exactly once. On match: emit a structured `auth.key_parity.deploy_ok` audit row + proceed. On mismatch: emit `auth.key_parity.mismatch` audit row to production DB AND fail the job with non-zero exit AND block the traffic-promotion job via `needs:` dependency in `.github/workflows/ci.yml`.
+- **Mitigation M-125b (no fallback path):** the script MUST NOT have a `--force` flag or a `KEY_PARITY_SKIP` env-var bypass. If a future emergency demands a deploy with known-mismatched parity, the operator MUST temporarily delete the CI step (visible in PR diff, reviewable, second-opinion-required-by-policy per `constraints.md` Human Gates).
+- **Mitigation M-125c (rotation atomic-swap window):** during the documented 1-time-per-year rotation, the script accepts a `--rotation-window` flag that allows ONE retry after 60s. The flag is gated on a separate `ROTATION_IN_PROGRESS` GitHub Actions environment-secret that requires manual approval to set. Documented in the rotation runbook (M11 deliverable; M2 only ships the flag wiring).
+- **Testable mitigation:**
+  - *CI integration test:* `scripts/verify-key-parity-deploy.sh --self-test` runs against a fixture where GUC-SHA ≠ env-SHA; asserts non-zero exit + the `key_parity.mismatch` audit row landed in the fixture DB.
+  - *workflow-shape test:* `scripts/verify-ci-deploy-gates.sh` parses `.github/workflows/ci.yml` (or the deploy workflow when M11 lands) and asserts the `verify-key-parity-deploy` step's job appears in the `needs:` chain of every traffic-promoting job.
+  - *no-bypass grep:* `scripts/verify-no-key-parity-bypass.sh` greps the workflow YAML + the deploy script for any of `KEY_PARITY_SKIP`, `--force`, `--no-verify`, `if: false`. Fail-closed.
+
+#### F-126 | E | Cold-start parity check missing or fail-open
+The cold-start half of Option C: each Edge Function on first invocation issues the parity check. If the check is absent from a new EF, or if a transient DB error causes a fail-open, the running EF produces mismatched pseudonyms for the lifetime of that container's warmth.
+- **Affected:** every Edge Function under `supabase/functions/*-op/` + `mint-session/`. The boot-smoke posture in `apps/web/src/hooks.server.ts` is irrelevant here — that file is prerender-only under adapter-static (G-T05-2 status update); the EF cold-start is the only runtime surface.
+- **Severity:** HIGH. The cold-start defense exists specifically because the deploy-time check cannot catch a post-deploy GUC rotation under a running EF; without it, M2 collapses to Option B (deploy-time only) and the G-T05-2 status entry's "fail-open under rotation" residual re-emerges.
+- **Mitigation M-126a (cold-start check inside every EF):** Each Edge Function ships a `_shared/key-parity-deno.ts` module exporting `assertKeyParityOrThrow()`. The dispatcher calls it as a module-level top-level `await` (Deno supports this) so a parity failure refuses to bind the Deno.serve handler at all — the EF returns 500/503 from the Supabase platform layer.
+- **Mitigation M-126b (fail-closed direction):** if the parity-check DB query fails for ANY reason (DB down, network blip, role permission error, function not found), the EF refuses to serve. NEVER fail-open. The cold-start call has a 5-second timeout; a timeout is treated as a failure. Document in the module header: "Refuse traffic = safer; fail-open = unsafe. This module fail-closes."
+- **Mitigation M-126c (audit row on mismatch):** on mismatch, the EF emits a `key_parity.mismatch` audit row via the SECURITY DEFINER `audit_emit` function before refusing further traffic. The row's meta is closed-allowlist: `{ ef_name, request_id, mismatch_class: 'cold_start' | 'cold_start_db_error' | 'cold_start_timeout' }`. NEVER includes either SHA value (F-124).
+- **Mitigation M-126d (alert path):** observability-setup wires a Sentry-EU alert on `key_parity.mismatch` events; pager severity HIGH. The alert payload is the audit-row meta only (scrubbed of SHA per F-124). Alert routes to the on-call rotation (M11 deliverable; M2 ships the alert wiring).
+- **Testable mitigation:**
+  - *deno test (per EF):* mock the DB rpc; assert that on mismatch, `Deno.serve` is NOT registered (the module throws before reaching the bind call). Assert that on DB-error during cold-start, same behaviour.
+  - *deno test (audit row shape):* mock the audit_emit RPC; assert the emitted payload matches the closed-allowlist shape exactly.
+  - *live-stack integration:* in the existing `supabase-live-stack` CI job, ALTER the GUC to a known-wrong value mid-test; invoke each EF; assert all return 5xx + the `key_parity.mismatch` audit row landed.
+  - *CI grep (uniformity):* `scripts/verify-key-parity-cold-start.sh` greps every `supabase/functions/*/index.ts` (op-dispatchers + mint-session) for an import of `_shared/key-parity-deno.ts` at module level. Fail-closed: any EF without the import fails the build. Allowlist (none currently).
+
+#### F-127 | R | `key_parity.mismatch` is a new audit event-type not yet in `audit_log_retention_schedule`
+The architect's M2 Option C invokes a new audit event-type (`key_parity.mismatch`) that does NOT appear in the current `audit_log_retention_schedule` table or in `retention_class_for()` (auth.sql:117–150; per G-T05-6 it's already a mirror at-risk-of-drift). Emitting an unknown event-type either fails the audit_emit CHECK (event lost) or falls through to the default `'24mo'` retention class (silently wrong).
+- **Affected:** `audit_log_retention_schedule` table + the `audit_log.event_type` CHECK constraint (per the §3.12 carry-forward; the strict CHECK lands in T18). `retention_class_for()` mirror.
+- **Severity:** HIGH (the audit row is the integrity-witness for the mismatch; losing it defeats F-126's mitigation chain).
+- **Mitigation M-127a:** ADR-0015 amendment (see §5) adds `key_parity.mismatch` and `key_parity.deploy_ok` to the schedule. Retention class: `'24mo'` (operational/security-events tier) — matches `session.revoked` and other auth-layer events. Justification: this is an operator-security signal, not a PI event, but the integrity-witness function demands the standard audit retention.
+- **Mitigation M-127b:** `retention_class_for()` is updated in the same migration that adds the schedule rows; the G-T05-6 drift-check test (deferred to T16) MUST cover the two new event-types before M2 ships, OR M2 ships a one-shot pgTAP assertion in `supabase/test/key_parity_rls.sql` covering only these two rows.
+- **Mitigation M-127c:** the `audit_log.event_type` CHECK (T18 deliverable) MUST include the two new event-types in its enumeration. If T18 has not yet landed by M2 PR time, the migration adds the rows to the existing schedule table and the CHECK widens in T18's PR; document the ordering in the M2 ADR.
+- **Testable mitigation:**
+  - *pgTAP:* assert `SELECT retention_class FROM audit_log_retention_schedule WHERE event_type = 'key_parity.mismatch'` returns `'24mo'` (idem for `deploy_ok`).
+  - *pgTAP:* assert `retention_class_for('key_parity.mismatch')` returns `'24mo'` (idem for `deploy_ok`).
+  - *integration:* on a fixture EF cold-start mismatch, the emitted audit row's `retention_class` column (populated by `audit_emit`) is `'24mo'`.
+
+#### F-128 | T | `mint-session/assert` race: jti revoked between `mint_create_session` and JWT-sign
+The `mint-session/assert` flow inserts the new `auth_sessions` row via `mint_create_session` and then signs the JWT with `session_id=$jti`. If a concurrent async path (e.g., a co-chair triggering `revoke_all_my_sessions` for the same user during a passkey re-login) revokes the freshly-minted row between insert and sign, the user receives a JWT whose jti is already revoked. The browser-side F-39 propagation loop catches this on the FIRST authenticated call (within ≤5s), but the user sees a confusing "you're logged in then immediately logged out" UX that obscures the security signal.
+- **Affected:** `supabase/functions/mint-session/index.ts:127–134` (the `createSession` deps call) + `:160–170` (the JSON success response).
+- **Severity:** MEDIUM. The security invariant holds (the F-39 loop catches the revoked jti); the UX-level signal is confusing and may train users to retry-on-revocation, weakening F-30.
+- **Mitigation M-128a:** AFTER `mint_create_session` returns the jti, AND BEFORE `signSessionJwt` is called, the `mint-session` dispatcher MUST issue a `SELECT EXISTS(SELECT 1 FROM auth_sessions WHERE session_id = $jti AND revoked_at IS NULL)` round-trip. On false: the response is `{ ok: false, error: 'session_revoked_during_mint' }` with status 401, and the partially-inserted (now-revoked) jti is NOT re-revoked (it already is). The log line is `mint.assert outcome=session_revoked_during_mint`.
+- **Mitigation M-128b:** the integrity check is the **only legitimate skip-then-add-back** entry in the F-122 grep's mint-session allowlist (F-123 M-123b cross-reference). The grep allowlist entry's comment names F-128 explicitly so a future refactor doesn't drop the check.
+- **Testable mitigation:**
+  - *deno test:* mock `mint_create_session` to return a jti, then mock the integrity-check query to return false; assert the response is 401 + the JWT was NEVER signed (the signing function was never called).
+  - *live-stack integration:* simulate the race by inserting an `auth_sessions` row with `revoked_at` pre-set, then drive the mint path to that row's jti; assert 401 + no JWT in the response body.
+
+### 3. Re-pass triggers (extends §3.12 line 2362)
+
+In addition to the four existing triggers, the following NEW triggers re-open the F-116/F-121/F-122/F-126 family:
+
+5. **Any new Edge Function op handler that does not pass the F-122 CI grep** → re-open F-116 + F-121 for that op's surface; threat-model re-pass required before the handler can be merged.
+6. **Any KEY_PARITY check (deploy-time OR cold-start) that fails open** — i.e. returns `ok` on a DB error, a timeout, or any non-match condition — re-open the F-124/F-125/F-126 family; the failing surface is treated as not-having-the-check.
+7. **`mint-session` allowlist additions to the F-122 grep** beyond `challenge` / `assert` → mandatory threat-model re-pass per F-123 M-123a.
+8. **Rotation of the `$HMAC_PSEUDONYM_KEY` GitHub Actions secret without the documented atomic-swap window (M-125c)** → re-open F-124 + F-125; the rotation MAY have silently shipped a mismatch.
+
+### 4. Handoff packets (extends §3.12 handoffs)
+
+- **To test-writer (priority order):**
+  1. F-121 pgTAP extension + deno-test per op handler + vitest revocation-propagation budget.
+  2. F-122 CI grep script + fixture + self-test.
+  3. F-125 deploy-time CI step fail-closed test + no-bypass grep.
+  4. F-126 deno test + cold-start uniformity grep + live-stack integration.
+  5. F-127 pgTAP schedule + retention_class_for assertions.
+  6. F-128 race-condition deno + live-stack test.
+  7. F-124 entropy + no-SHA-in-logs grep + secret-inventory row.
+  - Group as "M1 must-fail-first" (F-121, F-122, F-128) and "M2 must-fail-first" (F-124, F-125, F-126, F-127). Each test MUST be red against `main` before its implementer PR opens.
+- **To security-reviewer (required at both M1 PR and M2 PR per architect's §G):**
+  1. Verify F-122 grep is fail-closed (no `--force`, no bypass env var).
+  2. Verify F-125 deploy step appears in `needs:` chain of every traffic-promoting job.
+  3. Verify F-126 cold-start module is imported as a top-level await in every EF.
+  4. Verify F-127 retention rows exist + `retention_class_for()` updated in the SAME migration.
+  5. Verify M2 does NOT introduce a path that logs either SHA value (F-124 M-124b).
+- **To second-opinion-reviewer (required at both M1 PR and M2 PR per architect's §G):**
+  1. Confirm the F-122 grep's allowlist constant is reviewable (named in script header, not in an external config).
+  2. Confirm F-128's integrity check ordering is enforced by code, not by convention.
+  3. Spot-check the F-126 fail-closed direction against the architect's "refuse traffic = safer" rule.
+- **To privacy-reviewer (required at M2 PR — NEW handoff for this section):**
+  1. Ratify F-124 M-124b secret classification ("deploy-pipeline secret, privacy-adjacent"). The GitHub Actions secret is NOT a PI store but is one step removed from the HMAC pseudonym key that anchors the entire audit-log pseudonymisation chain; classification matters for breach-notification scope.
+  2. Confirm F-127's retention-class assignment (`'24mo'`) matches the audit-log retention regime for security-events; no PI/PII in the event meta, so PIPEDA Principle 4.5 retention-class concerns are not triggered, but the `'24mo'` choice should be ratified explicitly.
+  3. Confirm the `key_parity.mismatch` audit row's closed-allowlist meta (F-126 M-126c) does NOT inadvertently introduce a PI surface.
+- **To observability-setup (required at M2 PR):**
+  1. Wire the Sentry-EU alert on `key_parity.mismatch` (F-126 M-126d), HIGH severity.
+  2. Wire a separate WARN-level alert on `auth.key_parity.deploy_ok` rate-of-emission anomalies (a missing deploy_ok where one was expected is also a signal).
+  3. Confirm the alert payloads are scrubbed of any SHA value per F-124.
+- **To the user (NEW required human-gate decisions for M0):**
+  1. **HG-NEW-1 (M0 blocker for M2):** approve the introduction of the new GitHub Actions secret carrying production `$HMAC_PSEUDONYM_KEY` or its derived SHA, classified per F-124 M-124b. This is a new credential surface and per `constraints.md` Human Gates "credentials touching auth or PI" requires explicit approval.
+  2. **HG-NEW-2 (M0 blocker for M2):** approve the new trust boundary B6 (deploy-pipeline ↔ production-DB SHA-read path). Document in `.context/constraints.md` §Trust Boundaries as a one-line addition.
+  3. **HG-NEW-3 (M0 blocker for M2):** ratify the rotation-atomic-swap-window procedure (M-125c) — the runbook lands in M11 but the policy MUST be agreed at M0.
+
+### 5. ADR amendments needed in M0 BEFORE M1/M2 implementation kicks off
+
+The architect needs to land the following ADR amendments during M0 (per the architect's §D Fork adjudications, which collapse into ADR amendments). Without these, M1/M2 PRs will be blocked at security-reviewer or privacy-reviewer time.
+
+1. **ADR-0015 amendment** — add `key_parity.mismatch` and `key_parity.deploy_ok` event-types to the audit-log retention schedule. Retention class: `'24mo'`. Cross-reference F-127. Update `retention_class_for()` in the same migration. (Estimated: 1 PR, ≤30 LOC migration + ADR text.)
+2. **ADR-0023 amendment** — formalize the F-122 CI grep as the F-116 enforcement-uniformity mechanism. Names the script path, the allowlist (mint-session only), and the re-pass-trigger language under F-122 M-122a. Cross-reference F-121/F-122/F-123/F-128. (Estimated: ADR text only, no code.)
+3. **NEW ADR (proposed: ADR-0024) — KEY_PARITY check posture**. Documents the M2 Option C decision: the two-half check (deploy-time CI + EF cold-start), the new trust boundary B6, the secret classification (F-124 M-124b), the no-bypass rule (F-125 M-125b), the rotation atomic-swap window (M-125c). Includes the new GitHub Actions secret in the secret inventory with classification "deploy-pipeline secret, privacy-adjacent". Cross-reference F-124–F-127 and HG-NEW-1/2/3. (Estimated: 1 ADR; the migration + script work is M2's actual deliverable, separate PRs.)
+
+### 6. Sibling-flaw discoveries flagged for architect re-review
+
+The F-128 mint-race finding (M-128a integrity check) was NOT explicit in the architect's Fork 1 framing — the Fork's recommendation says "Every Edge Function dispatcher … calls `session_is_live(jti)` as its first DB query," which doesn't fit the mint-session pre-session shape. The §3.12 F-116 entry implicitly carved mint-session out, but the post-mint race-window between INSERT and SIGN was not addressed. This is a real exploitable race during legitimate co-chair revocation traffic. **Architect re-review requested**: should the ADR-0023 amendment / new ADR-0024 explicitly require the F-128 post-mint integrity check, or is the F-39 client-side propagation loop sufficient and the UX-confusion residual acceptable?
+
+---
