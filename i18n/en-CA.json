@@ -1006,6 +1006,12 @@
     "pinnedViews": {
       "heading": "Pinned views",
       "manage_link": "Manage pins →"
+    },
+    "recentRoutes": {
+      "heading": "Recently visited",
+      "just_now": "just now",
+      "minutes_ago": "{n}m ago",
+      "hours_ago": "{n}h ago"
     }
   },
 

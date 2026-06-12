@@ -41,6 +41,7 @@
   import RecentActivityCard from '$lib/home/RecentActivityCard.svelte';
   import SavedViewsCard from '$lib/home/SavedViewsCard.svelte';
   import PinnedViewsCard from '$lib/home/PinnedViewsCard.svelte';
+  import RecentRoutesCard from '$lib/home/RecentRoutesCard.svelte';
   import ShortcutsHintPill from '$lib/ui/ShortcutsHintPill.svelte';
   import { buildHomeSummary } from '$lib/home/home-summary';
   import { buildDemoConcerns } from '$lib/concerns/demo-concerns';
@@ -121,6 +122,7 @@
   <section class="card" data-testid="landing-dashboard">
     <HomeDashboard {summary} />
     <PinnedViewsCard />
+    <RecentRoutesCard />
     <SavedViewsCard />
     <ShortcutsHintPill />
   </section>
