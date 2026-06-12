@@ -33,6 +33,7 @@
   import HeaderSearch from '$lib/ui/HeaderSearch.svelte';
   import KeyboardShortcuts from '$lib/ui/KeyboardShortcuts.svelte';
   import PrintGeneratedAt from '$lib/ui/PrintGeneratedAt.svelte';
+  import { recordRouteVisit } from '$lib/nav/recent-routes';
   import '../app.css';
 
   // Trigger feature-flag setup (no-op at scaffold; T-feature-flag wires).
@@ -49,6 +50,11 @@
   // `$page.url.pathname` — SvelteKit's page store is reactive across route
   // changes so navigation updates the annotation without a page reload.
   $: currentPath = $page.url.pathname;
+  // Record every signed-in route navigation into the recent-routes
+  // store so the HomeDashboard RecentRoutesCard can surface them
+  // as quick-jump chips. The recorder filters its own ignored list
+  // (Home, /search, /more, /saved-views, /help, account / auth pages).
+  $: if (typeof window !== 'undefined' && currentPath) recordRouteVisit(currentPath);
   // `as const` narrows the literal so svelte-check's aria-current attribute
   // type (a closed union of 'page' | 'step' | … | undefined) accepts it.
   $: ariaCurrentHome = currentPath === '/' ? ('page' as const) : undefined;
