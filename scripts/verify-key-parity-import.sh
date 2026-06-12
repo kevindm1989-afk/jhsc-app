@@ -41,11 +41,8 @@ EF_DIR="$REPO_ROOT/supabase/functions"
 EXEMPT_DURING_ROLLOUT=(
   "auth-op"        # rollout: M2.1
   "committee-op"   # rollout: M2.1
-  "concern-op"     # rollout: M2.2
+  # concern-op + reprisal-op + t07-op + t14-op wired in M2.2 — removed.
   "mint-session"   # rollout: M2.3 (special — pre-mint path; check runs AFTER mint validation)
-  "reprisal-op"    # rollout: M2.2
-  "t07-op"         # rollout: M2.2
-  "t14-op"         # rollout: M2.2
 )
 
 violations=0

@@ -11,6 +11,7 @@
  */
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
 import { log, withFunctionName } from '../_shared/log.ts';
 import {
   readS51,
@@ -40,6 +41,17 @@ function json(body: unknown, status: number): Response {
 Deno.serve(async (req) => {
   const requestId = req.headers.get('X-Request-ID') ?? undefined;
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+
+  // ADR-0024 §2 — cold-start HMAC pseudonym key parity check.
+  try {
+    await assertKeyParity();
+  } catch (e) {
+    if (e instanceof KeyParityError) {
+      log.error({ event: 't14.key_parity.fail', outcome: 'mismatch' });
+      return json({ error: 'service_unavailable' }, 503);
+    }
+    throw e;
+  }
 
   const authorization = req.headers.get('Authorization') ?? '';
   if (!authorization.toLowerCase().startsWith('bearer ')) return json({ error: 'rls_denied' }, 401);
