@@ -1,0 +1,25 @@
+-- ===========================================================================
+-- ADR-0024 §2 rollout enablement:
+--   GRANT EXECUTE on key_parity_server_sha() to service_role.
+--
+--   The EF cold-start parity check (assertKeyParity in _shared/key-parity.ts)
+--   needs to call key_parity_server_sha() to read the server SHA. Each EF
+--   uses a dedicated service-role client (constructed once per process and
+--   memoised by assertKeyParity itself) for this single read.
+--
+--   service_role is appropriate because:
+--     1. The SECURITY DEFINER function returns the SHA only — never the key.
+--     2. service_role already has BYPASSRLS on the Supabase stack, so this
+--        grant adds no privilege beyond what service_role can already do.
+--     3. Authenticated end-users CANNOT call key_parity_server_sha() because
+--        we are NOT granting authenticated — only the EF runtime (via
+--        SUPABASE_SERVICE_ROLE_KEY env) can read the SHA.
+--     4. The F-124 SHA-narrowing-brute-force threat is bounded: the SHA
+--        cannot land in user-visible surfaces (verify-no-sha-in-logs.sh
+--        enforces) and the service-role client is internal-only.
+--
+-- Authoritative ADR: ADR-0024 §2 (cold-start check inside every Edge
+--   Function). Threat-model.md §3.14 F-124 / F-125 / F-126.
+-- ===========================================================================
+
+GRANT EXECUTE ON FUNCTION public.key_parity_server_sha() TO service_role;

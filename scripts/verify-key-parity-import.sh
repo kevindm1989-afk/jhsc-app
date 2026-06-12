@@ -39,8 +39,7 @@ EF_DIR="$REPO_ROOT/supabase/functions"
 # Format: EF directory name (the slug between supabase/functions/ and
 # /index.ts). One per line. Comments allowed (lines starting with #).
 EXEMPT_DURING_ROLLOUT=(
-  "auth-op"        # rollout: M2.1
-  "committee-op"   # rollout: M2.1
+  # auth-op + committee-op wired in M2.1 — removed.
   # concern-op + reprisal-op + t07-op + t14-op wired in M2.2 — removed.
   "mint-session"   # rollout: M2.3 (special — pre-mint path; check runs AFTER mint validation)
 )
