@@ -82,9 +82,24 @@ function nextId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
+const MAX_NAME = 80;
+const DUPLICATE_SUFFIX = ' (copy)';
+
 /** Trim, normalize, and cap at 80 chars so long labels don't bloat storage. */
 function normalizeName(name: string): string {
-  return name.trim().slice(0, 80);
+  return name.trim().slice(0, MAX_NAME);
+}
+
+/**
+ * Compose the duplicate-name from the source name + " (copy)" suffix
+ * while keeping the total within MAX_NAME. The suffix is preserved
+ * verbatim — the base label is truncated if needed so a worker can
+ * always tell at a glance which row is the clone.
+ */
+function nameWithCopySuffix(name: string): string {
+  const base = name.trim();
+  if (base.length + DUPLICATE_SUFFIX.length <= MAX_NAME) return base + DUPLICATE_SUFFIX;
+  return base.slice(0, MAX_NAME - DUPLICATE_SUFFIX.length) + DUPLICATE_SUFFIX;
 }
 
 /** All saved views, newest-first. */
@@ -122,6 +137,28 @@ export function renameSavedView(id: string, name: string): SavedView | null {
   updated[idx] = next;
   writeAll(updated);
   return next;
+}
+
+/**
+ * Clone an existing saved view: same route/search/pinnedToHome, with a
+ * fresh id, a new createdAt, and the " (copy)" suffix appended to the
+ * name. Returns the new record, or null when the source id is unknown.
+ *
+ * Useful when a worker wants to fork an existing view to tweak the
+ * filter — clone it, rename the clone, edit on the destination route.
+ */
+export function duplicateSavedView(id: string): SavedView | null {
+  const all = readAll();
+  const src = all.find((v) => v.id === id);
+  if (!src) return null;
+  const dup: SavedView = {
+    ...src,
+    id: nextId(),
+    name: nameWithCopySuffix(src.name),
+    createdAt: new Date().toISOString()
+  };
+  writeAll([...all, dup]);
+  return dup;
 }
 
 /** Delete a saved view by id. Returns true when something was removed. */

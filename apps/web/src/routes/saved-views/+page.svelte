@@ -18,6 +18,7 @@
   import { t } from '$lib/i18n';
   import {
     deleteSavedView,
+    duplicateSavedView,
     exportSavedViews,
     hrefForSavedView,
     importSavedViews,
@@ -143,6 +144,39 @@
   function remove(id) {
     deleteSavedView(id);
     refresh();
+  }
+
+  /** @param {string} id */
+  function onDuplicate(id) {
+    duplicateSavedView(id);
+    refresh();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('view:saved'));
+    }
+  }
+
+  /** Per-row copy-url transient state: keyed by view id. */
+  /** @type {Record<string, 'idle' | 'copied' | 'error'>} */
+  let copyState = {};
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let copyResetTimer = null;
+
+  /** @param {import('$lib/saved-views/saved-views').SavedView} v */
+  async function onCopyUrl(v) {
+    if (typeof window === 'undefined') return;
+    const url = window.location.origin + v.route + v.search;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard-unavailable');
+      await navigator.clipboard.writeText(url);
+      copyState = { ...copyState, [v.id]: 'copied' };
+    } catch {
+      copyState = { ...copyState, [v.id]: 'error' };
+    }
+    if (copyResetTimer) clearTimeout(copyResetTimer);
+    copyResetTimer = setTimeout(() => {
+      copyState = {};
+      copyResetTimer = null;
+    }, 1500);
   }
 
   /** @param {import('$lib/saved-views/saved-views').SavedView} view */
@@ -409,6 +443,32 @@
             </button>
             <button
               type="button"
+              class="svp-action"
+              data-testid="saved-views-duplicate"
+              on:click={() => onDuplicate(v.id)}
+            >
+              {t('common.savedViewsPage.duplicate')}
+            </button>
+            <button
+              type="button"
+              class="svp-action svp-copy-url"
+              class:is-copied={copyState[v.id] === 'copied'}
+              class:is-error={copyState[v.id] === 'error'}
+              data-testid="saved-views-copy-url"
+              data-state={copyState[v.id] ?? 'idle'}
+              on:click={() => onCopyUrl(v)}
+              aria-live="polite"
+            >
+              {#if copyState[v.id] === 'copied'}
+                {t('common.savedViewsPage.copy_url_copied')}
+              {:else if copyState[v.id] === 'error'}
+                {t('common.savedViewsPage.copy_url_failed')}
+              {:else}
+                {t('common.savedViewsPage.copy_url')}
+              {/if}
+            </button>
+            <button
+              type="button"
               class="svp-action svp-action-danger"
               data-testid="saved-views-delete"
               on:click={() => remove(v.id)}
@@ -605,6 +665,14 @@
   .svp-action-danger:hover {
     background: var(--color-tint-red-bg);
     color: var(--color-destructive);
+  }
+  .svp-copy-url.is-copied {
+    background: var(--color-tint-green-bg);
+    color: var(--color-tint-green-fg);
+  }
+  .svp-copy-url.is-error {
+    background: var(--color-tint-red-bg);
+    color: var(--color-tint-red-fg);
   }
   .svp-rename-input {
     flex: 1;
