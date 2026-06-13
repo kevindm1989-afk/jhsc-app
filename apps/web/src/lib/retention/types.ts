@@ -26,6 +26,7 @@ export type RetentionEventType =
   | 'audit.integrity_check.ran'
   | 'auth.passkey.enrolled'
   | 'auth.passkey.revoked'
+  | 'backup.hard_deleted'
   | 'backup.manifest_written'
   | 'client.cache_policy_violation'
   | 'client.identity_selftest_fail'
