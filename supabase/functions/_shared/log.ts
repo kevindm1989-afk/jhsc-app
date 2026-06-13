@@ -81,7 +81,17 @@ const SAFE_FIELDS: ReadonlySet<string> = new Set([
   'backup.age_hours',
   'drift.field',
   'drift.expected',
-  'drift.observed'
+  'drift.observed',
+  // M9 alert dispatch (lib/alerts).
+  'alert.symbol',
+  'alert.severity',
+  'alert.source',
+  'alert.ts_ms',
+  'alert.run_id',
+  'alert.outcome',
+  'alert.would_delete_total',
+  'alert.deleted_total',
+  'alert.deleted_count'
 ]);
 
 const PI_DENYLIST: ReadonlySet<string> = new Set([
