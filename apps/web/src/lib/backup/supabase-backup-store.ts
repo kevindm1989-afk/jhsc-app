@@ -201,22 +201,97 @@ export class SupabaseBackupStore implements BackupStore {
     return out;
   }
 
-  // ---- deferred to M8.A.3 ----------------------------------------------
+  // ---- read surface (M8.A.3a — wired against migration 28 RPCs) --------
 
   async getCurrentKid(): Promise<string> {
-    throw new Error('not_implemented_until_m8_a_3');
+    const { data, error } = await this.cfg.rpc.rpc('backup_get_current_kid', {});
+    if (error) throw new BackupRpcError('backup_get_current_kid', error);
+    if (data == null || typeof data !== 'string' || data.length === 0) {
+      throw new BackupRpcError('backup_get_current_kid', {
+        code: 'no_active_kid',
+        message: 'no active committee_data_key (rotated_at IS NULL)'
+      });
+    }
+    return data;
   }
 
   async countAuditRowsByEventType(): Promise<Readonly<Record<string, number>>> {
-    throw new Error('not_implemented_until_m8_a_3');
+    const { data, error } = await this.cfg.rpc.rpc('backup_count_rows_by_event_type', {});
+    if (error) throw new BackupRpcError('backup_count_rows_by_event_type', error);
+    if (data == null || typeof data !== 'object') return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+      out[k] = Number(v);
+    }
+    return out;
   }
 
   async snapshotRetentionSweepRunsTs(): Promise<number> {
-    throw new Error('not_implemented_until_m8_a_3');
+    const { data, error } = await this.cfg.rpc.rpc('backup_snapshot_retention_sweep_runs_ts', {});
+    if (error) throw new BackupRpcError('backup_snapshot_retention_sweep_runs_ts', error);
+    return Number(data ?? 0);
   }
 
+  async readManifest(run_id: string): Promise<BackupManifest | null> {
+    const { data, error } = await this.cfg.rpc.rpc('backup_read_manifest', {
+      p_run_id: run_id
+    });
+    if (error) throw new BackupRpcError('backup_read_manifest', error);
+    if (data == null) return null;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (row == null || typeof row !== 'object') return null;
+    const r = row as Record<string, unknown>;
+    // RPC returns NULL fields when the row doesn't exist; the OUT-fn
+    // shape still produces a record with NULL columns, so guard on
+    // run_id being non-null.
+    if (r.run_id == null) return null;
+    const head: BackupAuditLogHead = {
+      id: String(r.audit_log_head_id),
+      ts_ms: Number(r.audit_log_head_ts_ms ?? 0),
+      hash: String(r.audit_log_head_hash ?? '')
+    };
+    return {
+      run_id: String(r.run_id),
+      status: r.manifest_status as BackupManifest['status'],
+      started_at_ms: Number(r.started_at_ms),
+      committed_at_ms: r.committed_at_ms == null ? null : Number(r.committed_at_ms),
+      finalized_at_ms: r.committed_at_ms == null ? null : Number(r.committed_at_ms),
+      hard_deleted_at_ms: r.hard_deleted_at_ms == null ? null : Number(r.hard_deleted_at_ms),
+      object_ref: String(r.object_ref ?? ''),
+      sha256: String(r.blob_sha256 ?? ''),
+      bytes: Number(r.blob_bytes ?? 0),
+      retention_class: '42d',
+      lock_until_ms: Number(r.object_lock_until_ms ?? 0),
+      committee_data_key_kid: String(r.encryption_kid ?? ''),
+      audit_log_head: r.audit_log_head_id == null ? null : head,
+      per_table_row_counts: (r.per_table_row_counts as Record<string, number>) ?? {},
+      per_event_row_counts: (r.per_event_row_counts as Record<string, number>) ?? {},
+      retention_sweep_runs_snapshot_ts_ms: Number(r.retention_sweep_runs_snapshot_ts_ms ?? 0),
+      schedule_hash: String(r.schedule_hash ?? ''),
+      node_runtime_pin:
+        typeof r.node_runtime_pin === 'string'
+          ? (JSON.parse(r.node_runtime_pin) as BackupManifest['node_runtime_pin'])
+          : { node_version: '', openssl_version: '' }
+    };
+  }
+
+  async hardDeleteManifestRow(run_id: string, hard_deleted_at_ms: number): Promise<void> {
+    // The M8.A.1 state machine already covers committed -> hard_deleted
+    // (the row stays as a tombstone per the DELETE-revoked posture);
+    // delegate to the existing transition.
+    await this.transitionManifestStatus(run_id, 'hard_deleted', hard_deleted_at_ms);
+  }
+
+  // ---- deferred to M8.A.3b (backup.manifest_written six-mirror dance) --
+
+  async emitBackupManifestWritten(_row: BackupManifestWrittenAuditRow): Promise<void> {
+    throw new Error('not_implemented_until_m8_a_3b');
+  }
+
+  // ---- deferred to M8.A.3c (dump + Supabase Storage SDK wiring) --------
+
   async dumpClosedAllowlist(): Promise<BackupDumpSnapshot> {
-    throw new Error('not_implemented_until_m8_a_3');
+    throw new Error('not_implemented_until_m8_a_3c');
   }
 
   async putWithObjectLock(
@@ -224,27 +299,15 @@ export class SupabaseBackupStore implements BackupStore {
     _blob: Uint8Array,
     _lock_until_ms: number
   ): Promise<BackupPutResult> {
-    throw new Error('not_implemented_until_m8_a_3');
+    throw new Error('not_implemented_until_m8_a_3c');
   }
 
   async isObjectLocked(_object_ref: string): Promise<boolean> {
-    throw new Error('not_implemented_until_m8_a_3');
+    throw new Error('not_implemented_until_m8_a_3c');
   }
 
   async deleteObjectIfUnlocked(_object_ref: string): Promise<BackupDeleteResult> {
-    throw new Error('not_implemented_until_m8_a_3');
-  }
-
-  async hardDeleteManifestRow(_run_id: string, _hard_deleted_at_ms: number): Promise<void> {
-    throw new Error('not_implemented_until_m8_a_3');
-  }
-
-  async emitBackupManifestWritten(_row: BackupManifestWrittenAuditRow): Promise<void> {
-    throw new Error('not_implemented_until_m8_a_3');
-  }
-
-  async readManifest(_run_id: string): Promise<BackupManifest | null> {
-    throw new Error('not_implemented_until_m8_a_3');
+    throw new Error('not_implemented_until_m8_a_3c');
   }
 }
 

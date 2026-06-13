@@ -270,18 +270,178 @@ describe('SupabaseBackupStore — listCommittedManifests', () => {
   });
 });
 
-describe('SupabaseBackupStore — M8.A.3-deferred methods throw', () => {
+describe('SupabaseBackupStore — getCurrentKid (M8.A.3a)', () => {
+  it('returns the kid string from the RPC', async () => {
+    const { store, calls } = makeStore({
+      rpcReturns: () => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    });
+    expect(await store.getCurrentKid()).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    expect(calls[0].fn).toBe('backup_get_current_kid');
+  });
+
+  it('throws BackupRpcError with no_active_kid code on null result', async () => {
+    const { store } = makeStore({ rpcReturns: () => null });
+    await expect(store.getCurrentKid()).rejects.toMatchObject({
+      fn: 'backup_get_current_kid',
+      cause: { code: 'no_active_kid' }
+    });
+  });
+
+  it('throws BackupRpcError on RPC error', async () => {
+    const { store } = makeStore({
+      rpcErrors: () => ({ code: 'P0001', message: 'boom' })
+    });
+    await expect(store.getCurrentKid()).rejects.toBeInstanceOf(BackupRpcError);
+  });
+});
+
+describe('SupabaseBackupStore — countAuditRowsByEventType (M8.A.3a)', () => {
+  it('maps RPC jsonb to a frozen record', async () => {
+    const { store, calls } = makeStore({
+      rpcReturns: () => ({ 'session.revoked': 2, 'auth.passkey.enrolled': 1 })
+    });
+    const out = await store.countAuditRowsByEventType();
+    expect(out).toEqual({ 'session.revoked': 2, 'auth.passkey.enrolled': 1 });
+    expect(calls[0].fn).toBe('backup_count_rows_by_event_type');
+  });
+
+  it('returns {} when RPC returns null', async () => {
+    const { store } = makeStore({ rpcReturns: () => null });
+    expect(await store.countAuditRowsByEventType()).toEqual({});
+  });
+
+  it('coerces string-counted bigint values to number', async () => {
+    const { store } = makeStore({
+      rpcReturns: () => ({ 'session.revoked': '42' })
+    });
+    expect(await store.countAuditRowsByEventType()).toEqual({ 'session.revoked': 42 });
+  });
+});
+
+describe('SupabaseBackupStore — snapshotRetentionSweepRunsTs (M8.A.3a)', () => {
+  it('returns the bigint coerced to number', async () => {
+    const { store, calls } = makeStore({ rpcReturns: () => 1_700_000_000_000 });
+    expect(await store.snapshotRetentionSweepRunsTs()).toBe(1_700_000_000_000);
+    expect(calls[0].fn).toBe('backup_snapshot_retention_sweep_runs_ts');
+  });
+
+  it('returns 0 when RPC returns null', async () => {
+    const { store } = makeStore({ rpcReturns: () => null });
+    expect(await store.snapshotRetentionSweepRunsTs()).toBe(0);
+  });
+});
+
+describe('SupabaseBackupStore — readManifest (M8.A.3a)', () => {
+  it('maps a populated RPC row to a BackupManifest', async () => {
+    const { store, calls } = makeStore({
+      rpcReturns: () => ({
+        run_id: '33333333-3333-3333-3333-333333333333',
+        manifest_status: 'committed',
+        started_at_ms: 1700000000000,
+        committed_at_ms: 1700000200000,
+        object_lock_until_ms: 1700000200000 + 42 * 86400000,
+        hard_deleted_at_ms: null,
+        object_ref: 'backups/x',
+        blob_sha256: 'a'.repeat(64),
+        blob_bytes: 4096,
+        encryption_kid: 'kid-v1',
+        audit_log_head_id: 7,
+        audit_log_head_ts_ms: 1700000000000,
+        audit_log_head_hash: 'b'.repeat(64),
+        per_event_row_counts: { 'session.revoked': 2 },
+        per_table_row_counts: { audit_log: 10 },
+        retention_sweep_runs_snapshot_ts_ms: 1700000000000,
+        schedule_hash: 'sch-hash-abc',
+        node_runtime_pin: JSON.stringify({ node_version: 'v20.0.0', openssl_version: '3.0.0' })
+      })
+    });
+    const m = await store.readManifest('33333333-3333-3333-3333-333333333333');
+    expect(m).not.toBeNull();
+    expect(m!.run_id).toBe('33333333-3333-3333-3333-333333333333');
+    expect(m!.status).toBe('committed');
+    expect(m!.retention_class).toBe('42d');
+    expect(m!.committed_at_ms).toBe(1700000200000);
+    expect(m!.finalized_at_ms).toBe(1700000200000);
+    expect(m!.hard_deleted_at_ms).toBeNull();
+    expect(m!.audit_log_head).toEqual({
+      id: '7',
+      ts_ms: 1700000000000,
+      hash: 'b'.repeat(64)
+    });
+    expect(m!.node_runtime_pin).toEqual({ node_version: 'v20.0.0', openssl_version: '3.0.0' });
+    expect(calls[0].args.p_run_id).toBe('33333333-3333-3333-3333-333333333333');
+  });
+
+  it('returns null when RPC yields a row with null run_id (no match)', async () => {
+    const { store } = makeStore({
+      rpcReturns: () => ({
+        run_id: null,
+        manifest_status: null,
+        started_at_ms: null,
+        committed_at_ms: null,
+        object_lock_until_ms: null,
+        hard_deleted_at_ms: null,
+        object_ref: null,
+        blob_sha256: null,
+        blob_bytes: null,
+        encryption_kid: null,
+        audit_log_head_id: null,
+        audit_log_head_ts_ms: null,
+        audit_log_head_hash: null,
+        per_event_row_counts: null,
+        per_table_row_counts: null,
+        retention_sweep_runs_snapshot_ts_ms: null,
+        schedule_hash: null,
+        node_runtime_pin: null
+      })
+    });
+    expect(await store.readManifest('ffffffff-ffff-ffff-ffff-ffffffffffff')).toBeNull();
+  });
+
+  it('null head fields produce audit_log_head=null', async () => {
+    const { store } = makeStore({
+      rpcReturns: () => ({
+        run_id: '33333333-3333-3333-3333-333333333333',
+        manifest_status: 'pending',
+        started_at_ms: 1,
+        committed_at_ms: null,
+        object_lock_until_ms: null,
+        hard_deleted_at_ms: null,
+        object_ref: 'r',
+        blob_sha256: 'a'.repeat(64),
+        blob_bytes: 0,
+        encryption_kid: 'k',
+        audit_log_head_id: null,
+        audit_log_head_ts_ms: null,
+        audit_log_head_hash: null,
+        per_event_row_counts: {},
+        per_table_row_counts: {},
+        retention_sweep_runs_snapshot_ts_ms: 0,
+        schedule_hash: 's',
+        node_runtime_pin: JSON.stringify({ node_version: 'x', openssl_version: 'y' })
+      })
+    });
+    const m = await store.readManifest('33333333-3333-3333-3333-333333333333');
+    expect(m!.audit_log_head).toBeNull();
+  });
+});
+
+describe('SupabaseBackupStore — hardDeleteManifestRow (M8.A.3a)', () => {
+  it('delegates to transitionManifestStatus(hard_deleted)', async () => {
+    const { store, calls } = makeStore();
+    await store.hardDeleteManifestRow('33333333-3333-3333-3333-333333333333', 1700);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].fn).toBe('backup_transition_manifest_status');
+    expect(calls[0].args.p_new_status).toBe('hard_deleted');
+    expect(calls[0].args.p_now_ms).toBe(1700);
+  });
+});
+
+describe('SupabaseBackupStore — still-deferred methods throw', () => {
   it.each([
-    ['getCurrentKid', (s: SupabaseBackupStore) => s.getCurrentKid()],
-    ['countAuditRowsByEventType', (s: SupabaseBackupStore) => s.countAuditRowsByEventType()],
-    ['snapshotRetentionSweepRunsTs', (s: SupabaseBackupStore) => s.snapshotRetentionSweepRunsTs()],
-    ['dumpClosedAllowlist', (s: SupabaseBackupStore) => s.dumpClosedAllowlist()],
-    ['putWithObjectLock', (s: SupabaseBackupStore) => s.putWithObjectLock('ref', new Uint8Array(), 1)],
-    ['isObjectLocked', (s: SupabaseBackupStore) => s.isObjectLocked('ref')],
-    ['deleteObjectIfUnlocked', (s: SupabaseBackupStore) => s.deleteObjectIfUnlocked('ref')],
-    ['hardDeleteManifestRow', (s: SupabaseBackupStore) => s.hardDeleteManifestRow('run', 1)],
     [
       'emitBackupManifestWritten',
+      'not_implemented_until_m8_a_3b',
       (s: SupabaseBackupStore) =>
         s.emitBackupManifestWritten({
           event_type: 'backup.manifest_written',
@@ -291,10 +451,29 @@ describe('SupabaseBackupStore — M8.A.3-deferred methods throw', () => {
           meta: {}
         })
     ],
-    ['readManifest', (s: SupabaseBackupStore) => s.readManifest('run')]
-  ])('%s throws not_implemented_until_m8_a_3', async (_name, call) => {
+    [
+      'dumpClosedAllowlist',
+      'not_implemented_until_m8_a_3c',
+      (s: SupabaseBackupStore) => s.dumpClosedAllowlist()
+    ],
+    [
+      'putWithObjectLock',
+      'not_implemented_until_m8_a_3c',
+      (s: SupabaseBackupStore) => s.putWithObjectLock('ref', new Uint8Array(), 1)
+    ],
+    [
+      'isObjectLocked',
+      'not_implemented_until_m8_a_3c',
+      (s: SupabaseBackupStore) => s.isObjectLocked('ref')
+    ],
+    [
+      'deleteObjectIfUnlocked',
+      'not_implemented_until_m8_a_3c',
+      (s: SupabaseBackupStore) => s.deleteObjectIfUnlocked('ref')
+    ]
+  ])('%s throws %s', async (_name, marker, call) => {
     const { store } = makeStore();
-    await expect(call(store)).rejects.toThrow('not_implemented_until_m8_a_3');
+    await expect(call(store)).rejects.toThrow(marker);
   });
 });
 
