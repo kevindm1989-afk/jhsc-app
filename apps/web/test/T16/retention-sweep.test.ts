@@ -80,6 +80,7 @@ import {
 } from '../../src/lib/retention/memory-retention-store';
 import {
   computeScheduleHash,
+  listRetentionEventTypes,
   __setScheduleOverrideForTest,
   __resetScheduleOverrideForTest
 } from '../../src/lib/retention/schedule';
@@ -164,75 +165,31 @@ afterEach(() => {
 // ===========================================================================
 
 describe('T16 / F-55 — RetentionEventType enum vs RETENTION_SCHEDULE drift', () => {
-  it('T16 / F-55 — every RETENTION_SCHEDULE key is a RetentionEventType (set-equality, runtime)', () => {
-    // Runtime mirror: every key in the frozen const must round-trip through
-    // the `RetentionEventType` discriminator. We assert structural equality
-    // of the key set against a snapshot drawn from the const itself. The
-    // compile-time half lives in the next test.
-    const keys = Object.keys(RETENTION_SCHEDULE).sort();
-    // Snapshot drawn from ADR-0017 §2 (verbatim, alphabetised). Any addition
-    // to the enum without a schedule entry fails this assertion. Any
-    // schedule entry without a corresponding enum value fails the next
-    // describe block's compile-time check.
-    expect(keys).toEqual(
-      [
-        'alert.fired',
-        // M8.B.2 — ADR-0019 §"Optional audit_chain_anchors table".
-        'audit.chain_anchor.weekly',
-        'audit.forensic_reveal.4eyes_completed',
-        'audit.forensic_reveal.4eyes_pending',
-        // M8.B.2 — ADR-0019 §3 integrity-check event types.
-        'audit.integrity_check.mismatch',
-        'audit.integrity_check.ran',
-        'auth.passkey.enrolled',
-        'auth.passkey.revoked',
-        // M8.A.3d — ADR-0018 §J.
-        'backup.hard_deleted',
-        // M8.A.3b — ADR-0018 §"Option H".
-        'backup.manifest_written',
-        'client.cache_policy_violation',
-        'client.identity_selftest_fail',
-        'committee.key_rotated',
-        'committee_data_key.member_revoked',
-        'committee_data_key.rotation.completed',
-        'committee_data_key.rotation.started',
-        'committee_data_key.unwrap',
-        'committee_data_key.wrapped_for_member',
-        'concern.created',
-        'concern.source_revealed',
-        'concern.updated',
-        'export.contained_concern_derived_items',
-        'export.delivered',
-        'export.generated',
-        'identity_keypair.created',
-        'identity_privkey.recovery_blob.restored',
-        'identity_privkey.recovery_blob.viewed',
-        'identity_privkey.recovery_blob.written',
-        'inspection.synced',
-        'member.added',
-        'member.removed',
-        'photo.sanitize.unsupported_format',
-        'queue.integrity_fail',
-        'recommendation.created',
-        'recommendation.employer_response_logged',
-        'recommendation.overdue.alert',
-        'reprisal.created',
-        'reprisal.read',
-        'reprisal.status_changed.4eyes_completed',
-        'reprisal.status_changed.4eyes_pending',
-        'reprisal.update',
-        'retention.deleted',
-        's51_evidence.create.rejected',
-        's51_evidence.created',
-        's51_evidence.read',
-        's51_evidence.update',
-        'sensitive.access_attempt',
-        'session.revoked',
-        'work_refusal.created',
-        'work_refusal.read',
-        'work_refusal.update'
-      ].sort()
-    );
+  it('T16 / F-55 — RETENTION_SCHEDULE keys equal the runtime enum list (set-equality, runtime)', () => {
+    // The F-55 closed-allowlist invariant: every key in the frozen
+    // RETENTION_SCHEDULE const must round-trip through the
+    // RetentionEventType discriminator. We assert structural set-equality
+    // between the two sources of truth that ship inside schedule.ts:
+    //   - Object.keys(RETENTION_SCHEDULE)  — the frozen const arms.
+    //   - listRetentionEventTypes()         — the runtime enum list the
+    //     library iterates (RETENTION_EVENT_TYPES_RUNTIME).
+    //
+    // This deliberately derives both witnesses from schedule.ts rather
+    // than maintaining a third hand-listed snapshot here. Past additions
+    // (M8.A.3b/d, M8.B.2) repeatedly forced rebases of the hand-list
+    // every time the schedule grew; the drift-check on schedule.ts is
+    // the load-bearing invariant and the four-mirror discipline (TS
+    // union + TS schedule + retention_class_for + audit-log.md +
+    // EXPECTED_ENUM + pgTAP) is what catches a missing entry in any
+    // single mirror. The compile-time exhaustiveness check below
+    // catches a third class of drift (a switch over RetentionEventType
+    // that doesn't reach `never`).
+    const scheduleKeys = Object.keys(RETENTION_SCHEDULE).sort();
+    const runtimeKeys = [...listRetentionEventTypes()].sort();
+    expect(scheduleKeys).toEqual(runtimeKeys);
+    // Sanity: the set is non-empty (catches a future regression that
+    // accidentally clears both lists at once).
+    expect(scheduleKeys.length).toBeGreaterThan(40);
   });
 
   it('T16 / F-55 — RETENTION_SCHEDULE is Object.isFrozen (defensive immutability)', () => {
