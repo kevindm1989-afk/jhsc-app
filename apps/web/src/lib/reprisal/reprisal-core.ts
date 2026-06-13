@@ -216,10 +216,15 @@ export async function readReprisalEntry(
 
   const body_plaintext = await openUtf8(row.body_ct, committeeKeyBytes);
   const title_plaintext = await openUtf8(row.title_ct, committeeKeyBytes);
-  // ms-epoch shim — strict ordering (audit ts < returned ts) per F-18 /
-  // HG-6 invariant. With vitest fake timers Date.now() is frozen within
-  // a tick; +1 ensures inequality the test asserts on.
-  const received_at_ts = now() + 1;
+  // F-18 / HG-6: the audit row above is awaited BEFORE this return,
+  // so the audit MUST have committed by the time the caller sees the
+  // plaintext. The ordering is enforced by the `await` (not by the
+  // returned timestamp). `received_at_ts = now()` is the actual
+  // return-moment clock; under frozen timers it may equal the audit's
+  // ts, which is fine — the test uses spy presence + `<=` to prove
+  // the audit precedes the return.
+  // Prior: `now() + 1` (G-T13-9 shim, mirror of G-T08-14).
+  const received_at_ts = now();
   return {
     ok: true,
     body_plaintext,

@@ -526,7 +526,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments B/D/E + 
 **Source:** implementer T13 pass (mirror of G-T08-14).
 **Finding:** `reprisal-core.readReprisalEntry` returns `received_at_ts: now() + 1` AND records the audit row with `meta.transaction_ts_ms` so the harness can satisfy the test's "same-transaction timestamp" assertion. In production this is wrong — the value comes from the SQL transaction's `xact_start()` and is byte-equal to the audit row's `ts` for free.
 **Resolution scope (T13.1):** SupabaseReprisalStore reveals the audit row's `xact_start()` ts; the library can drop the shim.
-**Blocker for:** T13.1 PR submission (the library shim must NOT persist into production).
+**Status (closed via library-shim removal):** `reprisal-core.readReprisalEntry` now returns `received_at_ts = now()` (no `+ 1`). No test asserts on the strict-inequality (grep of `apps/web/test` for `received_at_ts` returned zero hits outside T08), so no test changes were needed. The F-18 / HG-6 ordering is enforced by the `await` on the audit emit before the openUtf8 decrypts — same closure rationale as G-T08-14.
+**Blocker for:** closed.
 
 ### G-T13-10 — Protected-modal harness production component
 **Source:** test-writer T13 — `apps/web/test/_helpers/protected-modal-harness.ts`.
@@ -628,7 +629,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** second-opinion-reviewer T14 Concern 3.
 **Finding:** `work-refusal-core.ts:207` and `s51-evidence-core.ts:240` use the same `received_at_ts: now() + 1` shim T13's `readReprisalEntry` introduced. The library returns a fabricated future timestamp purely so the strict-inequality test assertion holds under frozen timers. Production must replace with the SQL transaction's `xact_start()`.
 **Resolution scope (T14.1):** `SupabaseWorkRefusalStore` / `SupabaseS51EvidenceStore` reveal flows return the actual return-moment timestamp from the SQL transaction; library shim collapses (test relaxes to `<=`).
-**Blocker for:** T14.1 PR submission (library shim must NOT persist into production).
+**Status (closed via library-shim removal):** both `work-refusal-core.readWorkRefusalEntry` and `s51-evidence-core.readS51EvidenceEntry` now return `received_at_ts = now()` (no `+ 1`). No test asserts on the strict-inequality (grep of `apps/web/test` for `received_at_ts` returned zero hits outside T08), so no test changes were needed. Same closure rationale as G-T08-14 / G-T13-9: the F-18 / HG-6 ordering is enforced by the `await` on the audit emit before the openUtf8 decrypts.
+**Blocker for:** closed.
 
 ### G-T14-12 — `s51_evidence.create.rejected` audit + structured error for `PhotoUnsupportedFormatError`
 **Source:** second-opinion-reviewer T14 Concern 1.

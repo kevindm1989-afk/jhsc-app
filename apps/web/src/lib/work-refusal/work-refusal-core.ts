@@ -201,10 +201,12 @@ export async function readWorkRefusalEntry(
 
   const notes_plaintext = await openUtf8(row.notes_ct, committeeKeyBytes);
   const title_plaintext = await openUtf8(row.title_ct, committeeKeyBytes);
-  // ms-epoch shim — strict ordering (audit ts < returned ts) per
-  // HG-6 mirror. With vitest fake timers Date.now() is frozen within a
-  // tick; +1 ensures inequality if a test asserts on it.
-  const received_at_ts = now() + 1;
+  // F-18 / HG-6 mirror: the audit row above is awaited BEFORE this
+  // return, so the audit MUST have committed by the time the caller
+  // sees the plaintext. The ordering is enforced by the `await` (not
+  // by the returned timestamp). Prior: `now() + 1` (G-T14 mirror of
+  // G-T08-14 / G-T13-9; cleanup closed via .context/known-gaps.md).
+  const received_at_ts = now();
   return {
     ok: true,
     notes_plaintext,
