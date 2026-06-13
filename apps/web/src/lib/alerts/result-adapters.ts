@@ -12,8 +12,8 @@
  * Source: §C M9 roadmap deliverable.
  */
 
-import type { BackupRetentionPassResult } from '../backup/types';
-import type { IntegrityRunResult } from '../audit-integrity/types';
+import type { BackupRetentionPassResult } from '../backup';
+import type { IntegrityRunResult } from '../audit-integrity';
 import type { RetentionPassResult } from '../retention/types';
 import { dispatchAlert, type AlertSymbol } from './dispatch';
 
