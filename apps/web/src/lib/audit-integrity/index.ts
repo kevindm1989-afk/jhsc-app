@@ -58,3 +58,6 @@ export type { IntegrityStore } from './integrity-store';
 
 export { runIntegrityCheck, runWeeklyChainAnchor } from './integrity-core';
 export type { RunIntegrityCheckOpts, RunWeeklyChainAnchorOpts } from './integrity-core';
+
+export { runWatchdogProbe, WATCHDOG_DEFAULT_WINDOW_MS } from './watchdog';
+export type { WatchdogProbeConfig, WatchdogProbeResult, WatchdogStore } from './watchdog';

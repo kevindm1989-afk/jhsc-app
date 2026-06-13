@@ -20,5 +20,6 @@ export { StructuredLogAlertSink } from './structured-log-sink';
 export {
   dispatchBackupRetentionAlerts,
   dispatchIntegrityAlerts,
-  dispatchRetentionAlerts
+  dispatchRetentionAlerts,
+  dispatchWatchdogAlerts
 } from './result-adapters';
