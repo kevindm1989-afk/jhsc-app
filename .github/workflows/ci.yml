@@ -236,6 +236,7 @@ jobs:
              supabase/migrations/00000000000030_t18_integrity_check_runner.sql \
              supabase/migrations/00000000000031_t17_backup_emit_hard_deleted.sql \
              supabase/migrations/00000000000032_t17_backup_dump_table_rows.sql \
+             supabase/migrations/00000000000033_t18_watchdog_read_fn.sql \
              supabase/test/committee_rls.sql \
              supabase/test/mint_rls.sql \
              supabase/test/concerns_rls.sql \
@@ -262,7 +263,8 @@ jobs:
              supabase/test/t17_backup_emit_manifest_written.sql \
              supabase/test/t18_integrity_check_runner.sql \
              supabase/test/t17_backup_emit_hard_deleted.sql \
-             supabase/test/t17_backup_dump_table_rows.sql /tmp/dbtest/
+             supabase/test/t17_backup_dump_table_rows.sql \
+             supabase/test/t18_watchdog_read_fn.sql /tmp/dbtest/
           chmod -R a+rX /tmp/dbtest
           sudo -u postgres psql -c "DROP DATABASE IF EXISTS jhsc_test;" -c "CREATE DATABASE jhsc_test;"
           # Test HMAC key — NOT a secret (pgcrypto needs a non-empty key to run).
@@ -298,11 +300,12 @@ jobs:
             00000000000029_t17_backup_emit_manifest_written.sql \
             00000000000030_t18_integrity_check_runner.sql \
             00000000000031_t17_backup_emit_hard_deleted.sql \
-            00000000000032_t17_backup_dump_table_rows.sql; do
+            00000000000032_t17_backup_dump_table_rows.sql \
+            00000000000033_t18_watchdog_read_fn.sql; do
             echo "applying $f"
             sudo -u postgres psql -v ON_ERROR_STOP=1 -d jhsc_test -f "/tmp/dbtest/$f"
           done
-          sudo -u postgres pg_prove -d jhsc_test /tmp/dbtest/committee_rls.sql /tmp/dbtest/mint_rls.sql /tmp/dbtest/concerns_rls.sql /tmp/dbtest/reprisal_rls.sql /tmp/dbtest/t14_rls.sql /tmp/dbtest/t07_rls.sql /tmp/dbtest/t07_f02_rls.sql /tmp/dbtest/t07_selftest_fail_rls.sql /tmp/dbtest/t07_recovery_blob_get_rls.sql /tmp/dbtest/t19_panic_wipe_rls.sql /tmp/dbtest/adr0015_amend_i_retention_classes.sql /tmp/dbtest/adr0024_key_parity_check.sql /tmp/dbtest/adr0023_amend_a_f128.sql /tmp/dbtest/t16_retention_service_role.sql /tmp/dbtest/t17_backup_writer_role.sql /tmp/dbtest/t18_integrity_check_role.sql /tmp/dbtest/t16_retention_sweep_functions.sql /tmp/dbtest/t16_retention_ceiling_rule.sql /tmp/dbtest/t17_backup_functions.sql /tmp/dbtest/t18_integrity_check_functions.sql /tmp/dbtest/t16_retention_sweep_runner.sql /tmp/dbtest/t18_integrity_check_event_types.sql /tmp/dbtest/t17_backup_read_functions.sql /tmp/dbtest/t17_backup_emit_manifest_written.sql /tmp/dbtest/t18_integrity_check_runner.sql /tmp/dbtest/t17_backup_emit_hard_deleted.sql /tmp/dbtest/t17_backup_dump_table_rows.sql
+          sudo -u postgres pg_prove -d jhsc_test /tmp/dbtest/committee_rls.sql /tmp/dbtest/mint_rls.sql /tmp/dbtest/concerns_rls.sql /tmp/dbtest/reprisal_rls.sql /tmp/dbtest/t14_rls.sql /tmp/dbtest/t07_rls.sql /tmp/dbtest/t07_f02_rls.sql /tmp/dbtest/t07_selftest_fail_rls.sql /tmp/dbtest/t07_recovery_blob_get_rls.sql /tmp/dbtest/t19_panic_wipe_rls.sql /tmp/dbtest/adr0015_amend_i_retention_classes.sql /tmp/dbtest/adr0024_key_parity_check.sql /tmp/dbtest/adr0023_amend_a_f128.sql /tmp/dbtest/t16_retention_service_role.sql /tmp/dbtest/t17_backup_writer_role.sql /tmp/dbtest/t18_integrity_check_role.sql /tmp/dbtest/t16_retention_sweep_functions.sql /tmp/dbtest/t16_retention_ceiling_rule.sql /tmp/dbtest/t17_backup_functions.sql /tmp/dbtest/t18_integrity_check_functions.sql /tmp/dbtest/t16_retention_sweep_runner.sql /tmp/dbtest/t18_integrity_check_event_types.sql /tmp/dbtest/t17_backup_read_functions.sql /tmp/dbtest/t17_backup_emit_manifest_written.sql /tmp/dbtest/t18_integrity_check_runner.sql /tmp/dbtest/t17_backup_emit_hard_deleted.sql /tmp/dbtest/t17_backup_dump_table_rows.sql /tmp/dbtest/t18_watchdog_read_fn.sql
 
   # Blocking: the FULL Supabase local stack (real GoTrue + PostgREST + Postgres).
   # Proves the committee RLS + session_is_live surface under the real auth
