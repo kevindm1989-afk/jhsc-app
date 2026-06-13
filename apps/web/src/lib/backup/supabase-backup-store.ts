@@ -1,0 +1,268 @@
+/**
+ * SupabaseBackupStore — production-time BackupStore against the
+ * Supabase project. Mirrors the same BackupStore contract the
+ * library consumes from MemoryBackupStore.
+ *
+ * Source obligations:
+ *   - ADR-0018 §4 (T17 backup library + sibling task spec).
+ *   - ADR-0012 + amendments (backup strategy + 42-day object-lock).
+ *   - threat-model.md §6 B6.1 trust boundary (backup_writer_role).
+ *
+ * Production path:
+ *   The store calls SECURITY DEFINER RPCs landed in migration
+ *   00000000000024_t17_backup_functions.sql:
+ *     - backup_extract_head_pointer
+ *     - backup_write_manifest_pending
+ *     - backup_transition_manifest_status
+ *     - backup_has_open_run_within_window
+ *     - backup_list_manifests_older_than_ms
+ *   These functions have EXECUTE granted ONLY to backup_writer_role.
+ *
+ * What this PR does NOT yet ship (separate M8.A.3 follow-up):
+ *   - getCurrentKid, countAuditRowsByEventType,
+ *     snapshotRetentionSweepRunsTs — need new SECURITY DEFINER fns.
+ *   - dumpClosedAllowlist — heavy; needs the pg_dump-shaped surface
+ *     (separate Edge Function + table-by-table SECURITY DEFINER set).
+ *   - putWithObjectLock / isObjectLocked / deleteObjectIfUnlocked —
+ *     Supabase Storage SDK wiring; not pure DB.
+ *   - hardDeleteManifestRow, readManifest — need new SECURITY DEFINER
+ *     fns (M8.A.1 ships transition_manifest_status which covers
+ *     committed -> hard_deleted at the status level; the row-delete
+ *     surface is deferred).
+ *   - emitBackupManifestWritten — needs the ADR-0003 Amendment A
+ *     six-mirror enum-extension for `backup.manifest_written`.
+ *   Each deferred method throws `not_implemented_until_m8_a_3` so a
+ *   premature caller fails closed instead of silently dropping data.
+ */
+
+import { createHmac } from 'node:crypto';
+import type {
+  BackupDeleteResult,
+  BackupDumpSnapshot,
+  BackupManifestPendingInput,
+  BackupManifestWrittenAuditRow,
+  BackupPutResult,
+  BackupStore,
+  CommittedManifestSummary
+} from './backup-store';
+import type { BackupAuditLogHead, BackupManifest, BackupManifestStatus } from './types';
+
+/**
+ * Minimal RPC interface — narrower than the supabase-js client. Keeps
+ * this module testable without dragging the full @supabase/supabase-js
+ * type surface into vitest. The production caller passes a wrapper
+ * over `supabase.rpc(fn, args)`.
+ */
+export interface SupabaseBackupRpc {
+  rpc(
+    fn: string,
+    args: Record<string, unknown>
+  ): Promise<{ data: unknown; error: { code?: string | null; message: string } | null }>;
+}
+
+/**
+ * Configuration for the production store. The caller injects:
+ *   - `rpc`: the supabase-js .rpc() shim.
+ *   - `nowMs`: clock; defaults to Date.now (overridable in tests).
+ *   - `hmacKey`: ONLY used to derive `systemActorPseudonym()` for the
+ *     row-shape the library asks for. In production the same value of
+ *     `$HMAC_PSEUDONYM_KEY` flows in (the parity gate enforces it).
+ */
+export interface SupabaseBackupStoreConfig {
+  readonly rpc: SupabaseBackupRpc;
+  readonly nowMs?: () => number;
+  readonly hmacKey: string;
+}
+
+/**
+ * Maps the library's expanded `aborted_*` discriminator down to the
+ * single 'aborted' the SQL state machine accepts. The structured
+ * reason carries in the library's own log; the audit row records the
+ * upload-rejection reason in `meta` when M8.A.3 wires emit.
+ */
+function mapTransitionStatusForSql(s: BackupManifestStatus): string {
+  if (s === 'pending') return 'pending';
+  if (s === 'committed') return 'committed';
+  if (s === 'hard_deleted') return 'hard_deleted';
+  // Every aborted_* discriminator collapses to 'aborted' in SQL.
+  return 'aborted';
+}
+
+export class SupabaseBackupStore implements BackupStore {
+  private readonly cfg: SupabaseBackupStoreConfig;
+  private readonly _nowMs: () => number;
+  /** Cached HMAC('system:backup-pass') for the row's actor_pseudonym. */
+  private readonly _systemActorPseudonym: string;
+
+  constructor(cfg: SupabaseBackupStoreConfig) {
+    this.cfg = cfg;
+    this._nowMs = cfg.nowMs ?? Date.now;
+    this._systemActorPseudonym = createHmac('sha256', cfg.hmacKey)
+      .update('system:backup-pass')
+      .digest('hex')
+      .slice(0, 16);
+  }
+
+  nowMs(): number {
+    return this._nowMs();
+  }
+
+  systemActorPseudonym(): string {
+    return this._systemActorPseudonym;
+  }
+
+  // ---- head pointer ------------------------------------------------------
+
+  async extractAuditLogHead(): Promise<BackupAuditLogHead | null> {
+    const { data, error } = await this.cfg.rpc.rpc('backup_extract_head_pointer', {});
+    if (error) throw new BackupRpcError('backup_extract_head_pointer', error);
+    if (data == null) return null;
+    // RETURNS record yields a single row with three named fields.
+    const row = Array.isArray(data) ? data[0] : data;
+    if (row == null || typeof row !== 'object') return null;
+    const r = row as { head_id?: unknown; head_ts_ms?: unknown; head_hash?: unknown };
+    if (r.head_id == null) return null;
+    return {
+      id: String(r.head_id),
+      ts_ms: Number(r.head_ts_ms ?? 0),
+      hash: String(r.head_hash ?? '')
+    };
+  }
+
+  // ---- manifest write + transition --------------------------------------
+
+  async writeManifestPending(input: BackupManifestPendingInput): Promise<void> {
+    const { error } = await this.cfg.rpc.rpc('backup_write_manifest_pending', {
+      p_run_id: input.run_id,
+      p_started_at_ms: input.started_at_ms,
+      p_object_ref: input.object_ref,
+      p_blob_sha256: input.sha256,
+      p_blob_bytes: input.bytes,
+      p_encryption_kid: input.committee_data_key_kid,
+      p_audit_log_head_id: input.audit_log_head?.id ?? null,
+      p_audit_log_head_ts_ms: input.audit_log_head?.ts_ms ?? null,
+      p_audit_log_head_hash: input.audit_log_head?.hash ?? null,
+      p_per_event_row_counts: input.per_event_row_counts,
+      p_per_table_row_counts: input.per_table_row_counts,
+      p_retention_sweep_runs_snapshot_ts_ms: input.retention_sweep_runs_snapshot_ts_ms,
+      p_schedule_hash: input.schedule_hash,
+      p_node_runtime_pin: JSON.stringify(input.node_runtime_pin)
+    });
+    if (error) throw new BackupRpcError('backup_write_manifest_pending', error);
+  }
+
+  async transitionManifestStatus(
+    run_id: string,
+    to_status: BackupManifestStatus,
+    finalized_at_ms: number
+  ): Promise<void> {
+    const { error } = await this.cfg.rpc.rpc('backup_transition_manifest_status', {
+      p_run_id: run_id,
+      p_new_status: mapTransitionStatusForSql(to_status),
+      p_now_ms: finalized_at_ms
+    });
+    if (error) throw new BackupRpcError('backup_transition_manifest_status', error);
+  }
+
+  // ---- lease check ------------------------------------------------------
+
+  async hasOpenBackupRunWithinWindow(now_ms: number, lease_window_ms: number): Promise<boolean> {
+    const { data, error } = await this.cfg.rpc.rpc('backup_has_open_run_within_window', {
+      p_now_ms: now_ms,
+      p_lease_window_ms: lease_window_ms
+    });
+    if (error) throw new BackupRpcError('backup_has_open_run_within_window', error);
+    return data === true;
+  }
+
+  // ---- committed-manifest list ------------------------------------------
+  //
+  // backup_list_manifests_older_than_ms returns committed manifests
+  // strictly older than the threshold. To enumerate ALL committed
+  // manifests at observation time, pass nowMs + 1 — every committed
+  // manifest's committed_at_ms is < nowMs by construction.
+
+  async listCommittedManifests(): Promise<readonly CommittedManifestSummary[]> {
+    const threshold = this._nowMs() + 1;
+    const { data, error } = await this.cfg.rpc.rpc('backup_list_manifests_older_than_ms', {
+      p_threshold_ms: threshold
+    });
+    if (error) throw new BackupRpcError('backup_list_manifests_older_than_ms', error);
+    if (!Array.isArray(data)) return [];
+    const out: CommittedManifestSummary[] = [];
+    for (const row of data as Array<Record<string, unknown>>) {
+      if (row.run_id == null || row.committed_at_ms == null) continue;
+      out.push({
+        run_id: String(row.run_id),
+        object_ref: String(row.object_ref ?? ''),
+        committed_at_ms: Number(row.committed_at_ms)
+      });
+    }
+    return out;
+  }
+
+  // ---- deferred to M8.A.3 ----------------------------------------------
+
+  async getCurrentKid(): Promise<string> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async countAuditRowsByEventType(): Promise<Readonly<Record<string, number>>> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async snapshotRetentionSweepRunsTs(): Promise<number> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async dumpClosedAllowlist(): Promise<BackupDumpSnapshot> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async putWithObjectLock(
+    _object_ref: string,
+    _blob: Uint8Array,
+    _lock_until_ms: number
+  ): Promise<BackupPutResult> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async isObjectLocked(_object_ref: string): Promise<boolean> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async deleteObjectIfUnlocked(_object_ref: string): Promise<BackupDeleteResult> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async hardDeleteManifestRow(_run_id: string, _hard_deleted_at_ms: number): Promise<void> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async emitBackupManifestWritten(_row: BackupManifestWrittenAuditRow): Promise<void> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+
+  async readManifest(_run_id: string): Promise<BackupManifest | null> {
+    throw new Error('not_implemented_until_m8_a_3');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Error class
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps a Postgres-level error from a backup RPC call. Caller maps
+ * (e.g.) ERRCODE 22023 to the library's structured error vocabulary
+ * (`manifest_write_failed`, `transition_failed`, `head_pointer_failed`).
+ */
+export class BackupRpcError extends Error {
+  constructor(
+    public readonly fn: string,
+    public override readonly cause: { code?: string | null; message: string }
+  ) {
+    super(`backup rpc ${fn} failed: ${cause.code ?? 'unknown'} — ${cause.message}`);
+    this.name = 'BackupRpcError';
+  }
+}
