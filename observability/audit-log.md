@@ -145,6 +145,9 @@ Wrong-passphrase reads on the T13/T14 surfaces emit the shared
 | Enum value | When emitted | Required `meta` |
 |---|---|---|
 | `alert.fired` | The dispatcher emits one row per fired alert (so the alert pipeline itself is auditable) | `alert_id`, `severity`, `routing` |
+| `audit.integrity_check.ran` | One row per integrity-check pass (ADR-0019 §3 / M8.B.2). Emitted by `integrity_check_emit_run_and_mismatches`. NO PI. Retention: 24mo (operational telemetry; mirrors `retention.deleted`). | `run_id`, `trigger` ∈ {`scheduled`,`post_rotation`,`post_export`,`weekly_anchor`}, `status` ∈ {`ok`,`mismatch_found`,`aborted`,`timed_out`}, `rows_walked`, `mismatches_count`, `schedule_hash`, `node_runtime_pin` |
+| `audit.integrity_check.mismatch` | One row per mismatch the integrity pass discovered (ADR-0019 §3 / M8.B.2). Emitted by `integrity_check_emit_run_and_mismatches` alongside the `ran` row. Load-bearing forensic. Retention: 7y. | `run_id`, `audit_log_id`, `mismatch_kind` ∈ {`hash_mismatch`,`row_missing`,`row_unexpected`,`head_pointer_drift`}, `attributable` (boolean), `attribution_run_id?` (uuid) |
+| `audit.chain_anchor.weekly` | One row per weekly off-app anchor delivery (ADR-0019 §"Optional audit_chain_anchors table" / G-T18-12). Emitted by `integrity_check_emit_chain_anchor_weekly`. NO PI — `email_recipient_pseudonym` is HMAC. Retention: 7y. | `anchor_id`, `head_audit_log_id`, `head_ts_ms`, `head_hash_hex`, `email_recipient_pseudonym` |
 
 ---
 

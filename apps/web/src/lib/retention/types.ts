@@ -19,8 +19,11 @@
  */
 export type RetentionEventType =
   | 'alert.fired'
+  | 'audit.chain_anchor.weekly'
   | 'audit.forensic_reveal.4eyes_completed'
   | 'audit.forensic_reveal.4eyes_pending'
+  | 'audit.integrity_check.mismatch'
+  | 'audit.integrity_check.ran'
   | 'auth.passkey.enrolled'
   | 'auth.passkey.revoked'
   | 'client.cache_policy_violation'

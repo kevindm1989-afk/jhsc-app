@@ -74,6 +74,9 @@ EXPECTED_ENUM=(
   client.cache_policy_violation
   client.identity_selftest_fail
   alert.fired
+  audit.integrity_check.ran
+  audit.integrity_check.mismatch
+  audit.chain_anchor.weekly
 )
 
 # (1) Documentation present.
