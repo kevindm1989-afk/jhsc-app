@@ -186,6 +186,8 @@ describe('T16 / F-55 — RetentionEventType enum vs RETENTION_SCHEDULE drift', (
         'audit.integrity_check.ran',
         'auth.passkey.enrolled',
         'auth.passkey.revoked',
+        // M8.A.3b — ADR-0018 §"Option H".
+        'backup.manifest_written',
         'client.cache_policy_violation',
         'client.identity_selftest_fail',
         'committee.key_rotated',

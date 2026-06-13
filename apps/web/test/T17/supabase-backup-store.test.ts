@@ -437,20 +437,107 @@ describe('SupabaseBackupStore — hardDeleteManifestRow (M8.A.3a)', () => {
   });
 });
 
+describe('SupabaseBackupStore — emitBackupManifestWritten (M8.A.3b)', () => {
+  it('maps every meta field to the SQL RPC arg shape', async () => {
+    const { store, calls } = makeStore();
+    await store.emitBackupManifestWritten({
+      event_type: 'backup.manifest_written',
+      ts_ms: 1_700_000_100_000,
+      target_id: null,
+      actor_pseudonym: 'a'.repeat(16),
+      meta: {
+        run_id: '22222222-2222-2222-2222-222222222222',
+        sha256: 'a'.repeat(64),
+        bytes: 4096,
+        committee_data_key_kid: 'kid-v1',
+        audit_log_head: {
+          id: '7',
+          ts_ms: 1_700_000_000_000,
+          hash: 'b'.repeat(64)
+        },
+        per_event_row_counts: { 'session.revoked': 2 },
+        per_table_row_counts: { audit_log: 42 },
+        retention_sweep_runs_snapshot_ts_ms: 1_700_000_000_000,
+        schedule_hash: 'sch-hash-abc',
+        node_runtime_pin: { node_version: 'v20.0.0', openssl_version: '3.0.0' }
+      }
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].fn).toBe('backup_emit_manifest_written');
+    expect(calls[0].args).toMatchObject({
+      p_run_id: '22222222-2222-2222-2222-222222222222',
+      p_emitted_at_ms: 1_700_000_100_000,
+      p_sha256: 'a'.repeat(64),
+      p_bytes: 4096,
+      p_committee_data_key_kid: 'kid-v1',
+      p_audit_log_head_id: '7',
+      p_audit_log_head_ts_ms: 1_700_000_000_000,
+      p_audit_log_head_hash: 'b'.repeat(64),
+      p_per_event_row_counts: { 'session.revoked': 2 },
+      p_per_table_row_counts: { audit_log: 42 },
+      p_retention_sweep_runs_snapshot_ts_ms: 1_700_000_000_000,
+      p_schedule_hash: 'sch-hash-abc'
+    });
+    expect(JSON.parse(calls[0].args.p_node_runtime_pin as string)).toEqual({
+      node_version: 'v20.0.0',
+      openssl_version: '3.0.0'
+    });
+  });
+
+  it('passes null head fields when audit_log_head meta is null', async () => {
+    const { store, calls } = makeStore();
+    await store.emitBackupManifestWritten({
+      event_type: 'backup.manifest_written',
+      ts_ms: 1,
+      target_id: null,
+      actor_pseudonym: 'a'.repeat(16),
+      meta: {
+        run_id: '22222222-2222-2222-2222-222222222222',
+        sha256: 'a'.repeat(64),
+        bytes: 0,
+        committee_data_key_kid: 'kid-v1',
+        audit_log_head: null,
+        per_event_row_counts: {},
+        per_table_row_counts: {},
+        retention_sweep_runs_snapshot_ts_ms: 0,
+        schedule_hash: 's',
+        node_runtime_pin: { node_version: '', openssl_version: '' }
+      }
+    });
+    expect(calls[0].args.p_audit_log_head_id).toBeNull();
+    expect(calls[0].args.p_audit_log_head_ts_ms).toBeNull();
+    expect(calls[0].args.p_audit_log_head_hash).toBeNull();
+  });
+
+  it('throws BackupRpcError on RPC error (22023 input validation)', async () => {
+    const { store } = makeStore({
+      rpcErrors: () => ({ code: '22023', message: 'p_sha256 must be 64 hex chars' })
+    });
+    await expect(
+      store.emitBackupManifestWritten({
+        event_type: 'backup.manifest_written',
+        ts_ms: 1,
+        target_id: null,
+        actor_pseudonym: 'a'.repeat(16),
+        meta: {
+          run_id: '22222222-2222-2222-2222-222222222222',
+          sha256: 'too_short',
+          bytes: 0,
+          committee_data_key_kid: 'kid-v1',
+          audit_log_head: null,
+          per_event_row_counts: {},
+          per_table_row_counts: {},
+          retention_sweep_runs_snapshot_ts_ms: 0,
+          schedule_hash: 's',
+          node_runtime_pin: { node_version: 'x', openssl_version: 'y' }
+        }
+      })
+    ).rejects.toBeInstanceOf(BackupRpcError);
+  });
+});
+
 describe('SupabaseBackupStore — still-deferred methods throw', () => {
   it.each([
-    [
-      'emitBackupManifestWritten',
-      'not_implemented_until_m8_a_3b',
-      (s: SupabaseBackupStore) =>
-        s.emitBackupManifestWritten({
-          event_type: 'backup.manifest_written',
-          ts_ms: 1,
-          target_id: null,
-          actor_pseudonym: 'a'.repeat(16),
-          meta: {}
-        })
-    ],
     [
       'dumpClosedAllowlist',
       'not_implemented_until_m8_a_3c',
