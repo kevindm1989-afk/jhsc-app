@@ -276,10 +276,48 @@ export class SupabaseBackupStore implements BackupStore {
   }
 
   async hardDeleteManifestRow(run_id: string, hard_deleted_at_ms: number): Promise<void> {
-    // The M8.A.1 state machine already covers committed -> hard_deleted
-    // (the row stays as a tombstone per the DELETE-revoked posture);
-    // delegate to the existing transition.
+    // F-72 step 10 mirror / ADR-0018 §J: every committed -> hard_deleted
+    // transition writes a backup.hard_deleted audit row. The state machine
+    // covers the row-status update (M8.A.1); the audit emit is the durable
+    // forensic anchor (M8.A.3d).
+    //
+    // Order matters:
+    //   (1) read manifest BEFORE transition so we have the structural
+    //       meta (object_ref, original committed_at_ms) for the audit
+    //       row even if the transition succeeds and the row is later
+    //       hard-deleted at the storage layer.
+    //   (2) transition (enforces state machine; committed -> hard_deleted
+    //       only — invalid transitions raise 22023).
+    //   (3) emit the audit row LAST per F-24 inversion. If emit throws,
+    //       the transition has already landed; the runbook §3 (last
+    //       bullet) treats this as "manifest hard-deleted without audit
+    //       trail" — a recordable but non-blocking exception. The
+    //       structured-log error is the trace.
+    const manifest = await this.readManifest(run_id);
+    if (manifest == null) {
+      throw new BackupRpcError('backup_read_manifest', {
+        code: 'manifest_not_found',
+        message: `manifest ${run_id} not found for hard_delete`
+      });
+    }
+    if (manifest.committed_at_ms == null) {
+      throw new BackupRpcError('backup_read_manifest', {
+        code: 'manifest_not_committed',
+        message: `manifest ${run_id} has no committed_at_ms (status=${manifest.status})`
+      });
+    }
+    const original_committed_at_ms = manifest.committed_at_ms;
+    const object_ref = manifest.object_ref;
+
     await this.transitionManifestStatus(run_id, 'hard_deleted', hard_deleted_at_ms);
+
+    const { error } = await this.cfg.rpc.rpc('backup_emit_hard_deleted', {
+      p_run_id: run_id,
+      p_object_ref: object_ref,
+      p_hard_deleted_at_ms: hard_deleted_at_ms,
+      p_original_committed_at_ms: original_committed_at_ms
+    });
+    if (error) throw new BackupRpcError('backup_emit_hard_deleted', error);
   }
 
   // ---- backup.manifest_written emit (M8.A.3b — wired against migration 29) -
