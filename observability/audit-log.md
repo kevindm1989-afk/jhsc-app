@@ -145,6 +145,7 @@ Wrong-passphrase reads on the T13/T14 surfaces emit the shared
 | Enum value | When emitted | Required `meta` |
 |---|---|---|
 | `backup.manifest_written` | One row per backup pass that successfully committed (ADR-0018 §"Option H" / M8.A.3b). Emitted by `backup_emit_manifest_written` AS THE LAST step of a committed pass (F-72 step 10). NO PI — structural metadata only (G-T16-PRIV-7); `actor_pseudonym` at TOP LEVEL only (G-T16-PRIV-1; F-79). Retention: 7y (mirrors `retention.deleted` — manifest is the audit anchor). | `run_id`, `sha256`, `bytes`, `committee_data_key_kid`, `audit_log_head` (`{id, ts_ms, hash}`), `per_event_row_counts`, `per_table_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`, `node_runtime_pin`, `status: 'committed'` |
+| `backup.hard_deleted` | One row per `committed` → `hard_deleted` manifest transition fired by the 42-day retention pass (ADR-0018 §J / M8.A.3d). Emitted by `backup_emit_hard_deleted` AS THE LAST step of the transition. NO PI — structural metadata only; same F-79 / G-T16-PRIV-1 posture. Retention: 7y. | `run_id`, `object_ref`, `hard_deleted_at_ms`, `original_committed_at_ms` |
 
 ### Alerting infra echoes (T18)
 
