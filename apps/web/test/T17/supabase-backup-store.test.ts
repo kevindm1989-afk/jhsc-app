@@ -426,14 +426,136 @@ describe('SupabaseBackupStore — readManifest (M8.A.3a)', () => {
   });
 });
 
-describe('SupabaseBackupStore — hardDeleteManifestRow (M8.A.3a)', () => {
-  it('delegates to transitionManifestStatus(hard_deleted)', async () => {
-    const { store, calls } = makeStore();
-    await store.hardDeleteManifestRow('33333333-3333-3333-3333-333333333333', 1700);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].fn).toBe('backup_transition_manifest_status');
-    expect(calls[0].args.p_new_status).toBe('hard_deleted');
-    expect(calls[0].args.p_now_ms).toBe(1700);
+describe('SupabaseBackupStore — hardDeleteManifestRow (M8.A.3a + M8.A.3d emit wire)', () => {
+  // Builds the populated-manifest row shape backup_read_manifest returns.
+  function manifestRow(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+    return {
+      run_id: '33333333-3333-3333-3333-333333333333',
+      manifest_status: 'committed',
+      started_at_ms: 1700000000000,
+      committed_at_ms: 1700000200000,
+      object_lock_until_ms: 1700000200000 + 42 * 86400000,
+      hard_deleted_at_ms: null,
+      object_ref: 'backups/2026/06/13/run.bin',
+      blob_sha256: 'a'.repeat(64),
+      blob_bytes: 4096,
+      encryption_kid: 'kid-v1',
+      audit_log_head_id: 7,
+      audit_log_head_ts_ms: 1700000000000,
+      audit_log_head_hash: 'b'.repeat(64),
+      per_event_row_counts: {},
+      per_table_row_counts: {},
+      retention_sweep_runs_snapshot_ts_ms: 1700000000000,
+      schedule_hash: 'sh',
+      node_runtime_pin: JSON.stringify({ node_version: 'v20', openssl_version: '3' }),
+      ...over
+    };
+  }
+
+  it('reads manifest, transitions to hard_deleted, then emits backup.hard_deleted', async () => {
+    const { store, calls } = makeStore({
+      rpcReturns: (call) => {
+        if (call.fn === 'backup_read_manifest') return manifestRow();
+        return null;
+      }
+    });
+    await store.hardDeleteManifestRow('33333333-3333-3333-3333-333333333333', 1700001000000);
+
+    // Three RPC calls in order: read, transition, emit.
+    expect(calls.map((c) => c.fn)).toEqual([
+      'backup_read_manifest',
+      'backup_transition_manifest_status',
+      'backup_emit_hard_deleted'
+    ]);
+
+    // Transition uses the new hard_deleted_at_ms; emit uses both the
+    // hard_deleted_at_ms AND the original committed_at_ms from the
+    // pre-transition read.
+    expect(calls[1].args).toMatchObject({
+      p_new_status: 'hard_deleted',
+      p_now_ms: 1700001000000
+    });
+    expect(calls[2].args).toMatchObject({
+      p_run_id: '33333333-3333-3333-3333-333333333333',
+      p_object_ref: 'backups/2026/06/13/run.bin',
+      p_hard_deleted_at_ms: 1700001000000,
+      p_original_committed_at_ms: 1700000200000
+    });
+  });
+
+  it('throws BackupRpcError(manifest_not_found) when readManifest returns null', async () => {
+    const { store, calls } = makeStore({ rpcReturns: () => null });
+    await expect(
+      store.hardDeleteManifestRow('ffffffff-ffff-ffff-ffff-ffffffffffff', 1700)
+    ).rejects.toMatchObject({
+      fn: 'backup_read_manifest',
+      cause: { code: 'manifest_not_found' }
+    });
+    // Only the read call should have happened; no transition, no emit.
+    expect(calls.map((c) => c.fn)).toEqual(['backup_read_manifest']);
+  });
+
+  it('throws BackupRpcError(manifest_not_committed) when committed_at_ms is null', async () => {
+    const { store, calls } = makeStore({
+      rpcReturns: (call) => {
+        if (call.fn === 'backup_read_manifest') {
+          return manifestRow({ manifest_status: 'pending', committed_at_ms: null });
+        }
+        return null;
+      }
+    });
+    await expect(
+      store.hardDeleteManifestRow('33333333-3333-3333-3333-333333333333', 1700)
+    ).rejects.toMatchObject({
+      fn: 'backup_read_manifest',
+      cause: { code: 'manifest_not_committed' }
+    });
+    expect(calls.map((c) => c.fn)).toEqual(['backup_read_manifest']);
+  });
+
+  it('propagates a transition RPC error (no emit attempted)', async () => {
+    const { store, calls } = makeStore({
+      rpcReturns: (call) => {
+        if (call.fn === 'backup_read_manifest') return manifestRow();
+        return null;
+      },
+      rpcErrors: (call) => {
+        if (call.fn === 'backup_transition_manifest_status') {
+          return { code: '22023', message: 'invalid transition' };
+        }
+        return null;
+      }
+    });
+    await expect(
+      store.hardDeleteManifestRow('33333333-3333-3333-3333-333333333333', 1700)
+    ).rejects.toMatchObject({ fn: 'backup_transition_manifest_status' });
+    expect(calls.map((c) => c.fn)).toEqual([
+      'backup_read_manifest',
+      'backup_transition_manifest_status'
+    ]);
+  });
+
+  it('propagates an emit RPC error (transition has already landed)', async () => {
+    const { store, calls } = makeStore({
+      rpcReturns: (call) => {
+        if (call.fn === 'backup_read_manifest') return manifestRow();
+        return null;
+      },
+      rpcErrors: (call) => {
+        if (call.fn === 'backup_emit_hard_deleted') {
+          return { code: 'P0001', message: 'boom' };
+        }
+        return null;
+      }
+    });
+    await expect(
+      store.hardDeleteManifestRow('33333333-3333-3333-3333-333333333333', 1700)
+    ).rejects.toMatchObject({ fn: 'backup_emit_hard_deleted' });
+    expect(calls.map((c) => c.fn)).toEqual([
+      'backup_read_manifest',
+      'backup_transition_manifest_status',
+      'backup_emit_hard_deleted'
+    ]);
   });
 });
 
