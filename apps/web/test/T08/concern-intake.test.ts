@@ -223,9 +223,22 @@ describe('T08 / F-18 — concern list default payload omits source_name_ct', () 
     });
     const auditSpy = supa.spyAuditWrites();
     const res = await supa.client(user).revealConcernSource(id, 'per-record-passphrase-x');
-    const auditTs = auditSpy.last_written_ts_for('concern.source_revealed')!;
+    // F-18 ordering proof (G-T08-14 closure):
+    //   1. The audit row exists by the time the caller sees the
+    //      response — last_written_ts_for(...) returns a non-null ts
+    //      ONLY if the spy captured the write before this assertion
+    //      runs. Under the await-based ordering in revealSource, the
+    //      audit emit completes BEFORE the function returns. (Prior
+    //      to G-T08-14 closure, the library returned `now() + 1` to
+    //      synthesise a strict-`<` under frozen timers; that shim is
+    //      gone — see concern-core.ts revealSource header.)
+    //   2. The timestamps may be equal under frozen timers, so the
+    //      relaxed `<=` is correct for the ts comparison; the
+    //      not-null assertion above carries the actual ordering.
+    const auditTs = auditSpy.last_written_ts_for('concern.source_revealed');
+    expect(auditTs).not.toBeNull();
     const responseTs = res.received_at_ts;
-    expect(auditTs).toBeLessThan(responseTs);
+    expect(auditTs!).toBeLessThanOrEqual(responseTs);
     expect(res.source_name).toBe(SYNTHETIC_DISPLAY_NAME);
   });
 });

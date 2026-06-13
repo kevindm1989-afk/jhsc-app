@@ -279,13 +279,17 @@ export async function revealSource(
   });
 
   const source_name = await openUtf8(ct, committeeKeyBytes);
-  // The returned timestamp is captured AFTER the audit row commits + AFTER
-  // the decrypt completes. With vitest's fake timers Date.now() is frozen
-  // across synchronous code, so two calls inside the same tick return the
-  // same value. Per F-18 the audit row MUST precede the plaintext return;
-  // we mark `received_at_ts` as `now() + 1` to surface the ordering as a
-  // strict inequality the test asserts. (Same convention as T07's
-  // `dom_render_ts` shim in `apps/web/test/_helpers/supabase-test.ts`.)
-  const received_at_ts = now() + 1;
+  // F-18: the audit row above is awaited BEFORE this return, so the
+  // audit MUST have committed by the time the caller sees the
+  // plaintext. The ordering is enforced by the `await` (not by the
+  // returned timestamp). The returned `received_at_ts` is the actual
+  // return-moment clock; under frozen timers it may equal the audit's
+  // ts, which is fine — the test uses spy presence + `<=` to prove
+  // the audit precedes the return without inventing a future ts.
+  // Prior: this returned `now() + 1` (G-T08-14 shim) to satisfy a
+  // strict-`<` test under jsdom's frozen clock; G-T08-14 closed by
+  // relaxing the test's strict inequality + adding a spy-presence
+  // assertion.
+  const received_at_ts = now();
   return { source_name, received_at_ts };
 }

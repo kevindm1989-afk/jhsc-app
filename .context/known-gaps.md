@@ -317,8 +317,8 @@ All eight are ratified under ADR-0002 Amendment H + ADR-0007 + the T08 four-revi
 **Source:** second-opinion-reviewer T08 Concern 1.
 **Finding:** `apps/web/src/lib/concerns/concern-core.ts:293` returns `received_at_ts: now() + 1` so the test's strict-inequality assertion (`auditTs < responseTs`) holds when both audit emit and decrypt resolve in the same JS tick. In production this value is wrong — it's an invented future moment, not the actual return-to-caller moment.
 **Resolution scope (T08.1):** SupabaseConcernStore reveal flow replaces this whole pattern with a transaction where audit-commit-ts precedes function-return-ts naturally. The library shim can then return the actual return-moment timestamp; the test relaxes to `<=` with separate ordering-of-operations assertion.
-**Status (still open):** `concern-core.ts:289` still returns `received_at_ts = now() + 1`. The production `SupabaseConcernClient` reveal path goes through the SQL function and gets the real audit-commit-ts via PostgREST, so the production response doesn't carry this shim — but the library shim itself hasn't been removed. Cleanup pass needed.
-**Blocker for:** none (production path doesn't use the shim). Cleanup.
+**Status (closed via library-shim removal):** `concern-core.ts` revealSource now returns `received_at_ts = now()` (no `+ 1`). The test in `apps/web/test/T08/concern-intake.test.ts` was relaxed: the F-18 ordering proof carries on `expect(auditTs).not.toBeNull()` (the audit row exists by the time the caller sees the response — the await chain guarantees ordering) + `expect(auditTs).toBeLessThanOrEqual(responseTs)`. The pseudo-strict-inequality was synthetic; the real ordering is enforced by the await on the audit emit before the decrypt + return.
+**Blocker for:** closed.
 
 ### G-T08-15 — Route-layer consent-attestation field (or documented asymmetry)
 **Source:** second-opinion-reviewer T08 Concern 2.
