@@ -13,7 +13,7 @@
  */
 
 import type { BackupRetentionPassResult } from '../backup';
-import type { IntegrityRunResult } from '../audit-integrity';
+import type { IntegrityRunResult, WatchdogProbeResult } from '../audit-integrity';
 import type { RetentionPassResult } from '../retention/types';
 import { dispatchAlert, type AlertSymbol } from './dispatch';
 
@@ -91,4 +91,22 @@ export function dispatchIntegrityAlerts(result: IntegrityRunResult, ts_ms: numbe
       'alert.outcome': result.status
     });
   }
+}
+
+/**
+ * Watchdog probe result -> A-INTEGRITY-001.
+ *
+ * The watchdog (lib/audit-integrity/watchdog) is the out-of-band
+ * probe that turns silence (no successful integrity-check pass in
+ * the configured window) into an alert. The library's per-pass
+ * surface can never detect "the pass never ran"; this adapter is
+ * the only path A-INTEGRITY-001 can fire on.
+ *
+ * Fires on `status: 'no_recent_pass'`; the `ok` shape is a no-op.
+ */
+export function dispatchWatchdogAlerts(result: WatchdogProbeResult, ts_ms: number): void {
+  if (result.status !== 'no_recent_pass') return;
+  dispatchAlert('A-INTEGRITY-001', 'audit-integrity', ts_ms, {
+    'alert.outcome': 'no_recent_pass'
+  });
 }
