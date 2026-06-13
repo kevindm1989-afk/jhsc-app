@@ -282,10 +282,34 @@ export class SupabaseBackupStore implements BackupStore {
     await this.transitionManifestStatus(run_id, 'hard_deleted', hard_deleted_at_ms);
   }
 
-  // ---- deferred to M8.A.3b (backup.manifest_written six-mirror dance) --
+  // ---- backup.manifest_written emit (M8.A.3b — wired against migration 29) -
 
-  async emitBackupManifestWritten(_row: BackupManifestWrittenAuditRow): Promise<void> {
-    throw new Error('not_implemented_until_m8_a_3b');
+  async emitBackupManifestWritten(row: BackupManifestWrittenAuditRow): Promise<void> {
+    // The SQL fn re-derives actor_pseudonym server-side; the row's
+    // actor_pseudonym is structural-only on the wire. The fn rejects
+    // empty kid / bad sha256 / negative bytes with 22023.
+    const meta = row.meta as Record<string, unknown>;
+    const head =
+      (meta.audit_log_head as { id?: string; ts_ms?: number; hash?: string } | null) ?? null;
+    const { error } = await this.cfg.rpc.rpc('backup_emit_manifest_written', {
+      p_run_id: meta.run_id,
+      p_emitted_at_ms: row.ts_ms,
+      p_sha256: meta.sha256,
+      p_bytes: meta.bytes,
+      p_committee_data_key_kid: meta.committee_data_key_kid,
+      p_audit_log_head_id: head?.id ?? null,
+      p_audit_log_head_ts_ms: head?.ts_ms ?? null,
+      p_audit_log_head_hash: head?.hash ?? null,
+      p_per_event_row_counts: meta.per_event_row_counts ?? {},
+      p_per_table_row_counts: meta.per_table_row_counts ?? {},
+      p_retention_sweep_runs_snapshot_ts_ms: meta.retention_sweep_runs_snapshot_ts_ms,
+      p_schedule_hash: meta.schedule_hash,
+      p_node_runtime_pin:
+        typeof meta.node_runtime_pin === 'string'
+          ? meta.node_runtime_pin
+          : JSON.stringify(meta.node_runtime_pin)
+    });
+    if (error) throw new BackupRpcError('backup_emit_manifest_written', error);
   }
 
   // ---- deferred to M8.A.3c (dump + Supabase Storage SDK wiring) --------

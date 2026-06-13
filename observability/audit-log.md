@@ -140,6 +140,12 @@ Wrong-passphrase reads on the T13/T14 surfaces emit the shared
 |---|---|---|
 | `queue.integrity_fail` | Inspection-queue drain HMAC mismatch — equivalent to `inspection.synced.hmac_fail`; we keep both names for the threat-model cross-references. (Implementer chooses one canonical; the other becomes a forbidden alias caught by semgrep.) | same as `inspection.synced.hmac_fail` |
 
+### Backup pipeline (T17)
+
+| Enum value | When emitted | Required `meta` |
+|---|---|---|
+| `backup.manifest_written` | One row per backup pass that successfully committed (ADR-0018 §"Option H" / M8.A.3b). Emitted by `backup_emit_manifest_written` AS THE LAST step of a committed pass (F-72 step 10). NO PI — structural metadata only (G-T16-PRIV-7); `actor_pseudonym` at TOP LEVEL only (G-T16-PRIV-1; F-79). Retention: 7y (mirrors `retention.deleted` — manifest is the audit anchor). | `run_id`, `sha256`, `bytes`, `committee_data_key_kid`, `audit_log_head` (`{id, ts_ms, hash}`), `per_event_row_counts`, `per_table_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`, `node_runtime_pin`, `status: 'committed'` |
+
 ### Alerting infra echoes (T18)
 
 | Enum value | When emitted | Required `meta` |

@@ -44,6 +44,9 @@ export const RETENTION_SCHEDULE = Object.freeze({
   'audit.integrity_check.ran': { kind: 'fixed_months', months: 24, no_target_id: true },
   'auth.passkey.enrolled': { kind: 'fixed_days', days: 90 },
   'auth.passkey.revoked': { kind: 'fixed_days', days: 90 },
+  // M8.A.3b — ADR-0018 §"Option H": manifest_written is the durable audit
+  // anchor for each backup pass; mirrors retention.deleted at 7y. NO target_id.
+  'backup.manifest_written': { kind: 'fixed_years', years: 7, no_target_id: true },
   'client.cache_policy_violation': { kind: 'fixed_months', months: 12 },
   'client.identity_selftest_fail': { kind: 'fixed_months', months: 12 },
   'committee.key_rotated': { kind: 'years_from_rotation', years: 7 },
@@ -181,6 +184,8 @@ const RETENTION_EVENT_TYPES_RUNTIME: readonly RetentionEventType[] = [
   'audit.integrity_check.ran',
   'auth.passkey.enrolled',
   'auth.passkey.revoked',
+  // M8.A.3b — ADR-0018 §"Option H".
+  'backup.manifest_written',
   'client.cache_policy_violation',
   'client.identity_selftest_fail',
   'committee.key_rotated',

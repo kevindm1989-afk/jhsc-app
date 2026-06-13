@@ -77,6 +77,7 @@ EXPECTED_ENUM=(
   audit.integrity_check.ran
   audit.integrity_check.mismatch
   audit.chain_anchor.weekly
+  backup.manifest_written
 )
 
 # (1) Documentation present.
