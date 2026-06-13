@@ -177,8 +177,13 @@ describe('T16 / F-55 — RetentionEventType enum vs RETENTION_SCHEDULE drift', (
     expect(keys).toEqual(
       [
         'alert.fired',
+        // M8.B.2 — ADR-0019 §"Optional audit_chain_anchors table".
+        'audit.chain_anchor.weekly',
         'audit.forensic_reveal.4eyes_completed',
         'audit.forensic_reveal.4eyes_pending',
+        // M8.B.2 — ADR-0019 §3 integrity-check event types.
+        'audit.integrity_check.mismatch',
+        'audit.integrity_check.ran',
         'auth.passkey.enrolled',
         'auth.passkey.revoked',
         'client.cache_policy_violation',

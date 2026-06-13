@@ -33,8 +33,15 @@ import type {
  */
 export const RETENTION_SCHEDULE = Object.freeze({
   'alert.fired': { kind: 'fixed_months', months: 24 },
+  // ADR-0019 §"Optional audit_chain_anchors table": load-bearing
+  // forensic anchor; 7y per the off-app weekly-email backstop policy.
+  'audit.chain_anchor.weekly': { kind: 'fixed_years', years: 7, no_target_id: true },
   'audit.forensic_reveal.4eyes_completed': { kind: 'fixed_years', years: 7 },
   'audit.forensic_reveal.4eyes_pending': { kind: 'fixed_years', years: 7 },
+  // ADR-0019 Decision §10: mismatch is load-bearing forensic (7y),
+  // ran is operational telemetry (24mo) — mirrors retention_sweep_runs.
+  'audit.integrity_check.mismatch': { kind: 'fixed_years', years: 7, no_target_id: true },
+  'audit.integrity_check.ran': { kind: 'fixed_months', months: 24, no_target_id: true },
   'auth.passkey.enrolled': { kind: 'fixed_days', days: 90 },
   'auth.passkey.revoked': { kind: 'fixed_days', days: 90 },
   'client.cache_policy_violation': { kind: 'fixed_months', months: 12 },
@@ -165,8 +172,13 @@ export function computeScheduleHash(): string {
  */
 const RETENTION_EVENT_TYPES_RUNTIME: readonly RetentionEventType[] = [
   'alert.fired',
+  // M8.B.2 — ADR-0019 §"Optional audit_chain_anchors table".
+  'audit.chain_anchor.weekly',
   'audit.forensic_reveal.4eyes_completed',
   'audit.forensic_reveal.4eyes_pending',
+  // M8.B.2 — ADR-0019 §3 integrity-check event types.
+  'audit.integrity_check.mismatch',
+  'audit.integrity_check.ran',
   'auth.passkey.enrolled',
   'auth.passkey.revoked',
   'client.cache_policy_violation',
