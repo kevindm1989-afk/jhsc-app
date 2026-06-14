@@ -381,9 +381,21 @@ failing test before the implementer touches the code path.
 3. **`work_refusal.read` / `s51_evidence.read` are not enumerated in
    the architect's amendment.** T14 will need them. Adding to the
    enum is mechanical; flag for the architect's T14 amendment pass.
+   **[RESOLVED — ADR-0003 Amendment A extension (`.context/decisions.md`
+   line 5835) ratifies both enum values; G-T14-7 closure status block
+   in `.context/known-gaps.md` documents the structural landing. All
+   six T14 events are in §1 above (lines 96–101) and in
+   `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM`.]**
 4. **The `reprisal.created` event reveals to ALL active members that a
    reprisal entry exists.** This is intended (the read-feed surface is
    the social-norm backstop) but the rep who entered the reprisal may
    reasonably expect more discretion. **Surface to privacy-reviewer**
    before T13 ships; the privacy notice may need to name this
    explicitly.
+   **[RESOLVED — ADR-0003 Amendment D (`.context/decisions.md` around
+   line 6024+) mitigates via a `reprisal_audit_feed_pseudonymized`
+   `SECURITY DEFINER` view that suppresses `actor_pseudonym` and
+   buckets `ts` to the hour in the member-visible feed. Forensic
+   un-projected access requires the Amendment E 4-eyes procedure.
+   The social-norm backstop survives without the load-bearing
+   author-inference vector. Privacy-reviewer Q1 sign-off ratified.]**
