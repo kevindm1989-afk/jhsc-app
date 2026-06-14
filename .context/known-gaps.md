@@ -461,7 +461,8 @@ T10 ships library-only per ADR-0002 Amendment H. Concerns 1 (non-JPEG silent-des
 **Source:** implementer handoff; second-opinion concern 8.
 **Finding:** `apps/web/src/lib/sw/index.ts` is library-only. Production needs a real `service-worker.js` SvelteKit/Vite entry consuming the lib; install/activate/fetch handlers wired to `caches` + `clients.matchAll`. Snapshot test runs against real Cache Storage in a Playwright environment.
 **Resolution scope (T10.1):** real SW entry + Playwright integration test.
-**Blocker for:** T10.1 PR submission.
+**Status (closed via T19.1 PWA wire-up — same closure as G-T19-14):** `apps/web/src/service-worker.ts` ships the real SW entry. Registers `install` (skipWaiting), `activate` (clearStaleVersionCaches + clients.claim), `fetch` (cache-first for static/locales, network-first for dynamic, pass-through for non-allowlisted URLs + non-GET methods), and `message` (handles `{type: 'clear-dynamic-caches'}` → `clearDynamicCachesOnLock`). The X-Data-Class C3/C4 reject path + cache-policy-violation audit queueing run inside the library's `handleFetchResponse`. `hooks.client.ts` calls `navigator.serviceWorker.register('/service-worker.js', {scope: '/', type: 'module'})` gated on `import.meta.env.PROD` + `'serviceWorker' in navigator`. Errors route through structured logger + Sentry. Same wire-up that closed G-T19-14.
+**Blocker for:** closed.
 
 ### G-T10-10 — PhotoCaptureSurface.svelte full UI
 
@@ -524,7 +525,8 @@ T10 ships library-only per ADR-0002 Amendment H. Concerns 1 (non-JPEG silent-des
 **Source:** implementer handoff.
 **Finding:** A-QUEUE-001 fires per-row in the harness. Production wire should aggregate (e.g., >5 in 10min) to avoid alert storms.
 **Resolution scope:** observability-setup amendment; alerts.md update.
-**Blocker for:** none. Operational polish.
+**Status (closed via observability-setup decision — no aggregation by design):** the observability-setup pass explicitly chose per-occurrence over rate-thresholded firing. `observability/alerts.md:30` pins the policy verbatim: _"Per-occurrence alert (no rate threshold — a single forged queue entry matters)."_ Priority P2, routed to inc-responder, runbook at `docs/runbooks/queue-integrity-fail.md`. The rationale: HMAC failure on a queue entry is a forensic anomaly, not a noisy operational event — one forged entry warrants immediate triage. Alert-storm risk is bounded because the underlying production trigger (HMAC mismatch on drain) is itself adversary-rate-limited.
+**Blocker for:** closed.
 
 ### G-T10-19 — `inspect_quarantine()` user-visible UI
 
