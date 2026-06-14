@@ -1555,8 +1555,10 @@ describe('T18 / F-100 — no PII in error paths (closed-literal error_code)', ()
     const store = makeStore();
     plantPIICanaries(store);
     // Force the head-read to throw via a dedicated mutator (the architect
-    // spec lists this as a supported test hook).
-    store.__forceChainWalkException(true);
+    // spec lists this as a supported test hook). Post-G-T18-15 split:
+    // this flag targets `readChainHead` only; the segment-read flag is
+    // `__forceChainSegmentException`.
+    store.__forceHeadReadException(true);
     const result = await runWeeklyChainAnchor({ store });
     expect(result.status).toBe('errored');
     expect((result as { error_code?: string }).error_code).toBe('head_read_failed');

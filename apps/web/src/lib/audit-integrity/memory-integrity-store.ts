@@ -222,7 +222,8 @@ export interface TestIntegrityStore extends IntegrityStore {
   __debugInsertSweepRunFixture(run: SweepRunFixtureSeed): void;
   __debugDeleteRowAtId(id: string): void;
   __forceSummaryEmitFailure(on: boolean): void;
-  __forceChainWalkException(on: boolean): void;
+  __forceChainSegmentException(on: boolean): void;
+  __forceHeadReadException(on: boolean): void;
   __setLiveRuntimePin(pin: IntegrityNodeRuntimePin): void;
   __debugListRuns(): ReadonlyArray<{
     readonly run_id: string;
@@ -255,7 +256,8 @@ export class MemoryIntegrityStore implements TestIntegrityStore {
   };
 
   private forceSummaryEmitFailure = false;
-  private forceChainWalkException = false;
+  private forceChainSegmentException = false;
+  private forceHeadReadException = false;
 
   /** Snapshot registry keyed by symbol — F-58 rollback (mirrors T16). */
   private snapshots = new Map<symbol, SnapshotPayload>();
@@ -302,7 +304,7 @@ export class MemoryIntegrityStore implements TestIntegrityStore {
     readonly start_after_id: string | null;
     readonly max_rows: number;
   }): Promise<ReadonlyArray<AuditChainRowMaterialized>> {
-    if (this.forceChainWalkException) {
+    if (this.forceChainSegmentException) {
       throw new Error('chain_walk_failed');
     }
     const ordered = this.auditChainRows.slice().sort((a, b) => compareIds(a.id, b.id));
@@ -330,7 +332,7 @@ export class MemoryIntegrityStore implements TestIntegrityStore {
   }
 
   async readChainHead(): Promise<AuditChainRowMaterialized | null> {
-    if (this.forceChainWalkException) {
+    if (this.forceHeadReadException) {
       throw new Error('head_read_failed');
     }
     if (this.auditChainRows.length === 0) return null;
@@ -556,8 +558,12 @@ export class MemoryIntegrityStore implements TestIntegrityStore {
     this.forceSummaryEmitFailure = on;
   }
 
-  __forceChainWalkException(on: boolean): void {
-    this.forceChainWalkException = on;
+  __forceChainSegmentException(on: boolean): void {
+    this.forceChainSegmentException = on;
+  }
+
+  __forceHeadReadException(on: boolean): void {
+    this.forceHeadReadException = on;
   }
 
   __setLiveRuntimePin(pin: IntegrityNodeRuntimePin): void {
