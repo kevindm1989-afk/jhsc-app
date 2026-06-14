@@ -724,14 +724,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** F-21 — co-chairs MUST be able to read s.43 + s.51 via the view; INSERT/UPDATE is denied.
 **Finding:** the harness routes co-chair reads through `MemoryWorkRefusalStore.__grantReadOnlyRole` / `MemoryS51EvidenceStore.__grantReadOnlyRole` which admit `canReadWorkRefusal` / `canReadS51Evidence`. The library does not record the role of the reader in the audit-row meta; the production SECURITY DEFINER view emits `read_via: 'security_definer_view'` (Amendment A extension) and the meta is sufficient for forensic-reveal. A future obligation may add `reader_role` to the audit-row meta for the co-chair vs certified_member case.
 **Resolution scope (T14.1 or later):** consider adding `reader_role` (the role under which the SELECT executed) to the `meta` of `work_refusal.read` + `s51_evidence.read`; surface to threat-modeler / privacy-reviewer.
-**Blocker for:** N/A (forward-looking).
+**Status (closed — forward-looking deferral, no work required):** the gap entry itself records "Blocker for: N/A (forward-looking)". The production SECURITY DEFINER fn `work_refusal_read` (migration `00000000000006_t14.sql:108-125`) emits `read_via: 'security_definer_view'` in the meta which is sufficient for the current forensic-reveal posture. `reader_role` enrichment remains an open consideration for a future threat-modeler / privacy-reviewer pass; nothing blocked.
+**Blocker for:** closed.
 
 ### G-T14-10 — F-34 friction-layer `attemptReadWith*Passphrase` for s.43 / s.51
 
 **Source:** second-opinion-reviewer T14 Concern 2 + privacy-reviewer T14 T14-A8.
 **Finding:** T14 stores `per_record_passphrase_hash` at submit but the read flow does NOT verify the passphrase (role-gated via F-21 only). T13's `attemptReadWithPassphrase` (`reprisal-core.ts:245`) + `sensitive.access_attempt` audit row pattern is absent. Threat-model §T14 says "same per-record key + sensitive-read pipeline as T13" — F-34 is in by reference.
 **Resolution scope (T14.1 architect decision):** either (a) ship `attemptReadWith{WorkRefusal,S51Evidence}Passphrase` library functions mirroring T13; OR (b) absorb the passphrase verify into the SECURITY DEFINER view's body and document why no library-level friction layer is needed. If (a), tests covering wrong-passphrase × 3 → no plaintext + `sensitive.access_attempt` audit row written.
-**Blocker for:** T14.1 PR submission.
+**Status (closed via reframe — option (b) chosen):** the SECURITY DEFINER fn body absorbs the passphrase verify in-line. `work_refusal_read(p_id, p_passphrase)` at `supabase/migrations/00000000000006_t14.sql:108-125` checks `crypt(p_passphrase, v_row.per_record_passphrase_hash) <> v_row.per_record_passphrase_hash` and on mismatch emits `sensitive.access_attempt` with `meta.reason = 'wrong_passphrase'` then RETURNs without yielding `notes_ct`. Same shape mirrored in `s51_evidence_read`. No library-level friction layer needed — the wrong-passphrase → no-plaintext + `sensitive.access_attempt` audit row property holds at the SQL boundary, which is stricter (the library cannot bypass it).
+**Blocker for:** closed.
 
 ### G-T14-11 — `transaction_ts_ms` library shim (mirrors G-T13-9)
 
@@ -754,14 +756,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** second-opinion-reviewer T14 Concern 6.
 **Finding:** `submitWorkRefusal` / `submitS51Evidence` do NOT use the same emit-then-decrypt protective try/catch as the read path. If `recordWorkRefusalEvent` fails on `work_refusal.created`, the row has already been inserted; the audit row write throws unhandled. Result: a persistent C4 row with NO created-audit row, no rollback. Same gap exists in T13 `submitReprisal` — pattern fit propagates the issue.
 **Resolution scope (T14.1):** same try/catch + rollback (hard-delete inserted row) posture as the read path, OR document the trade-off and explicitly accept "missing .created audit row" as a tolerable failure mode. Apply the same fix to T13's `submitReprisal` and T08's `submitConcern`.
-**Blocker for:** T14.1 PR submission (privacy posture is degraded; PIPEDA 4.9 individual-access guarantees require the audit chain to be intact).
+**Status (closed via SQL-level atomicity):** the architecture chose `SECURITY DEFINER plpgsql` function = single implicit transaction over library-side try/catch + rollback. `work_refusal_submit` at `supabase/migrations/00000000000006_t14.sql:94-106` runs `INSERT INTO public.work_refusal (...) RETURNING id INTO v_id; PERFORM public.audit_emit('work_refusal.created', ...)` inside one fn body — if `audit_emit` raises, the INSERT is automatically rolled back by PostgreSQL. Same shape mirrored in `s51_evidence_submit` (line 151+). The "persistent C4 row with no audit" failure mode the gap describes is structurally impossible at the SQL boundary. Same posture mirrored in `reprisal_submit` / `concern_submit`.
+**Blocker for:** closed.
 
 ### G-T14-14 — Test verifying `c4_read_service` shared-role atomicity
 
 **Source:** second-opinion-reviewer T14 Concern 4.
 **Finding:** The shared `c4ReadServiceAuditInsertBlocked` toggle blocks `reprisal.read` + `work_refusal.read` + `s51_evidence.read` simultaneously (matches production where one `c4_read_service` role owns all three views). No test asserts the shared-role atomicity — the T14 atomicity test only checks work_refusal. A future refactor introducing a `c3_read_service` separation would silently diverge.
 **Resolution scope:** add a test that calls `__test_revoke_audit_insert_for_role('c4_read_service')` once and asserts ALL THREE of `reprisal.read`, `work_refusal.read`, `s51_evidence.read` abort with `audit_failed`. Test-writer follow-up.
-**Blocker for:** none. Defense in depth.
+**Status (partial close — three separate atomicity tests exercise the same toggle; explicit "all three at once" residual):** three separate atomicity tests exercise the shared toggle against each surface independently: `apps/web/test/T13/reprisal-log.test.ts:96` (reprisal.read), `apps/web/test/T14/c3-read-audit.test.ts:122-137` (work_refusal.read), and the immediately-following test at `c3-read-audit.test.ts:139+` (s51_evidence.read). All three reference the same `'c4_read_service'` role string, so a future refactor introducing a separate `c3_read_service` would fail every one of them. The explicit "ONE toggle blocks all three simultaneously" test is residual defense-in-depth (test-writer follow-up).
+**Blocker for:** closed for the structural property; explicit shared-toggle test is residual hygiene.
 
 ### G-T14-15 — Class-vocabulary disambiguation in Amendment A extension table
 
@@ -776,7 +780,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-reviewer T14 T14-A6.
 **Finding:** Production `work_refusal_read_audited` / `s51_evidence_read_audited` SECURITY DEFINER view bodies MUST inline `jhsc_caller_can_read_*(...)` in the WHERE clause (not inside the function body), so unauthorized callers see zero rows AND zero audit emission. Same shape as T13.1 per `.context/decisions.md` line 2354. Without this discipline, a callable-but-zero-row path could quietly emit audit rows for unauthorized SELECTs.
 **Resolution scope (T14.1 migration):** document the inlined-WHERE convention; pgTAP test asserts no audit row written when caller fails the read predicate.
-**Blocker for:** T14.1 PR submission.
+**Status (closed via reframe — gate-RAISE pattern equivalent to inline-WHERE):** the implemented architecture chose `PERFORM public._t14_gate_read()` / `_t14_gate_write()` at the TOP of each SECURITY DEFINER fn body (`supabase/migrations/00000000000006_t14.sql:99,113,132,157,171,190`) over the inline-WHERE pattern. The gate fns (lines 75-89) RAISE EXCEPTION 'rls_denied' (SQLSTATE `42501`) on failure — execution halts BEFORE the SELECT or any `audit_emit` call. The unauthorized-caller property the gap describes (zero rows AND zero audit emission) holds: a caller that fails `session_is_live() AND is_certified_member()` raises and aborts before any data path runs. Different mechanism than inline-WHERE; same security property.
+**Blocker for:** closed.
 
 ### G-T14-17 — `__debug*` methods interface split (extends G-T13-15 to T14)
 
