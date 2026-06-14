@@ -338,8 +338,8 @@ All eight are ratified under ADR-0002 Amendment H + ADR-0007 + the T08 four-revi
 **Source:** second-opinion-reviewer T08 Concern 8 (cross-cuts security-reviewer informational note).
 **Finding:** `ConcernIntakeForm.svelte:370, :409` use raw `1px` border widths (and `:446` uses raw `4px` for C4 left border). Implementer documented as the "1px exception" but no `border.width` token exists in `design-tokens.json`.
 **Resolution scope (next designer pass):** add `border.width.hairline` (1px) and `border.width.c4_stripe` (4px) tokens to `design-tokens.json`. Then sweep components to consume.
-**Status (closed):** `design-tokens.json` line 478 declares `"border_width": { "hairline": "1px", ..., "c4_stripe": "4px" }`. The token surface exists; components can now consume `tokens.border_width.hairline` instead of raw px. A separate cleanup pass to sweep the `ConcernIntakeForm.svelte` raw-px sites onto the token is a follow-up but not blocking.
-**Blocker for:** none. Cleanup sweep pending.
+**Status (fully closed):** the sweep landed. `apps/web/src/app.html` `:root` now declares CSS variables `--border-width-hairline: 1px;`, `--border-width-default: 1px;`, `--border-width-thick: 2px;`, `--border-width-c4-stripe: 4px;`, `--border-width-step-indicator: 2px;`, `--border-width-focus-inner: 2px;`, `--border-width-focus-outer: 3px;` (mirrors `design-tokens.json` `border_width`). `apps/web/src/lib/tokens.ts` `Tokens` interface + accessor extended to surface `c4_stripe` + `step_indicator` (the two missing keys). `apps/web/src/lib/concerns/ConcernIntakeForm.svelte` swept: every raw `border-width: 1px` / `border-inline-start-width: 4px` / `border: 1px solid …` now references `var(--border-width-hairline)` or `var(--border-width-c4-stripe)`. The `.sr-only` width/height/margin `1px` values stay raw (visually-hidden helper — not border tokens). Border-px grep on the file returns zero raw values.
+**Blocker for:** closed.
 
 ### G-T08-18 — Harness T07/T08 dual-write coupling unification
 **Source:** second-opinion-reviewer T08 Concern 4.
