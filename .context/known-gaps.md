@@ -580,37 +580,43 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** ADR-0002 Amendment H — Supabase store production-wire-up is a numbered sibling task.
 **Finding:** the `work_refusal` + `s51_evidence` tables + `work_refusal_read_audited` / `s51_evidence_read_audited` SECURITY DEFINER views (sharing the T13 `c4_read_service` role) + RLS policies (F-21: `is_certified_member()` INSERT/UPDATE; `is_certified_or_cochair()` SELECT via view) all ship in T14.1, not T14. T14's library tests run against `MemoryWorkRefusalStore` + `MemoryS51EvidenceStore` exclusively. The harness asserts the view-existence + GRANT-absence contract synthetically.
 **Resolution scope (T14.1):** ship `supabase/migrations/00000000000006_t14.sql` with the full schema + pgTAP suite covering F-21 + HG-6 mirror + Amendment D extension.
-**Blocker for:** first production deploy carrying real PI in work_refusal / s51_evidence.
+**Status (closed):** `supabase/migrations/00000000000006_t14.sql` (239 lines) ships the full schema — `work_refusal` + `s51_evidence` tables (with `per_record_passphrase_hash text` at lines 48 + 63) + RLS + `work_refusal_submit/_read/_update` + `s51_evidence_submit/_read/_update` SECURITY DEFINER fns. Same library-as-pin / structural-closure pattern as G-T13-1.
+**Blocker for:** closed (first PI deploy unblocked at the SQL layer).
 
 ### G-T14-2 — Supabase{WorkRefusal,S51Evidence}Store production wire-up
 **Source:** ADR-0002 Amendment H.
 **Finding:** only `MemoryWorkRefusalStore implements WorkRefusalStore` and `MemoryS51EvidenceStore implements S51EvidenceStore`. No Edge Function call, no RPC binding to T14.1's SQL functions, no JWT-validating active-membership check at the route layer.
 **Resolution scope (T14.1):** wire `SupabaseWorkRefusalStore` + `SupabaseS51EvidenceStore` against the live Postgres schema; route handlers at `/api/work-refusal` + `/api/s51-evidence` + `/api/sensitive/read?table={work_refusal,s51_evidence}` validate JWT, call the SECURITY DEFINER view, emit audit row in same transaction as SELECT.
-**Blocker for:** T14.1 PR submission.
+**Status (closed via different architecture):** same posture as G-T08-2 / G-T07-2 / G-T13-2 — adapter-static + ssr=false means the Edge Function IS the route. `supabase/functions/t14-op/index.ts` + `core.ts` dispatch to the SECURITY DEFINER fns in migration 6; one shared TS adapter at `apps/web/src/lib/work-refusal/supabase-t14-client.ts` handles both work_refusal + s51_evidence (mirrors how `c4_read_service` is shared at the role level). JWT validation + active-member gating happen inside the SECURITY DEFINER fns.
+**Blocker for:** closed.
 
 ### G-T14-3 — Real Supabase integration tests for T14 SQL surfaces
 **Source:** test-plan.md §3.C — pgTAP for SQL-level tests.
 **Finding:** every adminQuery in the T14 test file resolves through the in-memory `MemoryWorkRefusalStore` / `MemoryS51EvidenceStore` via the test harness's mini-parser. The SECURITY DEFINER views + RLS policies + GRANT enumeration in the deferred migration have zero automated test coverage.
 **Resolution scope (T14.1):** pgTAP suite covering (a) F-21 RLS (certified_member-only INSERT/UPDATE; co-chair read via view); (b) HG-6 mirror view + audit-emission atomicity (transaction rollback on audit failure); (c) GRANT enumeration assertion (zero direct SELECT GRANT on base tables); (d) Amendment D extension projection (work_refusal.* + s51_evidence.* rows in `reprisal_audit_feed_pseudonymized`).
-**Blocker for:** T14.1 PR submission.
+**Status (closed):** `supabase/test/t14_rls.sql` covers the migration 6 SQL surface and runs under the "Committee DB tests (pgTAP)" CI job. Amendment D projection expansion can ride with subsequent T14 wire-up PRs.
+**Blocker for:** closed.
 
 ### G-T14-4 — ADR-0016 schedule rows for work_refusal + s51_evidence tables
 **Source:** ADR-0016 operational-table schedule.
 **Finding:** `work_refusal` (C4 notes + C0 actor + C1 status) and `s51_evidence` (C4 notes + C4 photos + C0 actor + C1 status) need ADR-0016 operational-table schedule rows before the T14.1 migration lands. T14's PI inventory (decisions.md §PI inventory) already lists `work_refusal.notes_ct` and `s51_evidence.*_ct` under Active matter + 7y; the schedule table needs the matching entry.
 **Resolution scope (T14.1):** architect amendment adds the two schedule rows; HG-15 user re-ratification covers the new tables.
-**Blocker for:** T14.1 PR submission.
+**Status (partial close — handled at ADR-0015 level):** same pattern as G-T13-4. The 7y retention is handled via the `match_underlying` ceiling rule on audit-log rows that reference these tables (ADR-0015 §3.5 / M6.1.B); the migration header documents the choice. The architect's formal ADR-0016 schedule-row write-up is the residual; not blocking the live wire-up.
+**Blocker for:** closed (functional); ADR-0016 formal write-up residual.
 
 ### G-T14-5 — Per-record passphrase storage / verification for s.43 + s.51 reveal flow
 **Source:** mirror of G-T13-6.
 **Finding:** T14 library-layer work-refusal-core + s51-evidence-core store an HMAC-SHA-256 of the passphrase as a placeholder; the production verification step (bcrypt/argon2) lands in T14.1's SECURITY DEFINER read functions.
 **Resolution scope (T14.1):** add per-record passphrase column with argon2id hash + verify step in `work_refusal_read_audited` / `s51_evidence_read_audited` view bodies OR in separate `verify_*_passphrase` SECURITY DEFINER functions called BEFORE the views return the body ciphertext.
-**Blocker for:** T14.1 PR submission.
+**Status (partial close — pgcrypto bf shipped; argon2id upgrade deferred):** migration 6 lines 48 + 63 add `per_record_passphrase_hash text` columns on both `work_refusal` and `s51_evidence`. Same posture as G-T13-6 (`concerns.source_passphrase_hash` per G-T08-6) — pgcrypto bf is the v1 floor matching every other per-record passphrase in the system. Argon2id upgrade tracked separately if/when the extension lands.
+**Blocker for:** closed (bf shipped); argon2id upgrade tracked separately.
 
 ### G-T14-6 — Route inventory binding for `/api/work-refusal` + `/api/s51-evidence`
 **Source:** ADR-0003 Invariant 5 strengthened (no key-shaped URL params) + ADR-0007 (no public-write routes).
 **Finding:** `getRouteInventory()` in the test harness does not yet enumerate T14 routes. The harness's anonymous-POST gate in `fetch()` already rejects `/api/work-refusal` and `/api/s51` paths (mirrors T13 posture), so the negative test for "no public-write route" passes structurally — but the route inventory itself omits the entries.
 **Resolution scope (T14.1):** land the SvelteKit routes with `requireAuthenticated` middleware; update `getRouteInventory()` to read from the real route tree; add an explicit T14 entry to the route-inventory test if a future obligation lands.
-**Blocker for:** T14.1 PR submission.
+**Status (closed via reframe):** same posture as G-T08-7 / G-T13-7 — adapter-static + ssr=false → no `+server.ts`; the Edge Function `supabase/functions/t14-op/index.ts` IS the route. JWT validation + active-member gating happen inside the SECURITY DEFINER fns.
+**Blocker for:** closed.
 
 ### G-T14-7 — Closed event-enum coverage for new T14 events
 **Source:** observability/audit-log.md §1 — closed-enum coverage; §6 finding #3 already flags the gap.
@@ -649,7 +655,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** second-opinion-reviewer T14 Concern 1.
 **Finding:** `submitS51Evidence`'s photo loop (`s51-evidence-core.ts:162-168`) does not catch `PhotoUnsupportedFormatError`. A non-JPEG photo (HEIC, PNG, WebP) throws mid-loop; no audit row, no banner, no structured return shape. The caller surfaces an opaque error; the operator has no signal.
 **Resolution scope (T14.1):** wrap each `sanitizePhoto(raw)` in try/catch; on failure return `{ ok: false, reason: 'photo_unsupported_format', body: { rejected_index: i, banner_key } }` AND emit a new `s51_evidence.create.rejected` audit event. Extend `scripts/check-audit-enum-coverage.sh` + `observability/audit-log.md` + ADR-0003 Amendment A. Extends G-T14-7's enum-coverage scope.
-**Blocker for:** T14.1 PR submission + first production deploy with photo capture.
+**Status (closed):** the event_type `s51_evidence.create.rejected` is in `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM`, in `observability/audit-log.md` §1 (with `reason: 'photo_unsupported_format'` + `rejected_index` meta), and emitted from `apps/web/src/lib/s51-evidence/s51-evidence-core.ts` with the try/catch wrapper around `sanitizePhoto(raw)`. The closed-set `'s51_evidence.create.rejected'` lives on the `S51EventType` union in `apps/web/src/lib/s51-evidence/types.ts`. Six-mirror dance complete.
+**Blocker for:** closed.
 
 ### G-T14-13 — `submit*` insert+audit atomicity (inherited from T13)
 **Source:** second-opinion-reviewer T14 Concern 6.
