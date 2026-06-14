@@ -69,6 +69,7 @@ Ordering rule: anything that touches authn / session liveness comes first becaus
 Each milestone names: **deliverable** / **done definition** / **agents** / **PR-count estimate** / **calendar-week estimate** / **dependencies** / **architect-adjudication status**.
 
 #### M0 — Architect adjudications + policy ratifications (PRE-WORK)
+
 - **Deliverable:** user-side decisions on the five forks in §D below. Tech-writer regenerates HG-10 copy packet (G-T19-12 status update); HG-15 packets prepared for T16.1 / T17.1 / T18.1 / per-register migrations.
 - **Done:** each of the 5 forks has a decision recorded as an ADR amendment in this file; labour-lawyer (HG-10) has ratified concern intake purpose copy (G-T08-11), reprisal consent surface wording (G-T13-13), export interstitial recipient-identity copy (G-T11-17) and four-bullet parity (G-T11-18); deploy region + subprocessor list ratified by user (HG-12 / HG-15).
 - **Agents:** architect, tech-writer (HG-10 packet), user (adjudication), external labour-lawyer (HG-10 sign-off), external privacy-lawyer (privacy-policy / DPA review — see §D fork 5).
@@ -78,6 +79,7 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **CANNOT be ground out by implementer alone.** This is policy, not code.
 
 #### M1 — F-116 session-revocation enforcement (auth liveness)
+
 - **Deliverable:** every privileged path consults `auth_sessions.revoked_at` ≤5s after revocation. Under adapter-static + ssr=false this CANNOT live in `hooks.server.ts` at request time — see §D fork 1 for the three viable homes.
 - **Done:** the chosen home is wired across every Edge Function dispatcher (auth-op, committee-op, concern-op, reprisal-op, t14-op, t07-op, mint-session); F-39 `auth_sessions` query runs on every privileged op; 401 propagation loop in `createEdgeFnFetchTransport` exercised by integration test; revocation-latency pgTAP test asserts ≤5s budget.
 - **Agents:** architect (adjudicate §D-1), threat-modeler (re-pass on chosen home), implementer, verifier, second-opinion-reviewer (auth-adjacent gate).
@@ -86,6 +88,7 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **Depends on:** §D-1 fork.
 
 #### M2 — KEY_PARITY reframe + boot smoke test posture (auth correctness)
+
 - **Deliverable:** the deploy-time SHA-of-key parity check runs against the LIVE Postgres GUC, not a mirrored env var. Per §D fork 2, this lands as either (a) Edge Function cold-start check, or (b) deploy-time CI step using `supabase db query`. The boot-smoke-test activation rule (G-T05-8) also gets a final answer here.
 - **Done:** any HMAC-key mismatch fails CI / refuses traffic; staging environments cannot accidentally accept real PI under a misconfigured key; pgTAP / CI assertion proves the round-trip.
 - **Agents:** architect, implementer, verifier.
@@ -94,19 +97,21 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **Depends on:** §D-2 fork.
 
 #### M3 — Per-register production wire-up for the 4 already-libraried sensitive registers (T08.1, T13.1, T14.1, T10.1)
-- **Deliverable:** close out the open G-T08-* / G-T13-* / G-T14-* / G-T10-* entries that are tagged "blocker for production deploy" or "BLOCKING-IN-Tnn.1." This is a substantial debt — counting only the open or partially-closed gaps explicitly marked production blockers:
+
+- **Deliverable:** close out the open G-T08-_ / G-T13-_ / G-T14-_ / G-T10-_ entries that are tagged "blocker for production deploy" or "BLOCKING-IN-Tnn.1." This is a substantial debt — counting only the open or partially-closed gaps explicitly marked production blockers:
   - **T08.1 (concerns):** G-T08-11 (HG-10 purpose copy), G-T08-14 (`received_at_ts: now()+1` library shim removal), G-T08-16 (F-30 timing-budget pgTAP). Most T08 SQL already shipped; this is cleanup + HG-10.
   - **T10.1 (inspections):** G-T10-1 (real canvas re-encode), G-T10-2 (raw user_id leak), G-T10-3 (HEIC/PNG/WebP UI rejection), G-T10-4 (SQL migration), G-T10-5 (IndexedDBInspectionStore), G-T10-6 (real Supabase tests), G-T10-7 (ADR-0016 rows), G-T10-8 (`/api/audit/queue/+server.ts` reframed for adapter-static), G-T10-9 (real ServiceWorker — mostly closed in G-T19-14), G-T10-10 (PhotoCaptureSurface UI), G-T10-13/14/15 (sec advisories), G-T10-19 (quarantine UI). T10.1 is the biggest single-task chunk because almost nothing shipped for inspections beyond library + viewer.
   - **T13.1 (reprisal):** G-T13-1 through G-T13-14 — SQL migration, SupabaseReprisalStore, pgTAP, route inventory, F-30 budget test, per-record passphrase argon2id, HG-10 wording, 4-eyes pending modal, 6-event enum amendment.
   - **T14.1 (work-refusal + s.51):** G-T14-1 through G-T14-18 — SQL migration, two Supabase stores, pgTAP, GRANT enumeration, passphrase verify, per-record reveal flow attempt, rate-limited decision, photo unsupported-format audit + UI.
-- **Done:** every gap tagged "blocker for T*.1 PR submission" or "blocker for production deploy" with real PI in the corresponding table is closed; pgTAP coverage runs in CI under the existing Committee DB tests job; for each register the Edge Function rejects unauthorized callers structurally (not by application code).
+- **Done:** every gap tagged "blocker for T\*.1 PR submission" or "blocker for production deploy" with real PI in the corresponding table is closed; pgTAP coverage runs in CI under the existing Committee DB tests job; for each register the Edge Function rejects unauthorized callers structurally (not by application code).
 - **Agents per register:** test-writer → implementer → verifier → second-opinion-reviewer → privacy-reviewer (any PI touchpoint) → threat-modeler (any new RLS or SECURITY DEFINER function).
 - **PR-count:** 12–20 across the four tasks. T08.1 ~2 PRs; T10.1 ~5–7 PRs; T13.1 ~3–4 PRs; T14.1 ~3–4 PRs.
 - **Weeks:** 4–7. Can partially parallelize (T08.1 and T13.1/T14.1 share architectural shape so a single architect pass amortizes; T10.1 is mostly independent and biggest).
 - **Depends on:** M1 (F-116 must land before sensitive-register reads commit real PI), M2 (HMAC key parity), §D fork 3 (does the F-30 ≤60s budget hold in production? — implies whether the timing test is real or relaxed).
 
 #### M4 — Build out the six viewer-placeholder registers (recommendations, training, minutes, library, sensitive-feed, audit) — design + library + SQL + production wire-up
-- **Deliverable:** each of these 6 surfaces gets the same end-to-end treatment T08/T13/T14 got: types + Memory*Store + *-core.ts + intake form (where applicable) + Edge Function + SQL migration with RLS + pgTAP + Supabase*Client + viewer swap from demo provider to real provider. Several have natural shapes:
+
+- **Deliverable:** each of these 6 surfaces gets the same end-to-end treatment T08/T13/T14 got: types + Memory*Store + *-core.ts + intake form (where applicable) + Edge Function + SQL migration with RLS + pgTAP + Supabase\*Client + viewer swap from demo provider to real provider. Several have natural shapes:
   - **/recommendations:** intake (worker / co-chair files written recommendation to employer), 21-day OHSA s.9(20) timer (G-T12-1), responded-state lifecycle, exports via T11/T12 pipeline.
   - **/minutes:** finalized-minutes table, drafter / approver workflow, export via T11. NOT real-time collaborative editing — see §B.
   - **/training:** training records table (PHIPA-adjacent? — see §D fork 4 for the PI-class call), certification expiry timer, attachment.
@@ -121,6 +126,7 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **Cannot be parallelized within itself** at first — first register through this milestone is essentially a re-pass of the Amendment H sibling-task pattern with the new shapes. After the first is through, the remaining 5 can run in parallel-ish sessions (one register per session).
 
 #### M5 — Role enforcement across UI + Edge Function dispatch
+
 - **Deliverable:** every link in `/more`, every viewer, every intake form consults the worker's role-set (`worker_member` / `worker_co_chair` / `certified_member`) at render time AND at Edge-Function-call time. The `/sensitive-feed` "you don't have access" graceful-degradation path that the `/more` page header comment promises actually exists.
 - **Done:** unauthorized member loads `/sensitive-feed` and sees a structured 403-with-explanation, not the surface; the Edge Function denies the underlying op with `rls_denied` regardless of UI bypass; a CI test asserts every route + every Edge Function op has a declared role-set requirement; the role-set is read from the live `committee_membership.role[]` (T06.1) not from a cached JWT claim.
 - **Agents:** architect (role-enforcement ADR — does it live in the JWT, in a per-op DB lookup, or both?), implementer, verifier, threat-modeler, second-opinion-reviewer.
@@ -129,6 +135,7 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **Depends on:** M3 (real RLS surfaces to enforce on), M4 (for the registers added there to inherit the pattern). Role enforcement should land BEFORE M4 substantially completes if any of M4's new registers (sensitive-feed especially) carries real PI before M5 lands.
 
 #### M6 — T16 retention sweep (PIPEDA Principle 4.5 enforcement)
+
 - **Deliverable:** the daily 03:30 ET pg_cron job runs `retention_sweep_runner()` which:
   - Holds `pg_try_advisory_xact_lock(hashtext('retention_sweep'))` for the pass (G-T16-1)
   - Runs with `statement_timeout='60s'` + `lock_timeout='5s'` (G-T16-2)
@@ -136,7 +143,7 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
   - Emits `retention.deleted` audit row with `per_event_counts` (G-T16-RECONCILE-CEILING)
   - Wires A-RETENTION-001 alert (G-T16-5)
   - HG-15 ratification for two new physical tables `retention_sweep_runs` + `audit_log_retention_schedule` (G-T16-6)
-- **Done:** the open or deferred G-T16-* gaps are closed; pgTAP cross-mirror drift test enumerates TS const ↔ SQL function ↔ SQL table and asserts triple-equality (G-T16-4); first dry-run pass in staging deletes zero rows but the audit row + structured-log emission is correct.
+- **Done:** the open or deferred G-T16-\* gaps are closed; pgTAP cross-mirror drift test enumerates TS const ↔ SQL function ↔ SQL table and asserts triple-equality (G-T16-4); first dry-run pass in staging deletes zero rows but the audit row + structured-log emission is correct.
 - **Agents:** test-writer, implementer, verifier, privacy-reviewer, second-opinion-reviewer.
 - **PR-count:** 3–5.
 - **Weeks:** 2–3.
@@ -144,22 +151,25 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **HARD GATE on real-PI deploy.** No real PI can be written into any operational table until T16.1 ships and the retention class for that table has at least one sweep pass behind it (i.e., the deletion path proved to work, not just compile).
 
 #### M7 — T11/T12 export pipeline + recommendations 21-day timer
+
 - **Deliverable:** SQL migration for `minutes_final` + `recommendations` + `export_audit_log` projection view + `export_record_with_audit()` SECURITY DEFINER + recipient-identity narrowing (G-T11-12) + 4-bullet HG-10 consent copy (G-T11-18) + post-export rep notification fanout via Supabase Realtime or `sensitive_activity_feed` (G-T11-6) + RA-1 trigger #5 monitoring (G-T11-25) + 21-day timer SQL + `A-REC-001` overdue alert (G-T12-1) + WebAuthn re-auth assertion verification (G-T11-5) + recipient identity copy (G-T11-17) + byte-grep regression test for PDF metadata absence (G-T11-16) + closed-allowlist projection enforcement.
-- **Done:** open or deferred G-T11-* / G-T12-* entries closed; the OHSA s.9(20) 21-day clock is enforceable; PDFs produced are minimal, metadata-free, and produced by a server-side or vetted client-side library (per §D fork 3 if a PDF lib swap is chosen).
+- **Done:** open or deferred G-T11-_ / G-T12-_ entries closed; the OHSA s.9(20) 21-day clock is enforceable; PDFs produced are minimal, metadata-free, and produced by a server-side or vetted client-side library (per §D fork 3 if a PDF lib swap is chosen).
 - **Agents:** architect (re-auth + recipient-identity + PDF library), test-writer, implementer, privacy-reviewer (HG-10 mandated), threat-modeler (new RLS + new Edge Function), second-opinion-reviewer, verifier.
 - **PR-count:** 5–8.
 - **Weeks:** 3–5.
 - **Depends on:** M3 (concerns must be live; recommendations / minutes from M4 must exist; export draws from both), M5 (role enforcement for who-can-export), §D fork 3 (PDF library decision).
 
 #### M8 — T17 backup object-lock + T18 audit-log integrity (PIPEDA Safeguards + reconstructability)
+
 - **Deliverable:** T17.1's `backup_manifests` table + `backups-ca-central-1` Supabase Storage bucket with object-lock (42-day governance mode) + `backup_writer_role` + monthly restore drill (G-T17-5). T18.1's `integrity_check_runs` table + pg_cron 04:30 ET daily integrity job + `audit_chain_anchors` weekly off-app email to worker co-chair (G-T18-12) + `A-AUDIT-001` / `A-INTEGRITY-001` / `A-INTEGRITY-002` alerts (G-T18-8) + reconciliation join between live chain and backup manifests.
-- **Done:** open G-T17-* / G-T18-* entries closed; first restore drill passes on staging; weekly anchor email arrives at the configured co-chair address; PIPEDA s.10.1 breach-window reconstructability is provable.
+- **Done:** open G-T17-_ / G-T18-_ entries closed; first restore drill passes on staging; weekly anchor email arrives at the configured co-chair address; PIPEDA s.10.1 breach-window reconstructability is provable.
 - **Agents:** test-writer, implementer, verifier, privacy-reviewer, threat-modeler (B6.2 boundary — new non-login role), observability-setup.
 - **PR-count:** 5–8.
 - **Weeks:** 3–5.
 - **Depends on:** M3, M6 (T16 reconciliation feeds T18 attribution per G-T16-8).
 
 #### M9 — Observability + alerting end-to-end (Sentry beforeSend allowlist extensions, alert sinks)
+
 - **Deliverable:** every `would_fire_alert: 'A-*'` symbol returned by libraries has a real sink with on-call routing. The Sentry breadcrumb scrubber's path-allowlist covers `lib/onboarding/*`, `lib/lock/*`, `lib/audit-integrity/*`, `lib/retention/*`, `lib/backup/*`, `lib/export/*` (G-T19-7 extended). PI-canary tests verify scrubbing for each surface. T02 `/api/log/ingest` lands or its absence is explicitly accepted (decision recorded).
 - **Done:** alerts route to a single on-call surface; runbooks exist for each `A-*`; SLOs defined for the load-bearing flows (export fanout p95 ≤60s, session-revocation ≤5s, retention sweep daily-pass success, weekly anchor email delivery).
 - **Agents:** observability-setup, implementer, verifier.
@@ -168,6 +178,7 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **Depends on:** M3, M6, M7, M8 (the alert symbols come from those milestones).
 
 #### M10 — Hardening pass: AODA / accessibility audit, penetration test, full privacy review, legal sign-off
+
 - **Deliverable:**
   - **AODA / WCAG 2.0 AA audit** across every shipped route, including the 4-eyes modal, the recovery-passphrase ceremony, the panic-wipe type-back, the export interstitial, every intake form. axe-core is already a dev dep — wire it into a smoke job + run a manual pass.
   - **External penetration test** of the deployed staging environment (in scope: authn flows, RLS, panic-wipe, export, the 7 Edge Functions). External vendor.
@@ -183,6 +194,7 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 - **CANNOT be ground out by implementer alone.** This is policy + external review.
 
 #### M11 — Production CI/CD, canary, rollback runbook, on-call setup, deploy itself
+
 - **Deliverable:** the deploy pipeline that the mint-live-e2e CI job foreshadows but doesn't quite have: PR-approved-→-staging-→-soak-→-canary-→-prod with explicit human-gate on auth / billing / PI touch (per constraints.md §Human Gates). Rollback runbook tested. On-call rotation + escalation defined. First production deploy.
 - **Done:** the deploy happens, with a real human at the wheel, against the constraints.md "production deploys of changes touching auth, billing, or personal data" hard gate. A documented rollback works on the first try (because it was practiced).
 - **Agents:** architect (deploy-pipeline ADR), implementer, observability-setup, user (deploy approval).
@@ -196,7 +208,9 @@ Each milestone names: **deliverable** / **done definition** / **agents** / **PR-
 These are the gates that block autonomous implementer / verifier work. Each one has 2–3 options the user picks among; once picked, the choice lands as an ADR amendment in this file and downstream agents can proceed.
 
 #### Fork 1 — F-116 session-revocation middleware home (G-T05-1 remaining)
+
 The `hooks.server.ts` placement assumed in the original gap framing doesn't run at request time under adapter-static + ssr=false.
+
 - **Option A — Per-Edge-Function pre-check (recommended).** Every Edge Function dispatcher (auth-op, committee-op, concern-op, reprisal-op, t14-op, t07-op, mint-session) calls `session_is_live(jti)` as its first DB query inside the SECURITY DEFINER op. The browser-side `createEdgeFnFetchTransport` already handles 401-on-revoked via a propagation loop. Latency: ≤1 DB roundtrip per op, well under F-39's 5s budget. Adds a uniform pattern across every Edge Function.
 - **Option B — JWT short-TTL only (no liveness check at all).** Drop `jwt_expiry` from 300s to ≤30s; rely on the next mint requiring a passkey assertion to walk the live `auth_sessions` row. Cheap but it means a stolen-JWT window of up-to-30s is acceptable. Threat-model would need to re-pass on whether 30s is tolerable (F-39 originally argued ≤5s).
 - **Option C — Realtime channel from `auth_sessions.revoked_at` → live client.** Each authenticated client subscribes to a Supabase Realtime channel; revocation publishes to the channel; client invalidates JWT locally on receipt. Server-side check still needed as defense-in-depth, so this layers on top of A or B; doesn't replace.
@@ -204,7 +218,9 @@ The `hooks.server.ts` placement assumed in the original gap framing doesn't run 
 **Recommendation: Option A.** It matches the existing 401-propagation pattern, doesn't expand the trust surface, and the per-op DB query overhead is bounded. Document residual surface: any Edge Function that forgets to call the check is a footgun, so a CI grep asserting every op dispatcher invokes `session_is_live(...)` is mandatory.
 
 #### Fork 2 — KEY_PARITY check home (G-T05-2)
+
 Where does the SHA-of-key parity check run, given `hooks.server.ts` is prerender-only?
+
 - **Option A — Per-Edge-Function cold-start check.** Each Edge Function on first invocation issues `SELECT encode(digest(current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex')` and compares to the SHA-of-its-own-env-var. Mismatch → refuse traffic + emit `key_parity.mismatch` audit row + alert. Cold-start adds one query.
 - **Option B — Deploy-time CI assertion.** A new CI step (after `supabase db push` and before promoting traffic) runs `supabase db query "SELECT encode(...)"` against the production GUC and asserts equality with the value in the deployed environment's secret. Cleanest separation of concerns; doesn't add per-request overhead; but requires the deploy pipeline to have GUC read access, which means another credential.
 - **Option C — Both A and B (belt-and-braces).** Deploy-time gates the deploy; cold-start defends against the GUC being rotated out from under a running Edge Function.
@@ -212,7 +228,9 @@ Where does the SHA-of-key parity check run, given `hooks.server.ts` is prerender
 **Recommendation: Option C** if the deploy pipeline's credential cost is acceptable; otherwise **Option A** alone. Cold-start check is cheap and catches the actual drift class. The G-T05-8 boot-smoke activation rule collapses into this same fork — answer it once here.
 
 #### Fork 3 — PDF rendering posture (G-T11-3)
+
 The current hand-rolled emitter ships a non-typeset PDF. Production needs typesetting that an employer co-chair can read. F-19 closed-allowlist projection is the load-bearing privacy invariant — the PDF carries only allowlist fields.
+
 - **Option A — Keep the hand-rolled emitter, improve typesetting in-place.** Add Unicode font subsetting + line wrapping + headers/footers as additions to the existing emitter. Zero new dependencies. Most work; least risk of bundle bloat or telemetry.
 - **Option B — Adopt `pdf-lib` (vendored, audited).** Mature, no telemetry, no `window`/`console` dependencies — passes ADR-0010 no-third-party-JS gate. Bundle adds ~150KB. Reduces engineering load substantially. Add to the bundle-scan grep allowlist; pgTAP a byte-grep regression test that the emitter still produces no `/Info` dictionary (G-T11-16).
 - **Option C — Server-side render via Edge Function + headless typesetting.** Out of scope per §B item 2.
@@ -220,7 +238,9 @@ The current hand-rolled emitter ships a non-typeset PDF. Production needs typese
 **Recommendation: Option B.** The 150KB bundle add is acceptable given how much engineering it saves and `pdf-lib` is the de-facto vetted choice. Mandatory follow-on: the byte-grep regression test (G-T11-16) MUST pass against the new library; G-T11-23's hash determinism pin AND a new bundle-scan rule for `pdf-lib` source telemetry land in the same PR.
 
 #### Fork 4 — Training records PI class (G-T17-PRIV-6 architect deferral)
+
 The `/training` register tracks certifications (JHSC-certified-member training, WHMIS, first-aid, etc.) tied to identifiable members. Is this PHIPA-relevant?
+
 - **Option A — C2 (PI but not health information).** Treat it like committee membership. Standard PIPEDA retention. No PHIPA layer. Justification: certification status is occupational data, not health-information-about-an-identifiable-individual.
 - **Option B — C3 (sensitive PI; encrypted at rest beyond AES-default).** Encrypt with the committee data key like concerns; reveal flow + per-record passphrase. Justification: a cumulative training-completion record about a worker is sensitive enough that the worker should consent to its disclosure to a future employer's co-chair if they move committees.
 - **Option C — Defer — don't ship `/training` in v1; pull it from M4.** Acceptable if scope contraction is preferred over the PHIPA-class call.
@@ -228,7 +248,9 @@ The `/training` register tracks certifications (JHSC-certified-member training, 
 **Recommendation: Option A** absent specific worker pushback. The training data is operationally similar to "this worker holds first-aid certificate" — a credential, not a health record. If a future jurisdiction (Quebec Law 25, PHIPA expansion) brings health-class data into scope, revisit. Document the decision; HG-9 ratifies the retention class.
 
 #### Fork 5 — Subprocessor list + DPA + hosting region final ratification (HG-12 + HG-15)
+
 ADR-0001 named ca-central-1 as residency for Supabase. ADR-0010 named Sentry as the only third-party JS subprocessor. Are there others by the time of first PI deploy?
+
 - **Option A — Lock the list at {Supabase ca-central-1, Sentry US} only.** Anything else is rejected. Requires that every alert sink (M9), the on-call surface (M11), the deploy pipeline (M11), the AODA audit (M10), and the pen-test (M10) NOT be done via SaaS that processes PI. On-call can be email + a generic webhook to a self-hosted sink; CI is already GitHub-Actions which is itself a cross-border subprocessor that needs HG-12 ratification (this may already be implicit but should be made explicit).
 - **Option B — Allow a curated extension list.** GitHub Actions (CI; PI exposure: none in the build artifacts), email provider for breach notification + weekly anchor (PI exposure: co-chair email + anchor head — both already classified as not-PI), pen-test vendor (PI exposure: scope-limited to staging fixtures with synthetic PI only), AODA auditor (same posture).
 - **Option C — Explicit privacy-lawyer review of every subprocessor with a DPA in place.** Mandatory for production deploy; this is the M10 deliverable.
@@ -237,20 +259,20 @@ ADR-0001 named ca-central-1 as residency for Supabase. ADR-0010 named Sentry as 
 
 ### E. Estimate summary
 
-| Milestone | PR-count | Calendar weeks | Parallelizable with | Architect-decision needed? |
-|---|---|---|---|---|
-| M0 — Adjudications + HG-10 packets | 2–4 | 1–3 elapsed | (none) | YES (this IS the decisions) |
-| M1 — F-116 session-revocation | 2–4 | 1–2 | M2 | YES (Fork 1) |
-| M2 — KEY_PARITY reframe | 1–2 | 0.5–1 | M1, M0 | YES (Fork 2) |
-| M3 — T08.1/T10.1/T13.1/T14.1 wire-up | 12–20 | 4–7 | M2 partial | partial (Fork 3 for export touch, but mostly implementer-grindable) |
-| M4 — 6 viewer-only register builds | 18–30 | 6–12 | M5 (interleave) | YES (Fork 4, plus per-register design ADRs) |
-| M5 — Role enforcement | 4–7 | 2–4 | M4 partial | YES (role-enforcement architecture ADR) |
-| M6 — T16 retention sweep | 3–5 | 2–3 | (serial after M3) | partial (G-T16-SO-2 alarm scope decision) |
-| M7 — T11/T12 export + 21-day timer | 5–8 | 3–5 | (serial after M4 recommendations) | YES (Fork 3) |
-| M8 — T17/T18 backup + integrity | 5–8 | 3–5 | M9 | NO (mostly implementer) |
-| M9 — Observability + alerts | 3–5 | 2–3 | M8 | NO |
-| M10 — Hardening + external reviews | 4–8 | 4–8 elapsed | (mostly serial) | Reviewers, not architect |
-| M11 — Deploy pipeline + first deploy | 2–4 | 1–2 | (final) | Human gate |
+| Milestone                            | PR-count | Calendar weeks | Parallelizable with               | Architect-decision needed?                                          |
+| ------------------------------------ | -------- | -------------- | --------------------------------- | ------------------------------------------------------------------- |
+| M0 — Adjudications + HG-10 packets   | 2–4      | 1–3 elapsed    | (none)                            | YES (this IS the decisions)                                         |
+| M1 — F-116 session-revocation        | 2–4      | 1–2            | M2                                | YES (Fork 1)                                                        |
+| M2 — KEY_PARITY reframe              | 1–2      | 0.5–1          | M1, M0                            | YES (Fork 2)                                                        |
+| M3 — T08.1/T10.1/T13.1/T14.1 wire-up | 12–20    | 4–7            | M2 partial                        | partial (Fork 3 for export touch, but mostly implementer-grindable) |
+| M4 — 6 viewer-only register builds   | 18–30    | 6–12           | M5 (interleave)                   | YES (Fork 4, plus per-register design ADRs)                         |
+| M5 — Role enforcement                | 4–7      | 2–4            | M4 partial                        | YES (role-enforcement architecture ADR)                             |
+| M6 — T16 retention sweep             | 3–5      | 2–3            | (serial after M3)                 | partial (G-T16-SO-2 alarm scope decision)                           |
+| M7 — T11/T12 export + 21-day timer   | 5–8      | 3–5            | (serial after M4 recommendations) | YES (Fork 3)                                                        |
+| M8 — T17/T18 backup + integrity      | 5–8      | 3–5            | M9                                | NO (mostly implementer)                                             |
+| M9 — Observability + alerts          | 3–5      | 2–3            | M8                                | NO                                                                  |
+| M10 — Hardening + external reviews   | 4–8      | 4–8 elapsed    | (mostly serial)                   | Reviewers, not architect                                            |
+| M11 — Deploy pipeline + first deploy | 2–4      | 1–2            | (final)                           | Human gate                                                          |
 
 **Total PR-count:** 61–105.
 **Total calendar weeks:** 30–55 elapsed, assuming 1 substantive PR per session × ~5 sessions per week × the documented cadence holds. Parallelization where called out shaves perhaps 8–12 weeks off the upper end; external-vendor calendar (M10) is the dominant uncertainty.
@@ -259,6 +281,7 @@ ADR-0001 named ca-central-1 as residency for Supabase. ADR-0010 named Sentry as 
 **What CANNOT be ground out by implementer alone:** M0 (policy + lawyer turnaround); the architect adjudications inside M1, M2, M4, M5, M7 (the 5 forks above); M10 (external reviewers); M11's deploy human gate. Everything else is implementer-grindable once the gates are open.
 
 ### F. Critical-path serial chain (the milestones that CANNOT be parallelized)
+
 M0 → M1 → M2 → M3 (partial — first register can start during M2) → M5 (must lock before M4 ships sensitive-feed) → M6 (HARD GATE before any real PI write) → M10 (must wait for substantially-complete system) → M11.
 
 M4 / M7 / M8 / M9 can interleave with the above after M3 starts. M4 and M7 share the recommendations 21-day timer dependency, so M4-recommendations must precede M7.
@@ -298,6 +321,7 @@ Threat-modeler's §3.14 addendum (commit `6499f18`) produced the testable mitiga
 **F-128 ratification (architect re-review, 2026-06-12)**: Option 1 — bake the post-mint integrity check into M1. Three drivers force the bundle: (a) the mint path is the ONE legitimate F-122 allowlist entry, so it's the ONE path the F-116-uniformity story explicitly does NOT cover — punting F-128 to M1.1 leaves a known race in the only un-gated dispatcher, which is the worst possible asymmetry for a security-reviewer to discover; (b) the cost is a single indexed PK lookup on a connection the dispatcher already holds (`mint-session/index.ts:127-134` already round-trips for `mint_create_session`, then again for `mint_bump_counter` at :154 — adding one EXISTS in between is noise against the existing chatter), so the M1 scope-creep is negligible; (c) the audit row `auth.mint.revoked_during_mint` gives us a real-traffic detector for the race, which we otherwise have no way to observe (the F-116 reject on the second hop looks identical to a normal stale-jti reject in logs). On the orphan-row sub-question: ratify the existing TTL-on-`auth_sessions` sweep as the sufficient compensating control — orphans from a `signSessionJwt` throw expire at the same `exp ≤ 300s` boundary the live JWT would have, they're not queryable by `auth.uid()` (RLS gates `auth_sessions_select_self` on the requesting jti, not arbitrary jtis), and the only information they leak is row-count to the service role, which already sees the full table. No additional cleanup work for M1; T16.1 retention sweep covers the long-tail. Bundling consequences for M0: ADR-0015 amendment adds three event-types (`key_parity.mismatch`, `key_parity.deploy_ok`, `auth.mint.revoked_during_mint`) in ONE migration + `retention_class_for()` update, all `'24mo'`. ADR-0023 amendment's F-122 allowlist comment names F-128 as the required compensating check (already drafted in F-123 M-123b / F-128 M-128b). M1 estimate unchanged (the check is ~5 LOC in the dispatcher + 2 tests; folds inside the existing F-121 PR scope).
 
 **ADR amendments needed in M0 before M1/M2 implementation kicks off (per threat-modeler §3.14 §5):**
+
 1. ADR-0015 amendment — add `key_parity.mismatch` + `key_parity.deploy_ok` to retention schedule (`'24mo'` class). Closes F-127.
 2. ADR-0023 amendment — formalize the CI grep `verify-session-live-uniformity.sh` as the F-116 enforcement-uniformity mechanism.
 3. NEW ADR-0024 — KEY_PARITY check posture (binds Fork 2 Option C as durable architecture). Lists the GH-Actions secret in the secret inventory.
@@ -323,6 +347,7 @@ Threat-modeler's §3.14 addendum (commit `6499f18`) produced the testable mitiga
 **The pre-existing safeguard** — the runtime self-test in `key-parity.ts` that checks `HMAC(known_input, key)` against an agreed canonical output — runs per-node-process at first request. If env-var X and GUC Y are mismatched, the first request that races through is detected, but a corrupted audit row may already exist. The race is also asymmetric: Edge Function processes recycle at vendor whim, so each new process re-runs the self-test, but a successful self-test in one process does NOT prevent a subsequent rotation half-completion from drifting the keys mid-deploy.
 
 **The two attack surfaces** the existing self-test misses:
+
 1. **Deploy-time drift.** Operator updates the GitHub Actions secret but forgets the GUC (or vice versa); the deploy ships, no request triggers a process boot until traffic arrives, and meanwhile any process that DOES boot writes corrupted rows under the new env key against the old GUC.
 2. **Runtime drift.** The GUC is `ALTER SYSTEM SET … RELOAD`-able at runtime by a privileged operator outside the deploy flow. The env var is fixed at deploy. A runtime GUC change without a redeploy creates a drift the cold-start check never sees because the process is already booted.
 
@@ -508,23 +533,27 @@ Per F-124 M-124a.
 **Source:** architect scoping pass + threat-model pass (2026-05-26); `supabase/migrations/0000000000000{1,2}_*.sql` (the `auth.uid()`/RLS/SECURITY-DEFINER model); `apps/web/src/lib/auth/auth-core.ts` (F-39 `auth_sessions` revocation gate); `svelte.config.js` (adapter-static); ADR-0001 (ca-central-1), ADR-0016 (pseudonym GUC).
 
 ## De-risked unknowns (resolved 2026-05-26)
+
 - **Minting:** no native `admin.createSession`; use a **custom JWT signed with an asymmetric signing key** (RS256/ES256/Ed25519). The mint Edge Function holds **only the signing key, not `service_role`** → contained blast radius (F-118).
 - **Residency:** GoTrue stores users in the project's own Postgres `auth` schema → same **ca-central-1** region (ADR-0001). No new subprocessor.
 - **Revocation latency:** design does NOT depend on GoTrue global signOut; the existing `auth_sessions` jti revocation list (F-39; `auth_sessions.session_id` IS the jti, `auth.sql:328`) is the primary control, checked live.
 
 ## Decisions (user-adjudicated 2026-05-26)
+
 1. **Server logic runs in Supabase Edge Functions (Deno).** The SvelteKit app stays `adapter-static`; `hooks.server.ts` remains build-time only. Matches the existing `supabase/functions/` scaffolding.
 2. **GoTrue is the RLS identity source, `auth_sessions` is the revocation authority.** A verified passkey assertion mints an asymmetric-signed JWT (`sub`=server-resolved uid, `role='authenticated'`, `session_id`=jti written to `auth_sessions`, `exp ≤ 300s`). Privileged RLS/SECURITY-DEFINER paths consult `session_is_live(jti)` (= `auth_sessions.revoked_at IS NULL`) **in addition to** `auth.uid()`. **Default-deny on disagreement.** GoTrue asserts identity; `auth_sessions` decides liveness.
-3. **High-level `SupabaseCommitteeClient`** (one method per SECURITY-DEFINER RPC), mapping Postgres `42501`/`23514` → `{ok:false,reason}`. In production the RPC IS the orchestration — `committee-core` + `MemoryCommitteeStore` remain the **test-only reference** (amends the Amendment-H "Supabase*Store implements the same low-level interface" expectation, which can't preserve the RPC's atomicity).
+3. **High-level `SupabaseCommitteeClient`** (one method per SECURITY-DEFINER RPC), mapping Postgres `42501`/`23514` → `{ok:false,reason}`. In production the RPC IS the orchestration — `committee-core` + `MemoryCommitteeStore` remain the **test-only reference** (amends the Amendment-H "Supabase\*Store implements the same low-level interface" expectation, which can't preserve the RPC's atomicity).
 4. **`@supabase/supabase-js`** added **server-only** (Edge Functions / never the browser bundle; CSP `connect-src 'self'` + the bundle gate keep it out of `build/`).
 5. **Live `supabase start` integration stage in CI** (gated behind `SKIP_SUPABASE_INTEGRATION` locally) — only a live stack proves the GoTrue→`auth.uid()`→RLS chain. (Sandbox has no Docker, so this chain is CI-verified only.)
 
 ## Implementation notes
+
 - **GUC bootstrap (2026-05-26, user-adjudicated; revised after live `supabase start`).** The auth migration needs `app.hmac_pseudonym_key` for its **runtime** SECURITY DEFINER functions; the original apply-time hard-`RAISE` guard blocked `supabase start` because that CLI applies each migration on its own connection **as a non-superuser** — so neither a session `set_config` (lost across connections) nor `ALTER DATABASE … SET` (permission denied, SQLSTATE 42501) can seed it. Final design: the guard **self-seeds the non-secret dev/CI placeholder** when absent (`ALTER DATABASE` with an `insufficient_privilege` fallback to session scope), never overriding an out-of-band value — so production still sets the real key first (guard skips it) and the boot key-match smoke test is the prod backstop. The pgTAP suite sets the GUC itself at session scope (privilege-safe), so no `ALTER DATABASE` pin step is needed in CI.
 - **`supabase start` CLI compatibility (2026-05-26, CLI 2.101 / live stack).** Three fixes were required to run the real stack: (1) the CLI **silently skips any migration named `init`** → renamed `00000000000000_init.sql` → `_bootstrap.sql` (same all-zeros version; CI refs updated); (2) GUC seeding can't use `ALTER DATABASE` under the non-superuser apply role → self-seed-with-fallback (above); (3) Supabase ships **pgcrypto in the `extensions` schema**, but the SECURITY DEFINER functions pinned `search_path = public`, so `hmac()` was unresolved (SQLSTATE 42883) → added `extensions` to those functions' `search_path` (nonexistent schemas are skipped, so the vanilla-Postgres pgTAP job where pgcrypto is in `public` is unaffected). Verified: committee pgTAP 21/21 against the live stack; all four CI jobs green (PR #5).
 - **mint-session HTTP handler deferred to T05.1** — it needs a WebAuthn-assertion verifier running in Deno + the production signing-key custody decision, both in the T05 auth domain. The security-critical mint logic is already unit-tested (`mint-session/core.ts`); `committee-op` proves the live GoTrue→RLS chain without it.
 
 ## Binding threat conditions (threat-model.md §3.12; all design-blocking)
+
 - **F-116** privileged paths consult `auth_sessions` live (≤5s revocation); `jwt_expiry ≤ 300s`; revoke optionally also calls GoTrue signOut as backstop.
 - **F-117** mint uid derived **server-side from the verified WebAuthn assertion only** (via `webauthn_credentials.credential_id → user_id`); verify+mint atomic; never from request body.
 - **F-118** mint function uses the **isolated signing key only**; confirm C3/C4 stay unreadable by it; document custody + rotation.
@@ -532,9 +561,11 @@ Per F-124 M-124a.
 - **F-120** `auth.users.id = public.users.id = webauthn_credentials.user_id` invariant enforced + CI-tested.
 
 ## Reversibility
+
 - Edge Functions + client: **medium**. `jwt_expiry`/config: low. The GoTrue auth-model commitment: **hard** (touches B1) — hence the threat-model gate.
 
 ## Cross-references
+
 - **ADR-0022 / T06.1** — the RPCs `SupabaseCommitteeClient` calls.
 - **T05 / auth.sql** — `auth_sessions` (F-39) is reused as the revocation authority; the mint path composes `webauthn_credentials` + `enroll_first_passkey`.
 - **threat-model.md §3.12** — F-116–F-120 + the B1 redefinition.
@@ -663,9 +694,11 @@ Expanding `MINT_SESSION_PATHS` beyond the two `mint-session` paths requires a ne
 - **CI**: a Postgres 16 + pgTAP job applying the migrations against a Supabase-shim bootstrap and running `pg_prove`.
 
 ## Reversibility
+
 - Tables/columns: **medium** (a migration). Audit-enum DB CHECK: deferred (T18). RLS/function design: **medium**.
 
 ## Cross-references
+
 - **ADR-0021** — the library this satisfies; the deferred items it closes (atomic mutation+audit, invite consumer-binding, last-co-chair in-transaction).
 - **T05.1** — `auth_totp_bootstraps` is referenced (FK from `committee_invite`), not modified.
 - **T18** — owns the `audit_log.event_type` strict CHECK + `audit_log_retention_schedule`; `member.role_changed` CHECK/schedule row carried forward there.
@@ -693,6 +726,7 @@ T06 is the committee-membership spine: who is on the worker side, what role-set 
 ## Decision (binding for T06 ship)
 
 ### 1. File structure (`apps/web/src/lib/committee/`)
+
 - `types.ts` — `CommitteeRole` set type, `CommitteeMembershipRow`, `MemberInvite`, `CommitteeAuditEvent` (closed to documented enum values), `InviteResult`/denial shapes.
 - `committee-store.ts` — `CommitteeStore` interface (the persistence boundary, mirroring `ConcernStore`): membership CRUD, `isActiveMember`, invite issue/consume, RLS-denial-as-`{ok:false,reason}` (not throw), `recordCommitteeEvent`, `pseudonymOf`.
 - `memory-committee-store.ts` — `MemoryCommitteeStore` satisfying the interface for tests.
@@ -701,19 +735,23 @@ T06 is the committee-membership spine: who is on the worker side, what role-set 
 - Tests under `apps/web/test/T06/`.
 
 ### 2. Schema modeled by `MemoryCommitteeStore` (T06.1 lands the SQL)
+
 - `committee_membership { user_id PK/FK→users, role text[] (CHECK subset of the 3), active boolean, invited_by user_id, invited_at, activated_at, deactivated_at, grace_until }`. **Single-tenant:** NO `committee_id` column or parameter anywhere (a CI test asserts the literal `committee_id` is absent from `lib/committee/`).
 - `users.display_name` (C2), `users.off_employer_contact` (C2) — added in T06.1; modeled in the membership row for the library.
 - **Removal = mark inactive + 90-day `grace_until`** before the T07 key-destroy ripple (committee key rotation excludes the removed member after grace). `member.removed` is emitted at deactivation.
 - **RLS posture (mirrored at the interface; SQL in T06.1):** read = active members; INSERT/role mutation = worker_co_chair only; a co-chair removing/demoting THEMSELVES requires a second co-chair (**4-eyes**, mirroring the reprisal/forensic 4-eyes pattern).
 
 ### 3. Invite flow (composes T05; no public signup — locked)
+
 - A worker_co_chair issues an invite → a one-time **TOTP bootstrap** (T05 `auth_totp_bootstraps`); the invitee consumes it at first-device passkey enrollment (T05 `enrollFirstDevice`); the TOTP secret is destroyed on passkey set (F-43). T06 does NOT add a second credential type. Invite issuance is co-chair-gated; consumption activates the membership (`member.added`).
 
 ### 4. Audit emission (closed enum)
+
 - `member.added` (on activation), `member.removed` (on deactivation) — both already on the closed enum and documented. The library emits via `store.recordCommitteeEvent`, never a raw `audit_emit(` literal.
 - **`member.role_changed`** — emitted by `setRoles` (a no-op role write emits nothing). Reserved via the partial six-mirror (TS const + audit-log.md + enum-coverage script) per the user's 2026-05-25 §12 ratification; the SQL CHECK + retention-schedule half lands in T06.1.
 
 ### 5. Amendment H split / PR-time assertion
+
 - T06 ships ZERO SQL. `git diff --name-only main...T06-branch -- supabase/` returns empty. The migration + RLS + `SupabaseCommitteeStore` + the `users.display_name`/`off_employer_contact` columns land in **T06.1** (HG-15 fires there).
 
 ## Open questions (require adjudication before the relevant code lands)
@@ -722,11 +760,13 @@ T06 is the committee-membership spine: who is on the worker side, what role-set 
 2. **Grace window value.** 90 days proposed (aligns with the T07 key-rotation ripple); confirm against the retention schedule (§8 / ADR-0015) at T06.1.
 
 ## Reversibility
+
 - File structure / MemoryStore: **easy** (a redesign is contained).
 - `committee_membership` schema (T06.1): **medium** (a migration).
 - Any new audit enum value: **hard** (six-mirror; needs the §12 gate).
 
 ## Cross-references
+
 - **ADR-0002 Amendment G.3** — `users` field-set divergence; `display_name`/`off_employer_contact` deferred here.
 - **ADR-0002 Amendment H** — the library/sibling split T06 follows.
 - **ADR-0003 Amendment A** — closed audit enum; T06 stays within `member.added`/`member.removed`; role-change is the reserved open item.
@@ -959,15 +999,15 @@ D.6 entry (type-back verify):
 
 **3.d Audit events + when they fire:**
 
-| Surface | Event | When | Existing or new |
-|---|---|---|---|
-| D.3 passkey enrolled | `auth.passkey.enrolled` | Server-side, atomic with `enroll_first_passkey` SQL function | EXISTING (T05.1) |
-| D.4 recovery blob written | `identity_privkey.recovery_blob.written` | Server-side, atomic with `store_recovery_blob` SQL function | EXISTING (T07.1) |
-| D.4 show-again invoked | `identity_privkey.recovery_blob.viewed` | Client-emitted via the existing `createShowAgainController` audit-before-render contract | EXISTING (Amendment F + T07.1) |
-| D.5 session revocation | `session.revoked` with `reason: 'user_action'` | Server-side, atomic with `revoke_all_sessions` SQL function | EXISTING (T05.1) |
-| D.6 type-back fail | (none — operational, not security-relevant) | n/a | n/a |
-| panic-wipe invocation | `panic_wipe.invoked` | Client-emitted via WipeStore.emitAudit; **MUST be written BEFORE IndexedDB is cleared** (F-53 audit-before-side-effect mirror) | **NEW — reserved by T19; SQL half lands in T07.1 OR a small T19-audit-extension sibling** |
-| onboarding completion | (none — operational telemetry only) | n/a — observable from co-occurrence of `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written` | n/a |
+| Surface                   | Event                                          | When                                                                                                                           | Existing or new                                                                           |
+| ------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| D.3 passkey enrolled      | `auth.passkey.enrolled`                        | Server-side, atomic with `enroll_first_passkey` SQL function                                                                   | EXISTING (T05.1)                                                                          |
+| D.4 recovery blob written | `identity_privkey.recovery_blob.written`       | Server-side, atomic with `store_recovery_blob` SQL function                                                                    | EXISTING (T07.1)                                                                          |
+| D.4 show-again invoked    | `identity_privkey.recovery_blob.viewed`        | Client-emitted via the existing `createShowAgainController` audit-before-render contract                                       | EXISTING (Amendment F + T07.1)                                                            |
+| D.5 session revocation    | `session.revoked` with `reason: 'user_action'` | Server-side, atomic with `revoke_all_sessions` SQL function                                                                    | EXISTING (T05.1)                                                                          |
+| D.6 type-back fail        | (none — operational, not security-relevant)    | n/a                                                                                                                            | n/a                                                                                       |
+| panic-wipe invocation     | `panic_wipe.invoked`                           | Client-emitted via WipeStore.emitAudit; **MUST be written BEFORE IndexedDB is cleared** (F-53 audit-before-side-effect mirror) | **NEW — reserved by T19; SQL half lands in T07.1 OR a small T19-audit-extension sibling** |
+| onboarding completion     | (none — operational telemetry only)            | n/a — observable from co-occurrence of `auth.passkey.enrolled` + `identity_privkey.recovery_blob.written`                      | n/a                                                                                       |
 
 **3.e No PII in URLs / logs / errors:**
 
@@ -988,7 +1028,7 @@ Mirrors the G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 / G-T17 lineage:
   - `clearSessionStorage(): Promise<{ ok: boolean }>` — `window.sessionStorage.clear()`
   - `clearLocalStorage(): Promise<{ ok: boolean }>` — `window.localStorage.clear()` (NOTE: ADR-0013 forbids localStorage use; this is defense-in-depth for the case where a future task accidentally writes to localStorage)
   - `tearDownSessionCookie(): Promise<{ ok: boolean }>` — clears the SvelteKit session cookie
-  - `emitAudit(row: PanicWipeAuditRow): Promise<{ ok: boolean }>` — F-53 audit-before-side-effect: MUST be called BEFORE any clear* call
+  - `emitAudit(row: PanicWipeAuditRow): Promise<{ ok: boolean }>` — F-53 audit-before-side-effect: MUST be called BEFORE any clear\* call
   - `nowMs(): number` — F-66 monotonic clock shim
 - `TestWipeStore extends WipeStore` adds `__debugListClearedDatabases()`, `__debugListClearedCaches()`, `__debugListEmittedAuditRows()`, `__debugForceClearFailure(target)`, `__debugSetClock(ms)`. `MemoryWipeStore` implements `TestWipeStore`. Production `SupabaseWipeStore` would implement `WipeStore` only; narrowing to `TestWipeStore` is a type error. **However: `SupabaseWipeStore` is NOT needed in T19** — the wipe is client-side; the audit-emit is the only server-touching call and goes through the existing T05.1 audit-emit path. The `WipeStore` interface exists for testability + future server-side cascade (Open Question 4); for v1, the production path uses a `BrowserWipeStore` that wraps `indexedDB.deleteDatabase`, `caches.delete`, `sessionStorage.clear`, etc.
 
@@ -1040,6 +1080,7 @@ Designer's pass amends design-system §4 + design-tokens.json as needed; T19 imp
 ### 7. Personal-device advisory copy structure (the architect specifies WHAT must be communicated; the precise wording is tech-writer's job)
 
 D.1 copy MUST communicate:
+
 - The device the user is enrolling will store identity material (the wrapped identity privkey lives in IndexedDB).
 - The user MUST NOT enroll on a shared device.
 - The user MUST NOT enroll on an employer-issued device (per ADR-0008's honest-framing posture).
@@ -1049,6 +1090,7 @@ D.1 copy MUST communicate:
 - If the user does not have a personal smartphone, they should speak to the worker co-chair (per ADR-0008's shared committee-device option).
 
 D.2 copy MUST communicate:
+
 - The hosting is Supabase ca-central-1 (Canadian region).
 - The data crossing toward the server is ciphertext (the user's plaintext stays on the device).
 - US legal process could in principle reach the company, but the company sees ciphertext only (E2EE-as-load-bearing per ADR-0001).
@@ -1056,6 +1098,7 @@ D.2 copy MUST communicate:
 - Grade-8 reading level proxy: no Latin abbreviations (the scaffold's test at line 56 pins this).
 
 D.4 copy MUST communicate:
+
 - The recovery passphrase is the only way back in if the user loses BOTH the device AND the passkey.
 - There is no admin who can reset it.
 - Print or save the passphrase + the salt; do NOT store it at work (per design-system §4 D.4).
@@ -1063,11 +1106,13 @@ D.4 copy MUST communicate:
 - The JSON download is a secondary off-device copy of the encrypted blob (NOT a replacement for the printed passphrase).
 
 D.6 copy MUST communicate:
+
 - Type the passphrase back exactly as printed.
 - The screen is intentionally not showing the passphrase (the user must consult the printed sheet OR the "show again" hold-to-reveal).
 - After 3 wrong attempts the user returns to D.4 (the passphrase is re-displayed).
 
 Panic-wipe modal copy MUST communicate:
+
 - This is irreversible on this device.
 - This does NOT remove the data from the server (other devices and the committee retain their access).
 - The user must type the literal phrase "WIPE" into a text input (case-insensitive per design-system §4 Surface G).
@@ -1092,16 +1137,16 @@ Build-time assertion (lands as a T19 CI test): grep the production bundle for th
 
 ### 9. Failure modes + recovery (binding)
 
-| Failure | Recovery |
-|---|---|
-| Hard refresh during onboarding | Wizard restarts from D.1; a fresh `enrollment_session_id` is issued; the in-memory passphrase (if any) is lost; if D.4 server-side write completed, the user can attempt recovery via the existing F-12 flow (post-T07.1; out of T19 scope) |
-| Network loss during D.3 passkey ceremony | `enrollFirstDevicePasskey` returns a failed `EnrollResult`; wizard surfaces a retry affordance; on 3 failures, returns to D.1 |
-| Network loss during D.4 server-side recovery-blob write | The local IndexedDB write succeeded; the server write failed; wizard surfaces a retry; on persistent failure, the user can continue to D.6 with a warning that the server-side blob is missing (F-12 single-POST may need co-chair reset on next attempt — out of T19 scope, but the warning explains this) |
-| Browser baseline fails at D.3 | `baseline_blocked` terminal state; user is told which browsers work; no advance; no `auth.passkey.enrolled` row written; user can reload after switching browsers |
-| Passphrase type-back mismatch at D.6 | Attempt counter increments; on 3 wrong, return to D.4 (re-display); the F-08 type-back contract is preserved (no advance without type-back match) |
+| Failure                                                                           | Recovery                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hard refresh during onboarding                                                    | Wizard restarts from D.1; a fresh `enrollment_session_id` is issued; the in-memory passphrase (if any) is lost; if D.4 server-side write completed, the user can attempt recovery via the existing F-12 flow (post-T07.1; out of T19 scope)                                                                                                                                                                             |
+| Network loss during D.3 passkey ceremony                                          | `enrollFirstDevicePasskey` returns a failed `EnrollResult`; wizard surfaces a retry affordance; on 3 failures, returns to D.1                                                                                                                                                                                                                                                                                           |
+| Network loss during D.4 server-side recovery-blob write                           | The local IndexedDB write succeeded; the server write failed; wizard surfaces a retry; on persistent failure, the user can continue to D.6 with a warning that the server-side blob is missing (F-12 single-POST may need co-chair reset on next attempt — out of T19 scope, but the warning explains this)                                                                                                             |
+| Browser baseline fails at D.3                                                     | `baseline_blocked` terminal state; user is told which browsers work; no advance; no `auth.passkey.enrolled` row written; user can reload after switching browsers                                                                                                                                                                                                                                                       |
+| Passphrase type-back mismatch at D.6                                              | Attempt counter increments; on 3 wrong, return to D.4 (re-display); the F-08 type-back contract is preserved (no advance without type-back match)                                                                                                                                                                                                                                                                       |
 | Panic-wipe partial failure (e.g., IndexedDB clear succeeded, caches clear failed) | The `PanicWipeAuditRow.meta.completed = false`, `meta.partial_failure_classes = ['caches']`; the user is shown an error_state with which subsystems were and were not wiped (per design-system §4 Surface G last column); the user is told to close the tab + re-install or seek help; the audit row is preserved server-side via the audit-before-side-effect ordering, so a forensic walk can establish what happened |
-| Recovery-blob download blocked by browser (popup blocker, download permission) | The download silently fails (browser-level); the wizard's secondary affordance "I'll save this later" is offered; the user is NOT blocked from advancing (the IndexedDB + server-side blob are the canonical custody; the download is opt-in per Option C) |
-| `argon2id_unavailable_libsodium_wrappers_sumo_required` at D.4 | Wizard blocks at D.4 with a structured error toast (Decision 3.d failure-mode handling); user cannot advance; the operator-visible canonical error allows the issue to be diagnosed (likely a deploy with the wrong libsodium variant — see G-T07-12) |
+| Recovery-blob download blocked by browser (popup blocker, download permission)    | The download silently fails (browser-level); the wizard's secondary affordance "I'll save this later" is offered; the user is NOT blocked from advancing (the IndexedDB + server-side blob are the canonical custody; the download is opt-in per Option C)                                                                                                                                                              |
+| `argon2id_unavailable_libsodium_wrappers_sumo_required` at D.4                    | Wizard blocks at D.4 with a structured error toast (Decision 3.d failure-mode handling); user cannot advance; the operator-visible canonical error allows the issue to be diagnosed (likely a deploy with the wrong libsodium variant — see G-T07-12)                                                                                                                                                                   |
 
 ### 10. Capacity / cost (trivial; client-side; no new compute)
 
@@ -1151,11 +1196,13 @@ T19 introduces the following STRIDE deltas; threat-modeler consumes this list an
 - **E — Elevation of privilege.** None new at T19.
 
 **Trust-boundary deltas:**
+
 - The in-browser library function `panicWipe()` crosses B4 (browser-session boundary) into IndexedDB clear; the audit-emit cross B1 (auth boundary) into the server-side audit row.
 - The recovery-blob JSON download crosses NO trust boundary (it lives entirely in the user's device; the user moves it off-device via OS file system out of band).
 - The D.3 passkey ceremony crosses B1 (auth boundary) into the WebAuthn server-side verification path; the D.4 recovery-blob write crosses B2 (E2EE boundary) with ciphertext only.
 
 **PI touchpoints (T19 surfaces):**
+
 - D.1: UA + platform string (rendered; not transmitted; not audit-logged).
 - D.4: recovery passphrase (in-memory; never persisted off-screen; never logged; never transmitted).
 - D.4: identity privkey (already in memory from T07; encrypted with the passphrase via existing encryptRecoveryBlob).
@@ -1167,20 +1214,20 @@ All PI touchpoints have residency (Canada — ca-central-1 for any server-side w
 
 This is the binding T19 task sequence. Each task lists owner agent, dependencies, acceptance criteria, risk, estimate.
 
-| # | Task | Owner | Deps | Acceptance | Risk | Estimate |
-|---|---|---|---|---|---|---|
-| 1 | **Designer pass** — amend design-system §4 with new T19 surface inventory (`OnboardingFlow` wizard chrome, the JSON-download affordance, the per-step nav, the panic-wipe modal binding, the session-revocation primer surface); confirm or amend the token gaps in Decision 6; resolve the D.5 labelling drift (Decision 2.a note) | designer | this ADR | design-system §4 has rows for OnboardingFlow + the steps + PanicWipeModal + SessionRevocationPrimer; design-tokens.json has any new tokens identified; labelling drift resolved | low | S (1 day) |
-| 2 | **Tech-writer copy pass** — populate `i18n/en-CA.json` `onboarding.*` + `panic.*` + `lock.*` keys with the canonical copy per the WHAT-must-be-communicated list in Decision 7; deliver as fixture | tech-writer | designer | every key in `lib/onboarding/copy-keys.ts` closed-allowlist has a value; the scaffold's content assertions (Canada, encrypted, no Latin abbrevs) pass against the keys; **HG-10 labour-lawyer ratification gate fires HERE before merge** | medium (HG-10) | M (2-3 days incl. HG-10 turnaround) |
-| 3 | **Threat-modeler pass** — consume the threat-model delta summary above; amend `.context/threat-model.md §8.T19` with the F-39 / panic-wipe / F-53 / F-54 deltas; cross-check the audit-emit-before-side-effect contract for `panic_wipe.invoked` | threat-modeler | this ADR | §8.T19 exists; the test-obligation strings (constant-time compare, `autocomplete="off"`, `spellcheck="false"`, no `Sec-CH-UA-Full-Version-List` in fingerprint, etc.) are recorded for test-writer to consume | medium | S (1 day) |
-| 4 | **Test-writer expansion** — expand `apps/web/test/T19/onboarding.test.ts` per Decision 11; author `apps/web/test/_helpers/onboarding-harness.ts`; author the static lint scripts (`check-onboarding-no-pii-in-url.sh`, `check-onboarding-no-passphrase-leak.sh`); author the production-bundle-strip test | test-writer | designer + tech-writer + threat-modeler | all test files exist; tests fail (red) because no implementation exists | medium | M (2-3 days) |
-| 5 | **Accessibility-specialist pass (first)** — review the planned surfaces for AODA / WCAG 2.0 AA gaps BEFORE implementation; flag any obvious focus-trap / live-region / role / aria-label / contrast issues for the implementer to honor on first pass | accessibility-specialist | designer + tech-writer | A11y review notes posted; implementer consumes | low | S (0.5 day) |
-| 6 | **Implementer pass** — author `lib/onboarding/` + `lib/lock/` per Decision 1; compose against `MemoryAuthStore` + `MemoryKeyStore` + new `MemoryWipeStore`; satisfy every test red→green; honor the production-strip pattern for test-only props; honor the no-`node:crypto` rule | implementer | test-writer + accessibility-specialist | every test passes green; PR-review-time assertion (no SQL migration in T19) holds; `__test_step` / `__test_user_agent` literal strings absent from production bundle; HG-10-ratified copy is wired | high | L (4-6 days) |
-| 7 | **Accessibility-specialist pass (second)** — formal AODA verification against the implemented surfaces; axe run against each step; manual SR walk-through; gaps surface as blocker findings | accessibility-specialist | implementer | axeCheck violations === []; SR walk-through documented; HG-10 copy is grade-8 readable | medium | S (1 day) |
-| 8 | **Security-reviewer pass** — review the panic-wipe atomicity, the audit-before-side-effect ordering for `panic_wipe.invoked`, the test-only-props production-strip, the no-passphrase-leak static lint, the no-PII-in-URL static lint, the constant-time type-back compare, the WebCrypto / libsodium readiness gate at D.3 | security-reviewer | implementer | no blocker findings | medium | S (1 day) |
-| 9 | **Privacy-reviewer pass** — PIPEDA 4.3 / 4.3.4 / 4.5 / 4.7 walk-through; confirm no new operational table; confirm no new subprocessor; confirm consent moments are honest and informed-of-purpose; confirm the device-fingerprint render is client-only | privacy-reviewer | implementer | no blocker findings; HG-10 ratification confirmed wired | medium | S (1 day) |
-| 10 | **Second-opinion-reviewer pass** — independent re-walk of the implementer's diff; pin any cooperative-caller surfaces; pin any test-fixture-vs-production drift; pin any tokens-vs-magic-values drift | second-opinion-reviewer | implementer | no blocker findings | low | S (1 day) |
-| 11 | **Localization-specialist disposition** — Open Question 5 user adjudication: French at T19 or deferred; if at T19, French copy keys land before merge; if deferred, the deferral is noted as a carry-forward in `.context/known-gaps.md` (G-T19-1) | localization-specialist + user | tech-writer (en-CA copy locked) | disposition recorded; if at T19, fr-CA copy keys present | low | S (0.5 day if deferred; M if at T19) |
-| 12 | **Verifier pass** — close-out verification: all tests pass; all reviewers signed off; HG-10 ratified; the audit-event enum extension carry-forward is recorded for T07.1 OR a T19-audit-extension sibling; the panic-wipe + onboarding flow are reachable from a clean install | verifier | all above | sign-off; no autonomous merge (per preferences.md "new user-facing flows" risk-flagging — user-approval gate fires here) | medium | S (1 day) |
+| #   | Task                                                                                                                                                                                                                                                                                                                                | Owner                          | Deps                                    | Acceptance                                                                                                                                                                                                                                | Risk           | Estimate                             |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------ |
+| 1   | **Designer pass** — amend design-system §4 with new T19 surface inventory (`OnboardingFlow` wizard chrome, the JSON-download affordance, the per-step nav, the panic-wipe modal binding, the session-revocation primer surface); confirm or amend the token gaps in Decision 6; resolve the D.5 labelling drift (Decision 2.a note) | designer                       | this ADR                                | design-system §4 has rows for OnboardingFlow + the steps + PanicWipeModal + SessionRevocationPrimer; design-tokens.json has any new tokens identified; labelling drift resolved                                                           | low            | S (1 day)                            |
+| 2   | **Tech-writer copy pass** — populate `i18n/en-CA.json` `onboarding.*` + `panic.*` + `lock.*` keys with the canonical copy per the WHAT-must-be-communicated list in Decision 7; deliver as fixture                                                                                                                                  | tech-writer                    | designer                                | every key in `lib/onboarding/copy-keys.ts` closed-allowlist has a value; the scaffold's content assertions (Canada, encrypted, no Latin abbrevs) pass against the keys; **HG-10 labour-lawyer ratification gate fires HERE before merge** | medium (HG-10) | M (2-3 days incl. HG-10 turnaround)  |
+| 3   | **Threat-modeler pass** — consume the threat-model delta summary above; amend `.context/threat-model.md §8.T19` with the F-39 / panic-wipe / F-53 / F-54 deltas; cross-check the audit-emit-before-side-effect contract for `panic_wipe.invoked`                                                                                    | threat-modeler                 | this ADR                                | §8.T19 exists; the test-obligation strings (constant-time compare, `autocomplete="off"`, `spellcheck="false"`, no `Sec-CH-UA-Full-Version-List` in fingerprint, etc.) are recorded for test-writer to consume                             | medium         | S (1 day)                            |
+| 4   | **Test-writer expansion** — expand `apps/web/test/T19/onboarding.test.ts` per Decision 11; author `apps/web/test/_helpers/onboarding-harness.ts`; author the static lint scripts (`check-onboarding-no-pii-in-url.sh`, `check-onboarding-no-passphrase-leak.sh`); author the production-bundle-strip test                           | test-writer                    | designer + tech-writer + threat-modeler | all test files exist; tests fail (red) because no implementation exists                                                                                                                                                                   | medium         | M (2-3 days)                         |
+| 5   | **Accessibility-specialist pass (first)** — review the planned surfaces for AODA / WCAG 2.0 AA gaps BEFORE implementation; flag any obvious focus-trap / live-region / role / aria-label / contrast issues for the implementer to honor on first pass                                                                               | accessibility-specialist       | designer + tech-writer                  | A11y review notes posted; implementer consumes                                                                                                                                                                                            | low            | S (0.5 day)                          |
+| 6   | **Implementer pass** — author `lib/onboarding/` + `lib/lock/` per Decision 1; compose against `MemoryAuthStore` + `MemoryKeyStore` + new `MemoryWipeStore`; satisfy every test red→green; honor the production-strip pattern for test-only props; honor the no-`node:crypto` rule                                                   | implementer                    | test-writer + accessibility-specialist  | every test passes green; PR-review-time assertion (no SQL migration in T19) holds; `__test_step` / `__test_user_agent` literal strings absent from production bundle; HG-10-ratified copy is wired                                        | high           | L (4-6 days)                         |
+| 7   | **Accessibility-specialist pass (second)** — formal AODA verification against the implemented surfaces; axe run against each step; manual SR walk-through; gaps surface as blocker findings                                                                                                                                         | accessibility-specialist       | implementer                             | axeCheck violations === []; SR walk-through documented; HG-10 copy is grade-8 readable                                                                                                                                                    | medium         | S (1 day)                            |
+| 8   | **Security-reviewer pass** — review the panic-wipe atomicity, the audit-before-side-effect ordering for `panic_wipe.invoked`, the test-only-props production-strip, the no-passphrase-leak static lint, the no-PII-in-URL static lint, the constant-time type-back compare, the WebCrypto / libsodium readiness gate at D.3         | security-reviewer              | implementer                             | no blocker findings                                                                                                                                                                                                                       | medium         | S (1 day)                            |
+| 9   | **Privacy-reviewer pass** — PIPEDA 4.3 / 4.3.4 / 4.5 / 4.7 walk-through; confirm no new operational table; confirm no new subprocessor; confirm consent moments are honest and informed-of-purpose; confirm the device-fingerprint render is client-only                                                                            | privacy-reviewer               | implementer                             | no blocker findings; HG-10 ratification confirmed wired                                                                                                                                                                                   | medium         | S (1 day)                            |
+| 10  | **Second-opinion-reviewer pass** — independent re-walk of the implementer's diff; pin any cooperative-caller surfaces; pin any test-fixture-vs-production drift; pin any tokens-vs-magic-values drift                                                                                                                               | second-opinion-reviewer        | implementer                             | no blocker findings                                                                                                                                                                                                                       | low            | S (1 day)                            |
+| 11  | **Localization-specialist disposition** — Open Question 5 user adjudication: French at T19 or deferred; if at T19, French copy keys land before merge; if deferred, the deferral is noted as a carry-forward in `.context/known-gaps.md` (G-T19-1)                                                                                  | localization-specialist + user | tech-writer (en-CA copy locked)         | disposition recorded; if at T19, fr-CA copy keys present                                                                                                                                                                                  | low            | S (0.5 day if deferred; M if at T19) |
+| 12  | **Verifier pass** — close-out verification: all tests pass; all reviewers signed off; HG-10 ratified; the audit-event enum extension carry-forward is recorded for T07.1 OR a T19-audit-extension sibling; the panic-wipe + onboarding flow are reachable from a clean install                                                      | verifier                       | all above                               | sign-off; no autonomous merge (per preferences.md "new user-facing flows" risk-flagging — user-approval gate fires here)                                                                                                                  | medium         | S (1 day)                            |
 
 **Total estimate:** ~3 weeks of agent-time on the happy path, including HG-10 lawyer turnaround. The HG-10 gate is the critical path.
 
@@ -1279,24 +1326,23 @@ This is the binding T19 task sequence. Each task lists owner agent, dependencies
 
 ## Designer's pass (2026-05-24)
 
-> **Status:** Complete. **Blocked on accessibility-specialist sign-off before T19 implementation begins per ADR-0020 task 5.**
-> **Authoring agent:** designer
+> **Status:** Complete. **Blocked on accessibility-specialist sign-off before T19 implementation begins per ADR-0020 task 5.** > **Authoring agent:** designer
 > **Inputs consumed:** ADR-0020 in full (Decisions 2.a labelling drift, 2.b state machine, 2.c modal composition, 3.f D.7 next-step pointer, 5 new audit event, 6 token gaps, 7 copy WHAT-must-be-communicated, 8 test-only props, 9 failure-mode handling); the 195-line test scaffold at `apps/web/test/T19/onboarding.test.ts`; `apps/web/src/lib/onboarding/recovery/RecoveryPassphraseScreen.svelte`; design-system §3.2 / §3.4 / §3.5 / §4 Surface D / G / H; design-tokens.json end-to-end; G-T19-1 (fr-CA deferral context); G-T08-17 (`border.width` token carry-forward — folded in this pass).
 
 ### A. D.5 labelling-drift resolution (resolves provisional G-T19-2; closes ADR-0020 follow-up "D.5 labelling drift")
 
 **Canonical labelling — binding for tech-writer, test-writer, implementer, accessibility-specialist:**
 
-| step | canonical name | i18n heading key | i18n primary-button key | i18n helper key |
-|---|---|---|---|---|
-| **D.1** | Personal-device advisory | `onboarding.device.heading` | `onboarding.device.continue` | `onboarding.device.helper` |
-| **D.2** | Hosting tradeoff | `onboarding.hosting.heading` | `onboarding.hosting.continue` | `onboarding.hosting.helper` |
-| **D.3** | Passkey enrollment + browser-baseline | `onboarding.passkey.heading` | `onboarding.passkey.start` | `onboarding.passkey.helper` |
-| **D.4** | Recovery passphrase ceremony | `onboarding.recovery.heading` | `onboarding.recovery.print` | `onboarding.recovery.helper` |
-| **D.4.print** | Print layout (sub-step of D.4; `@media print` stylesheet; NOT its own wizard step) | `print.recovery.title` | n/a (system print dialog) | n/a |
-| **D.5** | **Session-revocation primer** (canonical — replaces the previously-overloaded "D.5 print" label) | `onboarding.sessions.heading` | `onboarding.sessions.revoke_other.label` (destructive primary) + `onboarding.sessions.skip.label` (tertiary) | `onboarding.sessions.helper` |
-| **D.6** | Type-back verification | `onboarding.recovery.verify.heading` | `onboarding.recovery.verify.submit` | `onboarding.recovery.verify.helper` |
-| **D.7** | Completion | `onboarding.done.heading` | `onboarding.done.continue` | n/a |
+| step          | canonical name                                                                                   | i18n heading key                     | i18n primary-button key                                                                                      | i18n helper key                     |
+| ------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| **D.1**       | Personal-device advisory                                                                         | `onboarding.device.heading`          | `onboarding.device.continue`                                                                                 | `onboarding.device.helper`          |
+| **D.2**       | Hosting tradeoff                                                                                 | `onboarding.hosting.heading`         | `onboarding.hosting.continue`                                                                                | `onboarding.hosting.helper`         |
+| **D.3**       | Passkey enrollment + browser-baseline                                                            | `onboarding.passkey.heading`         | `onboarding.passkey.start`                                                                                   | `onboarding.passkey.helper`         |
+| **D.4**       | Recovery passphrase ceremony                                                                     | `onboarding.recovery.heading`        | `onboarding.recovery.print`                                                                                  | `onboarding.recovery.helper`        |
+| **D.4.print** | Print layout (sub-step of D.4; `@media print` stylesheet; NOT its own wizard step)               | `print.recovery.title`               | n/a (system print dialog)                                                                                    | n/a                                 |
+| **D.5**       | **Session-revocation primer** (canonical — replaces the previously-overloaded "D.5 print" label) | `onboarding.sessions.heading`        | `onboarding.sessions.revoke_other.label` (destructive primary) + `onboarding.sessions.skip.label` (tertiary) | `onboarding.sessions.helper`        |
+| **D.6**       | Type-back verification                                                                           | `onboarding.recovery.verify.heading` | `onboarding.recovery.verify.submit`                                                                          | `onboarding.recovery.verify.helper` |
+| **D.7**       | Completion                                                                                       | `onboarding.done.heading`            | `onboarding.done.continue`                                                                                   | n/a                                 |
 
 **Test-harness mapping:** `harness.advanceThroughTo('D.5')` now lands on the session-revocation primer; the print-stylesheet sub-step is reachable via `harness.invokePrintAtD4()` (the harness's existing `__test_step` prop accepts `'D.4'` and emits the print stylesheet via `window.print()` mock). The existing scaffold's `advanceThroughTo('D.4')` / `advanceThroughTo('D.7')` assertions remain accurate. **Tech-writer's i18n catalog MUST follow the canonical step names above.** **Test-writer's expansion MUST consume the canonical step names in the harness.**
 
@@ -1321,18 +1367,18 @@ In addition, the designer's pass adds the following T19-specific token families:
 
 New entries appended to `color._contrast_audit.light` and `.dark`. Every new pair meets WCAG 2.0 AA (text ≥4.5:1; large/UI ≥3:1); most meet AAA (≥7:1). Notable load-bearing entries:
 
-| Pair | Light ratio | Dark ratio | Notes |
-|---|---|---|---|
-| `onboarding.passphrase_reveal_fg on passphrase_reveal_bg` | 16.1:1 AAA | 15.2:1 AAA | Load-bearing for the D.4 reveal — ADR-0003 Amendment F op-rule 5 |
-| `onboarding.step_indicator_active_fg on active_bg` | 8.6:1 AAA | 10.1:1 AAA | Current-step pill |
-| `onboarding.step_indicator_complete_fg on complete_bg` | 5.7:1 AA | 9.6:1 AAA | Always paired with checkmark icon (color-blind safe) |
-| `onboarding.browser_baseline_pass_fg on pass_bg` | 5.7:1 AA | 9.6:1 AAA | Always paired with check icon |
-| `onboarding.browser_baseline_fail_fg on fail_bg` | 6.6:1 AA | 7.1:1 AAA | Always paired with x-circle icon |
-| `onboarding.device_fingerprint_fg on bg` | 9.6:1 AAA | 10.4:1 AAA | `typography.roles.code` |
-| `onboarding.completion_success_fg on bg` | 5.7:1 AA | 9.6:1 AAA | Always paired with check-circle icon |
-| `onboarding.panic_overlay_fg on bg` | 15.3:1 AAA | 15.2:1 AAA | Loading text legibility load-bearing while every other UI element drops behind |
-| `focus_ring.inner on passphrase_reveal_bg` | 16.1:1 AAA | 15.2:1 AAA | Focus ring inner line on the reveal surface |
-| `focus_ring.inner on panic_overlay_bg` | **1.0:1 FAIL** | n/a | **Two-layer focus ring INVERTED on panic-overlay**: the standard inner `border.focus` (#16181d) is invisible against the near-black overlay. Implementer MUST render the inner ring layer at `color.{mode}.onboarding.panic_overlay_fg` (#fbfbfa) rather than `border.focus` — outer `#fbbf24` carries visibility at 13.1:1; the inner layer at white-on-dark provides redundancy. Documented inline in the contrast audit. Test-writer MUST cover this. |
+| Pair                                                      | Light ratio    | Dark ratio | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------- | -------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboarding.passphrase_reveal_fg on passphrase_reveal_bg` | 16.1:1 AAA     | 15.2:1 AAA | Load-bearing for the D.4 reveal — ADR-0003 Amendment F op-rule 5                                                                                                                                                                                                                                                                                                                                                                                         |
+| `onboarding.step_indicator_active_fg on active_bg`        | 8.6:1 AAA      | 10.1:1 AAA | Current-step pill                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `onboarding.step_indicator_complete_fg on complete_bg`    | 5.7:1 AA       | 9.6:1 AAA  | Always paired with checkmark icon (color-blind safe)                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `onboarding.browser_baseline_pass_fg on pass_bg`          | 5.7:1 AA       | 9.6:1 AAA  | Always paired with check icon                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `onboarding.browser_baseline_fail_fg on fail_bg`          | 6.6:1 AA       | 7.1:1 AAA  | Always paired with x-circle icon                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `onboarding.device_fingerprint_fg on bg`                  | 9.6:1 AAA      | 10.4:1 AAA | `typography.roles.code`                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `onboarding.completion_success_fg on bg`                  | 5.7:1 AA       | 9.6:1 AAA  | Always paired with check-circle icon                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `onboarding.panic_overlay_fg on bg`                       | 15.3:1 AAA     | 15.2:1 AAA | Loading text legibility load-bearing while every other UI element drops behind                                                                                                                                                                                                                                                                                                                                                                           |
+| `focus_ring.inner on passphrase_reveal_bg`                | 16.1:1 AAA     | 15.2:1 AAA | Focus ring inner line on the reveal surface                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `focus_ring.inner on panic_overlay_bg`                    | **1.0:1 FAIL** | n/a        | **Two-layer focus ring INVERTED on panic-overlay**: the standard inner `border.focus` (#16181d) is invisible against the near-black overlay. Implementer MUST render the inner ring layer at `color.{mode}.onboarding.panic_overlay_fg` (#fbfbfa) rather than `border.focus` — outer `#fbbf24` carries visibility at 13.1:1; the inner layer at white-on-dark provides redundancy. Documented inline in the contrast audit. Test-writer MUST cover this. |
 
 ### D. design-system.md §4 surface inventory amendments (binding)
 
@@ -1418,6 +1464,7 @@ The accessibility-specialist's pre-implementation review was conducted against t
 > **Scope:** post-rework second pass of T19 (diff `d6ce313..4c93eab`). Full per-finding closure table in `/home/user/agent-os/accessibility-review-t19-post-impl.md` §Re-review.
 
 **Closure of prior BLOCKING findings:**
+
 - A11Y-T19-1 (focus-to-heading on advance) — CLOSED. `focusCurrentHeading()` runs after `tick()`; every `<h1>` is `tabindex="-1"`; every step-advance handler calls it.
 - A11Y-T19-2 (PanicWipeModal focus management) — PARTIALLY CLOSED → see RR-1. Initial focus, Tab/Shift-Tab cycle, focus-restore-on-close, and Escape-no-dismiss are all implemented correctly. BUT the Cancel button has no `on:click` and `open` is not bound, so there is no working close path from inside the modal.
 - A11Y-T19-3 / -4 (aria-describedby) — D.6 `d6-help` / `d6-err` wired; modal body context now in a `panic-wipe-modal-body` block (advisory: still no explicit `aria-describedby` on the dialog).
@@ -1468,8 +1515,8 @@ The scaffold pins the high-water-mark contracts (D.1 advisory, D.2 copy, D.3 bas
 - **F-103 → M-103a/b/c**: D.3 TOTP-locked copy assertion (single key `t('onboarding.totp.locked')`); static lint against `===` near `totp`; collapsed-user-surface text equivalence for `expired` vs `consumed` reasons.
 - **F-104 → M-104a/b/c/d**: static lint against `window.passphrase` / `globalThis.passphrase` / module-level `let passphrase`; post-match ref-clear assertion via a test-only debug seam (production-stripped); D.6 input attribute snapshot (`autocomplete='off'` + `spellcheck='false'` + `autocapitalize='none'` + `autocorrect='off'`); static lint against `===` near `passphrase`/`typed`.
 - **F-105 → M-105a/b/c**: JSON-download closed-allowlist snapshot (`ciphertext`, `kdf_params`, `version`, `blob_id` ONLY); tampered-byte decrypt-throw test; header-comment lint on `recovery-blob-download.ts`.
-- **F-106 → M-106a/b/c**: TestWipeStore.__debugForceAuditFailure aborts wipe AND emits no `clearXxx`; meta-shape closed-allowlist snapshot; TestWipeStore.__debugForceClearFailure('caches') produces a SECOND audit row carrying `meta.partial_failure_classes = ['caches']`.
-- **F-108 → M-108a/b/c**: no `data-testid='copy-passphrase'` on D.4; no-TTS static lint extended to D4RecoveryPassphrase / D6TypeBackVerify / recovery/*; passphrase `<code>` has no `aria-live`, no `role='alert'`, no `role='status'`.
+- **F-106 → M-106a/b/c**: TestWipeStore.**debugForceAuditFailure aborts wipe AND emits no `clearXxx`; meta-shape closed-allowlist snapshot; TestWipeStore.**debugForceClearFailure('caches') produces a SECOND audit row carrying `meta.partial_failure_classes = ['caches']`.
+- **F-108 → M-108a/b/c**: no `data-testid='copy-passphrase'` on D.4; no-TTS static lint extended to D4RecoveryPassphrase / D6TypeBackVerify / recovery/\*; passphrase `<code>` has no `aria-live`, no `role='alert'`, no `role='status'`.
 - **F-109 → M-109a**: `BrowserWipeStore.clearCaches` enumerates via `caches.keys()` dynamic call; no hard-coded cache name array in `lib/lock/panic-wipe.ts`.
 - **F-110 → M-110a/b/c**: per-error-path canary test (passphrase canary, TOTP canary, UA canary all absent from rendered toasts); Argon2id `argon2id_unavailable_libsodium_wrappers_sumo_required` symbol present in structured logs but absent from user-visible toast; Sentry breadcrumb scrubber test extends to `lib/onboarding/*` paths.
 - **F-111 → M-111a/b**: `check-onboarding-no-pii-in-url.sh` script (already named in Decision 11) reaffirmed binding; route-inventory test asserts no `/onboarding/*` route consumes `$page.url.searchParams` for wizard-step state.
@@ -1525,8 +1572,7 @@ No BLOCKERS in the architect's design. T19 ships as library + Svelte composition
 
 ## Tech-writer's pass (2026-05-24)
 
-> **HG-10 packet regenerated 2026-05-25 (gap G-T19-12, raised by privacy reviewer P-T19-RR-1, user-confirmed):** Catalog has grown since the 2026-05-24 packet. New verified counts: **151** `onboarding.*` leaf keys (was 134, +17) + **26** `a11y.onboarding.*` keys (was 18, +8) + 1 `_meta` = **178 catalog entries** (was 152). Counts re-measured against the current `apps/web/src/lib/i18n/onboarding.en-CA.json` and the "Catalog file path + key count" + "A11y-string catalog summary" subsections below have been updated to match. The +8 a11y keys are screen-reader/operational (step-indicator landmark + three step-pill states, browser-baseline failed-checks list + per-capability label, panic-wipe type-back aria-label) — added to the a11y summary enumeration. Of the +17 `onboarding.*` keys, the step-4 substantive audit found ALL are operational (button/step labels, placeholders, helper microcopy, badge states, empty-states, row labels) OR restate scope already inside the thematic envelope of paragraphs 1-7 — with ONE error string flagged for explicit counsel attention: `onboarding.panic_wipe_d6.error.audit_emit_failed` asserts "we did not wipe anything … nothing on this device has been deleted yet" on audit-emit failure. This is a substantive correctness claim (the audit-BEFORE-side-effect / F-106 / M-106a contract surfaced to the user) that paragraph 5 does NOT currently guide the lawyer to — see the new "Substantive-delta audit note" subsection below. The packet must be (re)sent to counsel WITH the current catalog file. **STATUS UNCHANGED: still PENDING lawyer ratification.**
-> **STATUS: PENDING EXTERNAL LABOUR-LAWYER REVIEW (deferred 2026-05-24 per user adjudication — formal HG-10 path per G-T08-11). DO NOT MERGE T19 TO `main` UNTIL THE LAWYER HAS RATIFIED THE COPY BELOW.** Test-writer + implementer proceed against catalog KEYS; lawyer's edits land in the catalog VALUES without invalidating tests or implementation.
+> **HG-10 packet regenerated 2026-05-25 (gap G-T19-12, raised by privacy reviewer P-T19-RR-1, user-confirmed):** Catalog has grown since the 2026-05-24 packet. New verified counts: **151** `onboarding.*` leaf keys (was 134, +17) + **26** `a11y.onboarding.*` keys (was 18, +8) + 1 `_meta` = **178 catalog entries** (was 152). Counts re-measured against the current `apps/web/src/lib/i18n/onboarding.en-CA.json` and the "Catalog file path + key count" + "A11y-string catalog summary" subsections below have been updated to match. The +8 a11y keys are screen-reader/operational (step-indicator landmark + three step-pill states, browser-baseline failed-checks list + per-capability label, panic-wipe type-back aria-label) — added to the a11y summary enumeration. Of the +17 `onboarding.*` keys, the step-4 substantive audit found ALL are operational (button/step labels, placeholders, helper microcopy, badge states, empty-states, row labels) OR restate scope already inside the thematic envelope of paragraphs 1-7 — with ONE error string flagged for explicit counsel attention: `onboarding.panic_wipe_d6.error.audit_emit_failed` asserts "we did not wipe anything … nothing on this device has been deleted yet" on audit-emit failure. This is a substantive correctness claim (the audit-BEFORE-side-effect / F-106 / M-106a contract surfaced to the user) that paragraph 5 does NOT currently guide the lawyer to — see the new "Substantive-delta audit note" subsection below. The packet must be (re)sent to counsel WITH the current catalog file. **STATUS UNCHANGED: still PENDING lawyer ratification.** > **STATUS: PENDING EXTERNAL LABOUR-LAWYER REVIEW (deferred 2026-05-24 per user adjudication — formal HG-10 path per G-T08-11). DO NOT MERGE T19 TO `main` UNTIL THE LAWYER HAS RATIFIED THE COPY BELOW.** Test-writer + implementer proceed against catalog KEYS; lawyer's edits land in the catalog VALUES without invalidating tests or implementation.
 > **HG-10 packet routing:** the 7-paragraph ratification packet below + the catalog file `apps/web/src/lib/i18n/onboarding.en-CA.json` are the materials to send to counsel. Replies and edits are tracked in this section; PR merge gate enforced at security-reviewer + verifier turn.
 > **Architect flags from tech-writer (6 raised):** deferred to implementer per user adjudication 2026-05-24. Three actionable (catalog placement, D.5 empty-state copy enumeration, D.6 input-attribute disclosure) — implementer adjudicates as the spec is wired; lawyer flags any copy adds at HG-10. Three traceability-only (no action).
 > **Authoring agent:** tech-writer
@@ -1577,17 +1623,17 @@ The `a11y.onboarding.*` namespace contains 26 screen-reader announcement strings
 
 ### Compliance mapping (which PIPEDA principle each catalog section satisfies)
 
-| Catalog section | PIPEDA principle satisfied | How |
-|---|---|---|
-| `onboarding.advisory_d1.body` + `advisory_d1.checkbox_label` + `advisory_d1.primary_button` | 4.3 Consent + 4.3.4 Informed-of-purpose | States the purpose of enrolling on a personal device (sign-in key storage on this device); explicit-click gate satisfies "informed and explicit" consent for an action with non-trivial security consequences per ADR-0008. |
-| `onboarding.browser_baseline_d2.body_pass` + `browser_baseline_d2.privacy_policy_link` | 4.8 Openness + 4.1 Accountability | Discloses the hosting provider, region, and US-legal-process exposure at the consent moment; links to the full privacy policy for users who want the longer-form disclosure. |
-| `onboarding.passkey_d3.body` + `passkey_d3.totp_helper` | 4.3 Consent + 4.7 Safeguards | States the purpose of the passkey (sign in without a password) and the purpose of the TOTP code (one-time invite confirmation); the safeguards posture is implicit in the "no password to leak or guess" framing. |
-| `onboarding.passphrase_d4.body_purpose` + `passphrase_d4.download_helper` + `passphrase_d4.print_modal_body` | 4.3.4 Informed-of-purpose + 4.7 Safeguards + 4.9 Individual access | States the purpose of the recovery passphrase (account recovery on device loss); states what we do NOT do (cannot reset, cannot see); operational instruction for safe custody; distinguishes file backup from passphrase. |
-| `onboarding.sessions_d5.body` + `sessions_d5.helper` | 4.3 Consent + 4.5 Limiting use | States the purpose of session revocation (sign out other devices the user has used); discloses that the action is optional and what it does NOT touch (committee records); supports the user's individual control over sessions per 4.9 lineage. |
+| Catalog section                                                                                                                           | PIPEDA principle satisfied                                         | How                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboarding.advisory_d1.body` + `advisory_d1.checkbox_label` + `advisory_d1.primary_button`                                               | 4.3 Consent + 4.3.4 Informed-of-purpose                            | States the purpose of enrolling on a personal device (sign-in key storage on this device); explicit-click gate satisfies "informed and explicit" consent for an action with non-trivial security consequences per ADR-0008.                                                                         |
+| `onboarding.browser_baseline_d2.body_pass` + `browser_baseline_d2.privacy_policy_link`                                                    | 4.8 Openness + 4.1 Accountability                                  | Discloses the hosting provider, region, and US-legal-process exposure at the consent moment; links to the full privacy policy for users who want the longer-form disclosure.                                                                                                                        |
+| `onboarding.passkey_d3.body` + `passkey_d3.totp_helper`                                                                                   | 4.3 Consent + 4.7 Safeguards                                       | States the purpose of the passkey (sign in without a password) and the purpose of the TOTP code (one-time invite confirmation); the safeguards posture is implicit in the "no password to leak or guess" framing.                                                                                   |
+| `onboarding.passphrase_d4.body_purpose` + `passphrase_d4.download_helper` + `passphrase_d4.print_modal_body`                              | 4.3.4 Informed-of-purpose + 4.7 Safeguards + 4.9 Individual access | States the purpose of the recovery passphrase (account recovery on device loss); states what we do NOT do (cannot reset, cannot see); operational instruction for safe custody; distinguishes file backup from passphrase.                                                                          |
+| `onboarding.sessions_d5.body` + `sessions_d5.helper`                                                                                      | 4.3 Consent + 4.5 Limiting use                                     | States the purpose of session revocation (sign out other devices the user has used); discloses that the action is optional and what it does NOT touch (committee records); supports the user's individual control over sessions per 4.9 lineage.                                                    |
 | `onboarding.panic_wipe_d6.modal_body_what_happens` + `modal_body_what_doesnt` + `modal_residual_risk_callout` + `modal_recovery_reminder` | 4.3.4 Informed-of-purpose + 4.7 Safeguards + 4.9 Individual access | States the purpose of panic-wipe (local destruction); honestly discloses scope (local-only, not server-side per Q4); informs coerced users of the residual session-validity window; informs users of the recovery path. The four-section structure satisfies the F-115 / M-115 four-regex contract. |
-| `onboarding.completion_d7.next_steps_body` | 4.1 Accountability + 4.8 Openness | Tells the user where the destructive and revocation controls live for future need (Decision 3.f). |
-| `a11y.onboarding.*` | 4.7 Safeguards + AODA WCAG 2.0 AA | Screen-reader announcements for every state transition; F-108 M-108c-compliant (no passphrase in any live-region string); explicit Escape-no-dismiss disclosure satisfies §3.2 keyboard-only-user expectation. |
-| `_meta` | n/a | Translator + reviewer metadata. |
+| `onboarding.completion_d7.next_steps_body`                                                                                                | 4.1 Accountability + 4.8 Openness                                  | Tells the user where the destructive and revocation controls live for future need (Decision 3.f).                                                                                                                                                                                                   |
+| `a11y.onboarding.*`                                                                                                                       | 4.7 Safeguards + AODA WCAG 2.0 AA                                  | Screen-reader announcements for every state transition; F-108 M-108c-compliant (no passphrase in any live-region string); explicit Escape-no-dismiss disclosure satisfies §3.2 keyboard-only-user expectation.                                                                                      |
+| `_meta`                                                                                                                                   | n/a                                                                | Translator + reviewer metadata.                                                                                                                                                                                                                                                                     |
 
 ### Flags raised for architect (do NOT silently redesign)
 
@@ -1624,53 +1670,53 @@ The catalog satisfies every copy-touching mitigation from §8.T19 (F-101 M-101a 
 
 9 new test files added under `/home/user/agent-os/apps/web/test/T19/`. The existing 195-line scaffold at `apps/web/test/T19/onboarding.test.ts` is unmodified.
 
-| File | `it()` blocks | Coverage focus |
-|---|---|---|
-| `d1-personal-device-advisory.test.ts` | 21 | F-101 M-101a/b/c + D.T19.b step indicator at D.1 |
-| `d2-browser-baseline.test.ts` | 11 | F-102 M-102a/b + Decision 8 production-strip + G-T19-5 + Surface D.T19.e |
-| `d3-passkey-enrollment.test.ts` | 11 | F-103 M-103a/b/c + F-110 M-110a TOTP-canary + D.3 input attrs |
-| `d4-recovery-passphrase.test.ts` | 23 | F-104 M-104a/b/c/d + F-105 M-105a/b/c + F-108 M-108a/b/c + F-110 M-110a passphrase-canary + F-111 M-111a/b + F-112 M-112a + in-memory-state contract |
-| `d5-session-revocation-primer.test.ts` | 15 | Designer §A FIXED labels + D.5 state matrix + F-39 ≤5s propagation |
-| `d6-panic-wipe.test.ts` | 24 | F-106 M-106a/b/c (audit-BEFORE-side-effect, closed allowlist meta, partial-failure double-row) + F-109 M-109a + G-T19-8 + F-113 M-113a + F-115 M-115 + Surface G state matrix + INVERTED focus-ring |
-| `d7-completion-and-elevation.test.ts` | 10 | F-114 M-114a/b/c (integration; PR-review-time `git diff` deferred to security-reviewer) + Surface D.T19.h |
-| `state-completeness.test.ts` | 22 | Designer §4 Surface D.T19 8 sub-surfaces × full state matrix; reduced-motion |
-| `i18n-catalog-coverage.test.ts` | 7 explicit + 88 dynamically-generated `requiredKeys` `it()` | Closed-allowlist contract: every catalog key reachable from at least one source; every source `t()` reference exists in catalog; Designer §A FIXED-label values; no PII placeholders |
+| File                                   | `it()` blocks                                               | Coverage focus                                                                                                                                                                                      |
+| -------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `d1-personal-device-advisory.test.ts`  | 21                                                          | F-101 M-101a/b/c + D.T19.b step indicator at D.1                                                                                                                                                    |
+| `d2-browser-baseline.test.ts`          | 11                                                          | F-102 M-102a/b + Decision 8 production-strip + G-T19-5 + Surface D.T19.e                                                                                                                            |
+| `d3-passkey-enrollment.test.ts`        | 11                                                          | F-103 M-103a/b/c + F-110 M-110a TOTP-canary + D.3 input attrs                                                                                                                                       |
+| `d4-recovery-passphrase.test.ts`       | 23                                                          | F-104 M-104a/b/c/d + F-105 M-105a/b/c + F-108 M-108a/b/c + F-110 M-110a passphrase-canary + F-111 M-111a/b + F-112 M-112a + in-memory-state contract                                                |
+| `d5-session-revocation-primer.test.ts` | 15                                                          | Designer §A FIXED labels + D.5 state matrix + F-39 ≤5s propagation                                                                                                                                  |
+| `d6-panic-wipe.test.ts`                | 24                                                          | F-106 M-106a/b/c (audit-BEFORE-side-effect, closed allowlist meta, partial-failure double-row) + F-109 M-109a + G-T19-8 + F-113 M-113a + F-115 M-115 + Surface G state matrix + INVERTED focus-ring |
+| `d7-completion-and-elevation.test.ts`  | 10                                                          | F-114 M-114a/b/c (integration; PR-review-time `git diff` deferred to security-reviewer) + Surface D.T19.h                                                                                           |
+| `state-completeness.test.ts`           | 22                                                          | Designer §4 Surface D.T19 8 sub-surfaces × full state matrix; reduced-motion                                                                                                                        |
+| `i18n-catalog-coverage.test.ts`        | 7 explicit + 88 dynamically-generated `requiredKeys` `it()` | Closed-allowlist contract: every catalog key reachable from at least one source; every source `t()` reference exists in catalog; Designer §A FIXED-label values; no PII placeholders                |
 
 **Total: 144 explicit `it()` blocks + 88 generated = 232 distinct test cases across the 9 new files.**
 
 ### F-XXX → test file/line coverage map
 
-| Finding | Mitigation(s) | Covered by |
-|---|---|---|
-| F-101 | M-101a, M-101b, M-101c | `d1-personal-device-advisory.test.ts:33-217` (all 21 tests in this file) |
-| F-102 | M-102a, M-102b, M-102c | `d2-browser-baseline.test.ts:97-150` (D.3 source origin-check + production-bundle strip + G-T19-5 grep gate) |
-| F-103 | M-103a, M-103b, M-103c | `d3-passkey-enrollment.test.ts:48-126` (TOTP rate-limit copy + no-`===` near totp + collapsed 410/401 user surface) |
-| F-104 | M-104a, M-104b, M-104c, M-104d | `d4-recovery-passphrase.test.ts:66-128, 484-510` (no `window.passphrase`; ref clear on advance; D.6 input attrs autocomplete/spellcheck/autocapitalize/autocorrect; no `===` near passphrase/typed) |
-| F-105 | M-105a, M-105b, M-105c | `d4-recovery-passphrase.test.ts:135-228` (closed-allowlist JSON keys, no PI, version=1, blob_id UUID, header-comment lint) |
-| F-106 | M-106a, M-106b, M-106c | `d6-panic-wipe.test.ts:46-178` (TestWipeStore.__debugForceAuditFailure aborts every clearXxx; meta closed allowlist; partial-failure double-row via __debugForceClearFailure('caches')) |
-| F-107 | M-107 (accepted; no test required) | Documented in this pass; no test obligation |
-| F-108 | M-108a, M-108b, M-108c, M-108d | `d4-recovery-passphrase.test.ts:243-319` (no copy-passphrase; no TTS in onboarding/lock; G-T19-6 lint script ref; <code> has no aria-live / role=alert / role=status) |
-| F-109 | M-109a | `d6-panic-wipe.test.ts:184-225` (dynamic `caches.keys()`; no hard-coded cache array; G-T19-8) |
-| F-110 | M-110a, M-110b, M-110c | `d4-recovery-passphrase.test.ts:325-364` (passphrase canary absent from toasts; Argon2 canonical symbol absent from rendered surfaces) + `d2-browser-baseline.test.ts:117-130` (UA canary absent from baseline-fail toasts) + `d3-passkey-enrollment.test.ts:149-179` (TOTP canary absent from D.3 error surfaces) |
-| F-111 | M-111a, M-111b, M-111c | `d4-recovery-passphrase.test.ts:370-432` (static lint on `lib/onboarding/` for hash/search/pushState/sessionStorage/localStorage + route-inventory scan) |
-| F-112 | M-112a | `d4-recovery-passphrase.test.ts:438-477` (createOnboardingRateLimiter: 10 attempts in 60s pass; 11th fails; window expiry resets) |
-| F-113 | M-113a | `d6-panic-wipe.test.ts:230-249` (post-wipe lockout: second panicWipe → no_op, no second audit row) |
-| F-114 | M-114a, M-114b, M-114c | `d7-completion-and-elevation.test.ts:99-194` (header invariant comment; static lint for committee_membership/role: absence; integration test for zero role.% audit rows + pre-seeded inactive membership unchanged) |
-| F-115 | M-115 | `d6-panic-wipe.test.ts:254-322` (catalog four-regex contract + rendered modal text four-regex contract) |
+| Finding | Mitigation(s)                      | Covered by                                                                                                                                                                                                                                                                                                         |
+| ------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F-101   | M-101a, M-101b, M-101c             | `d1-personal-device-advisory.test.ts:33-217` (all 21 tests in this file)                                                                                                                                                                                                                                           |
+| F-102   | M-102a, M-102b, M-102c             | `d2-browser-baseline.test.ts:97-150` (D.3 source origin-check + production-bundle strip + G-T19-5 grep gate)                                                                                                                                                                                                       |
+| F-103   | M-103a, M-103b, M-103c             | `d3-passkey-enrollment.test.ts:48-126` (TOTP rate-limit copy + no-`===` near totp + collapsed 410/401 user surface)                                                                                                                                                                                                |
+| F-104   | M-104a, M-104b, M-104c, M-104d     | `d4-recovery-passphrase.test.ts:66-128, 484-510` (no `window.passphrase`; ref clear on advance; D.6 input attrs autocomplete/spellcheck/autocapitalize/autocorrect; no `===` near passphrase/typed)                                                                                                                |
+| F-105   | M-105a, M-105b, M-105c             | `d4-recovery-passphrase.test.ts:135-228` (closed-allowlist JSON keys, no PI, version=1, blob_id UUID, header-comment lint)                                                                                                                                                                                         |
+| F-106   | M-106a, M-106b, M-106c             | `d6-panic-wipe.test.ts:46-178` (TestWipeStore.**debugForceAuditFailure aborts every clearXxx; meta closed allowlist; partial-failure double-row via **debugForceClearFailure('caches'))                                                                                                                            |
+| F-107   | M-107 (accepted; no test required) | Documented in this pass; no test obligation                                                                                                                                                                                                                                                                        |
+| F-108   | M-108a, M-108b, M-108c, M-108d     | `d4-recovery-passphrase.test.ts:243-319` (no copy-passphrase; no TTS in onboarding/lock; G-T19-6 lint script ref; <code> has no aria-live / role=alert / role=status)                                                                                                                                              |
+| F-109   | M-109a                             | `d6-panic-wipe.test.ts:184-225` (dynamic `caches.keys()`; no hard-coded cache array; G-T19-8)                                                                                                                                                                                                                      |
+| F-110   | M-110a, M-110b, M-110c             | `d4-recovery-passphrase.test.ts:325-364` (passphrase canary absent from toasts; Argon2 canonical symbol absent from rendered surfaces) + `d2-browser-baseline.test.ts:117-130` (UA canary absent from baseline-fail toasts) + `d3-passkey-enrollment.test.ts:149-179` (TOTP canary absent from D.3 error surfaces) |
+| F-111   | M-111a, M-111b, M-111c             | `d4-recovery-passphrase.test.ts:370-432` (static lint on `lib/onboarding/` for hash/search/pushState/sessionStorage/localStorage + route-inventory scan)                                                                                                                                                           |
+| F-112   | M-112a                             | `d4-recovery-passphrase.test.ts:438-477` (createOnboardingRateLimiter: 10 attempts in 60s pass; 11th fails; window expiry resets)                                                                                                                                                                                  |
+| F-113   | M-113a                             | `d6-panic-wipe.test.ts:230-249` (post-wipe lockout: second panicWipe → no_op, no second audit row)                                                                                                                                                                                                                 |
+| F-114   | M-114a, M-114b, M-114c             | `d7-completion-and-elevation.test.ts:99-194` (header invariant comment; static lint for committee_membership/role: absence; integration test for zero role.% audit rows + pre-seeded inactive membership unchanged)                                                                                                |
+| F-115   | M-115                              | `d6-panic-wipe.test.ts:254-322` (catalog four-regex contract + rendered modal text four-regex contract)                                                                                                                                                                                                            |
 
 ### Designer §4 Surface D.T19 → test file/line coverage map
 
-| Sub-surface | States covered | Test file location |
-|---|---|---|
-| **D.T19.a OnboardingFlow chrome** | default, focus-visible, loading (aria-busy), error (per-step), success, baseline_blocked, reduced-motion | `state-completeness.test.ts:51-112` |
-| **D.T19.b Step indicator** | pending (aria-disabled), active (aria-current), complete (check icon REQUIRED + "completed" aria-label), error (x-circle), focus-visible | `d1-personal-device-advisory.test.ts:198-237` + `state-completeness.test.ts:118-167` |
-| **D.T19.c Device-fingerprint card** | default (read-only render; no interactive sub-states) | `d1-personal-device-advisory.test.ts:139-180` + `state-completeness.test.ts:173-194` |
-| **D.T19.d Recovery-blob download** | default, disabled (during encryption), loading (aria-busy), error (toast; doesn't block advance), success (label transient swap) | `state-completeness.test.ts:200-241` |
-| **D.T19.e Browser-baseline badge** | pass (role=status), fail (role=alert + sub-check enumeration with per-li aria-label) | `d2-browser-baseline.test.ts:67-95` + `state-completeness.test.ts:247-261` |
-| **D.T19.f Recovery-passphrase reveal pair** | default (concealed; passphrase NOT in DOM), capped (aria-disabled=true + helper swap to capped variant), no aria-live on `<code>` | `d4-recovery-passphrase.test.ts:301-319` + `state-completeness.test.ts:267-279` |
-| **D.T19.g Session-revocation primer** | ready (FIXED labels), in_progress (aria-busy), success (role=status), empty (only-this-device, primary aria-disabled), partial_failure (role=alert + failed_systems enumeration), error (rate_limited; Skip remains) | `d5-session-revocation-primer.test.ts:32-203` (full state matrix) |
-| **D.T19.h Completion summary** | default (role=status + next-step pointer role=region + check-circle icon REQUIRED) | `d7-completion-and-elevation.test.ts:67-97` + `state-completeness.test.ts:286-298` |
-| **Surface G PanicWipeModal** | ready-delay-pending (literal-phrase input keystroke-gated; primary aria-disabled), ready (input accepts; primary enables on phrase match), in-progress overlay (aria-busy + reduced-motion fallback), partial-failure (role=alert + failed-class enumeration), complete (role=status toast), INVERTED focus-ring (inner bound to panic_overlay_fg, NOT border.focus), Escape does NOT dismiss | `d6-panic-wipe.test.ts:328-410` + `state-completeness.test.ts:303-329` |
+| Sub-surface                                 | States covered                                                                                                                                                                                                                                                                                                                                                                                | Test file location                                                                   |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **D.T19.a OnboardingFlow chrome**           | default, focus-visible, loading (aria-busy), error (per-step), success, baseline_blocked, reduced-motion                                                                                                                                                                                                                                                                                      | `state-completeness.test.ts:51-112`                                                  |
+| **D.T19.b Step indicator**                  | pending (aria-disabled), active (aria-current), complete (check icon REQUIRED + "completed" aria-label), error (x-circle), focus-visible                                                                                                                                                                                                                                                      | `d1-personal-device-advisory.test.ts:198-237` + `state-completeness.test.ts:118-167` |
+| **D.T19.c Device-fingerprint card**         | default (read-only render; no interactive sub-states)                                                                                                                                                                                                                                                                                                                                         | `d1-personal-device-advisory.test.ts:139-180` + `state-completeness.test.ts:173-194` |
+| **D.T19.d Recovery-blob download**          | default, disabled (during encryption), loading (aria-busy), error (toast; doesn't block advance), success (label transient swap)                                                                                                                                                                                                                                                              | `state-completeness.test.ts:200-241`                                                 |
+| **D.T19.e Browser-baseline badge**          | pass (role=status), fail (role=alert + sub-check enumeration with per-li aria-label)                                                                                                                                                                                                                                                                                                          | `d2-browser-baseline.test.ts:67-95` + `state-completeness.test.ts:247-261`           |
+| **D.T19.f Recovery-passphrase reveal pair** | default (concealed; passphrase NOT in DOM), capped (aria-disabled=true + helper swap to capped variant), no aria-live on `<code>`                                                                                                                                                                                                                                                             | `d4-recovery-passphrase.test.ts:301-319` + `state-completeness.test.ts:267-279`      |
+| **D.T19.g Session-revocation primer**       | ready (FIXED labels), in_progress (aria-busy), success (role=status), empty (only-this-device, primary aria-disabled), partial_failure (role=alert + failed_systems enumeration), error (rate_limited; Skip remains)                                                                                                                                                                          | `d5-session-revocation-primer.test.ts:32-203` (full state matrix)                    |
+| **D.T19.h Completion summary**              | default (role=status + next-step pointer role=region + check-circle icon REQUIRED)                                                                                                                                                                                                                                                                                                            | `d7-completion-and-elevation.test.ts:67-97` + `state-completeness.test.ts:286-298`   |
+| **Surface G PanicWipeModal**                | ready-delay-pending (literal-phrase input keystroke-gated; primary aria-disabled), ready (input accepts; primary enables on phrase match), in-progress overlay (aria-busy + reduced-motion fallback), partial-failure (role=alert + failed-class enumeration), complete (role=status toast), INVERTED focus-ring (inner bound to panic_overlay_fg, NOT border.focus), Escape does NOT dismiss | `d6-panic-wipe.test.ts:328-410` + `state-completeness.test.ts:303-329`               |
 
 ### Tests intentionally exercising threat-modeler `__debug*` seams
 
@@ -1760,6 +1806,7 @@ The implementer's task #6 (per ADR-0020) is unblocked on test-writer's side; the
 ### Screen-reader announcement consumption
 
 **3 of 18** `a11y.onboarding.*` catalog keys are actually consumed in components:
+
 - `step_change` at `OnboardingFlow.svelte:313`
 - `device_fingerprint_announcement` at `OnboardingFlow.svelte:334`
 - `panic_wipe_in_progress_announcement` at `PanicWipeModal.svelte:124`
@@ -1832,7 +1879,6 @@ ADR-0020 task 7 is **NOT closed.** The implementer must address A11Y-T19-1 throu
 
 **Block merge.** Escalate to human review for an architect adjudication: is `OnboardingFlow.svelte` intentionally a UI-stub destined to be wired in a follow-on (T19.1?) sibling task, or is T19 meant to ship as a complete monolithic surface? The 5 BLOCKING findings are real against the §8.T19 contract and ADR-0020 binding clauses; the test suite passes because the integration harness simulates the auth client rather than composing against the production-path stores.
 
-
 ## Security-reviewer re-review (2026-05-25)
 
 **Diff range:** `d6ce313..4c93eab` (implementer rework). Full per-finding evidence in `/home/user/agent-os/security-review-t19.md` (## Re-review section).
@@ -1879,8 +1925,8 @@ ADR-0020 task 7 is **NOT closed.** The implementer must address A11Y-T19-1 throu
 
 - **A-T19-RR-1 [BLOCKING]** — Panic-wipe silently non-functional in production: emitAudit fail-closes {ok:false} (correct per M-106a) but PanicWipeModal has NO `audit_failed` UI branch. User types WIPE, clicks, modal silently stays idle — no error, no destruction, no trace. Fix: render audit_failed state. G-T19-PRIV-3 becomes a release blocker.
 - **A-T19-RR-2 [BLOCKING]** — Inescapable modal: Cancel button (PanicWipeModal.svelte:242-244) has no on:click; Escape swallowed (correct per §3.5); Tab trapped. Keyboard user who changes mind cannot leave. (Same defect as a11y A11Y-T19-RR-1, independently confirmed.) Fix: bind Cancel → close + restore focus.
-- **A-T19-RR-3 [MEDIUM]** — Re-onboard panic-wipe lockout still broken in production (getDefaultStore() singleton lives in __wipedStores after wipe; second wipe in same tab → no_op). Masked by RR-1; surfaces when the real emitter ships. Carry-forward.
-- **A-T19-RR-4 [LOW]** — Bundle grep gate misses new child-component test props (__test_session_count, __test_revoke_*, __test_force_*, __test_ready_delay_ms, D5 __test_revoke_*) — none use the split-form decoy. Add a `__test_` family regex.
+- **A-T19-RR-3 [MEDIUM]** — Re-onboard panic-wipe lockout still broken in production (getDefaultStore() singleton lives in \_\_wipedStores after wipe; second wipe in same tab → no_op). Masked by RR-1; surfaces when the real emitter ships. Carry-forward.
+- **A-T19-RR-4 [LOW]** — Bundle grep gate misses new child-component test props (**test_session_count, **test*revoke*_, \_*test_force*_, **test_ready_delay_ms, D5 **test*revoke*\*) — none use the split-form decoy. Add a `__test_` family regex.
 - **A-T19-RR-5 [LOW]** — No round-trip decrypt test; the nonce-fold branch is never exercised (the exact gap that hid A-T19-1). test-writer scope.
 
 ---
@@ -1961,12 +2007,14 @@ The hard case: the dump captured at `latest_dump_ts` lists row `X` (event_type `
 **Decision (binding):** for each row in the dump but absent from the live chain, attribute IFF (the dump's `retention_sweep_runs_snapshot_ts_ms` window contains a sweep row whose `per_event_counts[row.event_type] > 0` AND row.ts is within that sweep's `started_at_ms..completed_at_ms` window). Otherwise → unattributable → A-AUDIT-001 + A-INTEGRITY-002 fire. Conversely: for each row in the live chain absent from the dump, the row was inserted post-dump — no reconciliation required (RA-2 trigger #3 explicitly covers only rows older than the dump per §4297 "`ts < (latest_dump_ts - 1 hour)`"). The 1h buffer is per the RA-2 follow-up — rows inside the 1h-since-dump window are not yet eligible for the backup-diff check.
 
 Test-writer must pin BOTH directions:
+
 - Attributed: dump has row X, sweep accounts for it, live chain absent → no fire.
 - Unattributable: dump has row X, no sweep accounts for it, live chain absent → A-AUDIT-001 fires with `meta.detected_via: 'backup_diff'`, `meta.attribution_attempted: true`, AND A-INTEGRITY-002 fires distinctly.
 
 ### Option H: `audit.integrity_check.ran` summary vs `audit.integrity_check.mismatch` per-mismatch — both (chosen)
 
 Two distinct emission patterns:
+
 - **`audit.integrity_check.ran`** — exactly one per non-errored pass. Carries `{run_id, trigger, started_at_ms, completed_at_ms, status, rows_walked, mismatches_count, attributable_count, unattributable_count, node_runtime_pin, schedule_hash}`. LAST write in transaction (F-58). Recommended retention: 24 months — operational telemetry.
 - **`audit.integrity_check.mismatch`** — one per mismatch detected. Carries `{run_id, detected_via ∈ {'chain_walk','backup_diff'}, row_id, expected_hash, actual_hash, prev_hash_match, attribution_attempted}`. Written BEFORE the alert fan-out (F-24). Recommended retention: 7 years — load-bearing forensic.
 - **`audit.chain_anchor.weekly`** — one per week. Carries `{anchor_at_ms, head: {id, ts_ms, hash}}`. Recommended retention: 7 years — load-bearing forensic.
@@ -2041,6 +2089,7 @@ T18.1 adds the cross-mirror SQL drift test (TS `INTEGRITY_CHECK_EVENT_TYPES` con
 Per the G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 / G-T17 F-85 pattern (TestStore split):
 
 - `IntegrityStore` — production interface. Closed-allowlist methods only. No caller-supplied predicate, WHERE-fragment, table-name string, row id range, or pivot. Methods:
+
   - `nowMs(): number` — monotonic ms-epoch (F-66 pattern; library shim, production reads `xact_start()`).
   - `systemActorPseudonym(): string` — HMAC pseudonym for `'system:integrity-check'` (mirrors ADR-0017 §6 / ADR-0018 §5).
   - `readNodeRuntimePin(): { node_version: string; openssl_version: string }` — the LIVE runtime pin; the library compares against the manifest's pin before reconciliation begins (G-T11-23). Library calls `process.versions` indirectly via the store so tests can poison it.
@@ -2128,6 +2177,7 @@ where IntegrityCheckTrigger = 'scheduled' | 'post_rotation' | 'post_export'
 ```
 
 The library accepts ONLY the trigger discriminator. NO caller-supplied:
+
 - predicate / WHERE / row filter / pivot id / chain-segment range
 - batch_size (library constant `INTEGRITY_CHAIN_WALK_BATCH_SIZE`)
 - row_cap (library constant `INTEGRITY_MAX_ROWS_PER_PASS`)
@@ -2148,6 +2198,7 @@ runWeeklyChainAnchor({store}) -> { status: 'completed'; anchor_at_ms: number; he
 ```
 
 Algorithm:
+
 1. Read chain head: take the highest-id row from `walkAuditChainSegment({start_after_id: null, max_rows: Infinity})` (production T18.1 implements as `SELECT id, ts, hash FROM audit_log ORDER BY id DESC LIMIT 1`). If empty → `{status: 'skipped', reason: 'empty_chain'}`.
 2. Emit `audit.chain_anchor.weekly` audit row with `meta: { anchor_at_ms: nowMs, head: { id, ts_ms, hash } }`. `actor_pseudonym = store.systemActorPseudonym()`. `target_id = null`.
 3. Return `{status: 'completed', anchor_at_ms, head}`.
@@ -2286,7 +2337,7 @@ The test-writer turns each into a test obligation. Numbering continues from F-85
 - **F-97 (no caller-supplied predicate / pivot / WHERE — F-19 mirror).** TypeScript structural test: `IntegrityCheckRunConfig` has no field whose name matches `/predicate|where|pivot|row_range|start_id|end_id|table_name|backup_manifest_id|runtime_pin/i`. Runtime: poisoned-config fixture with `@ts-expect-error` directives fails tsc on injection of any of those fields. Mirrors ADR-0018 F-84.
 - **F-98 (TestStore split — IntegrityStore vs TestIntegrityStore).** `.test-d.ts` assertion: `keyof IntegrityStore` does NOT include any string starting with `__debug`. `TestIntegrityStore extends IntegrityStore` adds them. `apps/web/src/lib/audit-integrity/index.ts` re-exports do NOT include `MemoryIntegrityStore`, `TestIntegrityStore`, `__debug*` hooks. Mirrors ADR-0018 F-85.
 - **F-99 (row-cap + capped-state pattern — F-60 mirror).** With 20001 seeded fixture rows and zero mismatches, `runIntegrityCheck` returns `status: 'capped'`, `rows_walked: 20000`, `resume_after_id: <id of row 20000>`. The `audit.integrity_check.ran` row's `meta.status === 'capped'`, `meta.resume_after_id` present. A subsequent run with no resume parameter (library does not accept one — the next pass naturally picks up from the next un-walked row in production T18.1; library mirror is implementation-defined) walks the remaining rows.
-- **F-100 (no PII in errors — G-T11-29 / G-T16-PRIV-3 / G-T17 F-81 mirror).** Force each of the four error_codes: `run_start_failed`, `runtime_pin_mismatch`, `chain_walk_failed`, `audit_emit_failed`. Assert each returns `{status: 'errored', run_id, error_code: <closed literal>}` only — no `row_id`, no `event_type`, no `actor_pseudonym`, no hex > 64 chars, no UUID other than `run_id` (which itself uses the `ic_` prefix to break 32-hex word boundary per G-T16-PRIV-3 rejection-sample).
+- **F-100 (no PII in errors — G-T11-29 / G-T16-PRIV-3 / G-T17 F-81 mirror).** Force each of the four error*codes: `run_start_failed`, `runtime_pin_mismatch`, `chain_walk_failed`, `audit_emit_failed`. Assert each returns `{status: 'errored', run_id, error_code: <closed literal>}` only — no `row_id`, no `event_type`, no `actor_pseudonym`, no hex > 64 chars, no UUID other than `run_id` (which itself uses the `ic*` prefix to break 32-hex word boundary per G-T16-PRIV-3 rejection-sample).
 
 **RA-2 control #3 LOAD-BEARING preservation assertion (test-writer must convert):** the test fixture pre-snapshot of RA-2 trigger #3 firing: seed → backup-fixture → tamper row older than 1h → run integrity check. Assert `would_fire_alert: 'A-AUDIT-001'` with `meta.detected_via: 'backup_diff'`. This is the post-T18 operational test of RA-2 compensating control #3. **Any future change to T18 that breaks this test re-opens RA-2 by construction.**
 
@@ -2352,12 +2403,12 @@ The implementer picks these up in order. Each task is ≤1 file or 1 closed PR u
 2. **SQL migration: `integrity_check_runs` table.** Columns: `run_id uuid PK`, `trigger text NOT NULL CHECK (trigger IN ('scheduled','post_rotation','post_export'))`, `started_at_ms bigint NOT NULL`, `completed_at_ms bigint`, `status text NOT NULL CHECK (status IN ('running','completed','capped','errored'))`, `rows_walked int`, `mismatches_count int`, `attributable_count int`, `unattributable_count int`, `backup_diff_performed boolean`, `backup_manifest_run_id uuid`, `resume_after_id bigint`, `node_runtime_pin jsonb NOT NULL`, `schedule_hash text`. RLS: SELECT to authenticated + `is_active_member()`; INSERT/UPDATE only via `integrity_check_role` (new non-login role; HG-15 trigger). DELETE only via `retention_service_role` on aged rows (24mo per recommended retention class).
 3. **(Optional) SQL migration: `audit_chain_anchors` table.** Implementer choice: either a dedicated table OR `audit.chain_anchor.weekly` rows alone serve. Recommended: dedicated table for the off-app email Edge Function to read cleanly. Columns: `anchor_at_ms bigint PK`, `head_id bigint NOT NULL`, `head_ts_ms bigint NOT NULL`, `head_hash bytea NOT NULL`, `delivered_off_app_at_ms bigint`.
 4. **ADR-0003 Amendment A extension — six-mirror dance for three new event types** (`audit.integrity_check.ran`, `audit.integrity_check.mismatch`, `audit.chain_anchor.weekly`):
-    a. TS const — already reserved in T18 (`INTEGRITY_CHECK_EVENT_TYPES`).
-    b. SQL CHECK constraint widening on `audit_log.event_type` (migration).
-    c. `RETENTION_SCHEDULE` entries (TS const — T18.1 amends).
-    d. `audit_log_retention_schedule` SQL rows (T18.1 migration).
-    e. `audit-log.md §1` enum table update.
-    f. `scripts/check-audit-enum-coverage.sh` update.
+   a. TS const — already reserved in T18 (`INTEGRITY_CHECK_EVENT_TYPES`).
+   b. SQL CHECK constraint widening on `audit_log.event_type` (migration).
+   c. `RETENTION_SCHEDULE` entries (TS const — T18.1 amends).
+   d. `audit_log_retention_schedule` SQL rows (T18.1 migration).
+   e. `audit-log.md §1` enum table update.
+   f. `scripts/check-audit-enum-coverage.sh` update.
 5. **pg_cron schedule.** Daily 04:30 ET cron entry calling the `SECURITY DEFINER` wrapper around `runIntegrityCheck({trigger: 'scheduled'})`. Weekly Mon 00:00 ET cron entry calling `runWeeklyChainAnchor()`.
 6. **Edge Function trigger surface.** Two endpoints: `post_rotation` (called from the `committee_data_key.rotation.completed` emit path with the 5-min upper-bound contract per F-50) + `post_export` (called from the `export.generated` emit path). Each calls `runIntegrityCheck({trigger: <discriminator>})` via the SECURITY DEFINER wrapper.
 7. **`pg_advisory_xact_lock` coordination.** Backup pass + integrity-check pass take SHARED lock; restore pass takes EXCLUSIVE. Key: `hashtext('audit_chain_global')`. Documented in T18.1 + cross-referenced in ADR-0018.
@@ -2376,6 +2427,37 @@ The implementer picks these up in order. Each task is ≤1 file or 1 closed PR u
 - **Final F-### range:** F-86 (closed-allowlist drift), F-87 (audit-before-alert-fanout), F-88 (summary-LAST in tx), F-89 (chain-walk mismatch — primary surface), F-90 (sequential-id gap detection with sweep attribution), F-91 (backup-diff mismatch — **LOAD-BEARING for RA-2 trigger #3**), F-92 (attributable-vs-unattributable reconciliation — Option G binding rule), F-93 (runtime-pin coherence — OPERATIONAL not A-AUDIT-001), F-94 (no PII in mismatch / ran / anchor rows), F-95 (A-AUDIT-001 vs A-INTEGRITY-002 distinct), F-96 (weekly chain anchor emission — RA-2 manual backstop), F-97 (no caller-supplied predicate / pivot / WHERE / row-range / runtime_pin), F-98 (TestStore split + barrel re-export check), F-99 (row-cap + `capped` state), F-100 (no PII in errors — closed-literal error_codes).
 - **§3.11 verdicts (architect asks):** #1 F-91 is LOAD-BEARING (pivot-rewrite attack walk-through confirms only backup-diff catches it); #2 F-92 attribution rule pinnable in BOTH directions (five sub-directions); #3 F-88 is F-58 mirror, invariant holds; #4 F-87 vs F-88 are COHERENT not contradictory (mismatch rows first within tx; ran row last within tx; alert symbol after commit); #5 F-93 routing `runtime_pin_mismatch` to OPERATIONAL is correct (false-positive prevention on toolchain upgrades); #6 F-95 distinct causes confirmed; #7 RA-2 compensating control #3 STRENGTHENED (not re-opened); #8 none of the four RA-2 re-open triggers fires.
 - **§3.11 carry-forwards:** G-T18-1..G-T18-14 + G-T18-NO-T16-T17-COUPLING + G-T18-RA2-PRE-SNAPSHOT (the load-bearing pre-snapshot test obligation).
+
+## Amendment A (2026-06-14, G-T18-13 + G-T18-14): §5 step ordering ratification + closed-literal `error_code` union extension
+
+Two clarifications to §5 of this ADR, both ratifying what the M8.B
+library actually shipped after second-opinion review (security
+Finding 4 + 5).
+
+### A.1 §5 step-ordering ratification (closes G-T18-13)
+
+The original §5 algorithm ordered the pre-walk steps as: 3 (`record run started`) → 4 (`snapshot`) → 5 (`read manifest`) → 6 (`pin check`). The library implementation reorders to: 5 (`read manifest`) → 6 (`pin check`) → 3 (`record run started`) → 4 (`snapshot`).
+
+**Ratified:** the implementation order is now binding. Motivation (second-opinion CF-2; implementer-documented): the original order leaves an orphan `'running'` run row on the floor if `readLatestCommittedBackupManifest` or the pin check throws (the run was started but the algorithm cannot proceed and there is no clean rollback path since `snapshot()` is the rollback mechanism and it hasn't been taken yet). The reordered version pulls the two cheap, side-effect-free reads (manifest + pin) into the lease window BEFORE the run row is written; a throw in either short-circuits to `{status: 'errored', error_code: 'runtime_pin_mismatch'}` (or the manifest-read returns null which is treated as "no backup-diff this pass" per §5 step 5 second sentence) without leaving a dangling `'running'` row. Security properties preserved: the F-58 snapshot-on-throw + F-72 state-machine + F-87/F-88 mismatch-before-ran-row ordering are all post-step-3 in the reordered version, so the invariants hold exactly as the original ADR specified — only the pre-run-row ordering changes.
+
+### A.2 `IntegrityErrorCode` closed-literal union extension (closes G-T18-14)
+
+The original §5 step 11 enumerates 5 `error_code` literals: `'run_start_failed' | 'runtime_pin_mismatch' | 'chain_walk_failed' | 'backup_diff_failed' | 'audit_emit_failed'`. The library implementation closed-union (`apps/web/src/lib/audit-integrity/types.ts:207-214`) adds 2 more: `'head_read_failed'` (manifest head-read failure, raised by `runWeeklyChainAnchor` per security Finding 5) and `'lease_check_failed'` (raised by `runIntegrityCheck` when the F-59 lease check throws, added during the in-cycle Finding 1 fix).
+
+**Ratified:** the binding union is now the 7-literal version:
+
+```
+IntegrityErrorCode =
+  | 'run_start_failed'
+  | 'runtime_pin_mismatch'
+  | 'chain_walk_failed'
+  | 'backup_diff_failed'
+  | 'audit_emit_failed'
+  | 'head_read_failed'      // F-100 / runWeeklyChainAnchor head-read
+  | 'lease_check_failed';   // F-100 / runIntegrityCheck lease check
+```
+
+Adding more-specific literals is strictly safer than collapsing — every additional literal lets the result-adapter route to a more-targeted alert sink with less false-positive risk. Threat-model §3.11 F-100 enumeration mirrors this update in the same pass.
 
 ---
 
@@ -2445,7 +2527,7 @@ No prior ADR pins the cadence. Weekly is too aggressive for a 12-active-user com
 
 ### Option E: Backup-manifest schema — superset (chosen)
 
-The librarian briefing suggested: `timestamp, sha256, encrypted_key_id, retention_class, table_list, run_id, status`. We extend it with the RA-2 / G-T16-* anchors so T18 has everything it needs in one row: `audit_log_head: {id, ts, hash}` (the RA-2 follow-up requirement), `per_event_row_counts: {[event_type: string]: int}` (G-T16-RECONCILE-CEILING — per-event attribution preserved), `retention_sweep_runs_snapshot_ts_ms` (the ms-epoch the dump observed the sweep checkpoint at; T18 joins to the sweep-runs table at that ts), `schedule_hash` (mirrors ADR-0017 §7 — the ADR-0015 / ADR-0016 schedule version that produced the audit_log rows in the dump), and `node_runtime_pin: {node_version, openssl_version}` (G-T11-23 hash-determinism pin so a future toolchain swap is visible). Decision §7 below lists the full layout.
+The librarian briefing suggested: `timestamp, sha256, encrypted_key_id, retention_class, table_list, run_id, status`. We extend it with the RA-2 / G-T16-\* anchors so T18 has everything it needs in one row: `audit_log_head: {id, ts, hash}` (the RA-2 follow-up requirement), `per_event_row_counts: {[event_type: string]: int}` (G-T16-RECONCILE-CEILING — per-event attribution preserved), `retention_sweep_runs_snapshot_ts_ms` (the ms-epoch the dump observed the sweep checkpoint at; T18 joins to the sweep-runs table at that ts), `schedule_hash` (mirrors ADR-0017 §7 — the ADR-0015 / ADR-0016 schedule version that produced the audit_log rows in the dump), and `node_runtime_pin: {node_version, openssl_version}` (G-T11-23 hash-determinism pin so a future toolchain swap is visible). Decision §7 below lists the full layout.
 
 ### Option F: Library scope for "object-lock" — boolean predicate the store satisfies (chosen)
 
@@ -2569,6 +2651,7 @@ T17.1 adds the cross-mirror SQL drift test (TS `BACKUP_TABLES` const vs SQL `bac
 Per the G-T11-21 / G-T13-15 / G-T14-17 / G-T16-PRIV-1 pattern (TestStore split):
 
 - `BackupStore` — production interface. Closed-allowlist methods only. No caller-supplied object_ref, predicate, or table-name string. Methods:
+
   - `nowMs(): number` — monotonic ms-epoch (F-66-pattern; library shim, production reads `xact_start()`).
   - `extractHeadPointer(): Promise<{id: string, ts_ms: number, hash: string} | null>` — reads the highest `audit_log.id` and its `(ts, hash)` pair. The library never SQL-constructs this; the store implements it.
   - `dumpClosedAllowlist(tables: ReadonlyArray<BackupTable>): Promise<{blob: Uint8Array, per_table_row_counts: Readonly<Record<BackupTable, number>>, per_event_row_counts: Readonly<Record<string, number>>, retention_sweep_runs_snapshot_ts_ms: number}>` — performs the pg_dump (or in-memory equivalent), returning the encrypted blob, per-table row counts, per-event-type row counts (G-T16-RECONCILE-CEILING — never aggregated to a `__ceiling__` key), and the ms-epoch the dump observed `retention_sweep_runs` at.
@@ -2750,15 +2833,15 @@ Structural enforcement: `apps/web/src/lib/retention/` does NOT import from `apps
 
 ## Open-question dispositions (a)–(g) from the librarian briefing — answered
 
-| Q | Disposition | Rationale |
-|---|---|---|
-| (a) pg_dump scope: full-schema vs PI-bearing only | **Full-schema (closed `BACKUP_TABLES` allowlist).** | Option A above. RA-2 trigger #3 requires audit + retention surfaces; OHSA 7y obligations cover the operational PI tables; a single dump is the simplest restore unit. The closed allowlist is the F-19 defense — no "spread the dump scope" attack surface. |
-| (b) Encryption key per-backup / per-day / per-rotation | **Per-backup random DEK wrapped with current `committee_data_key`; kid recorded on manifest.** | Option B(i) above. Keeps backup encryption inside ADR-0007 / ADR-0010 trust boundary; rotation interaction documented as accepted race; crypto-shred is structural via `committee_key_wraps_history` aging out alongside backup. |
-| (c) Object-lock duration: auto-release vs explicit delete | **Both — explicit `runBackupRetentionPass` delete + auto-release lifecycle policy backstop.** | Option C above + Decision §9. Audit-trail-bearing path is the source of truth; lifecycle is the failsafe. "Deletion is real deletion" requires the audited path. |
-| (d) Restore drill cadence | **Monthly; missed drill fires A-BACKUP-002.** | Option D above. Aligns with ADR-0012 recovery-testing intent; weekly is too aggressive for 12-active-user committee. T17.1 ships the runbook + the alert wiring. |
-| (e) Backup-manifest schema fields | **Superset of the briefing's suggestion:** `run_id, status, started_at_ms, committed_at_ms, finalized_at_ms, hard_deleted_at_ms, object_ref, sha256, bytes, retention_class, lock_until_ms, committee_data_key_kid, audit_log_head, per_table_row_counts, per_event_row_counts, retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin`. | Option E + Decision §7. The RA-2 / G-T16-* anchors are NOT optional — they make the difference between an unattributed RA-2 trigger #3 firing and a clean reconciliation. |
-| (f) Library scope for "object-lock" | **Boolean predicate the store satisfies (`isObjectLocked`, `putWithObjectLock`, `deleteObjectIfUnlocked`); MemoryBackupStore models in-memory; SupabaseBackupStore (T17.1) defers to S3-compatible policy.** | Option F + Decision §6. Mirrors G-T16-1 pattern. Cooperative-caller defense via library-controlled lock duration. |
-| (g) Interaction with T16 sweep | **Independent passes; `retention_sweep_runs_snapshot_ts_ms` on manifest is the join surface.** | Option G + Decision §13. ADR-0015 §Risks already commits to transient inconsistency. **T17 MUST NOT add backup-completion dependency in T16 sweep — structurally enforced by CI no-import test.** |
+| Q                                                         | Disposition                                                                                                                                                                                                                                                                                                                                            | Rationale                                                                                                                                                                                                                                                   |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (a) pg_dump scope: full-schema vs PI-bearing only         | **Full-schema (closed `BACKUP_TABLES` allowlist).**                                                                                                                                                                                                                                                                                                    | Option A above. RA-2 trigger #3 requires audit + retention surfaces; OHSA 7y obligations cover the operational PI tables; a single dump is the simplest restore unit. The closed allowlist is the F-19 defense — no "spread the dump scope" attack surface. |
+| (b) Encryption key per-backup / per-day / per-rotation    | **Per-backup random DEK wrapped with current `committee_data_key`; kid recorded on manifest.**                                                                                                                                                                                                                                                         | Option B(i) above. Keeps backup encryption inside ADR-0007 / ADR-0010 trust boundary; rotation interaction documented as accepted race; crypto-shred is structural via `committee_key_wraps_history` aging out alongside backup.                            |
+| (c) Object-lock duration: auto-release vs explicit delete | **Both — explicit `runBackupRetentionPass` delete + auto-release lifecycle policy backstop.**                                                                                                                                                                                                                                                          | Option C above + Decision §9. Audit-trail-bearing path is the source of truth; lifecycle is the failsafe. "Deletion is real deletion" requires the audited path.                                                                                            |
+| (d) Restore drill cadence                                 | **Monthly; missed drill fires A-BACKUP-002.**                                                                                                                                                                                                                                                                                                          | Option D above. Aligns with ADR-0012 recovery-testing intent; weekly is too aggressive for 12-active-user committee. T17.1 ships the runbook + the alert wiring.                                                                                            |
+| (e) Backup-manifest schema fields                         | **Superset of the briefing's suggestion:** `run_id, status, started_at_ms, committed_at_ms, finalized_at_ms, hard_deleted_at_ms, object_ref, sha256, bytes, retention_class, lock_until_ms, committee_data_key_kid, audit_log_head, per_table_row_counts, per_event_row_counts, retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin`. | Option E + Decision §7. The RA-2 / G-T16-\* anchors are NOT optional — they make the difference between an unattributed RA-2 trigger #3 firing and a clean reconciliation.                                                                                  |
+| (f) Library scope for "object-lock"                       | **Boolean predicate the store satisfies (`isObjectLocked`, `putWithObjectLock`, `deleteObjectIfUnlocked`); MemoryBackupStore models in-memory; SupabaseBackupStore (T17.1) defers to S3-compatible policy.**                                                                                                                                           | Option F + Decision §6. Mirrors G-T16-1 pattern. Cooperative-caller defense via library-controlled lock duration.                                                                                                                                           |
+| (g) Interaction with T16 sweep                            | **Independent passes; `retention_sweep_runs_snapshot_ts_ms` on manifest is the join surface.**                                                                                                                                                                                                                                                         | Option G + Decision §13. ADR-0015 §Risks already commits to transient inconsistency. **T17 MUST NOT add backup-completion dependency in T16 sweep — structurally enforced by CI no-import test.**                                                           |
 
 ## Reversibility
 
@@ -2825,23 +2908,23 @@ Structural enforcement: `apps/web/src/lib/retention/` does NOT import from `apps
 
 ## Task breakdown (ordered; each task ≤ 1 file of work)
 
-| # | Title | Description | Deps | Acceptance (F-### from §12) | Owner | Risk | Estimate |
-|---|---|---|---|---|---|---|---|
-| 1 | Add `types.ts` | `BackupTable` closed string-literal union; `BackupManifest` / `BackupManifestPending` / `BackupPassResult` discriminated unions; `BACKUP_OBJECT_LOCK_DAYS = 42`, `BACKUP_HARD_DELETE_DAYS = 42`, `BACKUP_OBJECT_REF_PREFIX`, `MS_PER_DAY` constants; `BackupPassConfig` (no caller-supplied lock / table / object_ref fields). | none | F-70 (type-level), F-84 (type-level) | implementer | low | S (2h) |
-| 2 | Add `backup-tables.ts` | `BACKUP_TABLES` frozen closed-allowlist (19 entries per Decision §2); `runBackupTablesDriftCheck()` returning structured verdict; `__assertBackupTableExhaustive(t: never): never` exhaustiveness anchor. | 1 | F-70 | implementer | low | S (2h) |
-| 3 | Add `backup-store.ts` | `BackupStore` (production) and `TestBackupStore extends BackupStore` (test-only) interfaces per Decision §4. ESLint comment header forbidding `__debug*` outside Test. | 1 | F-84, F-85 | implementer | low | M (3h) |
-| 4 | Add `memory-backup-store.ts` | `MemoryBackupStore implements TestBackupStore`. In-memory: manifests array, objects map keyed by `object_ref` with `(blob, unlocked_at_ms)` tuples, audit rows array, registered table populations map, current kid shim. Monotonic `nowMs()`. HMAC pseudonym for `'system:backup-pass'`. Object-lock predicate enforced. Structured rejection vocabulary. | 2, 3 | F-71, F-73, F-75, F-79, F-80, F-82, F-85 | implementer | high | L (8h) |
-| 5 | Add `manifest.ts` | `buildBackupManifest(args)` constructs the Decision §7 layout; `hexSha256(blob)` (pinned-hex helper, G-T11-23); `backupObjectRefFor(manifest)` derives object_ref from `(BACKUP_OBJECT_REF_PREFIX, run_id, committed_at_ms)`; `generateBackupRunId()` with PII-shape rejection (mirrors ADR-0017 §6); imports `computeScheduleHash` from `apps/web/src/lib/retention/schedule.ts` for `schedule_hash` field; `nodeRuntimePin()` returns `{node_version, openssl_version}`. | 1 | F-77, F-78, F-83 | implementer | medium | M (4h) |
-| 6 | Add `backup-core.ts` | `runBackupPass({store, config})` implementing the 11-step algorithm (Decision §5). `runBackupRetentionPass({store, config})` implementing the explicit-delete-at-age-out pass (Decision §5 step 11 + Decision §9 Layer 2). Exhaustive switches with `never` cast. Dry-run mode. Structured error vocabulary (`{run_id, status, error_code, upload_reason?}`). | 2, 3, 4, 5 | F-72, F-74, F-75, F-76, F-77, F-78, F-79, F-81, F-82, F-83 | implementer | high | L (10h) |
-| 7 | Add `index.ts` | Public surface re-exports (`BackupStore`, `runBackupPass`, `runBackupRetentionPass`, `BACKUP_TABLES`, `BACKUP_OBJECT_LOCK_DAYS`, `BACKUP_HARD_DELETE_DAYS`, types). Deliberately omits `MemoryBackupStore`, `TestBackupStore`, `__debug*` hooks, `__assertBackupTableExhaustive` — deep-import surface only. | 6 | (surface) | implementer | low | S (1h) |
-| 8 | ESLint rule `no-spread-into-backup-tables` | Mirrors T11/T12 + T16 spread bans; forbids spread-into-`BACKUP_TABLES` outside `backup-tables.ts`. | 2 | F-70, F-84 | implementer | low | S (2h) |
-| 9 | Drift-check test file | `apps/web/test/T17/backup-tables-drift.test.ts` covering F-70 (set-equality, frozen-ness, §PI inventory pinning fixture, no caller-supplied table name). | 2 | F-70 | test-writer | low | M (3h) |
-| 10 | Backup pass test file | `apps/web/test/T17/backup-pass.test.ts` covering F-71, F-72, F-73, F-74, F-75, F-76, F-77, F-78, F-79, F-81, F-82, F-83, F-85. | 4, 5, 6 | (per F-### above) | test-writer | medium | L (10h) |
-| 11 | RA-2 anchor regression test | `apps/web/test/T17/ra2-anchor-preservation.test.ts` — every committed manifest has non-null `audit_log_head`, non-empty `per_event_row_counts`, non-zero `retention_sweep_runs_snapshot_ts_ms`. Snapshot-pins the three field names so a future ADR amendment that renames any of them fails CI. | 5, 6 | F-83 | test-writer | low | S (2h) |
-| 12 | T16/T17 no-coupling test | `apps/web/test/T17/no-retention-on-backup-coupling.test.ts` — parses `apps/web/src/lib/retention/` import graph; asserts no `backup/` path. Reverse direction (backup importing retention's `computeScheduleHash`) is allowed and expected. | 6 | (Decision §13) | test-writer | low | S (2h) |
-| 13 | Hash-determinism pin test | `apps/web/test/T17/sha256-determinism.test.ts` — fixed-content blob; assert sha256 equals a pinned hex. G-T11-23 lesson. | 5 | F-78 | test-writer | low | S (1h) |
-| 14 | Object-lock cooperative-caller defense test | `apps/web/test/T17/object-lock-cooperative-caller.test.ts` — put object with 42d lock; attempt delete; assert refused. TypeScript-level assertion that `BackupPassConfig` does NOT expose `lock_duration_ms`. | 4, 6 | F-71, F-84 | test-writer | low | S (2h) |
-| 15 | No-PII-in-errors test | `apps/web/test/T17/no-pii-in-errors.test.ts` — force every error path; grep error message for PII shapes per F-81 vocabulary. | 6 | F-81 | test-writer | medium | M (3h) |
+| #   | Title                                       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Deps       | Acceptance (F-### from §12)                                | Owner       | Risk   | Estimate |
+| --- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------- | ----------- | ------ | -------- |
+| 1   | Add `types.ts`                              | `BackupTable` closed string-literal union; `BackupManifest` / `BackupManifestPending` / `BackupPassResult` discriminated unions; `BACKUP_OBJECT_LOCK_DAYS = 42`, `BACKUP_HARD_DELETE_DAYS = 42`, `BACKUP_OBJECT_REF_PREFIX`, `MS_PER_DAY` constants; `BackupPassConfig` (no caller-supplied lock / table / object_ref fields).                                                                                                                                             | none       | F-70 (type-level), F-84 (type-level)                       | implementer | low    | S (2h)   |
+| 2   | Add `backup-tables.ts`                      | `BACKUP_TABLES` frozen closed-allowlist (19 entries per Decision §2); `runBackupTablesDriftCheck()` returning structured verdict; `__assertBackupTableExhaustive(t: never): never` exhaustiveness anchor.                                                                                                                                                                                                                                                                  | 1          | F-70                                                       | implementer | low    | S (2h)   |
+| 3   | Add `backup-store.ts`                       | `BackupStore` (production) and `TestBackupStore extends BackupStore` (test-only) interfaces per Decision §4. ESLint comment header forbidding `__debug*` outside Test.                                                                                                                                                                                                                                                                                                     | 1          | F-84, F-85                                                 | implementer | low    | M (3h)   |
+| 4   | Add `memory-backup-store.ts`                | `MemoryBackupStore implements TestBackupStore`. In-memory: manifests array, objects map keyed by `object_ref` with `(blob, unlocked_at_ms)` tuples, audit rows array, registered table populations map, current kid shim. Monotonic `nowMs()`. HMAC pseudonym for `'system:backup-pass'`. Object-lock predicate enforced. Structured rejection vocabulary.                                                                                                                 | 2, 3       | F-71, F-73, F-75, F-79, F-80, F-82, F-85                   | implementer | high   | L (8h)   |
+| 5   | Add `manifest.ts`                           | `buildBackupManifest(args)` constructs the Decision §7 layout; `hexSha256(blob)` (pinned-hex helper, G-T11-23); `backupObjectRefFor(manifest)` derives object_ref from `(BACKUP_OBJECT_REF_PREFIX, run_id, committed_at_ms)`; `generateBackupRunId()` with PII-shape rejection (mirrors ADR-0017 §6); imports `computeScheduleHash` from `apps/web/src/lib/retention/schedule.ts` for `schedule_hash` field; `nodeRuntimePin()` returns `{node_version, openssl_version}`. | 1          | F-77, F-78, F-83                                           | implementer | medium | M (4h)   |
+| 6   | Add `backup-core.ts`                        | `runBackupPass({store, config})` implementing the 11-step algorithm (Decision §5). `runBackupRetentionPass({store, config})` implementing the explicit-delete-at-age-out pass (Decision §5 step 11 + Decision §9 Layer 2). Exhaustive switches with `never` cast. Dry-run mode. Structured error vocabulary (`{run_id, status, error_code, upload_reason?}`).                                                                                                              | 2, 3, 4, 5 | F-72, F-74, F-75, F-76, F-77, F-78, F-79, F-81, F-82, F-83 | implementer | high   | L (10h)  |
+| 7   | Add `index.ts`                              | Public surface re-exports (`BackupStore`, `runBackupPass`, `runBackupRetentionPass`, `BACKUP_TABLES`, `BACKUP_OBJECT_LOCK_DAYS`, `BACKUP_HARD_DELETE_DAYS`, types). Deliberately omits `MemoryBackupStore`, `TestBackupStore`, `__debug*` hooks, `__assertBackupTableExhaustive` — deep-import surface only.                                                                                                                                                               | 6          | (surface)                                                  | implementer | low    | S (1h)   |
+| 8   | ESLint rule `no-spread-into-backup-tables`  | Mirrors T11/T12 + T16 spread bans; forbids spread-into-`BACKUP_TABLES` outside `backup-tables.ts`.                                                                                                                                                                                                                                                                                                                                                                         | 2          | F-70, F-84                                                 | implementer | low    | S (2h)   |
+| 9   | Drift-check test file                       | `apps/web/test/T17/backup-tables-drift.test.ts` covering F-70 (set-equality, frozen-ness, §PI inventory pinning fixture, no caller-supplied table name).                                                                                                                                                                                                                                                                                                                   | 2          | F-70                                                       | test-writer | low    | M (3h)   |
+| 10  | Backup pass test file                       | `apps/web/test/T17/backup-pass.test.ts` covering F-71, F-72, F-73, F-74, F-75, F-76, F-77, F-78, F-79, F-81, F-82, F-83, F-85.                                                                                                                                                                                                                                                                                                                                             | 4, 5, 6    | (per F-### above)                                          | test-writer | medium | L (10h)  |
+| 11  | RA-2 anchor regression test                 | `apps/web/test/T17/ra2-anchor-preservation.test.ts` — every committed manifest has non-null `audit_log_head`, non-empty `per_event_row_counts`, non-zero `retention_sweep_runs_snapshot_ts_ms`. Snapshot-pins the three field names so a future ADR amendment that renames any of them fails CI.                                                                                                                                                                           | 5, 6       | F-83                                                       | test-writer | low    | S (2h)   |
+| 12  | T16/T17 no-coupling test                    | `apps/web/test/T17/no-retention-on-backup-coupling.test.ts` — parses `apps/web/src/lib/retention/` import graph; asserts no `backup/` path. Reverse direction (backup importing retention's `computeScheduleHash`) is allowed and expected.                                                                                                                                                                                                                                | 6          | (Decision §13)                                             | test-writer | low    | S (2h)   |
+| 13  | Hash-determinism pin test                   | `apps/web/test/T17/sha256-determinism.test.ts` — fixed-content blob; assert sha256 equals a pinned hex. G-T11-23 lesson.                                                                                                                                                                                                                                                                                                                                                   | 5          | F-78                                                       | test-writer | low    | S (1h)   |
+| 14  | Object-lock cooperative-caller defense test | `apps/web/test/T17/object-lock-cooperative-caller.test.ts` — put object with 42d lock; attempt delete; assert refused. TypeScript-level assertion that `BackupPassConfig` does NOT expose `lock_duration_ms`.                                                                                                                                                                                                                                                              | 4, 6       | F-71, F-84                                                 | test-writer | low    | S (2h)   |
+| 15  | No-PII-in-errors test                       | `apps/web/test/T17/no-pii-in-errors.test.ts` — force every error path; grep error message for PII shapes per F-81 vocabulary.                                                                                                                                                                                                                                                                                                                                              | 6          | F-81                                                       | test-writer | medium | M (3h)   |
 
 Total estimate: ~55h library implementer + test-writer (matches the T16 / T07 library precedents' order-of-magnitude with a slight uptick for the additional state-machine + retention-pass).
 
@@ -2925,6 +3008,14 @@ T17.1 does NOT ship until HG-15 ratification for the table + the bucket is recor
 - [ ] **T17.1 (sibling task)** — see "Sibling task spec — T17.1 scope" above. Runs before any deploy carrying real PI. HG-15 fires at T17.1 PR submission for the new table + the new Storage bucket.
 - [ ] **observability-setup next pass after T17.1** — wire `A-BACKUP-001` (still-locked-past-window), `A-BACKUP-002` (missed-monthly-drill), `A-BACKUP-003` (storage quota) alert sinks.
 - [ ] **T18 next pass** — additive reconciliation check (live `audit_log` head vs latest committed `backup_manifests.audit_log_head` for rows whose `ts < (latest_dump_ts - 1 hour)`) per RA-2 follow-up. The join surface is pinned by F-83. No new task; additive to T18.
+
+## Amendment A (2026-06-14, G-T17-10): §5 step 2/3 ordering clarification
+
+The original §5 algorithm lists "Extract head pointer FIRST" as step 2 and "Resolve current key kid" as step 3. The library implementation (`apps/web/src/lib/backup/backup-core.ts`) calls `store.getCurrentKid()` BEFORE `store.extractAuditLogHead()` — the reverse order.
+
+**Clarified (no behaviour change owed):** both orderings satisfy the F-76 head-anchor invariant equally. The load-bearing constraint is "head extracted BEFORE the dump runs" (so the head corresponds to the chain state at the moment the dump begins; a head captured AFTER the dump would race the sweep + new inserts). Both calls are read-only, side-effect-free, and pre-dump; their relative order does not affect what the dump observes nor what the manifest carries. The implementer chose kid-before-head for symmetry with ADR-0017 §6 (which calls `currentCommitteeDataKeyKid` first to fail fast on a missing wrapping key before doing any further work). The §5 wording stays "Extract head pointer FIRST"; this amendment ratifies that "FIRST" means "first among the pre-dump steps, before the dump" — not "first relative to the kid lookup."
+
+No code change. No threat-model change. The F-76 head-anchor invariant continues to be enforced by the placement of both calls strictly above the `dumpClosedAllowlist` invocation.
 
 ---
 
@@ -3268,25 +3359,26 @@ The test-writer turns each into a test obligation. Numbering continues from exis
 
 The threat-modeler's next pass scored F-R1..F-R15 above as the retention-sweep family and assigned final F-### identifiers in `.context/threat-model.md` §3.9 "Retention sweep (T16)" (titled per the ADR-0017 brief as "§3.6 Retention sweep (T16)"; numbered §3.9 in the threat-model file because §3.6, §3.7, §3.8 are pre-occupied by inspection sync, backup encryption, and audit-log integrity respectively). Mapping placeholder → final:
 
-| ADR-0017 §10 placeholder | Final F-### in threat-model §3.9 | Lineage anchor | Library/SQL scope |
-|---|---|---|---|
-| F-R1 | F-55 | F-19 closed-allowlist | T16 library CI; T16.1 cross-mirror |
-| F-R2 | F-56 | F-38 / G-T05-7 | T16 library; T16.1 SQL DELETE |
-| F-R3 | F-57 | F-51 generalised | T16 library; T16.1 alert wire |
-| F-R4 | F-58 | F-52 + F-24 inversion | T16 library; T16.1 pgTAP single-tx |
-| F-R5 | F-59 | NEW SURFACE — pg_cron race | T16 checkpoint; T16.1 advisory lock |
-| F-R6 | F-60 | NEW SURFACE — starvation | T16 cap; T16.1 timeouts + cron stagger |
-| F-R7 | F-61 | ADR-0015 §3.5 | T16 library |
-| F-R8 | F-62 | ADR-0015 schedule carve-out | T16 library |
-| F-R9 | F-63 | F-27 allowlist hash | T16 library |
-| F-R10 | F-64 | F-19 lineage | T16 type-level + ESLint; T16.1 SQL signature |
-| F-R11 | F-65 | G-T11-21 / G-T13-15 / G-T14-17 | T16 library |
-| F-R12 | F-66 | G-T08-14 / G-T13-9 | T16 library; T16.1 xact_start() |
-| F-R13 | F-67 | constraints.md:110-111 | T16 library |
-| F-R14 | F-68 | RA-1 control #5 | T16 library |
-| F-R15 | F-69 | RA-2 trigger #3 | T16 library; T16.1 pgTAP; T18 join |
+| ADR-0017 §10 placeholder | Final F-### in threat-model §3.9 | Lineage anchor                 | Library/SQL scope                            |
+| ------------------------ | -------------------------------- | ------------------------------ | -------------------------------------------- |
+| F-R1                     | F-55                             | F-19 closed-allowlist          | T16 library CI; T16.1 cross-mirror           |
+| F-R2                     | F-56                             | F-38 / G-T05-7                 | T16 library; T16.1 SQL DELETE                |
+| F-R3                     | F-57                             | F-51 generalised               | T16 library; T16.1 alert wire                |
+| F-R4                     | F-58                             | F-52 + F-24 inversion          | T16 library; T16.1 pgTAP single-tx           |
+| F-R5                     | F-59                             | NEW SURFACE — pg_cron race     | T16 checkpoint; T16.1 advisory lock          |
+| F-R6                     | F-60                             | NEW SURFACE — starvation       | T16 cap; T16.1 timeouts + cron stagger       |
+| F-R7                     | F-61                             | ADR-0015 §3.5                  | T16 library                                  |
+| F-R8                     | F-62                             | ADR-0015 schedule carve-out    | T16 library                                  |
+| F-R9                     | F-63                             | F-27 allowlist hash            | T16 library                                  |
+| F-R10                    | F-64                             | F-19 lineage                   | T16 type-level + ESLint; T16.1 SQL signature |
+| F-R11                    | F-65                             | G-T11-21 / G-T13-15 / G-T14-17 | T16 library                                  |
+| F-R12                    | F-66                             | G-T08-14 / G-T13-9             | T16 library; T16.1 xact_start()              |
+| F-R13                    | F-67                             | constraints.md:110-111         | T16 library                                  |
+| F-R14                    | F-68                             | RA-1 control #5                | T16 library                                  |
+| F-R15                    | F-69                             | RA-2 trigger #3                | T16 library; T16.1 pgTAP; T18 join           |
 
 Verdicts (threat-modeler):
+
 - **RA-1 control #5 NOT re-opened** — confirmed; F-68 is the standing assertion.
 - **RA-2 trigger #3 NOT re-opened** — semantics unchanged; F-69 + G-T16-8 (T18 join inheritance) anchor attribution.
 - **HG-10 NOT firing is defensible** — confirmed; no BLOCK from threat-modeler.
@@ -3321,15 +3413,15 @@ T16.1 does NOT ship until HG-15 ratification for the two new tables is recorded.
 
 ## Open-question dispositions (a)–(g) from the librarian briefing — answered
 
-| Q | Disposition | Rationale |
-|---|---|---|
-| (a) Sweep semantics: hard-delete vs redact-but-retain-shape | **Hard-delete uniformly** | Option A above. ADR-0015 + ADR-0016 literal reading. Pseudonym-only is a v2 amendment if a regulator demands it. |
-| (b) Idempotency mechanism | **Checkpoint table `retention_sweep_runs`** | Option C(a) above. Doubles as F-52 forensic surface + RA-2 trigger #3 reconciliation anchor. Library mirrors in-memory via `MemoryRetentionStore`. |
-| (c) Recovery semantics mid-batch | **Single transaction; summary is LAST row** | Option D above. F-24 generalizes to audit-WITH-side-effect; on any failure the entire pass rolls back. Per-batch savepoints rejected. |
-| (d) Interaction with T17 / RA-2 trigger #3 | **Tolerate transient inconsistency; `retention_sweep_runs` is the reconciliation anchor** | Option E above. ADR-0015 §Risks already commits to "transient inconsistency is acceptable." T18's integrity job inherits the reconciliation check (additive). |
-| (e) Pre-deletion user notification | **No notification in v1** | Option F above. No ADR mandates; **HG-10 NOT fired.** Deferred for any future regulator-driven need. |
-| (f) `retention_class` backfill | **None required** | Option G above. T05 migration landed the column; every row stamps at write time. |
-| (g) Schedule-table vs `retention_class_for()` vs `RETENTION_SCHEDULE` authority | **`audit_log_retention_schedule` table is authoritative; SQL function and TS const are mirrors; CI drift assertion enforces equality** | Option H above. Library ships TS-side drift test in T16; T16.1 ships cross-mirror drift test. |
+| Q                                                                               | Disposition                                                                                                                            | Rationale                                                                                                                                                     |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (a) Sweep semantics: hard-delete vs redact-but-retain-shape                     | **Hard-delete uniformly**                                                                                                              | Option A above. ADR-0015 + ADR-0016 literal reading. Pseudonym-only is a v2 amendment if a regulator demands it.                                              |
+| (b) Idempotency mechanism                                                       | **Checkpoint table `retention_sweep_runs`**                                                                                            | Option C(a) above. Doubles as F-52 forensic surface + RA-2 trigger #3 reconciliation anchor. Library mirrors in-memory via `MemoryRetentionStore`.            |
+| (c) Recovery semantics mid-batch                                                | **Single transaction; summary is LAST row**                                                                                            | Option D above. F-24 generalizes to audit-WITH-side-effect; on any failure the entire pass rolls back. Per-batch savepoints rejected.                         |
+| (d) Interaction with T17 / RA-2 trigger #3                                      | **Tolerate transient inconsistency; `retention_sweep_runs` is the reconciliation anchor**                                              | Option E above. ADR-0015 §Risks already commits to "transient inconsistency is acceptable." T18's integrity job inherits the reconciliation check (additive). |
+| (e) Pre-deletion user notification                                              | **No notification in v1**                                                                                                              | Option F above. No ADR mandates; **HG-10 NOT fired.** Deferred for any future regulator-driven need.                                                          |
+| (f) `retention_class` backfill                                                  | **None required**                                                                                                                      | Option G above. T05 migration landed the column; every row stamps at write time.                                                                              |
+| (g) Schedule-table vs `retention_class_for()` vs `RETENTION_SCHEDULE` authority | **`audit_log_retention_schedule` table is authoritative; SQL function and TS const are mirrors; CI drift assertion enforces equality** | Option H above. Library ships TS-side drift test in T16; T16.1 ships cross-mirror drift test.                                                                 |
 
 ## Reversibility
 
@@ -3383,20 +3475,20 @@ T16.1 does NOT ship until HG-15 ratification for the two new tables is recorded.
 
 ## Task breakdown (ordered; each task ≤ 1 file of work)
 
-| # | Title | Description | Deps | Acceptance (F-R# from §10) | Owner | Risk | Estimate |
-|---|---|---|---|---|---|---|---|
-| 1 | Add `types.ts` | `RetentionEventType` closed string-literal union; `RetentionClass` discriminator; schedule-shape types; `SweepableSurface` interface. | none | F-R1, F-R10 (type-level) | implementer | low | S (2h) |
-| 2 | Add `schedule.ts` | `RETENTION_SCHEDULE` and `OPERATIONAL_TABLE_SCHEDULE` frozen consts; `EVENT_TYPE_TO_SOURCE_TABLE` map; canonical-JSON helper for `schedule_hash`. | 1 | F-R1, F-R8, F-R9 | implementer | low | M (3h) |
-| 3 | Add `retention-store.ts` | `RetentionStore` (production) and `TestRetentionStore extends RetentionStore` (test-only) interfaces. ESLint comment header forbidding `__debug*` outside Test. | 1 | F-R10, F-R11 | implementer | low | S (1h) |
-| 4 | Add `memory-retention-store.ts` | `MemoryRetentionStore implements TestRetentionStore`; registry-based composition with existing memory stores via `SweepableSurface`; `nowMs()` monotonic shim; HMAC pseudonym for synthetic `retention_service` actor. | 2, 3 | F-R11, F-R12 | implementer | medium | L (6h) |
-| 5 | Add `audit-emission.ts` | `buildRetentionDeletedSummary(...)` constructs the F-52 jsonb meta with `schedule_hash`, `per_event_counts`, `per_table_counts`, `run_id`, `prev_pass_hash`, `lease_window_ms`, etc. | 2 | F-R4, F-R8, F-R9 | implementer | low | M (3h) |
-| 6 | Add `retention-core.ts` | `runRetentionPass({store, config})` implementing the 10-step algorithm (Decision §6). Exhaustive switch on `RetentionEventType` with `never` cast. Dry-run mode. F-51 alarm flag. Per-pass row-cap. | 2, 3, 4, 5 | F-R2, F-R3, F-R4, F-R5, F-R6, F-R7, F-R13, F-R14, F-R15 | implementer | high | L (8h) |
-| 7 | Add `index.ts` | Public surface re-exports. | 6 | (surface) | implementer | low | S (1h) |
-| 8 | ESLint rule `no-spread-into-retention-schedule` | Mirrors T11/T12's allowlist spread ban; forbids spread-into-`RETENTION_SCHEDULE` outside `schedule.ts`. | 2 | F-R10 | implementer | low | S (2h) |
-| 9 | Drift-check test file | `apps/web/test/T16/retention-schedule-drift.test.ts` covering F-R1, F-R8, F-R9 (schedule-vs-enum, `match_underlying`-vs-source-table, frozen-ness). | 2 | F-R1, F-R8, F-R9 | test-writer | low | M (3h) |
-| 10 | Sweep algorithm test file | `apps/web/test/T16/retention-sweep.test.ts` covering F-R2, F-R3, F-R4, F-R5, F-R6, F-R7, F-R11, F-R12, F-R13, F-R14, F-R15. | 4, 5, 6 | (per F-R# above) | test-writer | medium | L (8h) |
-| 11 | RA-1 control #5 regression test | `apps/web/test/T16/ra1-control-5-preserved.test.ts` — snapshot the resolved cutoff for `export.generated`; asserts exactly 7y. | 2, 6 | F-R14 | test-writer | low | S (1h) |
-| 12 | F-19 / F-24 cross-task assertion | `apps/web/test/T16/closed-allowlist-and-audit-before.test.ts` — TypeScript-level type assertion that `RetentionStore` does not surface caller-supplied WHERE; behavioural assertion that summary row is written ONLY if deletes commit (rollback on emit failure). | 3, 6 | F-R4, F-R10 | test-writer | medium | M (3h) |
+| #   | Title                                           | Description                                                                                                                                                                                                                                                        | Deps       | Acceptance (F-R# from §10)                              | Owner       | Risk   | Estimate |
+| --- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | ------------------------------------------------------- | ----------- | ------ | -------- |
+| 1   | Add `types.ts`                                  | `RetentionEventType` closed string-literal union; `RetentionClass` discriminator; schedule-shape types; `SweepableSurface` interface.                                                                                                                              | none       | F-R1, F-R10 (type-level)                                | implementer | low    | S (2h)   |
+| 2   | Add `schedule.ts`                               | `RETENTION_SCHEDULE` and `OPERATIONAL_TABLE_SCHEDULE` frozen consts; `EVENT_TYPE_TO_SOURCE_TABLE` map; canonical-JSON helper for `schedule_hash`.                                                                                                                  | 1          | F-R1, F-R8, F-R9                                        | implementer | low    | M (3h)   |
+| 3   | Add `retention-store.ts`                        | `RetentionStore` (production) and `TestRetentionStore extends RetentionStore` (test-only) interfaces. ESLint comment header forbidding `__debug*` outside Test.                                                                                                    | 1          | F-R10, F-R11                                            | implementer | low    | S (1h)   |
+| 4   | Add `memory-retention-store.ts`                 | `MemoryRetentionStore implements TestRetentionStore`; registry-based composition with existing memory stores via `SweepableSurface`; `nowMs()` monotonic shim; HMAC pseudonym for synthetic `retention_service` actor.                                             | 2, 3       | F-R11, F-R12                                            | implementer | medium | L (6h)   |
+| 5   | Add `audit-emission.ts`                         | `buildRetentionDeletedSummary(...)` constructs the F-52 jsonb meta with `schedule_hash`, `per_event_counts`, `per_table_counts`, `run_id`, `prev_pass_hash`, `lease_window_ms`, etc.                                                                               | 2          | F-R4, F-R8, F-R9                                        | implementer | low    | M (3h)   |
+| 6   | Add `retention-core.ts`                         | `runRetentionPass({store, config})` implementing the 10-step algorithm (Decision §6). Exhaustive switch on `RetentionEventType` with `never` cast. Dry-run mode. F-51 alarm flag. Per-pass row-cap.                                                                | 2, 3, 4, 5 | F-R2, F-R3, F-R4, F-R5, F-R6, F-R7, F-R13, F-R14, F-R15 | implementer | high   | L (8h)   |
+| 7   | Add `index.ts`                                  | Public surface re-exports.                                                                                                                                                                                                                                         | 6          | (surface)                                               | implementer | low    | S (1h)   |
+| 8   | ESLint rule `no-spread-into-retention-schedule` | Mirrors T11/T12's allowlist spread ban; forbids spread-into-`RETENTION_SCHEDULE` outside `schedule.ts`.                                                                                                                                                            | 2          | F-R10                                                   | implementer | low    | S (2h)   |
+| 9   | Drift-check test file                           | `apps/web/test/T16/retention-schedule-drift.test.ts` covering F-R1, F-R8, F-R9 (schedule-vs-enum, `match_underlying`-vs-source-table, frozen-ness).                                                                                                                | 2          | F-R1, F-R8, F-R9                                        | test-writer | low    | M (3h)   |
+| 10  | Sweep algorithm test file                       | `apps/web/test/T16/retention-sweep.test.ts` covering F-R2, F-R3, F-R4, F-R5, F-R6, F-R7, F-R11, F-R12, F-R13, F-R14, F-R15.                                                                                                                                        | 4, 5, 6    | (per F-R# above)                                        | test-writer | medium | L (8h)   |
+| 11  | RA-1 control #5 regression test                 | `apps/web/test/T16/ra1-control-5-preserved.test.ts` — snapshot the resolved cutoff for `export.generated`; asserts exactly 7y.                                                                                                                                     | 2, 6       | F-R14                                                   | test-writer | low    | S (1h)   |
+| 12  | F-19 / F-24 cross-task assertion                | `apps/web/test/T16/closed-allowlist-and-audit-before.test.ts` — TypeScript-level type assertion that `RetentionStore` does not surface caller-supplied WHERE; behavioural assertion that summary row is written ONLY if deletes commit (rollback on emit failure). | 3, 6       | F-R4, F-R10                                             | test-writer | medium | M (3h)   |
 
 Total estimate: ~41h library implementer + test-writer (matches the T07 library precedent's order-of-magnitude).
 
@@ -3411,7 +3503,7 @@ Total estimate: ~41h library implementer + test-writer (matches the T07 library 
 - **F-19 / F-24 (threat-model)** — closed-allowlist + audit-before-side-effect; both patterns reused.
 - **F-50 / F-51 / F-52 (threat-model)** — chain-integrity / retention-bug / retention-itself-audited; F-51 and F-52 fully encoded; F-50 is T18's surface (sweep DELETE path is the only legitimate audit-row deletion path and is itself auditable via `retention_sweep_runs`).
 - **G-T05-6 / G-T05-7** — closed library-side; SQL half deferred to T16.1.
-- **G-T07-* / G-T08-1 / G-T10-4 / G-T11-1 / G-T13-1 / G-T14-1** — sweep iterates these tables once they exist (per task); SQL DELETE path lands in T16.1.
+- **G-T07-\* / G-T08-1 / G-T10-4 / G-T11-1 / G-T13-1 / G-T14-1** — sweep iterates these tables once they exist (per task); SQL DELETE path lands in T16.1.
 - **G-T08-14 / G-T13-9** — `transaction_ts_ms` shim mirrored.
 - **G-T11-21 / G-T13-15 / G-T14-17** — TestStore interface split mirrored.
 
@@ -3434,6 +3526,7 @@ Total estimate: ~41h library implementer + test-writer (matches the T07 library 
 **Source:** `/home/user/agent-os/.context/privacy-review-t07.md` §12; consolidated reviewer blockers B1 (Argon2id fallback) / B2 (`issue_recovery_blob_reset` missing authz+audit) / B3 (`record_recovery_blob_viewed` missing server-side cap-of-3) / B4 (module-level rotation lock) / B5 (`Math.random()` fallback) / B6 (untested SQL) / B7 (ADR-0016 schedule rows missing) / B8 (`view_count` over-collection); commit `31f80d3` message.
 
 **Hard rules for this pass (binding on this commit only):**
+
 - Only `.context/decisions.md` is modified in this pass. Known-gaps additions are written by the orchestrator in a separate commit per the carry-forward list below.
 - No application-code edits (`apps/web/`, `supabase/`, `observability/`, `i18n/`, test files all untouched).
 - Newest amendment on top per file convention.
@@ -3450,7 +3543,7 @@ Total estimate: ~41h library implementer + test-writer (matches the T07 library 
 
 **Advisories deliberately deferred to T07.1 / known-gaps (NOT ratified in this pass):**
 
-- Security F4 — history-purge architectural choice. Privacy review §4 already verdicted "right call" (Principle 4.4 minimization wins; audit row carries attribution). The deliberate exception to "preserve history" is documented in ADR-0015 implicitly via the per-event-type retention of `committee_data_key.member_revoked` (7y) holding the forensic value. **No new ADR; recorded as carry-forward G-T07-* under the T07.1 wire-up so the privacy review of T07.1 can re-confirm the audit-before-purge ordering test (T07-A1) lands with the SQL function.**
+- Security F4 — history-purge architectural choice. Privacy review §4 already verdicted "right call" (Principle 4.4 minimization wins; audit row carries attribution). The deliberate exception to "preserve history" is documented in ADR-0015 implicitly via the per-event-type retention of `committee_data_key.member_revoked` (7y) holding the forensic value. **No new ADR; recorded as carry-forward G-T07-\* under the T07.1 wire-up so the privacy review of T07.1 can re-confirm the audit-before-purge ordering test (T07-A1) lands with the SQL function.**
 - Security F5 — KeyStore interface accepts `private_key` (read interface should not surface private material). Split into two interfaces in T07.1.
 - Security F6 — F-02 self-test is client-side only; server-issued nonce challenge lands in T07.1.
 - Privacy T07-A1 — test-writer audit-row-ordering assertion on member-revoke (lands with T07.1 SQL function).
@@ -3744,7 +3837,7 @@ The pattern's adherence is verified at PR-review time, not in code-level tests:
 **Date:** 2026-05-23
 **Decider(s):** architect (amendment pass #4 per privacy-review-t05 §2.1 / §3 / §7 / §9 and consolidated security-reviewer blockers B1–B4); **HG-15 (NEW) — user ratification of (a) the operational-table retention schedule below and (b) the HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC posture before T16 ships.**
 
-**Source:** privacy-review-t05 §2.1 Findings 1+2 / §2.2 (24h retention) / §3 / §7 (PI inventory rows) / §8 cross-cuttings / §9 architect-amendment list (items 1, 3, 6); consolidated security-reviewer blockers B1 (HMAC-not-SHA), B2 (TOTP consumed-log documentation), B4 (drop plaintext `totp_code`); threat-model F-38 (TOTP code reuse-detection). Cross-references **ADR-0002** (passkeys + TOTP-enrollment bootstrap, the parent), **ADR-0002 Amendment G** (this pass; folds the four T05 auth-side-table decisions into the auth ADR), **ADR-0015** (audit-log per-event retention — this ADR is a sibling for *non-audit-log* operational tables), **observability/audit-log.md §2** (`actor_pseudonym = HMAC-BLAKE2b-256(uid)[:16hex]` — the canonical pseudonymization wording, which observability-setup updates on its next pass to permit HMAC-SHA-256 with `app.hmac_pseudonym_key`).
+**Source:** privacy-review-t05 §2.1 Findings 1+2 / §2.2 (24h retention) / §3 / §7 (PI inventory rows) / §8 cross-cuttings / §9 architect-amendment list (items 1, 3, 6); consolidated security-reviewer blockers B1 (HMAC-not-SHA), B2 (TOTP consumed-log documentation), B4 (drop plaintext `totp_code`); threat-model F-38 (TOTP code reuse-detection). Cross-references **ADR-0002** (passkeys + TOTP-enrollment bootstrap, the parent), **ADR-0002 Amendment G** (this pass; folds the four T05 auth-side-table decisions into the auth ADR), **ADR-0015** (audit-log per-event retention — this ADR is a sibling for _non-audit-log_ operational tables), **observability/audit-log.md §2** (`actor_pseudonym = HMAC-BLAKE2b-256(uid)[:16hex]` — the canonical pseudonymization wording, which observability-setup updates on its next pass to permit HMAC-SHA-256 with `app.hmac_pseudonym_key`).
 
 ## Context
 
@@ -3802,14 +3895,14 @@ Single-tenant per ADR-0005. The complexity of a key hierarchy is unjustified. v2
 
 ### The operational-table retention schedule (binding; the canonical table for non-audit-log persistent tables touching PI)
 
-| Table | Retention | Purpose | Hard-delete trigger | Classification ceiling |
-|---|---|---|---|---|
-| `auth_totp_bootstraps` | **15-minute ceiling**, hard-deleted on consume (F-43) | Single-use TOTP bootstrap for first-passkey enrollment per ADR-0002. | (a) consume (immediate, atomic with `enroll_first_passkey`); (b) 15-minute scheduled sweep for unconsumed rows. | C1 (user_id) + C2 (`secret_hash`). After this ADR's B4 decision, **no plaintext code column.** |
-| `auth_totp_consumed_log` | **24 hours after `consumed_at`** | F-38 reuse-detection (block code re-submission within the ~15-min bootstrap lifetime + safety margin). | Scheduled sweep deletes rows where `consumed_at < now() - interval '24 hours'`. | C1 (user_id, HMAC-of-code, ts). |
-| `auth_sessions` (active rows) | **15-minute TTL** on access tokens; row deleted when `revoked_at` is set OR `expires_at < now()`. | Session validation + revocation surface. | TTL expiry + explicit revoke. | C1 (user_id, session_id) + C2 (`device_label`, `device_fingerprint`). |
-| `auth_sessions` (revoked rows) | **90 days after `revoked_at`** then hard-delete. | Revocation-history forensic window per ADR-0002 Operational Rules. | Scheduled sweep. | Same as above. |
-| `webauthn_credentials` | **Until passkey revoked OR membership inactive + 24 months**, then hard-delete. | The passkey itself. Co-anchored to `committee_membership`. | Explicit `auth.passkey.revoked` event + 24mo membership-inactive grace. | C1 (cred_id, pubkey, aaguid, rp_id) + C0 (transports) + C2 (`device_label`). |
-| `public.users` (auth side-table) | **Membership + 24 months** (per ADR-0002). | Identity attribution anchor; `active`/`role`/`totp_destroyed_at` lookup. | Tied to `committee_membership` retention. | See PI inventory. |
+| Table                            | Retention                                                                                         | Purpose                                                                                                | Hard-delete trigger                                                                                             | Classification ceiling                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `auth_totp_bootstraps`           | **15-minute ceiling**, hard-deleted on consume (F-43)                                             | Single-use TOTP bootstrap for first-passkey enrollment per ADR-0002.                                   | (a) consume (immediate, atomic with `enroll_first_passkey`); (b) 15-minute scheduled sweep for unconsumed rows. | C1 (user_id) + C2 (`secret_hash`). After this ADR's B4 decision, **no plaintext code column.** |
+| `auth_totp_consumed_log`         | **24 hours after `consumed_at`**                                                                  | F-38 reuse-detection (block code re-submission within the ~15-min bootstrap lifetime + safety margin). | Scheduled sweep deletes rows where `consumed_at < now() - interval '24 hours'`.                                 | C1 (user_id, HMAC-of-code, ts).                                                                |
+| `auth_sessions` (active rows)    | **15-minute TTL** on access tokens; row deleted when `revoked_at` is set OR `expires_at < now()`. | Session validation + revocation surface.                                                               | TTL expiry + explicit revoke.                                                                                   | C1 (user_id, session_id) + C2 (`device_label`, `device_fingerprint`).                          |
+| `auth_sessions` (revoked rows)   | **90 days after `revoked_at`** then hard-delete.                                                  | Revocation-history forensic window per ADR-0002 Operational Rules.                                     | Scheduled sweep.                                                                                                | Same as above.                                                                                 |
+| `webauthn_credentials`           | **Until passkey revoked OR membership inactive + 24 months**, then hard-delete.                   | The passkey itself. Co-anchored to `committee_membership`.                                             | Explicit `auth.passkey.revoked` event + 24mo membership-inactive grace.                                         | C1 (cred_id, pubkey, aaguid, rp_id) + C0 (transports) + C2 (`device_label`).                   |
+| `public.users` (auth side-table) | **Membership + 24 months** (per ADR-0002).                                                        | Identity attribution anchor; `active`/`role`/`totp_destroyed_at` lookup.                               | Tied to `committee_membership` retention.                                                                       | See PI inventory.                                                                              |
 
 **Out of scope of this table:** `audit_log` (covered by ADR-0015); content tables `concerns` / `inspections` / `minutes` / `recommendations` / `reprisal_log` / `work_refusal` / `s51_evidence` / `training_records` (covered by plan §8 retention schedule).
 
@@ -3822,7 +3915,7 @@ Single-tenant per ADR-0005. The complexity of a key hierarchy is unjustified. v2
 
 ### Reversibility
 
-**Easy** on schedule values (additive migration). **Medium** on the HMAC primitive choice (SHA-256 vs BLAKE2b is one column / one function rewrite + chain re-key — the security property is identical; only the names change). **Hard** on the *fact* of using a keyed HMAC at all (reverting to bare SHA is the privacy-reviewer's BLOCK finding; we won't).
+**Easy** on schedule values (additive migration). **Medium** on the HMAC primitive choice (SHA-256 vs BLAKE2b is one column / one function rewrite + chain re-key — the security property is identical; only the names change). **Hard** on the _fact_ of using a keyed HMAC at all (reverting to bare SHA is the privacy-reviewer's BLOCK finding; we won't).
 
 ## Consequences
 
@@ -3900,6 +3993,7 @@ Single-tenant per ADR-0005. The complexity of a key hierarchy is unjustified. v2
 The audit log was specified at a uniform 24-month retention in `observability/README.md` §1, with the reasoning "PIPEDA s.10.1 breach-record floor." Privacy-review Q2 confirmed that 24 months is **defensible at the PIPEDA Principle 4.5 floor but not minimized** and is **incoherent with the underlying records' retention** (concerns at 7y post-closure, reprisal_log at active matter + 7y, etc.).
 
 The privacy-reviewer's APPROVED-WITH-CHANGES verdict on Q2 blocks T16 (retention job) until:
+
 1. A per-event-type retention schedule is ratified.
 2. The "audit row cannot outlive linked record" ceiling rule is encoded.
 3. User ratifies the schedule (HG-14, formerly HG-9 in the wider plan; HG-9 remains the high-level retention sign-off for plan §8 / §13.D, of which this is a part).
@@ -3936,36 +4030,36 @@ Simplest rule, but loses the per-event-type forensic floor — e.g., `committee_
 
 ### The schedule (verbatim from privacy-review §3.3; the authoritative table)
 
-| Event type | Retention | PIPEDA 4.5 justification |
-|---|---|---|
-| `identity_keypair.created` | **7 years** (membership + 7y) | Co-anchored to forensic identity attribution. If a reprisal entry is challenged in OLRB years later, the question "did this user even hold an identity key at the time?" must be answerable for the lifetime of the C4 records they could have authored. |
-| `identity_privkey.recovery_blob.written` | **Membership + 24 months** | F-08 brute-force anchor; supports access-by-user investigation. Aligns with the recovery blob's own retention. |
-| `identity_privkey.recovery_blob.restored` | **Membership + 24 months** | Same as above; restoration is a candidate-coercion signal (T6, T11) but loses forensic value once membership ends. |
-| `identity_privkey.recovery_blob.viewed` | **Membership + 24 months** | F-54 / M-54b — recovery-passphrase "show again" reveal event. Forensic value tracks the same window as `recovery_blob.written` since each reveal is an enrollment-session-bounded action; loses value when the user's membership ends. Added in this pass per ADR-0003 Amendment F. |
-| `committee_data_key.wrapped_for_member` | **7 years from rotation** | Key-history forensic anchor. If a removed-member-decrypted-old-data incident surfaces (F-06 / O-2), the wrap-history must be reconstructable for at least the active-matter + civil-limitation period. |
-| `committee_data_key.unwrap` | **24 months** | Read-of-own-wrap; high-volume, low-target-individuating. 24 months is enough to spot misuse patterns. |
-| `committee_data_key.rotation.started` / `.completed` | **7 years** | The rotation lifecycle is the load-bearing forward-secrecy event (Invariant 6); must outlive every record encrypted under the old key. Anchors crypto-shred-on-retention claims (ADR-0012 cross-reference). |
-| `committee_data_key.member_revoked` | **7 years** | Same as rotation; the revocation is a corner-stone forensic fact. |
-| `auth.passkey.enrolled` / `.revoked` | **90 days** | Auth events are operationally useful for ~90 days for misuse investigation; longer retention does not serve the purpose. |
-| `session.revoked` | **90 days** | Same as above. |
-| `concern.created` | **Match underlying concern record (7y post-closure)** | The concern is C3; the audit row for its creation should not outlive the concern. The reverse (audit gone, concern still present) breaks Principle 4.9. |
-| `concern.source_revealed` | **Match underlying concern record (7y post-closure)** | C4-adjacent (the reveal of source is the event that surfaces C4). |
-| `inspection.synced` | **Match underlying inspection (7y)** | Inspections are 7y per plan §8. |
-| `queue.integrity_fail` | **Match underlying inspection (7y)** | Same. (Canonical name per ADR-0010 F-B; alias `inspection.synced.hmac_fail` is forbidden.) |
-| `recommendation.created` / `recommendation.employer_response_logged` | **Match underlying recommendation (7y)** | Recommendations are 7y per plan §8. |
-| `reprisal.created` | **Match underlying record (Active matter + 7y)** | C4. The audit-of-creation must match the entry while the entry lives. Subject to Amendment D pseudonymization in the visible feed. |
-| `reprisal.read` | **Match underlying record (Active matter + 7y)** | Server-emitted under ADR-0003 Amendment B / HG-6. |
-| `reprisal.status_changed.4eyes_pending` / `.4eyes_completed` | **Match underlying record (Active matter + 7y)** | 4-eyes-on-soft-delete events per HG-7; Principle 4.9 traceability requires they outlive nothing the underlying record outlives. |
-| `work_refusal.*` / `s51_evidence.*` (T14 enumerations) | **Match underlying record (Active matter + 7y)** | C4; same justification. Includes the `work_refusal.read` / `s51_evidence.read` enums added by ADR-0003 Amendment A extension. |
-| `export.generated` | **7 years** | OHSA s.9(20) recommendations and s.9(21) minutes are 7y. The export is the only B3 egress; the audit of that must persist as long as the record being exported. |
-| `export.contained_concern_derived_items` | **7 years** | RA-1 compensating control; same justification. |
-| `retention.deleted` | **7 years** (independent; **carve-out — no `target_id` link**) | F-52 anchor. The retention summary must outlive the records it describes by enough margin to defend against "did the deletion actually happen?" challenges. **Exempt from the underlying-record-ceiling rule** in §3.5 because it has no `target_id`. |
-| `member.added` / `.removed` | **Membership + 7 years** | Membership history is an OHSA accountability anchor; outlives membership for the same reasons as `identity_keypair.created`. |
-| `committee.key_rotated` | **7 years** | Same as `committee_data_key.rotation.completed`. |
-| `client.cache_policy_violation` | **90 days** | Operational-defense event; SW policy regression detector. Forensic value decays fast. |
-| `client.identity_selftest_fail` | **90 days** | F-03 detection signal; investigation-window-bound. |
-| `alert.fired` | **24 months** | Matches the PIPEDA s.10.1 breach-record floor since alerts often precede or accompany breach analysis. |
-| `audit.forensic_reveal.4eyes_pending` / `.4eyes_completed` | **7 years** | Forensic-reveal audit events (Amendment E) gate post-incident attribution; same forensic profile as `committee_data_key.rotation.completed`. Added in this pass per ADR-0003 Amendment E. |
+| Event type                                                           | Retention                                                      | PIPEDA 4.5 justification                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity_keypair.created`                                           | **7 years** (membership + 7y)                                  | Co-anchored to forensic identity attribution. If a reprisal entry is challenged in OLRB years later, the question "did this user even hold an identity key at the time?" must be answerable for the lifetime of the C4 records they could have authored.                            |
+| `identity_privkey.recovery_blob.written`                             | **Membership + 24 months**                                     | F-08 brute-force anchor; supports access-by-user investigation. Aligns with the recovery blob's own retention.                                                                                                                                                                      |
+| `identity_privkey.recovery_blob.restored`                            | **Membership + 24 months**                                     | Same as above; restoration is a candidate-coercion signal (T6, T11) but loses forensic value once membership ends.                                                                                                                                                                  |
+| `identity_privkey.recovery_blob.viewed`                              | **Membership + 24 months**                                     | F-54 / M-54b — recovery-passphrase "show again" reveal event. Forensic value tracks the same window as `recovery_blob.written` since each reveal is an enrollment-session-bounded action; loses value when the user's membership ends. Added in this pass per ADR-0003 Amendment F. |
+| `committee_data_key.wrapped_for_member`                              | **7 years from rotation**                                      | Key-history forensic anchor. If a removed-member-decrypted-old-data incident surfaces (F-06 / O-2), the wrap-history must be reconstructable for at least the active-matter + civil-limitation period.                                                                              |
+| `committee_data_key.unwrap`                                          | **24 months**                                                  | Read-of-own-wrap; high-volume, low-target-individuating. 24 months is enough to spot misuse patterns.                                                                                                                                                                               |
+| `committee_data_key.rotation.started` / `.completed`                 | **7 years**                                                    | The rotation lifecycle is the load-bearing forward-secrecy event (Invariant 6); must outlive every record encrypted under the old key. Anchors crypto-shred-on-retention claims (ADR-0012 cross-reference).                                                                         |
+| `committee_data_key.member_revoked`                                  | **7 years**                                                    | Same as rotation; the revocation is a corner-stone forensic fact.                                                                                                                                                                                                                   |
+| `auth.passkey.enrolled` / `.revoked`                                 | **90 days**                                                    | Auth events are operationally useful for ~90 days for misuse investigation; longer retention does not serve the purpose.                                                                                                                                                            |
+| `session.revoked`                                                    | **90 days**                                                    | Same as above.                                                                                                                                                                                                                                                                      |
+| `concern.created`                                                    | **Match underlying concern record (7y post-closure)**          | The concern is C3; the audit row for its creation should not outlive the concern. The reverse (audit gone, concern still present) breaks Principle 4.9.                                                                                                                             |
+| `concern.source_revealed`                                            | **Match underlying concern record (7y post-closure)**          | C4-adjacent (the reveal of source is the event that surfaces C4).                                                                                                                                                                                                                   |
+| `inspection.synced`                                                  | **Match underlying inspection (7y)**                           | Inspections are 7y per plan §8.                                                                                                                                                                                                                                                     |
+| `queue.integrity_fail`                                               | **Match underlying inspection (7y)**                           | Same. (Canonical name per ADR-0010 F-B; alias `inspection.synced.hmac_fail` is forbidden.)                                                                                                                                                                                          |
+| `recommendation.created` / `recommendation.employer_response_logged` | **Match underlying recommendation (7y)**                       | Recommendations are 7y per plan §8.                                                                                                                                                                                                                                                 |
+| `reprisal.created`                                                   | **Match underlying record (Active matter + 7y)**               | C4. The audit-of-creation must match the entry while the entry lives. Subject to Amendment D pseudonymization in the visible feed.                                                                                                                                                  |
+| `reprisal.read`                                                      | **Match underlying record (Active matter + 7y)**               | Server-emitted under ADR-0003 Amendment B / HG-6.                                                                                                                                                                                                                                   |
+| `reprisal.status_changed.4eyes_pending` / `.4eyes_completed`         | **Match underlying record (Active matter + 7y)**               | 4-eyes-on-soft-delete events per HG-7; Principle 4.9 traceability requires they outlive nothing the underlying record outlives.                                                                                                                                                     |
+| `work_refusal.*` / `s51_evidence.*` (T14 enumerations)               | **Match underlying record (Active matter + 7y)**               | C4; same justification. Includes the `work_refusal.read` / `s51_evidence.read` enums added by ADR-0003 Amendment A extension.                                                                                                                                                       |
+| `export.generated`                                                   | **7 years**                                                    | OHSA s.9(20) recommendations and s.9(21) minutes are 7y. The export is the only B3 egress; the audit of that must persist as long as the record being exported.                                                                                                                     |
+| `export.contained_concern_derived_items`                             | **7 years**                                                    | RA-1 compensating control; same justification.                                                                                                                                                                                                                                      |
+| `retention.deleted`                                                  | **7 years** (independent; **carve-out — no `target_id` link**) | F-52 anchor. The retention summary must outlive the records it describes by enough margin to defend against "did the deletion actually happen?" challenges. **Exempt from the underlying-record-ceiling rule** in §3.5 because it has no `target_id`.                               |
+| `member.added` / `.removed`                                          | **Membership + 7 years**                                       | Membership history is an OHSA accountability anchor; outlives membership for the same reasons as `identity_keypair.created`.                                                                                                                                                        |
+| `committee.key_rotated`                                              | **7 years**                                                    | Same as `committee_data_key.rotation.completed`.                                                                                                                                                                                                                                    |
+| `client.cache_policy_violation`                                      | **90 days**                                                    | Operational-defense event; SW policy regression detector. Forensic value decays fast.                                                                                                                                                                                               |
+| `client.identity_selftest_fail`                                      | **90 days**                                                    | F-03 detection signal; investigation-window-bound.                                                                                                                                                                                                                                  |
+| `alert.fired`                                                        | **24 months**                                                  | Matches the PIPEDA s.10.1 breach-record floor since alerts often precede or accompany breach analysis.                                                                                                                                                                              |
+| `audit.forensic_reveal.4eyes_pending` / `.4eyes_completed`           | **7 years**                                                    | Forensic-reveal audit events (Amendment E) gate post-incident attribution; same forensic profile as `committee_data_key.rotation.completed`. Added in this pass per ADR-0003 Amendment E.                                                                                           |
 
 ### The underlying-record-ceiling rule (verbatim from privacy-review §3.5)
 
@@ -4046,15 +4140,16 @@ The retention pass continues to emit exactly one `retention.deleted` summary row
 
 ### The three new rows (added to the ADR-0015 schedule table)
 
-| Event type | Retention | PIPEDA 4.5 justification |
-|---|---|---|
-| `key_parity.mismatch` | **24 months** | F-125 forensic anchor. A parity mismatch is a structural safeguard failure (Principle 4.7): it means the cross-surface pseudonym equality property (Postgres ↔ TS ↔ audit-log meta ↔ Sentry) is broken and an unknown number of audit rows landed under a wrong-key pseudonym. The audit row is the ONLY durable trace of when the failure window opened and closed. Forensic value runs to the next breach-detection cycle + one full ADR-0016 annual rotation window, giving 24 months as the minimum needed to defend against "did the deploy-time check actually run, and what did it find?" challenges in a post-incident review. 24 months also matches the PIPEDA s.10.1 breach-record floor since a parity mismatch IS a breach-relevant safeguard event. |
-| `key_parity.deploy_ok` | **24 months** | The success counterpart of `key_parity.mismatch`. Forensic asymmetry is the failure mode this row protects against: absence of a `deploy_ok` row in a forensic window IS the breach signal ("we cannot prove the parity check ran on deploy X"). Symmetric 24-month retention is mandatory — a shorter window on the success row would create an "untestable safeguard" gap during a post-incident review of an old deploy. |
+| Event type                      | Retention     | PIPEDA 4.5 justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key_parity.mismatch`           | **24 months** | F-125 forensic anchor. A parity mismatch is a structural safeguard failure (Principle 4.7): it means the cross-surface pseudonym equality property (Postgres ↔ TS ↔ audit-log meta ↔ Sentry) is broken and an unknown number of audit rows landed under a wrong-key pseudonym. The audit row is the ONLY durable trace of when the failure window opened and closed. Forensic value runs to the next breach-detection cycle + one full ADR-0016 annual rotation window, giving 24 months as the minimum needed to defend against "did the deploy-time check actually run, and what did it find?" challenges in a post-incident review. 24 months also matches the PIPEDA s.10.1 breach-record floor since a parity mismatch IS a breach-relevant safeguard event.                                                                                                                                    |
+| `key_parity.deploy_ok`          | **24 months** | The success counterpart of `key_parity.mismatch`. Forensic asymmetry is the failure mode this row protects against: absence of a `deploy_ok` row in a forensic window IS the breach signal ("we cannot prove the parity check ran on deploy X"). Symmetric 24-month retention is mandatory — a shorter window on the success row would create an "untestable safeguard" gap during a post-incident review of an old deploy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `auth.mint.revoked_during_mint` | **24 months** | F-128 race detector. The audit row fires when the mint-session post-mint EXISTS check rejects a JWT because a concurrent `revoke_all_sessions` landed between `mint_create_session` and `signSessionJwt`. Forensic purpose: (1) detecting persistent racing patterns (an attacker timing revokes against mints, or a buggy rotation flow); (2) explaining a user-facing "your session expired immediately after login" complaint. 24 months matches `alert.fired` because the row is alert-adjacent — every emission represents a deliberately rejected mint, which feeds the same breach-response workflow as other auth-stage alerts. Note: this row is NOT linked via `target_id` to a single record (the auth_sessions row whose minting was rejected has already been hard-revoked); the underlying-record-ceiling rule in ADR-0015 §3.5 does NOT apply, so the 24-month floor governs absolutely. |
 
 ### Migration scope (M0, lands before M1 and M2)
 
 ONE migration adds:
+
 1. Three new rows to `audit_log_retention_schedule` with the values above.
 2. Three new values to the `event_type` CHECK constraint / enum (per ADR-0003 Amendment A "closed enum" rule).
 3. Three new `WHEN` branches in `retention_class_for()` mapping each to `'24mo'`.
@@ -4126,6 +4221,7 @@ F-44 surfaces this as Medium residual. The fix is integrity-on-the-queue: tag ev
 ### Option A: Per-entry HMAC keyed by HKDF off the user's identity private key (chosen)
 
 **Description:**
+
 - At session start (after the identity-key self-test passes per F-03), derive a session-scoped HMAC key:
   `K_hmac = HKDF-BLAKE2b(salt = "jhsc.queue.hmac.v1", ikm = identity_privkey, info = user_id || device_id)`.
 - For each queued entry, compute `tag = BLAKE2b-256-keyed(K_hmac, sequence_number || user_id || ciphertext)`.
@@ -4136,12 +4232,14 @@ F-44 surfaces this as Medium residual. The fix is integrity-on-the-queue: tag ev
 - Algorithm: **BLAKE2b-256 keyed** (`libsodium.crypto_generichash` with `key` parameter). Already in the stack via libsodium-wrappers (ADR-0003 Invariant 4).
 
 **Pros:**
-- Key never leaves the device; T1/T5 reach to plaintext still requires breaking E2EE *and* the HMAC chain.
+
+- Key never leaves the device; T1/T5 reach to plaintext still requires breaking E2EE _and_ the HMAC chain.
 - Uses libsodium primitives we already trust.
 - Deterministic, testable in CI.
 - Detects both injection (local attacker writes a forged row) and replay-from-another-device (copy queue from device B to device A — user_id mismatch fails).
 
 **Cons:**
+
 - If identity_privkey is unavailable at queue-drain time (lock screen, expired session), the queued entry cannot be verified and the user must re-auth to sync. Acceptable; matches the rest of the session model.
 - Server cannot itself verify the MAC; it relies on the client's verification + records the tag for downstream re-verification. This is acceptable because the threat is local device tampering, which is fundamentally a client-side detection problem.
 
@@ -4150,10 +4248,12 @@ F-44 surfaces this as Medium residual. The fix is integrity-on-the-queue: tag ev
 **Description:** Sign each queued entry with the identity private key directly (Ed25519). Server holds identity public key; verifies signature on sync.
 
 **Pros:**
+
 - Server-side verification possible.
 - Stronger non-repudiation.
 
 **Cons:**
+
 - Mixes signing key with sealing key — identity privkey already does too much (sealing C3, unwrapping committee key); adding signing widens the blast radius of a privkey compromise.
 - Slower per-entry; signing in the offline hot path on a shop-floor Android is noticeable.
 - Adds an Ed25519 keypair to the user model OR forces dual-use of X25519, which libsodium handles but is a footgun.
@@ -4163,6 +4263,7 @@ F-44 surfaces this as Medium residual. The fix is integrity-on-the-queue: tag ev
 **Description:** Status quo. Trust the JWT for authorship.
 
 **Cons:**
+
 - Exactly the F-44 finding. Local attacker injects rows; JWT proves the user was logged in, not that the user authored the entry.
 
 ## Decision
@@ -4174,6 +4275,7 @@ F-44 surfaces this as Medium residual. The fix is integrity-on-the-queue: tag ev
 The threat is local device tampering; client-side verification is the right place to catch it. Option B over-loads the identity privkey for marginal gain. Option C is the finding.
 
 **Operational rules:**
+
 - HMAC algorithm: `libsodium.crypto_generichash` (BLAKE2b-256) with the `key` parameter set to `K_hmac` (32 bytes).
 - HKDF construction: `K_hmac = crypto_generichash(key = identity_privkey, msg = user_id_bytes || device_id_bytes, outlen = 32, personalisation = "jhsc.queue.hmac.v1")` — single-step KDF using BLAKE2b's keyed mode is acceptable (libsodium pattern; the same pattern libsodium uses internally for sub-keys).
 - HMAC scope: `(sequence_number_u64_be || user_id_uuid_bytes || ciphertext)`. The sequence number prevents reordering; user_id prevents cross-device replay.
@@ -4187,15 +4289,18 @@ The threat is local device tampering; client-side verification is the right plac
 ## Consequences
 
 ### Positive
+
 - Local-tampering injection detected before it pollutes the inspection record.
 - No new key material to manage (derived from existing identity key).
 - Same crypto library; no new dependency.
 
 ### Negative / accepted tradeoffs
+
 - Cannot verify server-side; the server is a recorder, not a judge. Acceptable; the threat is local.
 - A user who restores from device backup AND has a wrong device_id will see queue entries fail integrity. Acceptable: prompt re-enter.
 
 ### Risks
+
 - HKDF parameter accident (wrong personalisation string) makes verification non-deterministic across versions. Mitigated by versioning the salt (`jhsc.queue.hmac.v1`) and refusing to verify entries tagged with an unknown version.
 
 ## Compliance check
@@ -4239,14 +4344,14 @@ This ADR specifies exactly what the PWA service worker is allowed to cache in pl
 
 **Service-worker cache policy is a strict allowlist, by data classification:**
 
-| Asset class | Cache plaintext? | Strategy | Notes |
-|---|---|---|---|
-| **Static assets** (HTML shell, JS bundles, CSS, fonts, web manifest, icons) | **YES** | Cache-first; versioned by build hash | App shell PWA pattern. No PI. |
-| **C0 public content** (document library: OHSA quick-ref text, i18n catalogs) | **YES** | Stale-while-revalidate | Public regulatory text; nothing to protect. |
-| **C1 operational metadata** (feature flags, schema version, route map, locale list) | **YES, time-bound** | Cache with `max-age=86400` (24h max) then revalidate | Bounded; no PI. |
-| **C2 worker-side PI** (display name, off-employer contact) | **NEVER plaintext** | Not cached by service worker. If retained at all on-device, only inside the encrypted IndexedDB layer keyed by the session/passkey wrap. | Worker-side identifying data must not survive in Cache Storage. |
-| **C3 sensitive worker content** (concerns body, minutes, inspections, recommendations) | **NEVER plaintext** | Not cached by service worker. Ciphertext payloads MAY appear in IndexedDB queues (per T10) but never in Cache Storage. | E2EE confined to browser RAM and ciphertext-only IndexedDB. |
-| **C4 highest sensitivity** (reprisal_log, work_refusal, s51_evidence, source_name) | **NEVER, period** | Not cached by service worker. Not in IndexedDB at all except as transient, session-scoped ciphertext for an open record; cleared on lock/logout/panic. | If anything looking like a C4 response slips into the SW fetch handler, the handler rejects (sanity check; defense in depth). |
+| Asset class                                                                            | Cache plaintext?    | Strategy                                                                                                                                               | Notes                                                                                                                         |
+| -------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Static assets** (HTML shell, JS bundles, CSS, fonts, web manifest, icons)            | **YES**             | Cache-first; versioned by build hash                                                                                                                   | App shell PWA pattern. No PI.                                                                                                 |
+| **C0 public content** (document library: OHSA quick-ref text, i18n catalogs)           | **YES**             | Stale-while-revalidate                                                                                                                                 | Public regulatory text; nothing to protect.                                                                                   |
+| **C1 operational metadata** (feature flags, schema version, route map, locale list)    | **YES, time-bound** | Cache with `max-age=86400` (24h max) then revalidate                                                                                                   | Bounded; no PI.                                                                                                               |
+| **C2 worker-side PI** (display name, off-employer contact)                             | **NEVER plaintext** | Not cached by service worker. If retained at all on-device, only inside the encrypted IndexedDB layer keyed by the session/passkey wrap.               | Worker-side identifying data must not survive in Cache Storage.                                                               |
+| **C3 sensitive worker content** (concerns body, minutes, inspections, recommendations) | **NEVER plaintext** | Not cached by service worker. Ciphertext payloads MAY appear in IndexedDB queues (per T10) but never in Cache Storage.                                 | E2EE confined to browser RAM and ciphertext-only IndexedDB.                                                                   |
+| **C4 highest sensitivity** (reprisal_log, work_refusal, s51_evidence, source_name)     | **NEVER, period**   | Not cached by service worker. Not in IndexedDB at all except as transient, session-scoped ciphertext for an open record; cleared on lock/logout/panic. | If anything looking like a C4 response slips into the SW fetch handler, the handler rejects (sanity check; defense in depth). |
 
 **Service-worker fetch-handler rules (enforced in code):**
 
@@ -4261,11 +4366,13 @@ This ADR specifies exactly what the PWA service worker is allowed to cache in pl
 ### Option A: Strict allowlist as specified above (chosen)
 
 **Pros:**
+
 - Snapshot-testable: a CI fixture installs the SW in a clean Cache Storage, hits a known set of routes, then enumerates Cache Storage and compares to a frozen JSON snapshot.
 - Defense in depth: the `X-Data-Class` header check catches accidental cacheable C3/C4 responses even if the URL allowlist is wrong.
 - Aligns with ADR-0011 (PWA-only) and ADR-0008 (session hygiene).
 
 **Cons:**
+
 - Slightly more verbose service-worker code than a "cache everything" default.
 - One more thing for the implementer to get right (mitigated by the snapshot test).
 
@@ -4274,6 +4381,7 @@ This ADR specifies exactly what the PWA service worker is allowed to cache in pl
 **Description:** Cache everything by default; mark specific routes as "no-store" via a `Cache-Control` header.
 
 **Cons:**
+
 - Inverts the safe default. A missing header = leaked plaintext. The whole point of the threat model is fail-closed.
 
 ### Option C: No service-worker caching at all
@@ -4281,6 +4389,7 @@ This ADR specifies exactly what the PWA service worker is allowed to cache in pl
 **Description:** Disable the cache; no offline UX beyond what IndexedDB provides.
 
 **Cons:**
+
 - Breaks offline-first inspection workflow (T10).
 - The app shell can't load offline either; users on shop-floor signal-gaps see "no internet" pages.
 
@@ -4295,14 +4404,17 @@ This ADR specifies exactly what the PWA service worker is allowed to cache in pl
 ## Consequences
 
 ### Positive
+
 - Plaintext C2/C3/C4 cannot persist in Cache Storage by construction.
 - T2 / T6 attacker reading Cache Storage offline sees only static assets + C0/C1 (already public or non-sensitive).
 - Snapshot test makes regression a CI failure, not a runtime surprise.
 
 ### Negative / accepted tradeoffs
+
 - A new C0/C1 route added later that the dev forgets to allowlist won't be cached — slower first-load but not a leak. Safe direction.
 
 ### Risks
+
 - A future PR adds a route to the allowlist that returns C2+ content. Mitigated by:
   - Reviewer (security-reviewer) checks every SW-allowlist diff.
   - The `X-Data-Class` header sanity check catches the response even if the URL was mis-allowlisted.
@@ -4361,10 +4473,12 @@ and a documented restore path. Plan §7 requires recovery to be tested per
 on Pro, configurable up to 28 days), no second copy.
 
 **Pros:**
+
 - Zero ops; covered by the platform.
 - Inside `ca-central-1`.
 
 **Cons:**
+
 - Single-vendor durability story. If the Supabase project is destroyed
   (account compromise, billing lapse, vendor incident), PITR doesn't help.
 - No protection against a malicious or buggy migration that gets PITR'd
@@ -4378,14 +4492,16 @@ nightly to a second Canadian region (e.g., Backblaze B2 or AWS S3 ca-central),
 35-day rolling retention. Restore drill quarterly.
 
 **Pros:**
+
 - Two independent durability domains.
-- Encrypted-at-rest with our key, so the bucket provider is *not* a PI
+- Encrypted-at-rest with our key, so the bucket provider is _not_ a PI
   processor for plaintext — it's a ciphertext blob holder. The PI inside
   the dump is already C3/C4 ciphertext at the row level; the dump itself
   is wrapped again.
 - Restore drill is forcing-function for proving the playbook.
 
 **Cons:**
+
 - One more vendor to evaluate (lightweight — they don't see plaintext).
 - Slight ops overhead (a GitHub Actions cron job, monitoring).
 
@@ -4395,9 +4511,11 @@ nightly to a second Canadian region (e.g., Backblaze B2 or AWS S3 ca-central),
 second Canadian region.
 
 **Pros:**
+
 - RPO near zero.
 
 **Cons:**
+
 - Way over-engineered for 50 users. Re-introduces ops burden we explicitly
   shed by choosing Supabase Cloud.
 - Cost.
@@ -4413,6 +4531,7 @@ a second, independent durability domain at low cost and forces a real
 restore drill.
 
 **Operational rules:**
+
 - **PITR window:** 7 days (Pro default).
 - **`pg_dump` cadence:** nightly at 03:00 ET, encrypted with a libsodium
   secret box; the dump key is held in 1Password Business (user account)
@@ -4427,7 +4546,7 @@ restore drill.
   committee key, and produces a signed restore report.
 - **Key-loss recovery:**
   - **Committee data key loss** → at least one remaining member with a wrapped
-    copy can re-wrap to the rest. If *all* members lose access, the data is
+    copy can re-wrap to the rest. If _all_ members lose access, the data is
     cryptographically gone. This is by design (T1, T5).
   - **Individual identity-key loss** → user prints a recovery passphrase at
     enrollment that decrypts an identity-key backup blob stored on the
@@ -4442,14 +4561,17 @@ playbook stays the same.
 ## Consequences
 
 ### Positive
+
 - Two-vendor durability without two-vendor PI exposure.
 - Restore drill becomes routine, not a surprise.
 
 ### Negative / accepted tradeoffs
+
 - Total key loss = total data loss. Documented; this is the price of E2EE.
 - One more thing to monitor (dump job freshness).
 
 ### Risks
+
 - Dump job silently failing → mitigated by alert if last successful dump
   is >36 hours old.
 - Key escrow procedure not followed → mitigated by quarterly drill that
@@ -4484,13 +4606,15 @@ playbook stays the same.
 **Reversibility:** Easy on bucket settings (a configuration change). Hard to retroactively apply Object Lock to existing objects, so this is set at bucket creation (T17 acceptance pre-flight) before the first nightly dump.
 
 **Compliance check additions:**
+
 - [x] Crypto-shred-on-retention is preserved (old backups hard-deleted on schedule).
 - [x] Ransomware-class delete defeated within the 35-day window.
 - [x] No new subprocessor; B2 still holds ciphertext-of-ciphertext only.
 
 **Follow-ups (amend T17 acceptance — see Task-list amendments at end):**
+
 - [ ] **T17 amended:** bucket created with Object Lock (governance, 35d), versioning ON, lifecycle 42d hard delete; CI drift check operational; restore-drill playbook covers the case "Object Lock prevents drill-bucket cleanup."
-- [ ] Recovery-drill procedure documents: how to restore a *specific version* of a dated dump under Object Lock (read path is unchanged; write/delete is the gated path).
+- [ ] Recovery-drill procedure documents: how to restore a _specific version_ of a dated dump under Object Lock (read path is unchanged; write/delete is the gated path).
 - [ ] Test (F-49 mitigation): with the regular workflow write credential, attempt to overwrite an existing object — assert it creates a NEW version, prior version still listable. Attempt to DELETE a version under retention — assert denied with the expected error code.
 
 ---
@@ -4502,17 +4626,19 @@ playbook stays the same.
 **The coherence note.** The Object-Lock-protected backup bucket holds nightly `pg_dump` ciphertext blobs with a hard delete at 42 days (35d retention + 7d grace). For the crypto-shred-on-retention claim to hold end-to-end, **no audit-log event-type retention value may exceed the longest underlying-record retention that any backup can carry** — otherwise a hard-deleted backup at day 42 would leave audit events on the live system referencing records that no longer exist (in either the live DB or backup), but with no provenance trace.
 
 The schedule in ADR-0015 satisfies this by construction:
+
 - The longest-lived audit-log event types are 7 years (e.g., `committee_data_key.rotation.completed`, `member.added/.removed`, `audit.forensic_reveal.4eyes_*`, `retention.deleted`).
 - Every backup older than 42 days is hard-deleted; backups older than 42d cannot exist.
 - Every audit row whose `target_id` references a record in another table is bounded by the underlying-record-ceiling rule (privacy-review §3.5, encoded in ADR-0015): audit row outlives linked record by at most 30 days.
 
-**Concrete invariant:** *"Backups older than the longest audit-log event retention can be hard-deleted without leaving 'events we cannot explain' on the live system; conversely, no live audit row references a deleted underlying record older than 30 days."* The two retention regimes (live audit-log schedule + backup lifecycle) are coherent.
+**Concrete invariant:** _"Backups older than the longest audit-log event retention can be hard-deleted without leaving 'events we cannot explain' on the live system; conversely, no live audit row references a deleted underlying record older than 30 days."_ The two retention regimes (live audit-log schedule + backup lifecycle) are coherent.
 
 **No new test obligation specific to ADR-0012**; the coherence is structurally enforced by ADR-0015's schedule and the existing T17 / T16 acceptance tests. Cross-reference recorded so a future amendment to either ADR-0015 (changing an event-type retention) or this ADR (changing the 42d hard-delete window) triggers a re-read of the coherence claim.
 
 **Reversibility:** N/A — this is a documented architectural cross-reference, not a new operational rule. The reversibility is governed by ADR-0015 and the original ADR-0012 amendment.
 
 **Compliance check additions:**
+
 - [x] Audit-log per-event retention (ADR-0015) and backup hard-delete (this ADR) are coherent — no orphan audit events at any retention horizon.
 
 ---
@@ -4554,11 +4680,13 @@ reasoning.
 service worker for offline.
 
 **Pros:**
+
 - No app-store PI processor.
 - One codebase, one CSP, one update path.
 - Auto-update; no abandoned-old-version users.
 
 **Cons:**
+
 - iOS push is recent and quirky.
 - Some platform APIs (background sync on iOS) are limited.
 - Users have to know about "Add to Home Screen."
@@ -4568,10 +4696,12 @@ service worker for offline.
 **Description:** Native shells over a web view or RN.
 
 **Pros:**
+
 - Better push, background sync, biometric integration.
 - Familiar install path.
 
 **Cons:**
+
 - **Apple and Google become PI subprocessors** (install records,
   device-bound IDs, crash reports if not disabled). Each requires a
   flagged-human-gate decision.
@@ -4584,6 +4714,7 @@ service worker for offline.
 **Description:** Ship PWA in v1; revisit native later when complaints justify it.
 
 **Pros:**
+
 - Keep the v1 attack surface minimal.
 - Decision can be re-opened with real data.
 
@@ -4607,15 +4738,18 @@ the crypto core stays the same.
 ## Consequences
 
 ### Positive
+
 - No app-store install record.
 - No Apple/Google as subprocessors.
 - One CSP, one update path.
 
 ### Negative / accepted tradeoffs
+
 - iOS push experience is weaker than native.
 - "Add to home screen" requires education in onboarding copy.
 
 ### Risks
+
 - iOS Safari changes that break PWA install. Mitigated by tracking
   webkit-dev signals and degrading to in-browser use (still functional).
 
@@ -4650,11 +4784,13 @@ the crypto core stays the same.
 **Reversibility:** Easy. The sanitize module is one file; changing the strip strategy is a one-PR change.
 
 **Compliance check additions:**
+
 - [x] Data minimization (PIPEDA Principle 4): location data not collected unless explicitly entered by the user.
 - [x] Mitigates F-46.
 - [x] Reduces the T3 export risk surface (an exported photo cannot smuggle GPS to the employer).
 
 **Follow-ups (amend T10 acceptance — see Task-list amendments at end):**
+
 - [ ] **T10 amended:** EXIF/IPTC/XMP strip + canvas re-encode + round-trip test; same pipeline applies to T14 (s.51 evidence photos).
 - [ ] Designer: photo-capture UI labels include "GPS off; location is free-text or from the location list."
 
@@ -4692,7 +4828,8 @@ same: **no PI may leave the app via error tracking**, regardless of provider.
 ### Option A: Sentry SaaS, EU region, with SDK-layer scrubbing
 
 **Description:** Sentry's EU-hosted instance (Frankfurt). PI scrubbing is
-done at the SDK *before* the event leaves the browser/server:
+done at the SDK _before_ the event leaves the browser/server:
+
 - `beforeSend` strips all `request.cookies`, `request.headers.authorization`,
   query params, form body fields.
 - Allowlist of breadcrumb categories; everything else dropped.
@@ -4704,12 +4841,14 @@ Sentry GmbH has a DPA, signs SCCs, and is GDPR-aligned. PIPEDA-comparable
 safeguards present.
 
 **Pros:**
+
 - Zero ops.
 - Mature product; good UX for triage.
 - EU residency is PIPEDA-comparable; documented in DPA.
 
 **Cons:**
-- A third party sees *something* (scrubbed payloads, IPs unless we strip).
+
+- A third party sees _something_ (scrubbed payloads, IPs unless we strip).
   Even with aggressive scrubbing, residual risk of accidental PI leak via
   a new code path the scrubber doesn't know about.
 - Sentry Inc. is US-incorporated even if the EU instance is in Frankfurt;
@@ -4724,11 +4863,13 @@ error tracker. Run it on a small VM or in Supabase-adjacent infra in
 Canada.
 
 **Pros:**
+
 - No third-party PI processor at all.
 - Fully Canadian residency.
 - Same SDK story as Sentry.
 
 **Cons:**
+
 - Real ops burden for a team-of-one: patching, monitoring, backups,
   capacity, the meta-question of "what monitors the monitor."
 - If GlitchTip is down, errors are lost (not the worst — but means we
@@ -4739,9 +4880,11 @@ Canada.
 **Description:** Just log to Supabase logs / a Canadian log sink.
 
 **Pros:**
+
 - Simplest.
 
 **Cons:**
+
 - No stack-trace aggregation, no de-dup, no release tagging. The
   implementer will be blind to client-side errors.
 - Reactive: we hear about bugs from users, late.
@@ -4770,14 +4913,17 @@ to migrate.
 ## Consequences
 
 ### Positive
+
 - Actionable error data in front of the implementer fast.
 - No ops burden.
 
 ### Negative / accepted tradeoffs
+
 - Sentry Inc. is a US-incorporated processor (scrubbed metadata only).
 - Cross-border flow Canada → EU (metadata, not PI).
 
 ### Risks
+
 - A new code path accidentally sends PI (e.g., a form-validation error
   containing the user's input). Mitigated by:
   - `beforeSend` deny-by-default for fields not on an allowlist.
@@ -4807,6 +4953,7 @@ to migrate.
 ## Amendment: Edge Function logging contract + Phase-0 tracing deferral (2026-05-22, F-D + F-H)
 
 **Amends ADR-0010** above. Triggers:
+
 - **F-D** (observability-setup pass #2): `observability/logging.md` §4 specifies the Edge Function structured-logging contract as "applies until contradicted." The substance is in the spec; the architectural pointer is missing. Without ratification, a downstream agent could plausibly reach for a different logging library, a different scrubber, or `console.log(req.body)` patterns without tripping a clear ADR-level rule.
 - **F-H** (observability-setup pass #2): distributed tracing is deferred to Phase 4 (sre-specialist) per `observability/README.md` §1; at 12-active-user scale this is acceptable. The deferral is a deliberate Phase-0 simplification, not an oversight; recording it here gives the future sre-specialist a clear handoff anchor.
 
@@ -4823,6 +4970,7 @@ The substance lives in `observability/logging.md` §4 (Edge Functions are the hi
 **Rule 4 — Edge Function log retention matches the audit-log retention floor, subject to F-F (privacy-reviewer pass).** `observability/README.md` §1 currently records: Sentry 30 days for errors / 7 days for breadcrumbs, Supabase Edge Function logs 7 days on Pro tier, audit-log 24 months. The retention values are NOT changed by this amendment. The pointer to **F-F (privacy-reviewer pass — open, see below)** is recorded explicitly so a future change to audit-log retention triggers a re-read of these values for consistency.
 
 **Architectural enforcement (binding for the implementer and verifier):**
+
 - Every Edge Function imports the shared logger module; direct `console.*` calls in `supabase/functions/` fail CI via semgrep.
 - The shared logger's `safeFields` allowlist is the union allowlist (browser + server + Edge Functions); no per-surface relaxation.
 - The canary-PII test fixture (T02 acceptance) traverses every Edge Function path and asserts the canary is absent from Supabase function logs. F-09 (`.context/threat-model.md` §3.1) is the test obligation; this amendment is the ADR-level commitment.
@@ -4835,11 +4983,13 @@ The substance lives in `observability/logging.md` §4 (Edge Functions are the hi
 **No distributed tracing in Phase 0.** OpenTelemetry, custom span propagation, or vendor tracing tools (Datadog, Honeycomb, etc.) are NOT in scope until the sre-specialist (Phase 4) has 90 days of real production data and a defensible SLO target.
 
 **Why this is acceptable at v1:**
+
 - Scale is 12 active committee members; the audit log IS the trace for trust-changing events (every meaningful action is hash-chained, pseudonym-attributed, timestamped). At this concurrency, an incident-responder can walk a `request_id` across Sentry → Edge Function log → audit row by hand.
 - Adding a tracing vendor would be a new PI-adjacent subprocessor (see ADR-0010 main body — Sentry is the only one approved, and adding another triggers a flagged human-gate decision per `.context/constraints.md` rule 3).
 - The cost of introducing tracing later is **mechanical**: `request_id` is already wired through all three pillars (browser → Edge Function → audit log → Sentry) per F-D Rule 3. The sre-specialist's introduction of a tracing tool fills in the spans without re-architecting the correlation key.
 
 **Re-open trigger:** any of the following indicates Phase 4 should consider tracing:
+
 - Sustained traffic where the audit log's volume (today's enum vocabulary, including the Amendment A extensions) is insufficient to localize a slow request.
 - An incident where a slow Edge Function → Postgres query path cannot be diagnosed from `request_id` correlation alone.
 - A formal SLO target (per `observability/README.md` §7 placeholder) that requires latency-percentile observability the structured logger does not provide.
@@ -4853,6 +5003,7 @@ This is a mechanical cross-reference, not a substantive ADR change, but it lands
 **Canonical event name: `queue.integrity_fail`** (matches ADR-0014 as the load-bearing source).
 
 The alias `inspection.synced.hmac_fail` was used in `observability/audit-log.md` §1 as an alternative name for the same event; this amendment confirms `queue.integrity_fail` is the single canonical name, and `inspection.synced.hmac_fail` is a **forbidden alias**. The verifier (Phase 2) wires a semgrep rule that fails CI on any reference to the alias in code, tests, migrations, or documentation outside of:
+
 - This file (this amendment block documenting the deprecation).
 - ADR-0014 (the source of truth — already uses `queue.integrity_fail`).
 - `observability/audit-log.md` §6 finding #2 (which already flagged this duplication; the verifier rule's allowlist for the alias string is exactly these three files until the audit-log spec drops the alias in a subsequent observability-setup pass — observability-setup files are not modified by the architect per this pass's hard rules).
@@ -4878,7 +5029,7 @@ Both items are privacy-review checkpoints, not architecture decisions. They are 
 
 ### Follow-ups
 
-- [ ] **T02 acceptance (existing, no change needed here — observability/* files not modified per this pass's hard rules):** the canary-PII test in `observability/sentry-scrub.ts` and the Edge Function canary test in `observability/logging.md` §4 already test the substance of Rules 1–4. The ADR-level ratification adds no new task; it adds reviewer authority.
+- [ ] **T02 acceptance (existing, no change needed here — observability/\* files not modified per this pass's hard rules):** the canary-PII test in `observability/sentry-scrub.ts` and the Edge Function canary test in `observability/logging.md` §4 already test the substance of Rules 1–4. The ADR-level ratification adds no new task; it adds reviewer authority.
 - [ ] **Privacy-reviewer pass (next, parallel with threat-modeler second pass):** F-E and F-F land in their output.
 - [ ] **Verifier (Phase 2):** semgrep rule `no-inspection-synced-hmac-fail-alias` (the F-B forbidden-alias rule) added to `scripts/verify.sh`.
 - [ ] **sre-specialist (Phase 4):** tracing re-evaluation per F-H re-open triggers.
@@ -4921,11 +5072,13 @@ keys but empty values (so missing-key checks pass and the structure is
 stable).
 
 **Pros:**
+
 - Adding fr-CA later is a translation pass, not a refactor.
 - Locale-aware formatting from day 1.
 - ESLint rule `no-literal-string` (or equivalent) prevents regression.
 
 **Cons:**
+
 - Slightly more verbose components.
 - Translators need to be briefed; not a v1 burden.
 
@@ -4934,9 +5087,11 @@ stable).
 **Description:** Just write English strings; add i18n when we need French.
 
 **Pros:**
+
 - Slightly less code.
 
 **Cons:**
+
 - This is the exact pack lesson we wrote down — don't do it.
 
 ### Option C: i18n + machine-translated fr-CA from day 1
@@ -4944,9 +5099,11 @@ stable).
 **Description:** Generate fr-CA strings with MT, ship dual locale.
 
 **Pros:**
+
 - French users covered immediately.
 
 **Cons:**
+
 - MT quality on labour-law and OHSA terms is poor.
 - Constraints.md forbids third-party AI processors without a flagged
   decision; this is one.
@@ -4970,13 +5127,16 @@ that = same task, repeated.
 ## Consequences
 
 ### Positive
+
 - Future-proof; adding French is straightforward.
 - Locale-aware formatting from day 1.
 
 ### Negative / accepted tradeoffs
+
 - Slight upfront discipline cost.
 
 ### Risks
+
 - Developer forgets to use `t()`. Mitigated by ESLint rule fail-on-CI.
 
 ## Compliance check
@@ -5004,6 +5164,7 @@ Plan §3.2 ("Worker-side-only ★") prohibits employer-network dependency.
 Plan §13 locks the device stance as personal-device-only, advisory only.
 
 A PWA cannot reliably detect:
+
 - MDM enrollment.
 - Whether the device is employer-owned.
 - Whether DNS, certificates, or proxy infrastructure are employer-controlled.
@@ -5028,9 +5189,11 @@ real and we can only mitigate it with UX nudges and session hygiene.
 positive signal.
 
 **Pros:**
+
 - Looks strong on a slide.
 
 **Cons:**
+
 - High false-positive rate on legitimate setups (corporate-pinned home
   WiFi, university captive portals).
 - High false-negative rate on actual MDM (modern MDM is invisible to
@@ -5040,6 +5203,7 @@ positive signal.
 ### Option B: Advisory + session hygiene + visible posture
 
 **Description:**
+
 - First-launch screen: "This app is intended for personal devices. If
   you are reading this on an employer-issued device, your employer may
   be able to read what you do here. Don't install. Use a personal phone."
@@ -5054,10 +5218,12 @@ positive signal.
   device that lives in a locker.
 
 **Pros:**
+
 - Honest about what the app can and can't enforce.
 - Layered: warning → behavior → recovery.
 
 **Cons:**
+
 - Some users will install on employer devices anyway. Documented.
 
 ### Option C: Require attestation (WebAuthn attestation)
@@ -5066,9 +5232,11 @@ positive signal.
 isn't employer-controlled.
 
 **Pros:**
+
 - Strongest signal.
 
 **Cons:**
+
 - WebAuthn attestation doesn't tell us if the device is employer-owned;
   only that the authenticator is genuine.
 - Privacy-hostile (attestation can be a tracking vector).
@@ -5092,16 +5260,19 @@ behavior choices, not data choices.
 ## Consequences
 
 ### Positive
+
 - Honest UX.
 - Real reduction in T2 risk via session hygiene.
 - Recovery (panic wipe, session revocation) gives a coerced user a
   visible action.
 
 ### Negative / accepted tradeoffs
+
 - We can't prevent a determined user from installing on the wrong
   device.
 
 ### Risks
+
 - A worker without a personal smartphone is excluded. Mitigated by
   shared committee device option (locker), called out in onboarding.
 
@@ -5138,7 +5309,7 @@ form, no anonymous web submission, no email ingestion.
 - Preserve labour-relations privilege — the rep mediates submission;
   the rep is the legitimate channel.
 - Anonymity of the original complaining worker is achieved via the
-  rep's "anonymous source" toggle, *not* by an anonymous public form.
+  rep's "anonymous source" toggle, _not_ by an anonymous public form.
 - Eliminate the "worker fills it out at their desk on the employer
   network and it shows up in logs" failure mode.
 
@@ -5151,20 +5322,24 @@ concerns table. Source can be marked anonymous (default ON) or have a
 worker name attached (name is E2EE under committee key).
 
 **Pros:**
+
 - Minimal attack surface.
 - Privilege story is intact.
 - RLS enforces it server-side; no public route.
 
 **Cons:**
+
 - Workers without rep access depend on the rep being responsive.
   Process risk, not a tech risk.
 
 ### Option B: Public unauthenticated form
 
 **Pros:**
+
 - Workers can submit without going through a rep.
 
 **Cons:**
+
 - Spam, enumeration of committee existence.
 - Submission from employer network has all the IP/header risks.
 - Requires CAPTCHA → third-party processor.
@@ -5173,9 +5348,11 @@ worker name attached (name is E2EE under committee key).
 ### Option C: Email-to-app intake
 
 **Pros:**
+
 - Familiar.
 
 **Cons:**
+
 - Email is the worst possible privacy channel for this content;
   contents pass through SMTP relays, anti-spam, mailbox providers.
 
@@ -5186,6 +5363,7 @@ worker name attached (name is E2EE under committee key).
 ### Rationale
 
 Locked by plan §13. The ADR records the rationale and the constraints:
+
 - No public route exists in the app — confirmed by route inventory in CI.
 - Concerns table RLS denies INSERT unless `committee_membership.active = true`.
 - "Anonymous source" toggle in the rep's form defaults to ON.
@@ -5199,11 +5377,13 @@ with a fresh threat model. Don't.
 ## Consequences
 
 ### Positive
+
 - Tiny attack surface.
 - Privilege intact.
 - T8 (account enumeration) addressed structurally.
 
 ### Negative / accepted tradeoffs
+
 - Workers must reach a rep to submit. Mitigated by "How to raise a
   concern" doc the committee distributes off-app.
 
@@ -5256,12 +5436,14 @@ The copy lives in `i18n/en-CA/reprisal-intake.json` (or the localization-special
 5. **The labour lawyer (HG-10) reviews the copy** before T13 ships. The copy may evolve through labour-lawyer review; the architectural contract (bullets 1–4 above) does not.
 
 **Out of scope for this amendment (deliberately not decided here):**
+
 - The exact final wording is **not** an architect decision; the labour-lawyer's review (HG-10) and the accessibility-specialist's plain-language review own the final copy. This amendment ratifies the architectural shape (the gating, the four-bullets contract, the per-intake re-render).
 - The visual treatment of the consent surface is the designer's, per the design system Surface C spec.
 
 **Reversibility:** **Easy** on copy text (one i18n catalog key). **Medium** on the structural gating (the submit-handler short-circuit pattern + the snapshot test); **Hard** on the architectural posture that "reprisal intake requires informed consent at every intake" — reversing this would re-introduce the PIPEDA Principle 4.3.6 gap that privacy-review Q1 identified.
 
 **Compliance check additions:**
+
 - [x] PIPEDA Principle 4.3 (Consent), 4.3.6 (sensitivity-appropriate consent) — informed, meaningful, per-intake consent for C4 disclosure.
 - [x] PIPEDA Principle 4.4 (Limiting Collection) — the consent surface names exactly what disclosure occurs.
 - [x] PIPEDA Principle 4.5 (Limiting Use, Disclosure, Retention) — disclosure scope (pseudonymized feed projection per Amendment D) is the narrowest viable.
@@ -5269,6 +5451,7 @@ The copy lives in `i18n/en-CA/reprisal-intake.json` (or the localization-special
 - [x] WCAG 2.0 AA / AODA — accessibility-specialist sign-off (HG-10 + AODA gate, NOT architect-owned).
 
 **Cross-references:**
+
 - **ADR-0003 Amendment D** — the architectural mechanism (pseudonymized projection view) the consent surface names as "they will NOT see who created it."
 - **ADR-0003 Amendment E** — the forensic-reveal 4-eyes procedure the consent surface names as "Forensic review can identify the author only after a two-member committee approval."
 - **HG-10** — labour-lawyer + privacy-lawyer review (already pre-launch per plan §13).
@@ -5276,6 +5459,7 @@ The copy lives in `i18n/en-CA/reprisal-intake.json` (or the localization-special
 - **privacy-review §2.4 (copy draft) / §5 fold-in item 2 / §7 test obligation 5.**
 
 **Follow-ups (T13 acceptance amended — see Task-list amendments at end):**
+
 - [ ] **T13 acceptance amended** — the four-bullets snapshot test + the structural gating test on the submit button + the per-intake re-render test.
 - [ ] **localization-specialist (next pass):** adds `reprisal-intake` i18n keys to `i18n/en-CA/` catalog with the §2.4 copy (subject to labour-lawyer review).
 - [ ] **designer (next pass):** Surface C spec covers the consent surface placement, the four-bullets layout, the consent-checkbox + "Save entry" gating UX.
@@ -5299,6 +5483,7 @@ medium reversibility (a sprint to swap, plus a re-test of every page) so
 we should commit and justify.
 
 The app is:
+
 - Mobile-first, PWA-installable, offline-capable for inspections.
 - ~10–20 distinct screens at launch.
 - Built by a team of one + the agent pack.
@@ -5324,11 +5509,12 @@ adapter-static or adapter-node deployment, Vite under the hood. Service
 worker via Workbox or hand-rolled. Stores for client state.
 
 **Pros:**
+
 - **Bundle size:** typically 40–60% smaller than equivalent Next routes
   for similar UX. On a shop floor with weak signal, this matters.
 - **Mental model:** runes/stores are simpler than RSC + Server Actions
-  + Client Components. One mental boundary (server vs. client) instead
-  of three (server-component vs. client-component vs. server-action).
+  - Client Components. One mental boundary (server vs. client) instead
+    of three (server-component vs. client-component vs. server-action).
 - **PWA story:** SvelteKit's service-worker integration is first-class;
   the `service-worker.ts` file is a documented hook.
 - **libsodium-wrappers:** runs cleanly client-side; no RSC/streaming
@@ -5337,6 +5523,7 @@ worker via Workbox or hand-rolled. Stores for client state.
   intake/inspection flows; progressive enhancement out of the box.
 
 **Cons:**
+
 - **Smaller ecosystem** than React. Some niche libraries (e.g., a
   fancy table) don't exist; we either roll our own or pick a less-
   loved alternative. For this app the component set is small and we'd
@@ -5350,11 +5537,13 @@ worker via Workbox or hand-rolled. Stores for client state.
 service worker bolted on.
 
 **Pros:**
+
 - Largest ecosystem.
 - Server Components reduce some client JS for read-only pages.
 - React talent pool huge.
 
 **Cons:**
+
 - **RSC complexity** adds mental load — "is this a client component?
   why is this hook erroring? what's serializable across the boundary?"
   For a team of one, this is real cognitive tax.
@@ -5374,9 +5563,11 @@ service worker bolted on.
 enhancement.
 
 **Pros:**
+
 - Forms-first philosophy aligns with our intake/inspection flows.
 
 **Cons:**
+
 - The Remix → React Router merger is recent; ecosystem in flux.
 - Same RSC-direction signals as Next; less stable.
 
@@ -5387,6 +5578,7 @@ enhancement.
 ### Rationale
 
 Three decisive factors:
+
 1. **Bundle size on weak networks** is a real shop-floor constraint.
 2. **Mental simplicity for a team of one** — SvelteKit has one
    client/server boundary; Next has three.
@@ -5405,16 +5597,19 @@ the app surface is small. Don't migrate without a stated reason.
 ## Consequences
 
 ### Positive
+
 - Smaller bundles → faster first paint on shop-floor devices.
 - Simpler mental model → fewer bugs from team-of-one churn.
 - First-class PWA + service worker story.
 - libsodium client-only, no server-bundle leakage risk.
 
 ### Negative / accepted tradeoffs
+
 - Smaller talent pool if we ever hire.
 - Some libraries don't exist; build or find alternatives.
 
 ### Risks
+
 - A future maintainer doesn't know Svelte. Mitigated: the agent pack
   knows it; Svelte's learning curve is gentle.
 - SvelteKit major-version breaking changes. Mitigated: pin, upgrade
@@ -5471,20 +5666,24 @@ genericness").
 auth.uid()`.
 
 **Pros:**
+
 - Minimal RLS surface.
 - No cross-tenant exposure possible by construction.
 - Easier audit.
 
 **Cons:**
+
 - Adding a second committee later = new Supabase project + onboarding
   process, OR a real multi-tenancy refactor. Either is a v2 project.
 
 ### Option B: Multi-tenant with `tenant_id` everywhere
 
 **Pros:**
+
 - "Future-ready."
 
 **Cons:**
+
 - Every table grows a column we don't need.
 - Every RLS policy gains a join.
 - Risk of a missing `WHERE tenant_id = ...` somewhere is the highest-
@@ -5511,10 +5710,12 @@ will adopt).
 ## Consequences
 
 ### Positive
+
 - RLS policies stay short and reviewable.
 - Onboarding = one committee key, period.
 
 ### Negative / accepted tradeoffs
+
 - Second-committee adoption is a project, not a config.
 
 ## Compliance check
@@ -5558,29 +5759,35 @@ that policies live in version-controlled migrations next to schema.
 A CI check fails if any table is missing RLS.
 
 **Pros:**
+
 - Authoritative at the data layer.
 - Reviewable in PRs.
 - Survives any app-layer bug.
 
 **Cons:**
+
 - More SQL to read.
 - Policies must be tested (we will — test-writer covers).
 
 ### Option B: RLS on PI tables only; app-layer authz elsewhere
 
 **Pros:**
+
 - Less SQL.
 
 **Cons:**
+
 - "Elsewhere" is exactly where a bug will land.
 - Two authz models = bugs at the seam.
 
 ### Option C: App-layer authz only (RLS off)
 
 **Pros:**
+
 - Familiar.
 
 **Cons:**
+
 - Loses Supabase's central value-prop for this use case.
 - App-layer bug → data leak.
 
@@ -5594,9 +5801,10 @@ This is the defining safety property of Supabase + RLS, and the entire
 threat model leans on it. App code is allowed to bug; RLS is not.
 
 **Operational rules:**
+
 - Every `CREATE TABLE` migration in the same file includes RLS + policies.
 - `verify.sh` includes a check: `SELECT relname FROM pg_class WHERE
-  relkind='r' AND relrowsecurity=false AND relnamespace = ...` returns
+relkind='r' AND relrowsecurity=false AND relnamespace = ...` returns
   zero rows in CI.
 - Test-writer writes policy tests for every table: positive (the right
   user can read) and negative (the wrong user cannot).
@@ -5611,14 +5819,17 @@ property). Not a thing we'd reverse.
 ## Consequences
 
 ### Positive
+
 - Bugs in app code don't become data leaks.
 - Policies are reviewable artifacts.
 
 ### Negative / accepted tradeoffs
+
 - More SQL per migration.
 - Test-writer's load grows with each table.
 
 ### Risks
+
 - Performance hit from policy joins. Mitigated by sensible indexes (every
   policy that uses `committee_membership` joins through an indexed FK).
 
@@ -5641,6 +5852,7 @@ property). Not a thing we'd reverse.
 **Decider(s):** user (locked in plan §13 item 9), architect ratifying; amendments per HG-2 + HG-6, user-approved
 
 **Amendment note (2026-05-22):** two amendments at the end of this ADR.
+
 1. **HG-2 amendment** adds **Invariant 8** (key-material mutation audit-log enum) — trigger F-07 / O-12 / threat-model §6 "Additional invariant to add".
 2. **HG-6 amendment** strengthens **Invariant 7** (C4 second-decrypt audit) to require server-side enforcement via a `SECURITY DEFINER` view, closing the client-cooperative-logging gap — trigger F-33 / O-14 / threat-model §6 Invariant 7 strengthened.
 
@@ -5667,6 +5879,7 @@ no longer defensible.
 ### Option A: Per-user identity + per-committee data key, wrapped per member (locked)
 
 **Description:**
+
 - Each user generates an X25519 identity keypair client-side at first login.
 - Private key encrypted with a passkey-derived secret + stored locally
   in IndexedDB. A backup blob is stored on the server, encrypted with a
@@ -5710,9 +5923,11 @@ no longer defensible.
 member's public key.
 
 **Pros:**
+
 - No "committee key" rotation problem.
 
 **Cons:**
+
 - Storage explodes (N copies of every blob).
 - Adding a new member requires re-encrypting every record they should
   see, in their browser, at invite time. UX nightmare on 1000+
@@ -5724,9 +5939,11 @@ member's public key.
 ### Option C: Server-side encryption only (no E2EE)
 
 **Pros:**
+
 - Standard, simple.
 
 **Cons:**
+
 - Defeats the entire point of the design. Plan §1 says explicitly that
   the server's compromise must not reveal worker-side content.
 
@@ -5749,16 +5966,19 @@ it right.
 ## Consequences
 
 ### Positive
+
 - Server compromise yields ciphertext only for C3/C4.
 - Removal rotation gives forward secrecy from removed members.
 - Audit log can record decryption attempts (per-record key access).
 
 ### Negative / accepted tradeoffs
+
 - No admin recovery; lost passphrase + lost device = lost user.
 - Client crypto on hot paths (manageable; libsodium-wrappers WASM is fast).
 - Rotation is a complex operation; needs careful testing.
 
 ### Risks
+
 - Implementation bug leaks plaintext to server. Mitigated by:
   - second-opinion-reviewer on every PR touching crypto;
   - integration test asserting all writes to C3/C4 columns are well-
@@ -5793,22 +6013,23 @@ it right.
 
 ### Invariant 8 — Key-material mutations have a defined audit-log enum
 
-**Testable invariant (canonical wording):** *"Every mutation of key material — identity-keypair generation, identity-private-key recovery-blob write or restore, committee-data-key wrap creation, committee-data-key unwrap (read of own wrap), committee-data-key rotation lifecycle, and member-revocation key teardown — emits exactly one audit-log row drawn from a closed enum, hash-chained to the previous audit row, with actor_id, target ids, and rotation_id where applicable."*
+**Testable invariant (canonical wording):** _"Every mutation of key material — identity-keypair generation, identity-private-key recovery-blob write or restore, committee-data-key wrap creation, committee-data-key unwrap (read of own wrap), committee-data-key rotation lifecycle, and member-revocation key teardown — emits exactly one audit-log row drawn from a closed enum, hash-chained to the previous audit row, with actor_id, target ids, and rotation_id where applicable."_
 
 **Audit-log enum values (closed allowlist; appended to the existing audit-log `action` enum, not replacing):**
 
-| Enum value | When emitted | Required fields |
-|---|---|---|
-| `identity_keypair.created` | New user generates their identity keypair at first-login enrollment (per §2.1 of threat model). | `actor_id`, `target_user_id` (= actor), `ident_pubkey_fingerprint` |
-| `identity_privkey.recovery_blob.written` | User completes recovery-passphrase enrollment and posts the wrapped privkey backup (F-08 pipeline). | `actor_id`, `target_user_id`, `kdf_params_version` |
-| `identity_privkey.recovery_blob.restored` | User triggers passphrase-based recovery to restore identity privkey on a new device. | `actor_id`, `target_user_id`, `device_fingerprint` |
-| `committee_data_key.wrapped_for_member` | An existing member wraps the committee data privkey for a new (or re-added) member. | `actor_id`, `target_member_id`, `committee_key_id`, `rotation_id?` |
-| `committee_data_key.unwrap` | A member opens their own wrap to recover the committee privkey for the session (the "read your own wrap" path). | `actor_id`, `committee_key_id` |
-| `committee_data_key.rotation.started` | First step of rotation: advisory lock acquired, new keypair generated. | `actor_id`, `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `trigger` ∈ {`member_removal`,`scheduled`,`incident`} |
-| `committee_data_key.rotation.completed` | Final step of rotation: new wraps in place for all remaining members; previous wraps in `committee_key_history`. | `actor_id`, `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `members_rewrapped_count` |
-| `committee_data_key.member_revoked` | The removed member's wrap row is deleted (atomic with rotation per Invariant 6). | `actor_id`, `removed_member_id`, `committee_key_id`, `rotation_id` |
+| Enum value                                | When emitted                                                                                                     | Required fields                                                                                                                    |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `identity_keypair.created`                | New user generates their identity keypair at first-login enrollment (per §2.1 of threat model).                  | `actor_id`, `target_user_id` (= actor), `ident_pubkey_fingerprint`                                                                 |
+| `identity_privkey.recovery_blob.written`  | User completes recovery-passphrase enrollment and posts the wrapped privkey backup (F-08 pipeline).              | `actor_id`, `target_user_id`, `kdf_params_version`                                                                                 |
+| `identity_privkey.recovery_blob.restored` | User triggers passphrase-based recovery to restore identity privkey on a new device.                             | `actor_id`, `target_user_id`, `device_fingerprint`                                                                                 |
+| `committee_data_key.wrapped_for_member`   | An existing member wraps the committee data privkey for a new (or re-added) member.                              | `actor_id`, `target_member_id`, `committee_key_id`, `rotation_id?`                                                                 |
+| `committee_data_key.unwrap`               | A member opens their own wrap to recover the committee privkey for the session (the "read your own wrap" path).  | `actor_id`, `committee_key_id`                                                                                                     |
+| `committee_data_key.rotation.started`     | First step of rotation: advisory lock acquired, new keypair generated.                                           | `actor_id`, `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `trigger` ∈ {`member_removal`,`scheduled`,`incident`} |
+| `committee_data_key.rotation.completed`   | Final step of rotation: new wraps in place for all remaining members; previous wraps in `committee_key_history`. | `actor_id`, `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `members_rewrapped_count`                             |
+| `committee_data_key.member_revoked`       | The removed member's wrap row is deleted (atomic with rotation per Invariant 6).                                 | `actor_id`, `removed_member_id`, `committee_key_id`, `rotation_id`                                                                 |
 
 **Testable assertions (T07 + T18 acceptance amended — see Task-list amendments at end):**
+
 - For each enum value above, fire the corresponding flow in an integration test and assert exactly one audit-log row appears with that action, the required fields populated, and a valid `prev_hash` linking to the previous row.
 - Negative: corrupt the audit-log emission path for `committee_data_key.rotation.completed`; assert the rotation flow is aborted (audit emission is a precondition, not a side effect).
 - Coverage: every code path that mutates `committee_key.*`, `users.identity_pubkey`, or `users.identity_privkey_recovery_blob` is grepped in CI; any path not paired with an emission of one of the enum values fails CI.
@@ -5817,25 +6038,26 @@ it right.
 **Reversibility:** Easy on enum values (additive); medium on retroactive recoverage (would require migration of existing audit rows — none at time of amendment).
 
 **Compliance check additions:**
+
 - [x] PIPEDA Principle 9 (Individual Access) — key-material events are part of "what was done with your data" attribution.
 - [x] Strengthens T4 (insider compromise) detection surface.
 
 ### Amendment A (extended 2026-05-22, F-C / observability-setup pass #2): chain-emission vs structured-log-event vocabulary split + C3 read enum additions
 
-**Why amended again:** observability-setup pass #2 surfaced two enum gaps and one architectural question about what the audit-log chain is *for*. The strengthening below resolves both.
+**Why amended again:** observability-setup pass #2 surfaced two enum gaps and one architectural question about what the audit-log chain is _for_. The strengthening below resolves both.
 
 **The architectural rule (declared explicitly here, so downstream agents stop deriving it from context):**
 
-> *"The tamper-evident hash-chained audit log captures **trust-changing** events: key-material mutations, C3/C4 reads, destructive ops on C4, exports, retention deletions, integrity-relevant cache and queue failures, and the alert-pipeline echo. High-frequency volumetric telemetry — including but not limited to per-request authentication assertions — does NOT participate in the hash chain and lives only in the structured-log surface (observability/logging.md). The chain is a forensic record, not an activity stream."*
+> _"The tamper-evident hash-chained audit log captures **trust-changing** events: key-material mutations, C3/C4 reads, destructive ops on C4, exports, retention deletions, integrity-relevant cache and queue failures, and the alert-pipeline echo. High-frequency volumetric telemetry — including but not limited to per-request authentication assertions — does NOT participate in the hash chain and lives only in the structured-log surface (observability/logging.md). The chain is a forensic record, not an activity stream."_
 
 This rule is the closed test: any new event proposed for audit-log emission MUST be classifiable as trust-changing under the criteria above OR be downgraded to structured-log-only. The verifier enforces this by reading the chain-emission enum as a closed allowlist (CHECK constraint per audit-log.md §1) and by treating any code path that calls `audit_emit(...)` with a value not on the allowlist as a CI failure.
 
 **Enum additions (chain-participating; appended to the closed allowlist):**
 
-| Enum value | Audit-event class¹ | When emitted | Required fields |
-|---|---|---|---|
-| `work_refusal.read` | C3 read (T14) | Server-emitted from the `SECURITY DEFINER` view `work_refusal_read_audited`, atomic with the SELECT (same enforcement shape as Amendment B). | `work_refusal_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
-| `s51_evidence.read` | C3 read (T14) | Server-emitted from the `SECURITY DEFINER` view `s51_evidence_read_audited`, atomic with the SELECT. | `s51_evidence_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
+| Enum value          | Audit-event class¹ | When emitted                                                                                                                                 | Required fields                                                                 |
+| ------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `work_refusal.read` | C3 read (T14)      | Server-emitted from the `SECURITY DEFINER` view `work_refusal_read_audited`, atomic with the SELECT (same enforcement shape as Amendment B). | `work_refusal_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
+| `s51_evidence.read` | C3 read (T14)      | Server-emitted from the `SECURITY DEFINER` view `s51_evidence_read_audited`, atomic with the SELECT.                                         | `s51_evidence_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
 
 ¹ "Audit-event class" classifies the AUDIT-LOG ROW (the read-event surface); it is NOT the data classification of the underlying record. The underlying `work_refusal` / `s51_evidence` BODIES are C4 per the §PI inventory (`notes_ct` / sealed photos sit at-rest under the committee data key). The library correctly uses `target_class: 'C4'` when emitting these events; the "C3 read" label here means the audit-row carries no plaintext PI and is readable by active members under HG-6. Disambiguation per privacy-review-t14 T14-A1 / Q1 (G-T14-15).
 
@@ -5845,21 +6067,22 @@ These two values bring T14's `work_refusal` and `s51_evidence` C3-read paths und
 
 The following events are emitted via the structured logger (`observability/logging.md` §2 / §3) only. They do NOT call `audit_emit(...)`. They do NOT appear in `audit_log`. Attempts to add them to the chain-emission allowlist fail CI.
 
-| Structured-log event | Why structured-log-only | Where it lives |
-|---|---|---|
+| Structured-log event  | Why structured-log-only                                                                                                                                                                                                                                                                                                                       | Where it lives                                                                                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `auth.passkey.assert` | High-frequency per-request authentication assertion. Volumetric (every request that performs WebAuthn assertion emits one). The trust-changing auth events — `auth.passkey.enrolled`, `auth.passkey.revoked`, `session.revoked` — DO chain-participate (already in the audit-log §1 Auth + session enum); the per-request assertion does not. | `observability/logging.md` §3 "Auth (T05)" — `auth.method`, `auth.result`, `auth.session_id_pseudonym` attributes on a structured-log line at INFO level. |
 
 Other high-frequency events that are NOT chain-participating include: rate-limit-hit events, retry-success events, cache-hit telemetry, feature-flag-evaluation events. These are NOT exhaustively enumerated here (the negative space would be infinite); the rule is the architectural rule stated above, and the verifier's CHECK constraint on `audit_log.event_type` is the structural enforcement.
 
 **Testable assertions (added to T07/T14/T18 acceptance — see Task-list amendments at end):**
 
-- *Closed-enum coverage:* an integration test enumerates every code path that calls `audit_emit(...)` and asserts each `event_type` argument is on the closed allowlist. Any new caller introducing a non-allowlisted value fails CI.
-- *Volumetric-event exclusion:* an integration test executes 100 successful WebAuthn assertions and asserts zero new rows in `audit_log` with `event_type = 'auth.passkey.assert'` (this value never reaches the chain). Counter-test: assert 100 structured-log lines with `event = 'auth.passkey.assert'` were emitted at INFO level.
-- *T14 server-enforced C3 read:* identical test shape to Amendment B's HG-6 tests, applied to `work_refusal_read_audited` and `s51_evidence_read_audited`. Direct SELECT bypass returns zero rows + no audit row; indirection success returns exactly one corresponding `work_refusal.read` / `s51_evidence.read` row with same-transaction timestamp; atomicity failure rolls back both.
+- _Closed-enum coverage:_ an integration test enumerates every code path that calls `audit_emit(...)` and asserts each `event_type` argument is on the closed allowlist. Any new caller introducing a non-allowlisted value fails CI.
+- _Volumetric-event exclusion:_ an integration test executes 100 successful WebAuthn assertions and asserts zero new rows in `audit_log` with `event_type = 'auth.passkey.assert'` (this value never reaches the chain). Counter-test: assert 100 structured-log lines with `event = 'auth.passkey.assert'` were emitted at INFO level.
+- _T14 server-enforced C3 read:_ identical test shape to Amendment B's HG-6 tests, applied to `work_refusal_read_audited` and `s51_evidence_read_audited`. Direct SELECT bypass returns zero rows + no audit row; indirection success returns exactly one corresponding `work_refusal.read` / `s51_evidence.read` row with same-transaction timestamp; atomicity failure rolls back both.
 
-**Reversibility:** Easy on enum values (additive). The chain-vs-structured-log architectural rule is *hard* to reverse — moving a high-frequency event into the chain would explode storage and erode the chain's forensic value; we won't.
+**Reversibility:** Easy on enum values (additive). The chain-vs-structured-log architectural rule is _hard_ to reverse — moving a high-frequency event into the chain would explode storage and erode the chain's forensic value; we won't.
 
 **Compliance check additions:**
+
 - [x] PIPEDA Principle 4 (Limiting Collection) — volumetric telemetry stays in the time-bounded log retention (7 days on Supabase Edge logs per `observability/README.md` §1), not in the 24-month audit-log retention. Less data, longer-lived, only where the data matters.
 - [x] Strengthens T4 (insider compromise) detection surface on T14 paths (matches Amendment B's posture on T13).
 
@@ -5875,7 +6098,7 @@ Other high-frequency events that are NOT chain-participating include: rate-limit
 
 **Strengthened wording (replaces the operational reading of Invariant 7):**
 
-*"Every read of a C4 row writes a `sensitive.read` audit-log row in the same database transaction as the SELECT, regardless of client cooperation. Direct SELECT on the underlying C4 table is revoked from every Postgres role except a single `c4_read_service` role used only by the indirection layer. Clients access C4 rows exclusively through a `SECURITY DEFINER` view (or equivalent Edge Function indirection) that performs the SELECT and the audit-log INSERT atomically; failure of either step rolls back both. Bypassing the indirection layer with any other role's JWT returns zero rows (RLS + GRANT-revoke)."*
+_"Every read of a C4 row writes a `sensitive.read` audit-log row in the same database transaction as the SELECT, regardless of client cooperation. Direct SELECT on the underlying C4 table is revoked from every Postgres role except a single `c4_read_service` role used only by the indirection layer. Clients access C4 rows exclusively through a `SECURITY DEFINER` view (or equivalent Edge Function indirection) that performs the SELECT and the audit-log INSERT atomically; failure of either step rolls back both. Bypassing the indirection layer with any other role's JWT returns zero rows (RLS + GRANT-revoke)."_
 
 **Operational implementation:**
 
@@ -5899,16 +6122,17 @@ Other high-frequency events that are NOT chain-participating include: rate-limit
 
 **Testable assertions (T13 acceptance amended — see Task-list amendments at end):**
 
-- *Direct-SELECT bypass test:* with a valid member JWT, attempt `SELECT * FROM reprisal_log` directly (bypassing the view). Assert zero rows returned (GRANT-revoke holds) and no audit row written.
-- *Indirection-path success:* SELECT from `reprisal_log_read_audited` with an authorized member's JWT. Assert (a) row returned, (b) exactly one `sensitive.read` audit-log row appears with the matching `target_id` and `actor_id` and the same transaction's timestamp.
-- *Atomicity test:* simulate a `jhsc_log_sensitive_read` failure (e.g., revoke INSERT on audit_log to `c4_read_service` for the test); assert the SELECT rolls back and the client receives an error; no row returned, no partial audit.
-- *Bypass via Edge Function:* if used, the Edge Function path is covered by the same three tests.
-- *Coverage:* `pg_proc` enumeration in CI asserts every C4 table has a corresponding `*_read_audited` view (or documented Edge Function) and that the underlying table's SELECT GRANT is empty for `authenticated`, `anon`, `service_role`.
-- *F-50 alerting:* if the daily audit-log integrity job detects a row in `reprisal_log` SELECT-able by the audit-log query but with no matching `sensitive.read` row for that read window, it alerts (defense-in-depth check; should be zero matches in practice).
+- _Direct-SELECT bypass test:_ with a valid member JWT, attempt `SELECT * FROM reprisal_log` directly (bypassing the view). Assert zero rows returned (GRANT-revoke holds) and no audit row written.
+- _Indirection-path success:_ SELECT from `reprisal_log_read_audited` with an authorized member's JWT. Assert (a) row returned, (b) exactly one `sensitive.read` audit-log row appears with the matching `target_id` and `actor_id` and the same transaction's timestamp.
+- _Atomicity test:_ simulate a `jhsc_log_sensitive_read` failure (e.g., revoke INSERT on audit_log to `c4_read_service` for the test); assert the SELECT rolls back and the client receives an error; no row returned, no partial audit.
+- _Bypass via Edge Function:_ if used, the Edge Function path is covered by the same three tests.
+- _Coverage:_ `pg_proc` enumeration in CI asserts every C4 table has a corresponding `*_read_audited` view (or documented Edge Function) and that the underlying table's SELECT GRANT is empty for `authenticated`, `anon`, `service_role`.
+- _F-50 alerting:_ if the daily audit-log integrity job detects a row in `reprisal_log` SELECT-able by the audit-log query but with no matching `sensitive.read` row for that read window, it alerts (defense-in-depth check; should be zero matches in practice).
 
 **Reversibility:** Medium. The view + role layer is straightforward to refactor, but reverting to client-cooperative logging would be a security regression we wouldn't do.
 
 **Compliance check additions:**
+
 - [x] T11 (compelled access detection) materially strengthened: a coerced member cannot bypass the audit by tweaking the client.
 - [x] T4 (insider compromise) detection surface strengthened: server-emitted audit is the source of truth.
 
@@ -5922,13 +6146,13 @@ The threat-modeler is running a parallel second pass to confirm the threat-model
 
 ### Invariant 9 — Protected-modal accessibility and coercion-resistance behavior is synchronous with mount
 
-**Testable invariant (canonical wording):** *"For every modal in the protected-modal list (`export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`), the focus trap engages, the `aria-labelledby` is announced, and Escape / backdrop-click handlers are bound **synchronously with mount** — i.e., during the same task tick that adds the modal DOM node. The opacity transition (and any other entrance animation) is decorative and runs independently; it does NOT gate the accessibility or coercion-resistance behavior. The animation may complete before, during, or after focus trap engagement; the user-perceived semantics of "the modal is open" are owned by mount, not by transition completion."*
+**Testable invariant (canonical wording):** _"For every modal in the protected-modal list (`export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`), the focus trap engages, the `aria-labelledby` is announced, and Escape / backdrop-click handlers are bound **synchronously with mount** — i.e., during the same task tick that adds the modal DOM node. The opacity transition (and any other entrance animation) is decorative and runs independently; it does NOT gate the accessibility or coercion-resistance behavior. The animation may complete before, during, or after focus trap engagement; the user-perceived semantics of "the modal is open" are owned by mount, not by transition completion."_
 
 **Operational rules (binding for the design-system spec, the implementer, and the test-writer):**
 
 1. **Focus trap engages on `modal.show()` (mount), not on `transitionend`.** The implementer wires the focus trap inside the same microtask that inserts the modal node; the focus-trap library's first focusable-element search runs against the just-mounted subtree. The animation (opacity, scale, slide) starts on the next paint and runs without blocking the focus contract.
 2. **`aria-labelledby` announcement is synchronous with mount.** Screen readers should announce the modal's title on mount; the announcement does not wait for the entrance animation.
-3. **Escape and backdrop-click handlers are bound on mount.** A scripted dismissal of a protected modal during the entrance animation MUST be blocked the same way it would be after the animation completes — the protected-modal list per the design system already specifies that Escape and backdrop-click are *no-ops* on these five variants (they require an explicit dismissal action). That rule applies from mount, not from transition end.
+3. **Escape and backdrop-click handlers are bound on mount.** A scripted dismissal of a protected modal during the entrance animation MUST be blocked the same way it would be after the animation completes — the protected-modal list per the design system already specifies that Escape and backdrop-click are _no-ops_ on these five variants (they require an explicit dismissal action). That rule applies from mount, not from transition end.
 4. **The animation MAY be skipped without changing behavior.** Under `prefers-reduced-motion`, or in a test harness that disables animations, the modal is fully functional with no visible transition. The focus trap is unaffected (it never depended on the transition firing).
 5. **Tests assert mount-time behavior.** The test-writer adds, for each of the five protected modals, a test that: (a) mounts the modal; (b) within the same task tick, assertions that the focus trap is active (focus is inside the modal subtree), that `document.activeElement` is the modal's first focusable element, and that a programmatic Escape keydown does NOT close the modal; (c) optionally awaits `transitionend` and re-asserts the same; (d) the assertions in (b) must pass even when animations are disabled (CSS `animation: none !important` test mode).
 
@@ -5948,10 +6172,10 @@ The invariant is a hard rule on `protected modals only` — the design system's 
 
 ### Testable assertions (added to design-system rules and to the test-writer's pre-T11/T13 obligations)
 
-- *Per-modal mount-time test (5 variants):* for each of `export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`, assert focus inside the modal within the same task tick as mount; assert Escape and backdrop-click are bound and no-op; assert `aria-labelledby` announcement was queued.
-- *Animation-disabled run:* same assertions hold when CSS animations are disabled at the test layer (no `transitionend` ever fires; the modal still works).
-- *Scripted-dismissal race test (coercion case):* mount the modal, immediately dispatch `keydown: Escape` AND `click` on the backdrop in the same task tick; assert the modal remains open and `document.activeElement` remains inside the modal subtree. Repeat with the animation set to 1000ms to exaggerate the window; same assertion.
-- *Synchronous mount of audit prerequisites:* for `export_interstitial`, assert that the audit-emission preflight (the "I confirm this export" handler binding, the `derived_from_concerns` flag rendering — per RA-1 compensating controls) is *also* synchronous with mount; an attacker who races a confirm-click against the entrance transition cannot trigger an export that pre-empts the visible flag.
+- _Per-modal mount-time test (5 variants):_ for each of `export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`, assert focus inside the modal within the same task tick as mount; assert Escape and backdrop-click are bound and no-op; assert `aria-labelledby` announcement was queued.
+- _Animation-disabled run:_ same assertions hold when CSS animations are disabled at the test layer (no `transitionend` ever fires; the modal still works).
+- _Scripted-dismissal race test (coercion case):_ mount the modal, immediately dispatch `keydown: Escape` AND `click` on the backdrop in the same task tick; assert the modal remains open and `document.activeElement` remains inside the modal subtree. Repeat with the animation set to 1000ms to exaggerate the window; same assertion.
+- _Synchronous mount of audit prerequisites:_ for `export_interstitial`, assert that the audit-emission preflight (the "I confirm this export" handler binding, the `derived_from_concerns` flag rendering — per RA-1 compensating controls) is _also_ synchronous with mount; an attacker who races a confirm-click against the entrance transition cannot trigger an export that pre-empts the visible flag.
 
 ### Cross-references
 
@@ -5986,13 +6210,13 @@ The invariant is a hard rule on `protected modals only` — the design system's 
 
 #### Invariant 9.a — Trap engages on `modal.show()` (covered by the original Invariant 9 wording; explicitly named here)
 
-*"For every modal in the protected-modal list (`export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`), the focus trap, the Escape-handler binding, the click-outside-no-op binding, and the `aria-modal=true` / `aria-labelledby` announcement MUST be installed synchronously with `modal.show()`, before the next animation frame, and BEFORE any opacity transition begins. The opacity transition is decorative-only."*
+_"For every modal in the protected-modal list (`export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending`), the focus trap, the Escape-handler binding, the click-outside-no-op binding, and the `aria-modal=true` / `aria-labelledby` announcement MUST be installed synchronously with `modal.show()`, before the next animation frame, and BEFORE any opacity transition begins. The opacity transition is decorative-only."_
 
 This is the threat-modeler's M-53a (`.context/threat-model.md` §3.3) restated as an ADR-level invariant; the original Amendment C already covered this property. Tests per `.context/threat-model.md` §8 T11 / F-53 M-53a entry.
 
 #### Invariant 9.b — Announce-on-open `ready` promise gates input acceptance (NEW — adds explicit coverage for M-53b)
 
-*"Protected modals MUST NOT accept any keyboard or pointer input that resolves to a primary or secondary action until the announce-on-open contract has resolved. The announce-on-open contract is: `aria-modal=true` is set, `aria-labelledby` is wired to the headline element, and the headline element is present in the accessibility tree. The implementer represents this as a `ready` promise; primary/secondary action handlers MUST await this promise before dispatching. For `export_interstitial` specifically: a confirm before `ready` resolves results in NO `export.minutes` / `export.recommendation` audit-log row AND no Blob URL creation."*
+_"Protected modals MUST NOT accept any keyboard or pointer input that resolves to a primary or secondary action until the announce-on-open contract has resolved. The announce-on-open contract is: `aria-modal=true` is set, `aria-labelledby` is wired to the headline element, and the headline element is present in the accessibility tree. The implementer represents this as a `ready` promise; primary/secondary action handlers MUST await this promise before dispatching. For `export_interstitial` specifically: a confirm before `ready` resolves results in NO `export.minutes` / `export.recommendation` audit-log row AND no Blob URL creation."_
 
 **Operational rule.** The `ready` promise resolves when the modal's title/label element is in the accessibility tree AND the screen-reader announcement has been queued (the implementer's choice between aria-live region or `aria-modal` + `aria-labelledby` reachability check; final form per design-system spec). Primary/secondary action handlers MUST `await` this promise. The button's `aria-disabled` SHOULD also flip to `false` only when `ready` resolves; the handler-await is the load-bearing control (a scripted click that bypasses the disabled state still hits an await).
 
@@ -6000,7 +6224,7 @@ This is the threat-modeler's M-53b restated as an ADR-level sub-invariant. Tests
 
 #### Invariant 9.c — Underlying surface is `inert` from t=0; scrim captures keydown + pointer during transition (NEW — adds explicit coverage for M-53c)
 
-*"When a protected modal mounts, the underlying surface MUST be marked `aria-hidden=true` AND `inert` (or polyfilled equivalent) AND its focusable descendants MUST have `tabindex=-1` applied synchronously with `modal.show()`. The scrim MUST have `pointer-events: auto` and a `keydown` capture-phase handler that swallows Tab/Enter/Space/Escape targeted at the underlying surface during the transition."*
+_"When a protected modal mounts, the underlying surface MUST be marked `aria-hidden=true` AND `inert` (or polyfilled equivalent) AND its focusable descendants MUST have `tabindex=-1` applied synchronously with `modal.show()`. The scrim MUST have `pointer-events: auto` and a `keydown` capture-phase handler that swallows Tab/Enter/Space/Escape targeted at the underlying surface during the transition."_
 
 **Operational rule.** The underlying surface is rendered `inert` (or a polyfill emulating its behaviour on browsers without native `inert` support) at the same task tick as the modal mount. The scrim DOM node is part of the modal mount and has `pointer-events: auto` AND a capture-phase `keydown` listener from t=0 that swallows Tab/Enter/Space/Escape; click events at scrim coordinates land on the scrim, not on the underlying surface beneath. Programmatic `.focus()` calls (e.g., from a malicious extension) on underlying-surface elements MUST NOT move `document.activeElement` to those elements; the focus-trap library's underlying-subtree filter rejects such moves.
 
@@ -6027,13 +6251,13 @@ This is the threat-modeler's M-53c restated as an ADR-level sub-invariant. Tests
 
 ### The problem
 
-The pre-amendment audit-log RLS (`observability/audit-log.md` §3 / `observability/README.md` §1) made `reprisal.created` rows readable by all active members with the full payload — `{ts, actor_pseudonym, target_id, target_class}`. Privacy-review Q1 found that this **bundled** the social-norm-backstop benefit (other members see "reprisal activity is happening") with **disclosure of authorship** (every active member sees that *rep X* logged a reprisal at *time T*) — exposing the most-likely target of reprisal (the rep themselves) to the rest of the committee, including any co-opted member (threat-model A3 / O-4).
+The pre-amendment audit-log RLS (`observability/audit-log.md` §3 / `observability/README.md` §1) made `reprisal.created` rows readable by all active members with the full payload — `{ts, actor_pseudonym, target_id, target_class}`. Privacy-review Q1 found that this **bundled** the social-norm-backstop benefit (other members see "reprisal activity is happening") with **disclosure of authorship** (every active member sees that _rep X_ logged a reprisal at _time T_) — exposing the most-likely target of reprisal (the rep themselves) to the rest of the committee, including any co-opted member (threat-model A3 / O-4).
 
 The fix mirrors Amendment B's HG-6 pattern: a `SECURITY DEFINER` view that projects the audit row with the load-bearing columns suppressed.
 
 ### The amendment — author-pseudonymized projection via SECURITY DEFINER view
 
-**Testable invariant (canonical wording):** *"Reprisal write-event RLS projections (`reprisal.created`, `reprisal.read`, `reprisal.status_changed.4eyes_pending`, `reprisal.status_changed.4eyes_completed`, and the analogous `work_refusal.*` and `s51_evidence.*` write events once T14 enumerates them) MUST suppress `actor_pseudonym` and bucket `ts` to the hour in the feed visible to active committee members; the underlying `audit_log` row retains `actor_pseudonym` and the original microsecond `ts` for forensic use; un-projected access requires the 4-eyes forensic-reveal procedure (Amendment E)."*
+**Testable invariant (canonical wording):** _"Reprisal write-event RLS projections (`reprisal.created`, `reprisal.read`, `reprisal.status_changed.4eyes_pending`, `reprisal.status_changed.4eyes_completed`, and the analogous `work_refusal._`and`s51_evidence._`write events once T14 enumerates them) MUST suppress`actor_pseudonym`and bucket`ts`to the hour in the feed visible to active committee members; the underlying`audit_log`row retains`actor_pseudonym`and the original microsecond`ts` for forensic use; un-projected access requires the 4-eyes forensic-reveal procedure (Amendment E)."_
 
 ### Operational implementation
 
@@ -6146,7 +6370,7 @@ The fix mirrors Amendment B's HG-6 pattern: a `SECURITY DEFINER` view that proje
 4. **Two new audit-log enum values** (appended to the closed allowlist per ADR-0003 Amendment A's enum):
    - `audit.forensic_reveal.4eyes_pending` — emitted when a proposer creates a `pending_forensic_reveals` row.
    - `audit.forensic_reveal.4eyes_completed` — emitted when a distinct approver approves.
-   Both events are hash-chained per ADR-0003 Amendment A; both carry `{actor_id, target_audit_log_id, proposer_id, approver_id?, proposer_reason}` in their meta. Both have **7-year retention** per ADR-0015 (added to the schedule in the same pass).
+     Both events are hash-chained per ADR-0003 Amendment A; both carry `{actor_id, target_audit_log_id, proposer_id, approver_id?, proposer_reason}` in their meta. Both have **7-year retention** per ADR-0015 (added to the schedule in the same pass).
 5. **No external KMS / external signer involvement.** Like Amendment B's `c4_read_service`, the `forensic_read_service` is a Postgres role; the 4-eyes gate is the RLS + check function. Consistent with ADR-0010's "Sentry is the only non-Supabase subprocessor" posture.
 6. **Reveal-session expiry.** A successful reveal exposes `actor_pseudonym` to the proposer and approver for 24 hours via the `pending_forensic_reveals.revealed_actor_pseudonym` column (RLS-scoped to those two members). After 24 hours the row's `expired_at` is set by a scheduled job and the column is cleared; further reveals require a new 4-eyes proposal. The audit-chain rows remain at 7y retention.
 
@@ -6208,8 +6432,8 @@ Threat-model F-54 STRIDE-walked the accommodation options and chose hold-to-reve
 
 The closed allowlist of `event_type` values per ADR-0003 Amendment A gains one new value:
 
-| Enum value | When emitted | Required fields |
-|---|---|---|
+| Enum value                              | When emitted                                                                                                                                  | Required fields                                                      |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `identity_privkey.recovery_blob.viewed` | Every successful invocation of "show passphrase again" on Surface D.6. Emitted by the server-instrumented logging path BEFORE the DOM render. | `actor_id`, `enrollment_session_id`, `reveal_count_in_session`, `ts` |
 
 **Pre-enrollment scoping.** Pre-enrollment users have a special enrollment-scoped logging path (the audit-log row is committed under the partially-enrolled user's id, which is bound to the TOTP-invite-consumed session per ADR-0002). The architecture treats this as an authenticated event under the partially-enrolled identity; the audit chain hash-chains normally.
@@ -6295,6 +6519,7 @@ that downstream agents must follow.
 ### Option A: Passkeys only, TOTP enrollment bootstrap (locked)
 
 **Description:**
+
 - First device: user enrolls with a TOTP code emailed to them at
   invitation time (or shown by the inviting co-chair on a printed
   invite slip). TOTP is consumed once to bind the first passkey.
@@ -6306,11 +6531,13 @@ that downstream agents must follow.
   long-lived refresh tokens.
 
 **Pros:**
+
 - Phishing-resistant by design.
 - No password attack surface.
 - Supabase Auth supports WebAuthn natively.
 
 **Cons:**
+
 - Browser support gaps on older devices (Android 9-, Safari 15-).
   Mitigated by setting a minimum supported browser baseline.
 - Lost-device recovery requires an alternate enrolled device OR a
@@ -6319,18 +6546,22 @@ that downstream agents must follow.
 ### Option B: Passkeys + password fallback
 
 **Pros:**
+
 - Familiar.
 
 **Cons:**
+
 - Defeats T7 mitigation; password is the weakest link.
 - Locked out by plan §13.
 
 ### Option C: SMS / email magic link
 
 **Pros:**
+
 - Familiar.
 
 **Cons:**
+
 - SIM-swap risk; email-account compromise.
 - Locked out by plan §13.
 
@@ -6343,6 +6574,7 @@ that downstream agents must follow.
 Locked by plan §13. The threat model leans on passkeys for T6, T7, T11.
 
 **Operational rules:**
+
 - Minimum browser baseline documented and enforced (no service worker
   registration on unsupported browsers; visible "your browser is too
   old" page).
@@ -6364,15 +6596,18 @@ passkeys would be a security regression we wouldn't do.
 ## Consequences
 
 ### Positive
+
 - Phishing-resistant.
 - No password DB to leak.
 - Sessions are short and revocable.
 
 ### Negative / accepted tradeoffs
+
 - Users on very old devices can't use the app. We accept that.
 - Lost-device recovery is a process, not a click.
 
 ### Risks
+
 - Supabase Auth bug in WebAuthn. Mitigated by tracking Supabase Auth
   CVEs in dependency-manager and gating with adversarial-reviewer.
 
@@ -6391,7 +6626,7 @@ passkeys would be a security regression we wouldn't do.
 
 ## Amendment G (2026-05-23, amendment pass #4, HG-15): T05 auth-side-table schema reconciliation, TOTP consumed-log, plaintext-code drop, HMAC standard adopted
 
-**Amends ADR-0002** above. Trigger: privacy-review-t05 §2.1 Findings 1 + 2 + §3.4 Finding 5 + §3.5 Finding 6 + §7 PI inventory rows + §9 architect-amendment items 1–3; consolidated security-reviewer blockers B1 (HMAC-not-SHA), B2 (TOTP consumed-log documentation), B3 (`public.users` field-set divergence), B4 (`auth_totp_bootstraps.totp_code` plaintext column). Cross-references **ADR-0016** (this pass; the general operational-table retention + HMAC-pseudonymization standard); **threat-model F-38** (TOTP code reuse-detection — the consumed log's *raison d'être*); **threat-model F-43** (TOTP bootstrap 15-minute ceiling); **HG-15** (the new architect-owned gate covering this Amendment and ADR-0016).
+**Amends ADR-0002** above. Trigger: privacy-review-t05 §2.1 Findings 1 + 2 + §3.4 Finding 5 + §3.5 Finding 6 + §7 PI inventory rows + §9 architect-amendment items 1–3; consolidated security-reviewer blockers B1 (HMAC-not-SHA), B2 (TOTP consumed-log documentation), B3 (`public.users` field-set divergence), B4 (`auth_totp_bootstraps.totp_code` plaintext column). Cross-references **ADR-0016** (this pass; the general operational-table retention + HMAC-pseudonymization standard); **threat-model F-38** (TOTP code reuse-detection — the consumed log's _raison d'être_); **threat-model F-43** (TOTP bootstrap 15-minute ceiling); **HG-15** (the new architect-owned gate covering this Amendment and ADR-0016).
 
 ### The amendment
 
@@ -6404,6 +6639,7 @@ T05 (auth core + auth migration) introduced four auth-supporting tables whose sc
 The migration creates `auth_totp_consumed_log (user_id uuid, totp_code_hash bytea, consumed_at timestamptz)`. The table's purpose is to **detect TOTP-code re-submission within the bootstrap's lifetime + a safety margin** — without this table, an attacker who obtains a consumed TOTP code and replays it before the issuing co-chair notices has a structural racing window. The detection requires retaining the keyed hash of consumed codes for the longest plausible attacker window.
 
 **Operational rules:**
+
 1. **Retention:** 24 hours after `consumed_at`. Per ADR-0016 schedule. Defensible: the bootstrap's own life ceiling is 15 minutes; 24 hours is a ~100x safety margin against clock-skew + delayed-replay + investigation-latency. Longer retention does not serve any documented purpose under PIPEDA Principle 4.5.
 2. **`totp_code_hash`:** stores `hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')` per ADR-0016 §Decision 1. **NEVER** stores `digest(p_totp_code, 'sha256')`. A 10^6-element value space against a plain hash is brute-forceable in microseconds; against a keyed HMAC the brute-force requires the key, which is not on the row.
 3. **Classification (per privacy-review-t05 §7):** `user_id` C1, `totp_code_hash` C1 (HMAC of a short-lived secret), `consumed_at` C1.
@@ -6416,6 +6652,7 @@ The migration creates `auth_totp_consumed_log (user_id uuid, totp_code_hash byte
 The T05 migration as-shipped creates BOTH `secret_hash bytea NOT NULL` AND `totp_code text NOT NULL` with `UNIQUE (user_id, totp_code)`. The plaintext column duplicates the same secret in two columns; a backup taken in the 15-minute window between issue and consume captures the code in plaintext (Principle 4.7 Safeguards gap; Principle 4.4 over-collection).
 
 **Operational rules:**
+
 1. **Drop the `totp_code` column.** Migration-handler respin.
 2. **Rewrite the unique constraint** to `UNIQUE (user_id)` — one bootstrap per user at a time (the 15-min ceiling enforces this in time; the unique constraint enforces it in the table).
 3. **Rewrite the consume comparison** in `enroll_first_passkey` from `v_bootstrap.totp_code = p_totp_code` to `v_bootstrap.secret_hash = hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')`. The plaintext code is in the function's argument bind only; never persists.
@@ -6425,9 +6662,10 @@ The T05 migration as-shipped creates BOTH `secret_hash bytea NOT NULL` AND `totp
 
 **Status:** ratified per blocker B3.
 
-The T05 migration creates `public.users` as the **auth side-table**, containing only the fields needed for auth + role gating: `{id, active, role, totp_destroyed_at, created_at, updated_at}`. This is the cleaner design (auth side-table; `committee_membership` is a separate concept introduced in T06; identity-key material lands in T07). The PI inventory as written in the original ADR-0001 → §PI inventory section described a `users` table whose composition was the *future* end-state including T06 + T07 fields.
+The T05 migration creates `public.users` as the **auth side-table**, containing only the fields needed for auth + role gating: `{id, active, role, totp_destroyed_at, created_at, updated_at}`. This is the cleaner design (auth side-table; `committee_membership` is a separate concept introduced in T06; identity-key material lands in T07). The PI inventory as written in the original ADR-0001 → §PI inventory section described a `users` table whose composition was the _future_ end-state including T06 + T07 fields.
 
 **The PI inventory is amended in this pass (see §PI inventory below) to reflect the T05 truth:**
+
 - `users.id` (C1) — Supabase Auth UUID, retention "Membership + 24mo" per ADR-0016. Unchanged in essence.
 - `users.active` (C1) — boolean; migrated from the originally-planned `committee_membership.active` to `users` per the T05 schema. Retention "Membership + 24mo."
 - `users.role` (C1) — text/enum; same migration; same retention.
@@ -6435,6 +6673,7 @@ The T05 migration creates `public.users` as the **auth side-table**, containing 
 - `users.created_at` / `users.updated_at` (C0) — operational timestamps; not PI.
 
 **Deferred to later tasks (recorded for traceability, not part of T05's schema):**
+
 - `users.display_name` (C2) — T06 owns. The original `users.display_name` row in §PI inventory is **deferred from "exists today" to "added in T06"**; the row is preserved in §PI inventory with an explicit T06-introduction note.
 - `users.off_employer_contact` (C2) — T06 owns. Same treatment.
 - `users.identity_pubkey` (C1) — T07 owns. Same treatment.
@@ -6448,7 +6687,7 @@ The T05 migration creates `public.users` as the **auth side-table**, containing 
 
 The migration's four pseudonym derivation sites — `auth_totp_consumed_log.totp_code_hash`, `audit_emit(...).meta.cred_id_pseudonym`, `audit_emit(...).meta.session_id_pseudonym`, and the `alert.fired`-shaped pseudonym at the fourth site — are all rewritten to use `hmac(X, current_setting('app.hmac_pseudonym_key'), 'sha256')` per ADR-0016 §Decision 1.
 
-**The `alert.fired` site (privacy-review-t05 §8 cross-cutting observation #5) is renamed in `meta`** from `actor_pseudonym` to `subject_pseudonym`. The outer audit row's `actor_pseudonym` is the alert-dispatcher (`sys-alert-dispatcher`); the embedded one is the **subject** the alert is firing on — a distinct semantic. Renaming avoids the column-name collision and clarifies that the embedded value is "who the alert is *about*", not "who fired it." The observability spec wording for the `alert.fired` meta shape is amended on observability-setup's next pass to document `subject_pseudonym`; the architect does NOT modify `observability/*` per hard rules.
+**The `alert.fired` site (privacy-review-t05 §8 cross-cutting observation #5) is renamed in `meta`** from `actor_pseudonym` to `subject_pseudonym`. The outer audit row's `actor_pseudonym` is the alert-dispatcher (`sys-alert-dispatcher`); the embedded one is the **subject** the alert is firing on — a distinct semantic. Renaming avoids the column-name collision and clarifies that the embedded value is "who the alert is _about_", not "who fired it." The observability spec wording for the `alert.fired` meta shape is amended on observability-setup's next pass to document `subject_pseudonym`; the architect does NOT modify `observability/*` per hard rules.
 
 #### G.5 — `auth.passkey.assert` structured-log emission is per-attempt (canonical wording fix)
 
@@ -6457,6 +6696,7 @@ The migration's four pseudonym derivation sites — `auth_totp_consumed_log.totp
 ADR-0003 **Amendment A extension** (structured-log-only event vocabulary table) was ambiguous on whether `auth.passkey.assert` emits **per attempt** or **per successful assertion**. The implementation emits per-attempt (success path AND failure paths, before the rate-limit gate). The architect adopts **per-attempt as canonical** — failure-path emissions provide load-bearing operational signal (rate-limit pressure, credential-not-found patterns, signature-verification-failure patterns) that a per-success-only posture would lose. This matches the current code; no implementer respin is needed for this point.
 
 **Wording fix to ADR-0003 Amendment A extension structured-log table:**
+
 - Existing wording at line ~1927 reads `auth.passkey.assert | High-frequency per-request authentication assertion. Volumetric (every request that performs WebAuthn assertion emits one).`
 - The wording is **clarified, not replaced**, in this pass: emission is **per-attempt** (success and failure paths both emit; emission happens BEFORE the rate-limit gate so that rate-limit-induced rejections still produce signal). The line above is read as already covering this when "every request that performs WebAuthn assertion" is interpreted literally; this amendment makes that reading binding.
 
@@ -6552,7 +6792,7 @@ self-hosting, accepting the **US-incorporated-provider tradeoff**:
 Supabase Inc. and the underlying AWS region operator are US legal
 persons, so US legal process (CLOUD Act, NSLs, FISA 702) can in
 principle reach the platform. This ADR does **not** re-litigate the
-decision — it captures the *how* of the mitigation so that downstream
+decision — it captures the _how_ of the mitigation so that downstream
 agents understand exactly what makes this hosting choice defensible.
 
 The threats this ADR mitigates are T1 (employer subpoena), T5 (provider
@@ -6572,13 +6812,15 @@ compromise), and a foreseeable CLOUD-Act class of risk.
 ### Option A: Supabase Cloud `ca-central-1`, with E2EE doing the heavy lifting (locked)
 
 **Description:** Use Supabase Cloud's managed Postgres + Auth + Storage
-+ Edge Functions, all in `ca-central-1`. C3/C4 data is E2EE under the
-committee key; the server holds ciphertext. RLS is the second layer
-(against an attacker with a stolen session token). Telemetry is
-scrubbed at the SDK layer (ADR-0010). No third-party PI processor
-beyond Supabase itself.
+
+- Edge Functions, all in `ca-central-1`. C3/C4 data is E2EE under the
+  committee key; the server holds ciphertext. RLS is the second layer
+  (against an attacker with a stolen session token). Telemetry is
+  scrubbed at the SDK layer (ADR-0010). No third-party PI processor
+  beyond Supabase itself.
 
 **Pros:**
+
 - Zero ops; managed Postgres + Auth + Storage + RLS in one stack.
 - Canadian region.
 - The E2EE design (ADR-0003) means Supabase sees ciphertext for the
@@ -6586,8 +6828,9 @@ beyond Supabase itself.
 - Fits the budget envelope.
 
 **Cons / accepted tradeoffs:**
+
 - Supabase Inc. is US-incorporated; AWS ca-central is operated by a US
-  entity. CLOUD-Act-reachable in principle for whatever Supabase *can*
+  entity. CLOUD-Act-reachable in principle for whatever Supabase _can_
   produce, which for C3/C4 is ciphertext.
 - Edge Functions run inside Supabase — they handle ciphertext +
   metadata only; **plaintext must never appear in an Edge Function**
@@ -6603,10 +6846,12 @@ beyond Supabase itself.
 Canadian VPS.
 
 **Pros:**
+
 - Eliminates US-incorporated provider in the path.
 - Same APIs, same code, in theory.
 
 **Cons:**
+
 - Real ops work for a team of one: patching Postgres, Postgrest,
   GoTrue, Storage, Realtime, etc. Each is a security-critical service.
 - Patching delay = larger attack window than Supabase Cloud.
@@ -6624,9 +6869,11 @@ Canadian VPS.
 ### Option C: Vanilla Postgres on Canadian VPS, hand-rolled auth + storage
 
 **Pros:**
+
 - Smallest provider surface.
 
 **Cons:**
+
 - Hand-rolled auth is a hard no for a tool whose users are protected
   under OHSA s.50. We don't roll our own crypto/auth.
 - More ops than Option B.
@@ -6640,6 +6887,7 @@ Canadian VPS.
 E2EE (ADR-0003) is the load-bearing mitigation. With C3/C4 data as
 ciphertext-only on the server, the practical reach of a CLOUD-Act
 order is reduced to:
+
 - Metadata (timestamps, row counts, user IDs).
 - Audit log (C1, contains no content).
 - Auth session tokens (short-lived, passkey-bound).
@@ -6651,6 +6899,7 @@ skipped, more bugs in services that don't get the platform team's
 attention.
 
 **Operational invariants:**
+
 1. **Region pin:** all Supabase resources in `ca-central-1`. Verified
    on every deploy (CI check reads the project metadata).
 2. **E2EE for C3/C4:** every C3/C4 column write goes through the
@@ -6676,6 +6925,7 @@ scenarios; if we ever do, we do it deliberately, not under pressure.
 ## Consequences
 
 ### Positive
+
 - Zero ops.
 - Canadian region.
 - Cost fits budget.
@@ -6683,12 +6933,14 @@ scenarios; if we ever do, we do it deliberately, not under pressure.
   matters.
 
 ### Negative / accepted tradeoffs
+
 - CLOUD-Act-reachable for ciphertext + metadata.
 - Single-vendor concentration. Mitigated by ADR-0012 (backup to a
   second Canadian provider, ciphertext only).
 - Edge Functions cannot use plaintext — limits some convenience patterns.
 
 ### Risks
+
 - Supabase pricing change or feature removal. Mitigated: contract not
   long-term; egress is small; migration possible if needed.
 - A future "AI feature" added by Supabase silently processes data. We
@@ -6733,6 +6985,7 @@ Newest on top.
 The `audit_log` table reserves a `signature bytea` column for a server-side Ed25519 signature over `hash`. **At v1, that column ships unfilled.** The tamper-evidence story for v1 is the BLAKE2b-256 hash chain alone: each row's `hash` is computed over the canonical-JSON serialization of its content plus `prev_hash`, by the `SECURITY DEFINER` `audit_emit(...)` function whose owner is `audit_writer_role`. Clients cannot forge a hash; downstream verifiers (the T18 integrity job; the post-rotation and post-export triggered checks per F-50) detect any in-place mutation of an existing row.
 
 **This is NOT:**
+
 - A claim that the audit log is non-repudiable against a platform admin. It is not.
 - A claim that no signer mechanism will ever exist. The column is reserved precisely so that v2 can fill it without a migration.
 
@@ -6744,7 +6997,7 @@ The observability-setup agent surfaced this gap in their pass-#2 findings (F-A):
 
 Three reasons v1 ships hash-only:
 
-1. **A5 is already in scope and load-bearing-mitigated elsewhere.** The threat model treats `A5 — Hosting provider compromise / rogue admin` as a credible adversary (threat-model §1). The primary control against A5 is **E2EE (ADR-0003)**: A5 with full platform access sees ciphertext for C3/C4 data and metadata + audit content for C1. The audit-log forgery vector under RA-2 is bounded by what A5 can already do — they can produce a *consistent record*, but they cannot fabricate plaintext content (none is present in the audit log; rows are PI-free by schema per audit-log.md §1) and they cannot fabricate the ciphertext rows the audit log references (those are RLS- and crypto-bound). RA-2's residual is therefore: A5 can rewrite the *narrative* of who did what, when. That is real harm, but it is a narrative-harm bounded by the absence of content.
+1. **A5 is already in scope and load-bearing-mitigated elsewhere.** The threat model treats `A5 — Hosting provider compromise / rogue admin` as a credible adversary (threat-model §1). The primary control against A5 is **E2EE (ADR-0003)**: A5 with full platform access sees ciphertext for C3/C4 data and metadata + audit content for C1. The audit-log forgery vector under RA-2 is bounded by what A5 can already do — they can produce a _consistent record_, but they cannot fabricate plaintext content (none is present in the audit log; rows are PI-free by schema per audit-log.md §1) and they cannot fabricate the ciphertext rows the audit log references (those are RLS- and crypto-bound). RA-2's residual is therefore: A5 can rewrite the _narrative_ of who did what, when. That is real harm, but it is a narrative-harm bounded by the absence of content.
 2. **Option (b) crosses a hard rule.** Introducing an external KMS / signer is a new PI-adjacent subprocessor (the signer would see audit-row hashes — not PI, but it would be a service in the trust chain). ADR-0010 documents the "single non-Supabase subprocessor" posture and the conditions under which it can be revisited. Re-opening that posture for a v1 hardening of a residual that A5 already partly owns is the wrong tradeoff at v1 scale (12 active users). The constraint is recorded; if it changes, RA-2 is re-opened in the same PR that changes ADR-0010.
 3. **Option (a) adds ops surface in the part of the system least-suited for it.** A `pg_cron`-driven signer reaching into a 1Password-held Ed25519 key requires either an in-database secret (defeats the point — the key is colocated with the role that needs to be defended against) OR an out-of-band signer process the team-of-one operates (cron job freshness, key rotation, recovery drill, alert wiring). The threat-modeler's "compelling" case for v1 (per §6 Invariants 7 + 8) is the chain itself; the signature is the v2 strengthening, not the v1 floor.
 
@@ -6757,7 +7010,7 @@ A platform admin (A5) — or anyone who has compromised `audit_writer_role` cred
 
 In both cases, **the v1 detection surface is**:
 
-- The T18 chain-integrity job (runs daily + post-rotation + post-export per F-50) detects any *in-place* mutation that breaks the chain. Crucially, this does NOT catch the second case above (where the attacker re-hashes the chain forward from the pivot) — that attack rewrites the chain consistently.
+- The T18 chain-integrity job (runs daily + post-rotation + post-export per F-50) detects any _in-place_ mutation that breaks the chain. Crucially, this does NOT catch the second case above (where the attacker re-hashes the chain forward from the pivot) — that attack rewrites the chain consistently.
 - **External witnesses**: any out-of-band copy of `(id, ts, hash)` triplets — printed daily summary, the deployer's incident log, a member's exported "my audit feed" snapshot — that diverges from the current chain at the same `id` is evidence of pivot-rewrite. The architect commits to documenting this as a manual control in the T18 deliverable (a daily "head pointer" — the highest `id` and its `hash` — emailed to the worker co-chair's off-app address, weekly review). This is not a formal control; it is a backstop that surfaces in the re-open triggers below.
 - The pg_dump backup (ADR-0012, amended HG-8): the nightly dump captures the chain state at 03:00 ET. A pivot-rewrite that happens between 03:00 yesterday and 03:00 today is detectable by comparing yesterday's dump (Object-Locked, governance-mode-protected for 35 days) to today's live state for any row older than yesterday's dump. **This makes the backup the de-facto secondary witness for the audit-log integrity story until v2 signing ships.**
 
@@ -6782,6 +7035,7 @@ In both cases, **the v1 detection surface is**:
 ### Re-opening procedure
 
 If any trigger fires:
+
 1. Architect + security-reviewer + (if available) the threat-modeler agent review the trigger and the post-incident evidence (which copy of the chain is authoritative).
 2. **Default response: ship Ed25519 row signing per observability-setup Option (a)** — keypair in 1Password, signer invoked via `pg_cron`-loaded `SECURITY DEFINER` function whose owner is a new `audit_signer_role` (distinct from `audit_writer_role`; INSERT-without-sign is preserved as a fallback for the brief migration window). The schema is already ready (the `signature` column).
 3. A new ADR amendment (or a successor RA) records the new posture and the trigger that prompted it.
@@ -6809,6 +7063,7 @@ For the export function — the only path off the worker side at the B3 trust bo
 - The audit-log row records `approver_id = actor_id` (a single signer; explicit, not implicit).
 
 **This is NOT:**
+
 - A stale-session click-through. Re-auth is required at the moment of export; a long-running session cannot click "Export" without a fresh assertion.
 - Full 4-eyes. A second active member's passkey assertion is NOT required for v1.
 
@@ -6819,6 +7074,7 @@ The threat-modeler explicitly recommended **full 4-eyes** for `recommendations.e
 ### The user's rationale (accepted)
 
 The user has accepted the lower-friction tradeoff for two operational reasons:
+
 1. Reps are occasionally absent (illness, shift, leave). A 4-eyes requirement that cannot be satisfied stalls a legitimate export — a real workflow harm against an OHSA-bound timeline (e.g., 21-day recommendation response clock in T12 cannot be advanced if the export can't go out).
 2. The act of export is a co-chair function (s.9 minute-signing role); pairing it with a second member's assertion feels procedurally backwards for the user's committee's working pattern.
 
@@ -6850,6 +7106,7 @@ These are the load-bearing reasons RA-1 is acceptable. If any one of them weaken
 ### Re-opening procedure
 
 If any trigger fires:
+
 1. Architect + privacy-reviewer + (if available) the threat-modeler agent review the trigger and the post-incident audit-log evidence.
 2. Default response: upgrade to full 4-eyes for `minutes.final` and `recommendations.export`. The implementation cost is documented (F-29 Option B test): "Same actor cannot be approver; actor attempts to approve own export -> 403."
 3. A new ADR amendment (or a successor RA) records the new posture and the trigger that prompted it.
@@ -6955,6 +7212,7 @@ is no employer side of this app. The only artifact that crosses the
 worker/employer line is an **explicit export** triggered by the worker
 co-chair: a finalized PDF (joint minutes, recommendations to employer).
 The export:
+
 - Runs in the browser (decrypts → renders PDF → user downloads).
 - Is logged in the audit log (timestamp, document ID, who exported).
 - Goes through a "this leaves the worker side" interstitial confirming
@@ -7019,66 +7277,67 @@ The export:
 
 Every field, classification per plan §5.4, retention default, encryption posture.
 
-| Entity / field | Class | Encryption | Retention | Notes |
-|---|---|---|---|---|
-| `users.id` (Supabase auth UUID) | C1 | TLS + AES-256 at rest | Membership + 24mo | Identifier only. T05-owned. |
-| `users.active` | C1 | TLS + AES-256 at rest | Membership + 24mo | Boolean; T05-owned per ADR-0002 Amendment G.3 (this pass). Originally planned on `committee_membership.active`; relocated to `users` per T05 schema. |
-| `users.role` | C1 | TLS + AES-256 at rest | Membership + 24mo | Enum {worker_member, worker_co_chair, certified_member}; T05-owned per ADR-0002 Amendment G.3 (this pass). Originally planned on `committee_membership.role`; relocated to `users` per T05 schema. |
-| `users.totp_destroyed_at` | C1 | TLS + AES-256 at rest | Membership + 24mo | Timestamptz; NEW field per ADR-0002 Amendment G.3 (this pass). F-43 audit field: records when the per-user TOTP enrollment closed. |
-| `users.created_at` / `users.updated_at` | C0 | TLS + AES-256 at rest | Membership + 24mo | Operational timestamps; not PI. |
-| `users.display_name` | C2 | TLS + AES-256 at rest | Membership + 24mo | **DEFERRED to T06.** First name / chosen name. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T06 adds it. |
-| `users.off_employer_contact` (email or phone) | C2 | TLS + AES-256 at rest | Membership + 24mo | **DEFERRED to T06.** NOT employer-domain; validated on entry. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T06 adds it. |
-| `users.identity_pubkey` | C1 | TLS only | Membership + 24mo | **DEFERRED to T07.** Public key, no secrecy needed. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T07 adds it. |
-| `users.identity_privkey_recovery_blob` | C2 (ciphertext of a secret) | TLS + AES-256 at rest; ciphertext wraps the actual secret | Membership + 24mo | **DEFERRED to T07.** Decrypts only with user passphrase. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T07 adds it. |
-| `auth_totp_bootstraps.user_id` | C1 | TLS + AES-256 at rest | 15-min ceiling, hard-deleted on consume (F-43) per ADR-0016 | FK to `users.id`. T05-owned. |
-| `auth_totp_bootstraps.secret_hash` | C2 | TLS + AES-256 at rest | 15-min ceiling, hard-deleted on consume per ADR-0016 | Single-use bootstrap secret. After ADR-0002 Amendment G.2 (this pass), the plaintext `totp_code` column is DROPPED; only `secret_hash` (HMAC-keyed per ADR-0016) remains. |
-| `auth_totp_consumed_log.user_id` | C1 | TLS + AES-256 at rest | 24h after `consumed_at` per ADR-0016 | F-38 reuse detection. T05-owned per ADR-0002 Amendment G.1 (this pass). |
-| `auth_totp_consumed_log.totp_code_hash` | C1 (HMAC of a short-lived secret) | TLS + AES-256 at rest | 24h after `consumed_at` per ADR-0016 | MUST be `hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')` per ADR-0016 §Decision 1; NEVER bare `digest()`. T05-owned per ADR-0002 Amendment G.1. |
-| `auth_totp_consumed_log.consumed_at` | C1 | TLS + AES-256 at rest | 24h after `consumed_at` per ADR-0016 | Timestamptz. T05-owned per ADR-0002 Amendment G.1. |
-| `webauthn_credentials.credential_id` | C1 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Pseudonymized in `audit_log` per ADR-0016 §Decision 1 / G.4. T05-owned. |
-| `webauthn_credentials.public_key` | C1 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Public key — no secrecy required. T05-owned. |
-| `webauthn_credentials.aaguid` | C1 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Authenticator model. T05-owned. |
-| `webauthn_credentials.transports[]` | C0 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Enum. T05-owned. |
-| `webauthn_credentials.device_label` | C2 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | USER-PROVIDED only; the migration's column comment carries this rule (no platform-derived defaults). T05-owned. |
-| `webauthn_credentials.rp_id` | C0 | TLS + AES-256 at rest | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Server-determined. T05-owned. |
-| `auth_sessions.session_id` | C1 | TLS + AES-256 at rest | 15-min TTL + 90d revocation history per ADR-0016 | Pseudonymized in `audit_log` per ADR-0016 §Decision 1 / G.4. T05-owned. |
-| `auth_sessions.device_label` | C2 | TLS + AES-256 at rest | 15-min TTL + 90d revocation history per ADR-0016 | USER-PROVIDED only. T05-owned. |
-| `auth_sessions.device_fingerprint` | C2 | TLS + AES-256 at rest | 15-min TTL + 90d revocation history per ADR-0016 | HASHED by caller; NEVER raw UA. T05-owned. |
-| `committee_membership.role[]` | C1 | TLS + AES-256 at rest | Membership + 24mo | **T06-owned.** {worker_member, worker_co_chair, certified_member}. Per ADR-0002 Amendment G.3 (this pass), `committee_membership` is created in T06; the `active` / `role` semantics for the auth path live on `users` (T05). T06 acceptance must not retroactively drop the columns from `users` without a successor architect amendment. |
-| `committee_key.wrapped_privkey_blob` (per member) | C3 (wraps committee key) | E2EE at rest | Membership + 24mo | One row per (committee, member) |
-| `concerns.title_ciphertext` | C3 | E2EE | 7y post-closure | Body field of concern |
-| `concerns.body_ciphertext` | C3 | E2EE | 7y post-closure | Free text |
-| `concerns.source_name_ciphertext` (nullable) | C4 | E2EE + per-record key | 7y post-closure | Identity of original worker complainant |
-| `concerns.hazard_class` | C1 | TLS + AES-256 at rest | 7y post-closure | Enum, not PI |
-| `concerns.severity` | C1 | TLS + AES-256 at rest | 7y post-closure | Enum |
-| `concerns.location_id` | C1 | TLS + AES-256 at rest | 7y post-closure | Site location code |
-| `concerns.status` | C1 | TLS + AES-256 at rest | 7y post-closure | Enum |
-| `inspections.notes_ciphertext` | C3 | E2EE | 7y | Text |
-| `inspections.photo_blob_keys[]` | C1 metadata | Storage blob is C3 ciphertext | 7y | FK to Storage |
-| Storage: inspection photos | C3 | E2EE client-side before upload | 7y | Ciphertext blob |
-| `minutes.draft_body_ciphertext` | C3 | E2EE | 90 days post-finalization | Working draft |
-| `minutes.final_body_ciphertext` | C3 | E2EE | 7y | Finalized; export source |
-| `recommendations.body_ciphertext` | C3 | E2EE | 7y | s.9(20) recommendations |
-| `recommendations.employer_response_ciphertext` | C3 | E2EE | 7y | Captured employer reply |
-| `reprisal_log.body_ciphertext` | C4 | E2EE + per-record key | Active matter + 7y; real-delete | Highest sensitivity |
-| `work_refusal.notes_ciphertext` | C4 | E2EE + per-record key | Active matter + 7y | s.43 |
-| `s51_evidence.*_ciphertext` | C4 | E2EE + per-record key | Active matter + 7y | s.51 |
-| `training_records.evidence_ciphertext` | C2 | E2EE | Membership + 24mo | Certified-member proof |
-| `audit_log.*` | C1 | TLS + AES-256 at rest; NOT E2EE | Per-event-type per ADR-0015 (supersedes uniform 24mo) | Tamper-evident hash chain. T18 implements chain hashing; T05 ships the stub with `retention_class` + `request_id` columns per ADR-0002 Amendment G.6 / G.7 (this pass). |
-| `audit_log.actor_pseudonym` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | varchar(16); `hmac(uid, current_setting('app.hmac_pseudonym_key'), 'sha256')` truncated to 16hex per ADR-0016 §Decision 1. Supersedes the prior `actor_id`-as-raw-UUID shape. |
-| `audit_log.event_type` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | Closed-enum text; ADR-0003 Amendment A + extensions. |
-| `audit_log.target_id` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | FK to affected row. Subject to underlying-record-ceiling rule per ADR-0015 §3.5. |
-| `audit_log.retention_class` | C0 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | NEW per ADR-0002 Amendment G.6 (this pass). Populated by `audit_emit` at write time; lands in T05 migration (not T18 backfill). |
-| `audit_log.request_id` | C1 | TLS + AES-256 at rest | Per-event-type per ADR-0015 | NEW per ADR-0002 Amendment G.7 (this pass). Correlation key to structured logs + Sentry. Nullable; pre-T18 callers may pass null. |
-| `audit_log.prev_hash` | C1 | TLS only | Per-event-type per ADR-0015 | Hash chain; T18 implements. T05 ships the column without backfilling pre-T18 rows per ADR-0002 Amendment G.9. |
-| `feature_flags.*` | C0 | TLS only | n/a | Operational config |
-| `document_library.*` | C0 | TLS only | n/a | OHSA quick-ref text, etc. |
-| `i18n_strings.*` | C0 | TLS only | n/a | en-CA catalog |
+| Entity / field                                    | Class                             | Encryption                                                | Retention                                                        | Notes                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------- | --------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users.id` (Supabase auth UUID)                   | C1                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | Identifier only. T05-owned.                                                                                                                                                                                                                                                                                                                |
+| `users.active`                                    | C1                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | Boolean; T05-owned per ADR-0002 Amendment G.3 (this pass). Originally planned on `committee_membership.active`; relocated to `users` per T05 schema.                                                                                                                                                                                       |
+| `users.role`                                      | C1                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | Enum {worker_member, worker_co_chair, certified_member}; T05-owned per ADR-0002 Amendment G.3 (this pass). Originally planned on `committee_membership.role`; relocated to `users` per T05 schema.                                                                                                                                         |
+| `users.totp_destroyed_at`                         | C1                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | Timestamptz; NEW field per ADR-0002 Amendment G.3 (this pass). F-43 audit field: records when the per-user TOTP enrollment closed.                                                                                                                                                                                                         |
+| `users.created_at` / `users.updated_at`           | C0                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | Operational timestamps; not PI.                                                                                                                                                                                                                                                                                                            |
+| `users.display_name`                              | C2                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | **DEFERRED to T06.** First name / chosen name. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T06 adds it.                                                                                                                                                                                                      |
+| `users.off_employer_contact` (email or phone)     | C2                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | **DEFERRED to T06.** NOT employer-domain; validated on entry. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T06 adds it.                                                                                                                                                                                       |
+| `users.identity_pubkey`                           | C1                                | TLS only                                                  | Membership + 24mo                                                | **DEFERRED to T07.** Public key, no secrecy needed. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T07 adds it.                                                                                                                                                                                                 |
+| `users.identity_privkey_recovery_blob`            | C2 (ciphertext of a secret)       | TLS + AES-256 at rest; ciphertext wraps the actual secret | Membership + 24mo                                                | **DEFERRED to T07.** Decrypts only with user passphrase. Per ADR-0002 Amendment G.3 (this pass), this field is NOT created in T05; T07 adds it.                                                                                                                                                                                            |
+| `auth_totp_bootstraps.user_id`                    | C1                                | TLS + AES-256 at rest                                     | 15-min ceiling, hard-deleted on consume (F-43) per ADR-0016      | FK to `users.id`. T05-owned.                                                                                                                                                                                                                                                                                                               |
+| `auth_totp_bootstraps.secret_hash`                | C2                                | TLS + AES-256 at rest                                     | 15-min ceiling, hard-deleted on consume per ADR-0016             | Single-use bootstrap secret. After ADR-0002 Amendment G.2 (this pass), the plaintext `totp_code` column is DROPPED; only `secret_hash` (HMAC-keyed per ADR-0016) remains.                                                                                                                                                                  |
+| `auth_totp_consumed_log.user_id`                  | C1                                | TLS + AES-256 at rest                                     | 24h after `consumed_at` per ADR-0016                             | F-38 reuse detection. T05-owned per ADR-0002 Amendment G.1 (this pass).                                                                                                                                                                                                                                                                    |
+| `auth_totp_consumed_log.totp_code_hash`           | C1 (HMAC of a short-lived secret) | TLS + AES-256 at rest                                     | 24h after `consumed_at` per ADR-0016                             | MUST be `hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')` per ADR-0016 §Decision 1; NEVER bare `digest()`. T05-owned per ADR-0002 Amendment G.1.                                                                                                                                                                    |
+| `auth_totp_consumed_log.consumed_at`              | C1                                | TLS + AES-256 at rest                                     | 24h after `consumed_at` per ADR-0016                             | Timestamptz. T05-owned per ADR-0002 Amendment G.1.                                                                                                                                                                                                                                                                                         |
+| `webauthn_credentials.credential_id`              | C1                                | TLS + AES-256 at rest                                     | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Pseudonymized in `audit_log` per ADR-0016 §Decision 1 / G.4. T05-owned.                                                                                                                                                                                                                                                                    |
+| `webauthn_credentials.public_key`                 | C1                                | TLS + AES-256 at rest                                     | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Public key — no secrecy required. T05-owned.                                                                                                                                                                                                                                                                                               |
+| `webauthn_credentials.aaguid`                     | C1                                | TLS + AES-256 at rest                                     | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Authenticator model. T05-owned.                                                                                                                                                                                                                                                                                                            |
+| `webauthn_credentials.transports[]`               | C0                                | TLS + AES-256 at rest                                     | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Enum. T05-owned.                                                                                                                                                                                                                                                                                                                           |
+| `webauthn_credentials.device_label`               | C2                                | TLS + AES-256 at rest                                     | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | USER-PROVIDED only; the migration's column comment carries this rule (no platform-derived defaults). T05-owned.                                                                                                                                                                                                                            |
+| `webauthn_credentials.rp_id`                      | C0                                | TLS + AES-256 at rest                                     | Until passkey revoked OR membership inactive + 24mo per ADR-0016 | Server-determined. T05-owned.                                                                                                                                                                                                                                                                                                              |
+| `auth_sessions.session_id`                        | C1                                | TLS + AES-256 at rest                                     | 15-min TTL + 90d revocation history per ADR-0016                 | Pseudonymized in `audit_log` per ADR-0016 §Decision 1 / G.4. T05-owned.                                                                                                                                                                                                                                                                    |
+| `auth_sessions.device_label`                      | C2                                | TLS + AES-256 at rest                                     | 15-min TTL + 90d revocation history per ADR-0016                 | USER-PROVIDED only. T05-owned.                                                                                                                                                                                                                                                                                                             |
+| `auth_sessions.device_fingerprint`                | C2                                | TLS + AES-256 at rest                                     | 15-min TTL + 90d revocation history per ADR-0016                 | HASHED by caller; NEVER raw UA. T05-owned.                                                                                                                                                                                                                                                                                                 |
+| `committee_membership.role[]`                     | C1                                | TLS + AES-256 at rest                                     | Membership + 24mo                                                | **T06-owned.** {worker_member, worker_co_chair, certified_member}. Per ADR-0002 Amendment G.3 (this pass), `committee_membership` is created in T06; the `active` / `role` semantics for the auth path live on `users` (T05). T06 acceptance must not retroactively drop the columns from `users` without a successor architect amendment. |
+| `committee_key.wrapped_privkey_blob` (per member) | C3 (wraps committee key)          | E2EE at rest                                              | Membership + 24mo                                                | One row per (committee, member)                                                                                                                                                                                                                                                                                                            |
+| `concerns.title_ciphertext`                       | C3                                | E2EE                                                      | 7y post-closure                                                  | Body field of concern                                                                                                                                                                                                                                                                                                                      |
+| `concerns.body_ciphertext`                        | C3                                | E2EE                                                      | 7y post-closure                                                  | Free text                                                                                                                                                                                                                                                                                                                                  |
+| `concerns.source_name_ciphertext` (nullable)      | C4                                | E2EE + per-record key                                     | 7y post-closure                                                  | Identity of original worker complainant                                                                                                                                                                                                                                                                                                    |
+| `concerns.hazard_class`                           | C1                                | TLS + AES-256 at rest                                     | 7y post-closure                                                  | Enum, not PI                                                                                                                                                                                                                                                                                                                               |
+| `concerns.severity`                               | C1                                | TLS + AES-256 at rest                                     | 7y post-closure                                                  | Enum                                                                                                                                                                                                                                                                                                                                       |
+| `concerns.location_id`                            | C1                                | TLS + AES-256 at rest                                     | 7y post-closure                                                  | Site location code                                                                                                                                                                                                                                                                                                                         |
+| `concerns.status`                                 | C1                                | TLS + AES-256 at rest                                     | 7y post-closure                                                  | Enum                                                                                                                                                                                                                                                                                                                                       |
+| `inspections.notes_ciphertext`                    | C3                                | E2EE                                                      | 7y                                                               | Text                                                                                                                                                                                                                                                                                                                                       |
+| `inspections.photo_blob_keys[]`                   | C1 metadata                       | Storage blob is C3 ciphertext                             | 7y                                                               | FK to Storage                                                                                                                                                                                                                                                                                                                              |
+| Storage: inspection photos                        | C3                                | E2EE client-side before upload                            | 7y                                                               | Ciphertext blob                                                                                                                                                                                                                                                                                                                            |
+| `minutes.draft_body_ciphertext`                   | C3                                | E2EE                                                      | 90 days post-finalization                                        | Working draft                                                                                                                                                                                                                                                                                                                              |
+| `minutes.final_body_ciphertext`                   | C3                                | E2EE                                                      | 7y                                                               | Finalized; export source                                                                                                                                                                                                                                                                                                                   |
+| `recommendations.body_ciphertext`                 | C3                                | E2EE                                                      | 7y                                                               | s.9(20) recommendations                                                                                                                                                                                                                                                                                                                    |
+| `recommendations.employer_response_ciphertext`    | C3                                | E2EE                                                      | 7y                                                               | Captured employer reply                                                                                                                                                                                                                                                                                                                    |
+| `reprisal_log.body_ciphertext`                    | C4                                | E2EE + per-record key                                     | Active matter + 7y; real-delete                                  | Highest sensitivity                                                                                                                                                                                                                                                                                                                        |
+| `work_refusal.notes_ciphertext`                   | C4                                | E2EE + per-record key                                     | Active matter + 7y                                               | s.43                                                                                                                                                                                                                                                                                                                                       |
+| `s51_evidence.*_ciphertext`                       | C4                                | E2EE + per-record key                                     | Active matter + 7y                                               | s.51                                                                                                                                                                                                                                                                                                                                       |
+| `training_records.evidence_ciphertext`            | C2                                | E2EE                                                      | Membership + 24mo                                                | Certified-member proof                                                                                                                                                                                                                                                                                                                     |
+| `audit_log.*`                                     | C1                                | TLS + AES-256 at rest; NOT E2EE                           | Per-event-type per ADR-0015 (supersedes uniform 24mo)            | Tamper-evident hash chain. T18 implements chain hashing; T05 ships the stub with `retention_class` + `request_id` columns per ADR-0002 Amendment G.6 / G.7 (this pass).                                                                                                                                                                    |
+| `audit_log.actor_pseudonym`                       | C1                                | TLS + AES-256 at rest                                     | Per-event-type per ADR-0015                                      | varchar(16); `hmac(uid, current_setting('app.hmac_pseudonym_key'), 'sha256')` truncated to 16hex per ADR-0016 §Decision 1. Supersedes the prior `actor_id`-as-raw-UUID shape.                                                                                                                                                              |
+| `audit_log.event_type`                            | C1                                | TLS + AES-256 at rest                                     | Per-event-type per ADR-0015                                      | Closed-enum text; ADR-0003 Amendment A + extensions.                                                                                                                                                                                                                                                                                       |
+| `audit_log.target_id`                             | C1                                | TLS + AES-256 at rest                                     | Per-event-type per ADR-0015                                      | FK to affected row. Subject to underlying-record-ceiling rule per ADR-0015 §3.5.                                                                                                                                                                                                                                                           |
+| `audit_log.retention_class`                       | C0                                | TLS + AES-256 at rest                                     | Per-event-type per ADR-0015                                      | NEW per ADR-0002 Amendment G.6 (this pass). Populated by `audit_emit` at write time; lands in T05 migration (not T18 backfill).                                                                                                                                                                                                            |
+| `audit_log.request_id`                            | C1                                | TLS + AES-256 at rest                                     | Per-event-type per ADR-0015                                      | NEW per ADR-0002 Amendment G.7 (this pass). Correlation key to structured logs + Sentry. Nullable; pre-T18 callers may pass null.                                                                                                                                                                                                          |
+| `audit_log.prev_hash`                             | C1                                | TLS only                                                  | Per-event-type per ADR-0015                                      | Hash chain; T18 implements. T05 ships the column without backfilling pre-T18 rows per ADR-0002 Amendment G.9.                                                                                                                                                                                                                              |
+| `feature_flags.*`                                 | C0                                | TLS only                                                  | n/a                                                              | Operational config                                                                                                                                                                                                                                                                                                                         |
+| `document_library.*`                              | C0                                | TLS only                                                  | n/a                                                              | OHSA quick-ref text, etc.                                                                                                                                                                                                                                                                                                                  |
+| `i18n_strings.*`                                  | C0                                | TLS only                                                  | n/a                                                              | en-CA catalog                                                                                                                                                                                                                                                                                                                              |
 
 **Fields that do NOT exist (data minimization):**
+
 - No SIN, no DOB, no home address.
 - No employer name attached to user (committee context implicit).
-- No worker's *role at the workplace* beyond what's needed (no job title).
+- No worker's _role at the workplace_ beyond what's needed (no job title).
 - No IP address logged in app logs (Supabase platform logs are out of
   app control; documented).
 - No geolocation by default on inspections; opt-in per inspection.
@@ -7090,26 +7349,27 @@ membership. `committee_membership_active(user_id)` is a SECURITY DEFINER
 helper that returns true when the user has a row in `committee_membership`
 with `active = true`. Single-tenant means there's only one committee.
 
-| Table | SELECT | INSERT | UPDATE | DELETE |
-|---|---|---|---|---|
-| `users` | Self OR committee member | Self (first row only, via Auth trigger) | Self | None (use crypto-shred on role removal) |
-| `committee_membership` | Active members only | Co-chair only | Co-chair only | None (mark inactive; 90-day grace then key destroy) |
-| `committee_key` | Self's wrapped row only | Co-chair INSERT during invite + member-self-init | Co-chair only | Co-chair only (on member removal) |
-| `concerns` | Active members | Active members | Active members | None (use `status='deleted'` + retention job) |
-| `inspections` | Active members | Active members | Author OR co-chair (until status='finalized') | None |
-| `minutes` (draft) | Active members | Active members | Active members | Co-chair only |
-| `minutes` (final) | Active members | Co-chair only | Co-chair only (rare) | Co-chair only |
-| `recommendations` | Active members | Active members | Active members until status='sent'; co-chair after | Co-chair only |
-| `reprisal_log` | Author OR co-chair OR certified_member | Active members | Author OR co-chair | Co-chair only with 4-eyes |
-| `work_refusal` | Certified member OR co-chair | Certified member | Certified member OR co-chair | Co-chair only with 4-eyes |
-| `s51_evidence` | Certified member OR co-chair | Certified member | Certified member OR co-chair | Co-chair only with 4-eyes |
-| `training_records` | Active members | Self OR co-chair | Self OR co-chair | Co-chair only |
-| `audit_log` | Active members | App writes via Edge Function (security definer); no direct write from users | Never | Never (immutable; retention job deletes by age) |
-| `feature_flags` | Active members | Co-chair only | Co-chair only | Co-chair only |
-| `document_library` | Active members | Co-chair only | Co-chair only | Co-chair only |
-| `i18n_strings` | Public | None (loaded via migration) | None | None |
+| Table                  | SELECT                                 | INSERT                                                                      | UPDATE                                             | DELETE                                              |
+| ---------------------- | -------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------- |
+| `users`                | Self OR committee member               | Self (first row only, via Auth trigger)                                     | Self                                               | None (use crypto-shred on role removal)             |
+| `committee_membership` | Active members only                    | Co-chair only                                                               | Co-chair only                                      | None (mark inactive; 90-day grace then key destroy) |
+| `committee_key`        | Self's wrapped row only                | Co-chair INSERT during invite + member-self-init                            | Co-chair only                                      | Co-chair only (on member removal)                   |
+| `concerns`             | Active members                         | Active members                                                              | Active members                                     | None (use `status='deleted'` + retention job)       |
+| `inspections`          | Active members                         | Active members                                                              | Author OR co-chair (until status='finalized')      | None                                                |
+| `minutes` (draft)      | Active members                         | Active members                                                              | Active members                                     | Co-chair only                                       |
+| `minutes` (final)      | Active members                         | Co-chair only                                                               | Co-chair only (rare)                               | Co-chair only                                       |
+| `recommendations`      | Active members                         | Active members                                                              | Active members until status='sent'; co-chair after | Co-chair only                                       |
+| `reprisal_log`         | Author OR co-chair OR certified_member | Active members                                                              | Author OR co-chair                                 | Co-chair only with 4-eyes                           |
+| `work_refusal`         | Certified member OR co-chair           | Certified member                                                            | Certified member OR co-chair                       | Co-chair only with 4-eyes                           |
+| `s51_evidence`         | Certified member OR co-chair           | Certified member                                                            | Certified member OR co-chair                       | Co-chair only with 4-eyes                           |
+| `training_records`     | Active members                         | Self OR co-chair                                                            | Self OR co-chair                                   | Co-chair only                                       |
+| `audit_log`            | Active members                         | App writes via Edge Function (security definer); no direct write from users | Never                                              | Never (immutable; retention job deletes by age)     |
+| `feature_flags`        | Active members                         | Co-chair only                                                               | Co-chair only                                      | Co-chair only                                       |
+| `document_library`     | Active members                         | Co-chair only                                                               | Co-chair only                                      | Co-chair only                                       |
+| `i18n_strings`         | Public                                 | None (loaded via migration)                                                 | None                                               | None                                                |
 
 **Helpers (all SECURITY DEFINER, owned by the migration role, called from policies):**
+
 - `is_active_member()` → bool.
 - `is_co_chair()` → bool.
 - `is_certified_member()` → bool.
@@ -7153,16 +7413,17 @@ sessions during a committee meeting.
 
 ## Cost (CAD-ish, monthly)
 
-| Item | Cost | Notes |
-|---|---|---|
-| Supabase Cloud Pro | ~$25 USD / mo | Includes 8GB DB, 100GB Storage, 250GB egress, 100k MAU, PITR |
-| Domain (`.ca`) | ~$2 / mo | Annual amortized |
-| Sentry SaaS, EU, Team plan | ~$26 USD / mo | Cheapest tier with EU residency; 50k events/mo is plenty |
-| Backup bucket (B2 / S3 ca-central) | <$1 / mo | ~5GB ciphertext + low egress |
-| GitHub Actions | $0 | Free tier sufficient for this volume |
-| **Total** | **~$54 USD / mo (~$74 CAD / mo)** | |
+| Item                               | Cost                              | Notes                                                        |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------ |
+| Supabase Cloud Pro                 | ~$25 USD / mo                     | Includes 8GB DB, 100GB Storage, 250GB egress, 100k MAU, PITR |
+| Domain (`.ca`)                     | ~$2 / mo                          | Annual amortized                                             |
+| Sentry SaaS, EU, Team plan         | ~$26 USD / mo                     | Cheapest tier with EU residency; 50k events/mo is plenty     |
+| Backup bucket (B2 / S3 ca-central) | <$1 / mo                          | ~5GB ciphertext + low egress                                 |
+| GitHub Actions                     | $0                                | Free tier sufficient for this volume                         |
+| **Total**                          | **~$54 USD / mo (~$74 CAD / mo)** |                                                              |
 
 At 10× scale (500 workers, 10 committees — would mean re-opening single-tenancy):
+
 - Multi-tenancy decision re-opens (this would be v2, not a config flip).
 - Supabase Pro probably still fits; Storage grows but is well under
   the 100GB allowance.
@@ -7175,6 +7436,7 @@ At 10× scale (500 workers, 10 committees — would mean re-opening single-tenan
 (switch to GlitchTip self-hosted; trade dollars for ops hours).
 
 **Cliffs:**
+
 - DB > ~50GB (years away at this profile) → review Supabase Compute
   tier.
 - Concurrent sessions > 100 → review connection pooling (PgBouncer is
@@ -7198,6 +7460,7 @@ compelled (documented).
 IDs, audit log content). Privacy policy names this exposure.
 
 **Test:** Integration test that:
+
 - Writes a known plaintext to every C3/C4 column path.
 - Queries the row directly via the Postgres admin connection (no app
   layer).
@@ -7217,6 +7480,7 @@ and stays logged in during work hours. Documented; this is a policy
 problem, not a tech problem.
 
 **Test:** Browser test:
+
 - Sets up logged-in session.
 - Backgrounds the tab for 16 minutes.
 - Asserts that any sensitive route reads from IndexedDB after passkey
@@ -7234,6 +7498,7 @@ field included.
 log and committee social norms.
 
 **Test:** Integration test:
+
 - Create a concern with anonymous=true.
 - Attempt to render an export PDF and assert the output contains no
   `source_name` field whatsoever.
@@ -7250,6 +7515,7 @@ no superuser DB access (Supabase admin separation).
 design (members need to read). Audit log records reads of C4 records.
 
 **Test:** Integration test:
+
 - Member A proposes DELETE on a reprisal_log row.
 - Assert row is NOT actually deleted yet; `pending_destructive_ops`
   has an entry.
@@ -7270,6 +7536,7 @@ rest (TLS + AES-256 protect from network/disk-snoop but not from
 provider-admin access).
 
 **Test:** Same as T1, plus a test that:
+
 - Generates a backup `pg_dump`.
 - Attempts to read a C3 ciphertext column from the dump and assert
   it does not yield plaintext without the dump key + committee key.
@@ -7283,6 +7550,7 @@ wipe.
 **Residual:** Brief window before lock if device is grabbed unlocked.
 
 **Test:** Browser test:
+
 - Log in on device A.
 - From device B, revoke device A's session.
 - On device A, attempt a privileged action; assert it fails with
@@ -7300,6 +7568,7 @@ binding — a passkey for `jhsc.example.ca` does not authenticate at
 `jhsc-example.com`.
 
 **Test:** End-to-end test:
+
 - Attempt to register a passkey at `app.example.com`.
 - Attempt to use that passkey at `app.evil.com` and assert WebAuthn
   rejects (origin mismatch).
@@ -7313,6 +7582,7 @@ doesn't distinguish "unknown user" from "wrong credential."
 some committee uses it. Mitigated by not advertising publicly.
 
 **Test:** Integration test:
+
 - POST auth endpoint with unknown user ID; capture response.
 - POST auth endpoint with known user ID, wrong credential; capture
   response.
@@ -7327,6 +7597,7 @@ allowlist on extras; CI fixture test.
 **Residual:** A new code path sends data the scrubber didn't anticipate.
 
 **Test:** Integration test:
+
 - Submit a form containing a known canary string (e.g., `CANARY_PII_X`).
 - Trigger an error.
 - Capture the would-be Sentry payload (mock the transport).
@@ -7341,6 +7612,7 @@ install record at Apple/Google.
 of the manifest). Not realistically subpoenable.
 
 **Test:** Inventory test:
+
 - CI fails if `package.json` or build output includes any iOS / Android
   bundler or React Native dependency.
 
@@ -7354,6 +7626,7 @@ for sensitive reads are visible to all active members.
 is detection + post-hoc notification, not prevention.
 
 **Test:** Integration test:
+
 - Member A reads a C4 row.
 - Member B (any other active member) logs in.
 - Assert member B sees a "recent sensitive read" notification or list
@@ -7368,6 +7641,7 @@ to AI services; CSP locks down outbound origins.
 human-gate ADR.
 
 **Test:** CSP and dependency tests:
+
 - CI fails if a new outbound origin appears in CSP without an ADR
   reference in the PR description.
 - CI fails if `package.json` adds a dependency whose name matches
@@ -7389,6 +7663,7 @@ flagged) → PR → human-gate review.
 GitHub Actions, `.env.example`, `.gitignore`. No features.
 
 **Acceptance:**
+
 - `pnpm verify` passes on a fresh clone.
 - CI runs verify on PR.
 - gitleaks + semgrep + ts + lint in CI green.
@@ -7405,6 +7680,7 @@ GitHub Actions, `.env.example`, `.gitignore`. No features.
 and a CI check that asserts the project's region.
 
 **Acceptance:**
+
 - Project exists in `ca-central-1`; verified via Supabase mgmt API.
 - CI job fails if the configured project metadata returns a non-CA region.
 - `SUBPROCESSORS.md` created with Supabase + (planned) Sentry + (planned) backup bucket.
@@ -7422,6 +7698,7 @@ provider gate per ADR-0001).
 logger with PI scrubbing for app logs.
 
 **Acceptance:**
+
 - `beforeSend` strips: cookies, auth headers, query params, all form bodies,
   user IDs; allowlist for category-only breadcrumbs.
 - Canary-PII test in CI asserts no canary leaks through the scrubber.
@@ -7439,6 +7716,7 @@ logger with PI scrubbing for app logs.
 empty `fr-CA.json` skeleton, ESLint rule `no-literal-strings`.
 
 **Acceptance:**
+
 - All UI strings go through `t()`.
 - Build fails on hard-coded user-facing strings.
 - Locale-aware date/number/currency helpers exist.
@@ -7455,6 +7733,7 @@ language attributes.
 `committee_key`, `audit_log`. RLS enabled with policies per the outline above.
 
 **Acceptance:**
+
 - Every table has RLS enabled.
 - CI check finds zero tables without RLS.
 - Positive + negative policy tests for each table.
@@ -7473,6 +7752,7 @@ enrollment that is consumed and destroyed on first passkey set; 15-min
 sessions; session list + revoke-all.
 
 **Acceptance:**
+
 - Login flow: invite → TOTP from invite → passkey enroll → passkey-only
   thereafter.
 - No password is ever set on the account.
@@ -7493,6 +7773,7 @@ sessions; session list + revoke-all.
 removal flow that triggers key-rotation hook (implemented in T07).
 
 **Acceptance:**
+
 - Invite flow works end-to-end (T05 prerequisite).
 - Role changes audit-logged.
 - Removal marks inactive immediately; 90-day grace before key destroy.
@@ -7511,6 +7792,7 @@ passphrase enrollment; committee key generation; per-member wrap;
 rotation on member removal.
 
 **Acceptance:**
+
 - All seven invariants from ADR-0003 are encoded as tests.
 - T1 ciphertext-shape test passes.
 - T5 backup-ciphertext test passes.
@@ -7546,6 +7828,7 @@ rotation on member removal.
 ON; encrypts client-side; concerns list view with decrypt-and-render.
 
 **Acceptance:**
+
 - T3 test passes (anonymous concerns never expose source field).
 - Title + body + optional source_name encrypted with committee key.
 - source_name is C4 (additional per-record key).
@@ -7564,6 +7847,7 @@ ON; encrypts client-side; concerns list view with decrypt-and-render.
 location, owner, dates.
 
 **Acceptance:**
+
 - Status enum: open, triaged, controls-in-progress, monitoring, closed.
 - Closed entries start retention clock.
 - Severity, location, owner are C1 metadata (not encrypted) — confirmed
@@ -7581,6 +7865,7 @@ location, owner, dates.
 photo capture; client-side encryption before upload; sync queue.
 
 **Acceptance:**
+
 - Inspector can complete an inspection fully offline.
 - Photos encrypted client-side before any network call.
 - Queue persists across PWA close/reopen.
@@ -7621,6 +7906,7 @@ photo capture; client-side encryption before upload; sync queue.
 export to PDF in browser.
 
 **Acceptance:**
+
 - Drafts are C3; retention 90 days post-finalization.
 - Finalized minutes are C3; retention 7y.
 - Export rendering is in-browser (no plaintext to server).
@@ -7638,6 +7924,7 @@ export to PDF in browser.
 response timer; employer-response capture.
 
 **Acceptance:**
+
 - 21-day clock starts on "sent" action.
 - Reminder at day 14, 18, 21.
 - Employer-response capture is a separate manual entry by the rep (no
@@ -7655,6 +7942,7 @@ response timer; employer-response capture.
 mitigation).
 
 **Acceptance:**
+
 - All writes are C4 (per-record key wrapping).
 - DELETE requires `pending_destructive_ops` two-member approval.
 - Reads are audit-logged with high salience; T11 test passes.
@@ -7714,6 +8002,7 @@ mitigation).
 protected notes (C4); Ministry-of-Labour notification timing for s.51.
 
 **Acceptance:**
+
 - Access restricted to certified_member + co-chair.
 - Notes are C4.
 - s.51 evidence photo capture goes through inspection's encrypted-upload
@@ -7741,6 +8030,7 @@ protected notes (C4); Ministry-of-Labour notification timing for s.51.
 OHSA/Reg quick-ref doc library; reminders engine.
 
 **Acceptance:**
+
 - Training records C2; evidence blobs E2EE.
 - Document library is C0 — read-only seed content via migrations.
 - Reminders: certified-member refresh, monthly inspection, annual review.
@@ -7756,6 +8046,7 @@ OHSA/Reg quick-ref doc library; reminders engine.
 per the schedule in plan §8.
 
 **Acceptance:**
+
 - "Export my data" produces a JSON bundle (decrypted in browser, downloaded).
 - Correction endpoints for user-owned fields.
 - Deletion = real delete (or crypto-shred for E2EE'd records).
@@ -7787,6 +8078,7 @@ per the schedule in plan §8.
 quarterly restore drill into a scratch project; alert if backup is stale.
 
 **Acceptance:**
+
 - Backup runs nightly; alerts on >36h freshness.
 - Restore playbook produces a signed report.
 - First end-to-end drill executed and signed before launch (human gate per plan §13.F).
@@ -7813,6 +8105,7 @@ quarterly restore drill into a scratch project; alert if backup is stale.
 "recent sensitive read" notification surface.
 
 **Acceptance:**
+
 - Audit log uses prev-hash chain; CI test covers tampering detection.
 - Integrity job runs daily; alerts on mismatch.
 - T11 test passes.
@@ -7836,6 +8129,7 @@ actions; first-launch advisory copy (ADR-0008); plain-language privacy
 notice referencing ADR-0001 tradeoff.
 
 **Acceptance:**
+
 - T6 test passes (revocation).
 - T2 test passes (panic wipe).
 - Onboarding copy reviewed by tech-writer + privacy-reviewer.
@@ -7852,6 +8146,7 @@ notice referencing ADR-0001 tradeoff.
 ---
 
 **Ordering rationale:**
+
 - T00–T03 are scaffolding; required by everything.
 - T04 (RLS) precedes any data-bearing table.
 - T05 (auth) precedes T07 (crypto) because passkey-derived secrets
@@ -7864,6 +8159,7 @@ notice referencing ADR-0001 tradeoff.
 - T17–T19 close out the cross-cutting obligations.
 
 **Human-gate items in this task list:**
+
 - T01: hosting region confirmation.
 - T05: auth — second-opinion-reviewer + human PR review.
 - T07: crypto — second-opinion-reviewer + human PR review.
@@ -7890,6 +8186,7 @@ cost, smaller subprocessor footprint). This is reversible easily.
 **Q2: Minimum-supported-browser baseline.** → **RESOLVED: architect's default.**
 
 Passkeys / WebAuthn need a fairly modern browser. Proposed baseline:
+
 - Safari 16.4+ (iOS 16.4+ for PWA push).
 - Chrome / Edge 109+.
 - Firefox 122+ (passkey UX matured here).
@@ -7909,6 +8206,7 @@ These are the only ambiguities that would materially change the design.
 **Next agent: threat-modeler.**
 
 Inputs to read:
+
 - `/home/user/agent-os/.context/decisions.md` (this file — all 12 ADRs +
   system design + RLS outline + PI inventory + failure-mode analysis).
 - `/home/user/agent-os/JHSC-APP-PLAN.md` (plan §4 threat table, §5.3
@@ -7924,7 +8222,7 @@ Inputs to read:
    on this layer.
 
 2. **Concern intake (ADR-0007 + T08).** Anonymous-by-default toggle is
-   the strongest s.50 mitigation; verify it is *structurally* enforced
+   the strongest s.50 mitigation; verify it is _structurally_ enforced
    (RLS + form default + export exclusion) not just defaulted-on. Look
    especially at the source-reveal path.
 
@@ -7942,6 +8240,7 @@ Inputs to read:
    T8 (enumeration) are structurally enforced.
 
 Lower priority but still required for full STRIDE coverage:
+
 - Inspection sync + offline cache (T10).
 - Backup encryption chain (T17).
 - Audit log integrity + retention job (T18 + T16).
@@ -7949,6 +8248,7 @@ Lower priority but still required for full STRIDE coverage:
 Output goes to `.context/threat-model.md` per plan §11.
 
 After the threat-modeler completes, the orchestrator routes to:
+
 - **designer** (audience, primary task, content shape — plan §11.3 task 5).
 - **observability-setup** (T02 scope — Sentry scrubber + structured logs).
 
@@ -7958,20 +8258,21 @@ After the threat-modeler completes, the orchestrator routes to:
 
 Threat-modeler completed STRIDE on the Phase-1 architecture and surfaced 10 human-gate items in `.context/threat-model.md` §9. HG-1 was answered by the user (RA-1 captured below). HG-2 through HG-8 are processed in this amendment pass. HG-9 and HG-10 remain as pre-launch human gates already in plan §13 and are unchanged.
 
-| HG | Threat-model finding(s) | Amendment artifact | Downstream task(s) |
-|---|---|---|---|
-| HG-1 | F-29 / O-8 (4-eyes on export) | **RA-1** (new "Risk acceptances" section between ADR-0001 and System Design) — single-signer co-chair passkey re-auth at export; compensating controls + re-open triggers documented. **ADR-0001 amended** with a "Linked risk acceptances" pointer. | T11, T12 — compensating controls (closed allowlist F-19, audit log F-32, visible concern-derived-items flag in interstitial, post-export rep notification) must be present in T11/T12 acceptance and tests. |
-| HG-2 | F-07 / O-12 (key-material mutation audit-log enum) | **ADR-0003 Amendment A** — Invariant 8 added with closed enum: `identity_keypair.created`, `identity_privkey.recovery_blob.written`, `identity_privkey.recovery_blob.restored`, `committee_data_key.wrapped_for_member`, `committee_data_key.unwrap`, `committee_data_key.rotation.started`, `committee_data_key.rotation.completed`, `committee_data_key.member_revoked`. | **T07 acceptance amended** — each enum value emits an audit row on the corresponding flow; CI grep coverage; F-50 alert wiring (T18 wires the alerts). |
-| HG-3 | F-10 / O-10 (service-worker plaintext cache policy) | **New ADR-0013** — Service-worker plaintext-cache allowlist (closed URL-pattern allowlist; `X-Data-Class: C3/C4` sanity check; clear on lock/logout/panic; snapshot test mandatory). | **T10 acceptance amended** (T20 folded into T10 per the user's "create T20 or fold into T09 PWA scaffold" instruction — folded into T10; the service worker file may be scaffolded earlier but the policy + snapshot test bind at T10). |
-| HG-4 | F-44 / O-11 (offline-queue HMAC integrity) | **New ADR-0014** — HMAC-tag every queued IndexedDB entry with BLAKE2b-256 keyed (libsodium `crypto_generichash`), key HKDF-derived from identity privkey, scoped over (seq, user_id, ciphertext); client verifies before drain; server stores tag. | **T10 acceptance amended** — deterministic-tamper test + cross-device-replay test + positive round-trip. |
-| HG-5 | F-46 / O-9 (EXIF/IPTC/XMP/GPS strip on photos) | **ADR-0011 amended** — EXIF/IPTC/XMP strip + canvas re-encode before encryption; GPS coords explicitly removed; round-trip and byte-grep tests. | **T10 acceptance amended** (also implicitly applies to T14 s.51 photos which go through the same upload pipeline). |
-| HG-6 | F-33 / O-14 (C4 server-side read-audit enforcement, Invariant 7 strengthen) | **ADR-0003 Amendment B** — Invariant 7 strengthened: all C4 reads go through a `SECURITY DEFINER` view (`reprisal_log_read_audited` and equivalents) that writes the `sensitive.read` audit row atomically with the SELECT, in the same transaction; direct table SELECT revoked from `authenticated`, `anon`, `service_role`. | **T13 acceptance amended** — direct-bypass test, indirection-success test, atomicity test, coverage-via-`pg_proc` test. Same pattern applied to `work_refusal` and `s51_evidence` in T14. |
-| HG-7 | F-36 / O-16 (soft-delete-as-delete gating) | **T13 amendment** — UPDATE on `reprisal_log` that flips `status` to any removed-like value requires the same 4-eyes flow as DELETE; user-triggered hard DELETE blocked entirely; only the retention job (T16) hard-deletes aged-out entries. | **T13 acceptance amended** — single-rep status-flip denied with clear "needs second member" error; 4-eyes status-flip succeeds with both members named in audit log; self-approve denied; retention-only hard-delete. |
-| HG-8 | F-49 / O-15 (Object Lock + versioning on backup bucket) | **ADR-0012 amended** — Object Lock governance mode 35d retention; versioning enabled; lifecycle hard-deletes versions > 42d (preserves crypto-shred on retention); workflow credential scoped (no Delete, no Bypass); weekly CI drift check. | **T17 acceptance amended** — bucket-config tests, overwrite-creates-new-version test, delete-denied-under-retention test, drift check, restore-drill procedure updated. |
-| HG-9 | (pre-existing per plan §13.D) | Unchanged. | Retention schedule final approval before launch. |
-| HG-10 | (pre-existing per plan §13.B/C) | Unchanged. | Privacy lawyer + labour lawyer review before Phase 3 ship. |
+| HG    | Threat-model finding(s)                                                     | Amendment artifact                                                                                                                                                                                                                                                                                                                                                         | Downstream task(s)                                                                                                                                                                                                                      |
+| ----- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HG-1  | F-29 / O-8 (4-eyes on export)                                               | **RA-1** (new "Risk acceptances" section between ADR-0001 and System Design) — single-signer co-chair passkey re-auth at export; compensating controls + re-open triggers documented. **ADR-0001 amended** with a "Linked risk acceptances" pointer.                                                                                                                       | T11, T12 — compensating controls (closed allowlist F-19, audit log F-32, visible concern-derived-items flag in interstitial, post-export rep notification) must be present in T11/T12 acceptance and tests.                             |
+| HG-2  | F-07 / O-12 (key-material mutation audit-log enum)                          | **ADR-0003 Amendment A** — Invariant 8 added with closed enum: `identity_keypair.created`, `identity_privkey.recovery_blob.written`, `identity_privkey.recovery_blob.restored`, `committee_data_key.wrapped_for_member`, `committee_data_key.unwrap`, `committee_data_key.rotation.started`, `committee_data_key.rotation.completed`, `committee_data_key.member_revoked`. | **T07 acceptance amended** — each enum value emits an audit row on the corresponding flow; CI grep coverage; F-50 alert wiring (T18 wires the alerts).                                                                                  |
+| HG-3  | F-10 / O-10 (service-worker plaintext cache policy)                         | **New ADR-0013** — Service-worker plaintext-cache allowlist (closed URL-pattern allowlist; `X-Data-Class: C3/C4` sanity check; clear on lock/logout/panic; snapshot test mandatory).                                                                                                                                                                                       | **T10 acceptance amended** (T20 folded into T10 per the user's "create T20 or fold into T09 PWA scaffold" instruction — folded into T10; the service worker file may be scaffolded earlier but the policy + snapshot test bind at T10). |
+| HG-4  | F-44 / O-11 (offline-queue HMAC integrity)                                  | **New ADR-0014** — HMAC-tag every queued IndexedDB entry with BLAKE2b-256 keyed (libsodium `crypto_generichash`), key HKDF-derived from identity privkey, scoped over (seq, user_id, ciphertext); client verifies before drain; server stores tag.                                                                                                                         | **T10 acceptance amended** — deterministic-tamper test + cross-device-replay test + positive round-trip.                                                                                                                                |
+| HG-5  | F-46 / O-9 (EXIF/IPTC/XMP/GPS strip on photos)                              | **ADR-0011 amended** — EXIF/IPTC/XMP strip + canvas re-encode before encryption; GPS coords explicitly removed; round-trip and byte-grep tests.                                                                                                                                                                                                                            | **T10 acceptance amended** (also implicitly applies to T14 s.51 photos which go through the same upload pipeline).                                                                                                                      |
+| HG-6  | F-33 / O-14 (C4 server-side read-audit enforcement, Invariant 7 strengthen) | **ADR-0003 Amendment B** — Invariant 7 strengthened: all C4 reads go through a `SECURITY DEFINER` view (`reprisal_log_read_audited` and equivalents) that writes the `sensitive.read` audit row atomically with the SELECT, in the same transaction; direct table SELECT revoked from `authenticated`, `anon`, `service_role`.                                             | **T13 acceptance amended** — direct-bypass test, indirection-success test, atomicity test, coverage-via-`pg_proc` test. Same pattern applied to `work_refusal` and `s51_evidence` in T14.                                               |
+| HG-7  | F-36 / O-16 (soft-delete-as-delete gating)                                  | **T13 amendment** — UPDATE on `reprisal_log` that flips `status` to any removed-like value requires the same 4-eyes flow as DELETE; user-triggered hard DELETE blocked entirely; only the retention job (T16) hard-deletes aged-out entries.                                                                                                                               | **T13 acceptance amended** — single-rep status-flip denied with clear "needs second member" error; 4-eyes status-flip succeeds with both members named in audit log; self-approve denied; retention-only hard-delete.                   |
+| HG-8  | F-49 / O-15 (Object Lock + versioning on backup bucket)                     | **ADR-0012 amended** — Object Lock governance mode 35d retention; versioning enabled; lifecycle hard-deletes versions > 42d (preserves crypto-shred on retention); workflow credential scoped (no Delete, no Bypass); weekly CI drift check.                                                                                                                               | **T17 acceptance amended** — bucket-config tests, overwrite-creates-new-version test, delete-denied-under-retention test, drift check, restore-drill procedure updated.                                                                 |
+| HG-9  | (pre-existing per plan §13.D)                                               | Unchanged.                                                                                                                                                                                                                                                                                                                                                                 | Retention schedule final approval before launch.                                                                                                                                                                                        |
+| HG-10 | (pre-existing per plan §13.B/C)                                             | Unchanged.                                                                                                                                                                                                                                                                                                                                                                 | Privacy lawyer + labour lawyer review before Phase 3 ship.                                                                                                                                                                              |
 
 **New artifacts in this file:**
+
 - ADR-0014 (offline queue HMAC integrity) — top of file.
 - ADR-0013 (service-worker plaintext-cache allowlist).
 - ADR-0012 amendment block (Object Lock + versioning + lifecycle).
@@ -7994,6 +8295,7 @@ The amendment pass closes HG-2 through HG-8 and records HG-1 as RA-1. Phase-1 ar
 **Run in parallel:**
 
 **Agent: designer.** Inputs:
+
 - `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
   - **RA-1** (the export interstitial UX is materially affected: the interstitial must list every included field by label per F-19, AND visibly flag "this export contains concern-derived items" with the originating concern_ids, AND record post-export rep notification — these are compensating controls for the single-signer posture).
   - ADR-0007 (concern intake, anonymous-toggle-default-ON form treatment).
@@ -8008,6 +8310,7 @@ The amendment pass closes HG-2 through HG-8 and records HG-1 as RA-1. Phase-1 ar
 Designer must capture: (a) the export interstitial UX with explicit field-list display **and the concern-derived-items flag from RA-1** (F-19 + RA-1), (b) the sensitive-read notification surface that reflects the server-emitted audit (F-33 / Amendment B), (c) anonymous-toggle-defaults-ON form treatment (T3), (d) onboarding copy that names the ADR-0001 tradeoff and the ADR-0008 device posture, (e) the recovery-passphrase print-and-type-back flow (F-08), (f) per-record passphrase prompts (F-34) WITHOUT implying they are the crypto gate, (g) the photo-capture UI's GPS / location messaging (HG-5 amendment to ADR-0011), (h) the "needs second member" UX for both DELETE proposals and soft-delete status flips on `reprisal_log` (HG-7), (i) the offline-state messaging consistent with the service-worker cache allowlist (HG-3 / ADR-0013).
 
 **Agent: observability-setup.** Inputs:
+
 - `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
   - ADR-0010 (Sentry scrubbing) and T02 acceptance (existing).
   - **ADR-0003 Amendment A** (Invariant 8 enum) — the audit-log-integrity check job in T18 alerts on the F-50 patterns documented in T07's amended acceptance (rotation-started-without-completed, member-revoked-without-rotation-completed, wrap-for-inactive-member).
@@ -8028,18 +8331,19 @@ These two agents run in parallel; their outputs do not block each other.
 
 Observability-setup completed Phase-0 wiring and surfaced 8 findings in `observability/README.md` §10 and `observability/audit-log.md` §6. The a11y review pass surfaced Advisory A-2 in parallel, which cross-cuts coercion-resistance and is handled here. This amendment pass processes F-A through F-H and folds in A-2 as ADR-0003 Amendment C. F-E and F-F are routed to the privacy-reviewer (running in parallel after the threat-modeler second pass) and are NOT decided here.
 
-| Finding | Source | Amendment artifact | Downstream task(s) |
-|---|---|---|---|
-| **F-A** (audit-row signature posture) | `observability/audit-log.md` §6 finding #1; `observability/README.md` §10 finding #1 | **RA-2** (new entry in "Risk acceptances", placed above RA-1) — v1 ships hash-only chain; signature deferred to v2; A5 detection backstop = `pg_dump` diff + manual head-pointer extraction; six re-open triggers documented. Threat-modeler's stance (A5 in scope, signing is the proper v2 strengthening) and the rationale for not crossing ADR-0010's no-new-PI-subprocessor posture are captured. | **T18 acceptance amended** — daily audit-log-vs-backup diff check added; runbook captures the weekly head-pointer extraction as a manual external witness. |
-| **F-B** (event-name dedupe: `queue.integrity_fail` vs `inspection.synced.hmac_fail`) | `observability/audit-log.md` §6 finding #2; `observability/README.md` §10 finding #1 | **ADR-0010 amendment** (F-B cross-pollination block) — `queue.integrity_fail` is canonical (matches ADR-0014 source of truth); `inspection.synced.hmac_fail` is a forbidden alias caught by semgrep. | **Verifier (Phase 2):** new semgrep rule `no-inspection-synced-hmac-fail-alias` in `scripts/verify.sh`. **observability-setup (next pass):** removes the alias text from `observability/audit-log.md` §1 and §6 finding #2. |
-| **F-C** (missing audit enum values + chain-vs-structured-log boundary) | `observability/audit-log.md` §6 finding #3; `observability/README.md` §10 (auth.passkey.assert recommendation) | **ADR-0003 Amendment A extended** (in-place under Amendment A) — closed allowlist gains `work_refusal.read` and `s51_evidence.read`; the chain-vs-structured-log architectural rule is declared explicitly ("the chain captures trust-changing events; volumetric auth telemetry is structured-log only"); `auth.passkey.assert` is listed in the structured-log-only event vocabulary table. | **T14 acceptance amended** — `work_refusal_read_audited` and `s51_evidence_read_audited` `SECURITY DEFINER` views and same-transaction audit emission, identical posture to T13 HG-6. **T18 acceptance amended** — volumetric-event exclusion test (100 WebAuthn assertions, zero `audit_log` rows of that type) + closed-enum coverage test for every `audit_emit(...)` caller. |
-| **F-D** (Edge Function logging contract not in any ADR) | `observability/README.md` §10 finding #1; `observability/logging.md` §4 "applies until contradicted" | **ADR-0010 amendment** — Edge Function structured-logging contract ratified: Rule 1 no PI ever, Rule 2 scrubbing at emit-point (not downstream), Rule 3 `request_id` propagation, Rule 4 retention pointer (subject to F-F). The substance was already in `observability/logging.md` §4; this gives it ADR-level authority. | **T02 acceptance (existing, unchanged):** the canary-PII tests in `observability/sentry-scrub.ts` and the Edge Function canary test in `observability/logging.md` §4 already cover the substance. No new task; reviewer authority added. |
-| **F-E** (`reprisal.created` visibility) | `observability/audit-log.md` §6 finding #4 | **NOT DECIDED — routed to privacy-reviewer.** Recorded in ADR-0010 amendment "F-E / F-F" block. ADR-0003 Amendment B and the audit-log RLS unchanged. | **Privacy-reviewer pass (next, parallel with threat-modeler second pass):** confirm or amend the "all active members see `reprisal.created`" default; if narrowing, a future architect pass amends ADR-0003 Amendment B. |
-| **F-F** (audit-log retention 24mo vs `.context/constraints.md` "at least 1 year" floor) | `observability/README.md` §10 finding #2 | **NOT DECIDED — routed to privacy-reviewer.** Recorded in ADR-0010 amendment "F-E / F-F" block. Retention value unchanged. | **Privacy-reviewer pass:** confirm 24mo or recommend an alternative value before launch. |
-| **F-G** (modal focus-trap timing — a11y A-2; cross-cutting to coercion-resistance) | `.context/a11y-review.md` §A-2; cross-references RA-1 export interstitial + HG-6/HG-7 protected modals | **ADR-0003 Amendment C** — Invariant 9: "Protected-modal focus trap and announce-on-open behavior MUST be synchronous with mount; the opacity transition is decorative and does not gate accessibility or coercion-resistance behavior." Per-modal mount-time tests + animation-disabled tests + scripted-dismissal-race test specified. Threat-modeler is running a parallel second pass; Amendment C stands independently. | **Designer (next pass):** fold the Amendment C language into `.context/design-system.md` §3.1 / §3.2 (architect does NOT modify design-system.md per this pass's hard rules). **Test-writer (pre-T11/T13):** five mount-time tests + scripted-dismissal-race test land before the feature implementer touches the protected modals. **Implementer (T11, T13):** focus trap wired at mount, not on `transitionend`. |
-| **F-H** (no tracing in Phase 0 — acknowledge only) | `observability/README.md` §10 finding #3 | **ADR-0010 amendment** — Phase-0 tracing deferral acknowledged explicitly. `request_id` is wired across all three pillars per F-D Rule 3, making the future sre-specialist introduction mechanical. Three re-open triggers documented. | **No new task.** **sre-specialist (Phase 4):** owner of the tracing re-evaluation per the documented triggers. |
+| Finding                                                                                 | Source                                                                                                         | Amendment artifact                                                                                                                                                                                                                                                                                                                                                                                                           | Downstream task(s)                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **F-A** (audit-row signature posture)                                                   | `observability/audit-log.md` §6 finding #1; `observability/README.md` §10 finding #1                           | **RA-2** (new entry in "Risk acceptances", placed above RA-1) — v1 ships hash-only chain; signature deferred to v2; A5 detection backstop = `pg_dump` diff + manual head-pointer extraction; six re-open triggers documented. Threat-modeler's stance (A5 in scope, signing is the proper v2 strengthening) and the rationale for not crossing ADR-0010's no-new-PI-subprocessor posture are captured.                       | **T18 acceptance amended** — daily audit-log-vs-backup diff check added; runbook captures the weekly head-pointer extraction as a manual external witness.                                                                                                                                                                                                                                                         |
+| **F-B** (event-name dedupe: `queue.integrity_fail` vs `inspection.synced.hmac_fail`)    | `observability/audit-log.md` §6 finding #2; `observability/README.md` §10 finding #1                           | **ADR-0010 amendment** (F-B cross-pollination block) — `queue.integrity_fail` is canonical (matches ADR-0014 source of truth); `inspection.synced.hmac_fail` is a forbidden alias caught by semgrep.                                                                                                                                                                                                                         | **Verifier (Phase 2):** new semgrep rule `no-inspection-synced-hmac-fail-alias` in `scripts/verify.sh`. **observability-setup (next pass):** removes the alias text from `observability/audit-log.md` §1 and §6 finding #2.                                                                                                                                                                                        |
+| **F-C** (missing audit enum values + chain-vs-structured-log boundary)                  | `observability/audit-log.md` §6 finding #3; `observability/README.md` §10 (auth.passkey.assert recommendation) | **ADR-0003 Amendment A extended** (in-place under Amendment A) — closed allowlist gains `work_refusal.read` and `s51_evidence.read`; the chain-vs-structured-log architectural rule is declared explicitly ("the chain captures trust-changing events; volumetric auth telemetry is structured-log only"); `auth.passkey.assert` is listed in the structured-log-only event vocabulary table.                                | **T14 acceptance amended** — `work_refusal_read_audited` and `s51_evidence_read_audited` `SECURITY DEFINER` views and same-transaction audit emission, identical posture to T13 HG-6. **T18 acceptance amended** — volumetric-event exclusion test (100 WebAuthn assertions, zero `audit_log` rows of that type) + closed-enum coverage test for every `audit_emit(...)` caller.                                   |
+| **F-D** (Edge Function logging contract not in any ADR)                                 | `observability/README.md` §10 finding #1; `observability/logging.md` §4 "applies until contradicted"           | **ADR-0010 amendment** — Edge Function structured-logging contract ratified: Rule 1 no PI ever, Rule 2 scrubbing at emit-point (not downstream), Rule 3 `request_id` propagation, Rule 4 retention pointer (subject to F-F). The substance was already in `observability/logging.md` §4; this gives it ADR-level authority.                                                                                                  | **T02 acceptance (existing, unchanged):** the canary-PII tests in `observability/sentry-scrub.ts` and the Edge Function canary test in `observability/logging.md` §4 already cover the substance. No new task; reviewer authority added.                                                                                                                                                                           |
+| **F-E** (`reprisal.created` visibility)                                                 | `observability/audit-log.md` §6 finding #4                                                                     | **NOT DECIDED — routed to privacy-reviewer.** Recorded in ADR-0010 amendment "F-E / F-F" block. ADR-0003 Amendment B and the audit-log RLS unchanged.                                                                                                                                                                                                                                                                        | **Privacy-reviewer pass (next, parallel with threat-modeler second pass):** confirm or amend the "all active members see `reprisal.created`" default; if narrowing, a future architect pass amends ADR-0003 Amendment B.                                                                                                                                                                                           |
+| **F-F** (audit-log retention 24mo vs `.context/constraints.md` "at least 1 year" floor) | `observability/README.md` §10 finding #2                                                                       | **NOT DECIDED — routed to privacy-reviewer.** Recorded in ADR-0010 amendment "F-E / F-F" block. Retention value unchanged.                                                                                                                                                                                                                                                                                                   | **Privacy-reviewer pass:** confirm 24mo or recommend an alternative value before launch.                                                                                                                                                                                                                                                                                                                           |
+| **F-G** (modal focus-trap timing — a11y A-2; cross-cutting to coercion-resistance)      | `.context/a11y-review.md` §A-2; cross-references RA-1 export interstitial + HG-6/HG-7 protected modals         | **ADR-0003 Amendment C** — Invariant 9: "Protected-modal focus trap and announce-on-open behavior MUST be synchronous with mount; the opacity transition is decorative and does not gate accessibility or coercion-resistance behavior." Per-modal mount-time tests + animation-disabled tests + scripted-dismissal-race test specified. Threat-modeler is running a parallel second pass; Amendment C stands independently. | **Designer (next pass):** fold the Amendment C language into `.context/design-system.md` §3.1 / §3.2 (architect does NOT modify design-system.md per this pass's hard rules). **Test-writer (pre-T11/T13):** five mount-time tests + scripted-dismissal-race test land before the feature implementer touches the protected modals. **Implementer (T11, T13):** focus trap wired at mount, not on `transitionend`. |
+| **F-H** (no tracing in Phase 0 — acknowledge only)                                      | `observability/README.md` §10 finding #3                                                                       | **ADR-0010 amendment** — Phase-0 tracing deferral acknowledged explicitly. `request_id` is wired across all three pillars per F-D Rule 3, making the future sre-specialist introduction mechanical. Three re-open triggers documented.                                                                                                                                                                                       | **No new task.** **sre-specialist (Phase 4):** owner of the tracing re-evaluation per the documented triggers.                                                                                                                                                                                                                                                                                                     |
 
 **New artifacts in this file (pass #2):**
+
 - **RA-2** in the "Risk acceptances" section, placed above RA-1 (newest on top per file convention).
 - **ADR-0003 Amendment A extension** (in-place under Amendment A; the original 8-value enum is preserved verbatim; the extension adds two C3-read enum values, the chain-vs-structured-log architectural rule, the structured-log-only event vocabulary table, and three new test obligations).
 - **ADR-0003 Amendment C** (Invariant 9 — protected-modal focus trap synchronous with mount).
@@ -8064,6 +8368,7 @@ The amendment pass #2 closes F-A (RA-2), F-B (canonical name + verifier rule), F
 **Sequence (NOT parallel for this round):**
 
 1. **First: privacy-reviewer pass.** Inputs:
+
    - `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
      - **F-E** routed in ADR-0010 amendment "F-E / F-F" block — confirm or amend the "all active members see `reprisal.created`" default RLS posture.
      - **F-F** routed in ADR-0010 amendment "F-E / F-F" block — confirm 24-month audit-log retention or recommend an alternative value.
@@ -8075,6 +8380,7 @@ The amendment pass #2 closes F-A (RA-2), F-B (canonical name + verifier rule), F
    - `/home/user/agent-os/JHSC-APP-PLAN.md` §8 (retention) and §13 (locked decisions).
 
 2. **In parallel with the privacy-reviewer: threat-modeler second pass.** Inputs:
+
    - `/home/user/agent-os/.context/decisions.md` (this file) — particularly:
      - **RA-2** — confirm the threat-modeler's stance recorded in the RA-2 rationale ("A5 in scope; signing is the proper v2 strengthening") matches the threat-modeler's actual position; if not, file a finding.
      - **ADR-0003 Amendment C** (F-G) — confirm the coercion-resistance reading of Invariant 9; if the second pass surfaces additional coercion-resistance implications for the five protected modals, file findings on top of Amendment C (do NOT modify Amendment C; the next architect pass folds the findings).
@@ -8082,6 +8388,7 @@ The amendment pass #2 closes F-A (RA-2), F-B (canonical name + verifier rule), F
    - `/home/user/agent-os/.context/a11y-review.md` §A-2 — the original A-2 finding the threat-modeler's parallel pass is examining.
 
 3. **After both: test-writer.** Test-writer is **next after the privacy-reviewer and threat-modeler second-pass complete.** Inputs:
+
    - `/home/user/agent-os/.context/decisions.md` (this file, final state including any privacy-reviewer + threat-modeler amendments to come).
    - `/home/user/agent-os/.context/threat-model.md` §8 (test obligations per task ID — already pre-loaded by the threat-modeler first pass; the second pass may add).
    - `/home/user/agent-os/observability/audit-log.md` §5 (test obligations for T07, T13, T18).
@@ -8090,6 +8397,7 @@ The amendment pass #2 closes F-A (RA-2), F-B (canonical name + verifier rule), F
    - `/home/user/agent-os/observability/README.md` §9 "For the test-writer (next in line)" — the pre-task test-artifact obligations enumerated per T0x.
 
    Specifically, the test-writer adds, before any implementer touches the corresponding code:
+
    - **RA-2 tests (T18):** live-vs-backup-diff alert test; no-false-positive-on-newer-rows test; closed-enum coverage test enumerating every `audit_emit(...)` caller; volumetric-event exclusion test for `auth.passkey.assert`.
    - **F-C tests (T14):** direct-bypass test, indirection-success test, atomicity test, coverage-via-`pg_proc` test on `work_refusal_read_audited` and `s51_evidence_read_audited` — same shape as the existing T13 HG-6 tests.
    - **F-G / Amendment C tests (T11, T13, and any feature touching a protected modal):** for each of `export_interstitial`, `reauth_prompt`, `passphrase_prompt`, `destructive_confirm`, `four_eyes_pending` — mount-time focus-trap test, animation-disabled test, scripted-dismissal-race test, synchronous-mount-of-audit-prerequisites test.
@@ -8103,20 +8411,21 @@ The amendment pass #2 closes F-A (RA-2), F-B (canonical name + verifier rule), F
 
 Privacy-reviewer returned two APPROVED-WITH-CHANGES verdicts (Q1 blocking T13; Q2 blocking T16) plus five cross-cutting observations plus a forensic-reveal proposal. Threat-modeler completed a second pass adding F-53 (modal trap-timing race during opacity transition) + F-54 (recovery-passphrase low-vision escape hatch) plus observations O-17 / O-18 and human gates HG-11 / HG-12 (written directly into `.context/threat-model.md` §9). Amendment pass #3 processes both sets together. Per directive G, since threat-modeler's HG-11/HG-12 writes landed first, privacy-reviewer's two proposed gates become **HG-13** (Amendment D pseudonymized projection + Amendment E forensic-reveal + ADR-0007 amendment consent surface — bundled) and **HG-14** (ADR-0015 per-event audit-log retention schedule).
 
-| Change | Source | Amendment artifact | Downstream task(s) |
-|---|---|---|---|
-| **Q1 / HG-13 — Pseudonymized reprisal-feed projection** | privacy-review Q1 / §2.1–§2.3 / §4 cross-cutting #5 / §7 obligations 1–3, 6 | **ADR-0003 Amendment D** — new `SECURITY DEFINER` view `reprisal_audit_feed_pseudonymized` projecting `{id, event_type, ts_bucketed_to_hour, target_id, target_class, prev_hash, hash}` with `actor_pseudonym` suppressed; GRANT-revoke on raw `audit_log` for the relevant event types; default-list-payload defaults to the view (mirrors F-18). | **T13 acceptance amended** — projection view, GRANT-revoke, default-list-payload, four tests from privacy-review §7. **T14 acceptance amended** (cross-reference) — extension to `work_refusal.*` and `s51_evidence.*` write events when T14 enumerates. |
-| **Q1 / HG-13 — Forensic-reveal 4-eyes procedure** | privacy-review §4 cross-cutting #2 | **ADR-0003 Amendment E** — new `pending_forensic_reveals` table, `forensic_read_service` non-login role, `jhsc_forensic_reveal_actor_pseudonym(...)` SECURITY DEFINER function; two new audit-log enum values `audit.forensic_reveal.4eyes_pending` / `.4eyes_completed`; co-chair + co-chair OR co-chair + certified_member approver pair; 24h reveal session. | **T13 acceptance amended** — `pending_forensic_reveals` table + role + function + 4 tests (proposer-cannot-self-approve, distinct-member approval succeeds, non-pair attempt denied, reveal-session expiry). |
-| **Q1 / HG-13 — Reprisal-log intake consent surface** | privacy-review §2.4 (copy draft) / §5 fold-in item 2 / §7 obligation 5 | **ADR-0007 amendment** — scope extension to cover reprisal-log intake consent surface; four-bullet contract + per-intake re-render + structural gating of "Save entry" button; §2.4 copy verbatim; labour-lawyer (HG-10) + accessibility-specialist sign-off before T13 ships. | **T13 acceptance amended** — consent-surface presence test + per-intake re-render test. **localization-specialist (next pass):** `i18n/en-CA/reprisal-intake.json` keys. **designer (next pass):** Surface C consent-surface placement + UX. |
-| **Q2 / HG-14 — Per-event-type audit-log retention** | privacy-review Q2 / §3.1 / §3.3 / §3.4 / §3.5 / §7 obligations 7–11 | **New ADR-0015** (top of file) — per-event-type schedule (privacy-review §3.3 table verbatim); `audit_log.retention_class` column; `audit_log_retention_schedule` table; underlying-record-ceiling rule (§3.5); `retention.deleted` jsonb shape (§3.4); CI drift assertion. **HG-14 — user explicitly ratifies the schedule before T16 ships.** | **T16 acceptance amended** — per-event schedule, schema additions, ceiling rule, drift check, five tests from privacy-review §7 obligations 7–11. |
-| **Cross-cutting #1 — `retention_class` column on `audit_log`** | privacy-review §4 cross-cutting #1 | Captured in **ADR-0015** schema requirements. | T16 acceptance bullet (covered in HG-14 row above). |
-| **Cross-cutting #4 — `observability/README.md` §1 reasoning correction** | privacy-review §4 cross-cutting #4 | Captured in **ADR-0015** cross-references — observability-setup's next pass corrects the reasoning text to "matched to the breach-record retention because audit log feeds the breach-response process, not because PIPEDA s.10.1 requires 24mo for audit logs." Architect does NOT edit `observability/*` per amendment pass #3 hard rules. | Follow-on for observability-setup, **not** a new task. |
-| **§5 fold-in item 4 — Crypto-shred-on-retention coherence** | privacy-review §5 fold-in item 4 | **ADR-0012 amendment** (new "Crypto-shred-on-retention coherence with audit-log per-event retention" block at the end of ADR-0012) — note that "Backups older than the longest audit-log event retention can be hard-deleted without leaving 'events we cannot explain.'" Structurally satisfied by ADR-0015 + ADR-0012 amendment HG-8. | No new test obligation; coherence is structural. |
-| **`HMAC_PSEUDONYM_KEY` escrow + rotation** | privacy-review §4 cross-cutting #3 | **NOT folded into this pass.** The recommendation (rotate quarterly with overlap window; old-era pseudonyms stay queryable in old-era space) is a substantive operational policy decision that touches ADR-0012's key escrow story; the architect surfaces this as an explicit **deferred-to-next-pass** item rather than land it half-spec'd. Rationale: the operational rotation procedure interacts with the backup window (35d) AND the live forensic procedure (Amendment E's reveal-session) AND the audit-log chain integrity (RA-2 head-pointer extraction). Half-specifying it now risks an inconsistency the test-writer would inherit. **Follow-on:** architect or security-reviewer's next pass amends ADR-0012 with the rotation cadence + overlap window + era encoding. | Tracked as a deferred follow-on; the privacy-reviewer's recommendation is preserved in their review file for the next pass to consume. |
-| **F-53 / HG-11 — M-53a/b/c enumeration in Invariant 9** | threat-model F-53 (§3.3) / O-17 / HG-11 (already in threat-model §9) | **ADR-0003 Amendment C extension** (in-place under Amendment C) — original Invariant 9 preserved verbatim; three sub-invariants added: 9.a (trap-on-mount; M-53a; was already covered), 9.b (announce-on-open `ready` promise gates input acceptance; M-53b; NEW), 9.c (underlying surface `inert` from t=0; scrim captures keydown + pointer during transition; M-53c; NEW). Cross-references threat-model M-53a/b/c assertion shapes. | **T11 + T13 acceptance amended** (cross-reference) — the three sub-invariants are already mapped in threat-model §8 T11 F-53 entries; the test-writer's checklist is unchanged in shape, but Invariant 9 now points to all three rather than just the timing property. |
-| **F-54 / HG-12 — Recovery-passphrase show-again accommodation** | threat-model F-54 (§3.1) / O-18 / HG-12 (already in threat-model §9) / a11y A-5 | **ADR-0003 Amendment F** — Surface D.6 gains "show passphrase again" hold-to-reveal (≥1500ms) + per-enrollment-session cap of 3 + audit-log emission gates render + no TTS / no clipboard on reveal + largest typography + highest-contrast pairing; new audit-log enum value `identity_privkey.recovery_blob.viewed` (added to ADR-0003 Amendment A closed allowlist; retention "membership + 24 months" per ADR-0015). | **T07 acceptance amended** — M-54a/b/c/d tests + audit-log enum addition + en-CA i18n contract for reveal-control label + helper text. **T19 acceptance amended** — full D.1 → D.7 onboarding integration test including a "show again" invocation. |
+| Change                                                                   | Source                                                                          | Amendment artifact                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Downstream task(s)                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Q1 / HG-13 — Pseudonymized reprisal-feed projection**                  | privacy-review Q1 / §2.1–§2.3 / §4 cross-cutting #5 / §7 obligations 1–3, 6     | **ADR-0003 Amendment D** — new `SECURITY DEFINER` view `reprisal_audit_feed_pseudonymized` projecting `{id, event_type, ts_bucketed_to_hour, target_id, target_class, prev_hash, hash}` with `actor_pseudonym` suppressed; GRANT-revoke on raw `audit_log` for the relevant event types; default-list-payload defaults to the view (mirrors F-18).                                                                                                                                                                                                                                                                                                                                                                                                                                     | **T13 acceptance amended** — projection view, GRANT-revoke, default-list-payload, four tests from privacy-review §7. **T14 acceptance amended** (cross-reference) — extension to `work_refusal.*` and `s51_evidence.*` write events when T14 enumerates.               |
+| **Q1 / HG-13 — Forensic-reveal 4-eyes procedure**                        | privacy-review §4 cross-cutting #2                                              | **ADR-0003 Amendment E** — new `pending_forensic_reveals` table, `forensic_read_service` non-login role, `jhsc_forensic_reveal_actor_pseudonym(...)` SECURITY DEFINER function; two new audit-log enum values `audit.forensic_reveal.4eyes_pending` / `.4eyes_completed`; co-chair + co-chair OR co-chair + certified_member approver pair; 24h reveal session.                                                                                                                                                                                                                                                                                                                                                                                                                        | **T13 acceptance amended** — `pending_forensic_reveals` table + role + function + 4 tests (proposer-cannot-self-approve, distinct-member approval succeeds, non-pair attempt denied, reveal-session expiry).                                                           |
+| **Q1 / HG-13 — Reprisal-log intake consent surface**                     | privacy-review §2.4 (copy draft) / §5 fold-in item 2 / §7 obligation 5          | **ADR-0007 amendment** — scope extension to cover reprisal-log intake consent surface; four-bullet contract + per-intake re-render + structural gating of "Save entry" button; §2.4 copy verbatim; labour-lawyer (HG-10) + accessibility-specialist sign-off before T13 ships.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | **T13 acceptance amended** — consent-surface presence test + per-intake re-render test. **localization-specialist (next pass):** `i18n/en-CA/reprisal-intake.json` keys. **designer (next pass):** Surface C consent-surface placement + UX.                           |
+| **Q2 / HG-14 — Per-event-type audit-log retention**                      | privacy-review Q2 / §3.1 / §3.3 / §3.4 / §3.5 / §7 obligations 7–11             | **New ADR-0015** (top of file) — per-event-type schedule (privacy-review §3.3 table verbatim); `audit_log.retention_class` column; `audit_log_retention_schedule` table; underlying-record-ceiling rule (§3.5); `retention.deleted` jsonb shape (§3.4); CI drift assertion. **HG-14 — user explicitly ratifies the schedule before T16 ships.**                                                                                                                                                                                                                                                                                                                                                                                                                                        | **T16 acceptance amended** — per-event schedule, schema additions, ceiling rule, drift check, five tests from privacy-review §7 obligations 7–11.                                                                                                                      |
+| **Cross-cutting #1 — `retention_class` column on `audit_log`**           | privacy-review §4 cross-cutting #1                                              | Captured in **ADR-0015** schema requirements.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | T16 acceptance bullet (covered in HG-14 row above).                                                                                                                                                                                                                    |
+| **Cross-cutting #4 — `observability/README.md` §1 reasoning correction** | privacy-review §4 cross-cutting #4                                              | Captured in **ADR-0015** cross-references — observability-setup's next pass corrects the reasoning text to "matched to the breach-record retention because audit log feeds the breach-response process, not because PIPEDA s.10.1 requires 24mo for audit logs." Architect does NOT edit `observability/*` per amendment pass #3 hard rules.                                                                                                                                                                                                                                                                                                                                                                                                                                           | Follow-on for observability-setup, **not** a new task.                                                                                                                                                                                                                 |
+| **§5 fold-in item 4 — Crypto-shred-on-retention coherence**              | privacy-review §5 fold-in item 4                                                | **ADR-0012 amendment** (new "Crypto-shred-on-retention coherence with audit-log per-event retention" block at the end of ADR-0012) — note that "Backups older than the longest audit-log event retention can be hard-deleted without leaving 'events we cannot explain.'" Structurally satisfied by ADR-0015 + ADR-0012 amendment HG-8.                                                                                                                                                                                                                                                                                                                                                                                                                                                | No new test obligation; coherence is structural.                                                                                                                                                                                                                       |
+| **`HMAC_PSEUDONYM_KEY` escrow + rotation**                               | privacy-review §4 cross-cutting #3                                              | **NOT folded into this pass.** The recommendation (rotate quarterly with overlap window; old-era pseudonyms stay queryable in old-era space) is a substantive operational policy decision that touches ADR-0012's key escrow story; the architect surfaces this as an explicit **deferred-to-next-pass** item rather than land it half-spec'd. Rationale: the operational rotation procedure interacts with the backup window (35d) AND the live forensic procedure (Amendment E's reveal-session) AND the audit-log chain integrity (RA-2 head-pointer extraction). Half-specifying it now risks an inconsistency the test-writer would inherit. **Follow-on:** architect or security-reviewer's next pass amends ADR-0012 with the rotation cadence + overlap window + era encoding. | Tracked as a deferred follow-on; the privacy-reviewer's recommendation is preserved in their review file for the next pass to consume.                                                                                                                                 |
+| **F-53 / HG-11 — M-53a/b/c enumeration in Invariant 9**                  | threat-model F-53 (§3.3) / O-17 / HG-11 (already in threat-model §9)            | **ADR-0003 Amendment C extension** (in-place under Amendment C) — original Invariant 9 preserved verbatim; three sub-invariants added: 9.a (trap-on-mount; M-53a; was already covered), 9.b (announce-on-open `ready` promise gates input acceptance; M-53b; NEW), 9.c (underlying surface `inert` from t=0; scrim captures keydown + pointer during transition; M-53c; NEW). Cross-references threat-model M-53a/b/c assertion shapes.                                                                                                                                                                                                                                                                                                                                                | **T11 + T13 acceptance amended** (cross-reference) — the three sub-invariants are already mapped in threat-model §8 T11 F-53 entries; the test-writer's checklist is unchanged in shape, but Invariant 9 now points to all three rather than just the timing property. |
+| **F-54 / HG-12 — Recovery-passphrase show-again accommodation**          | threat-model F-54 (§3.1) / O-18 / HG-12 (already in threat-model §9) / a11y A-5 | **ADR-0003 Amendment F** — Surface D.6 gains "show passphrase again" hold-to-reveal (≥1500ms) + per-enrollment-session cap of 3 + audit-log emission gates render + no TTS / no clipboard on reveal + largest typography + highest-contrast pairing; new audit-log enum value `identity_privkey.recovery_blob.viewed` (added to ADR-0003 Amendment A closed allowlist; retention "membership + 24 months" per ADR-0015).                                                                                                                                                                                                                                                                                                                                                               | **T07 acceptance amended** — M-54a/b/c/d tests + audit-log enum addition + en-CA i18n contract for reveal-control label + helper text. **T19 acceptance amended** — full D.1 → D.7 onboarding integration test including a "show again" invocation.                    |
 
 **New artifacts in this file (pass #3):**
+
 - **ADR-0015** — Per-event-type audit-log retention schedule (HG-14). Top of file.
 - **ADR-0012 amendment** — Crypto-shred-on-retention coherence note appended at the end of ADR-0012.
 - **ADR-0007 amendment** — Reprisal-log intake consent surface (HG-13 cross-reference). Appended at the end of ADR-0007.
@@ -8132,6 +8441,7 @@ Privacy-reviewer returned two APPROVED-WITH-CHANGES verdicts (Q1 blocking T13; Q
 **Reversibility note (pass #3):** All amendments use the additive "amends" / "extends" pattern. Original ADR text is preserved verbatim. ADR-0015 is a new top-of-file ADR (no prior version to preserve). Amendment D / E / F are siblings under ADR-0003. The ADR-0007 amendment is an additive scope extension; original concern-intake decision is unchanged. The ADR-0012 amendment is a cross-reference, not a new operational rule.
 
 **Hard rules observed:**
+
 - Newest ADR on top — ADR-0015 placed above ADR-0014.
 - Amendments are additive blocks at the end of the original ADR (or in-place under existing amendments for the C extension); original text preserved verbatim; amended ADRs carry status lines naming the amendment date and trigger.
 - Cross-references: every amendment cites the source review file (privacy-review §X) or threat-model finding (F-xx) and the human gate (HG-xx).
@@ -8142,6 +8452,7 @@ Privacy-reviewer returned two APPROVED-WITH-CHANGES verdicts (Q1 blocking T13; Q
 **Locked decisions from plan §13 were not re-opened.** No new locked decisions introduced. No new cross-border transfers. No new PI subprocessors. ADR-0010's "Sentry is the only non-Supabase PI-adjacent subprocessor" posture is preserved.
 
 **Renumbering note (per directive G).** HG-11 (modal trap-engagement contract) and HG-12 (recovery-passphrase show-again) are **permanent in `.context/threat-model.md` §9** (threat-modeler-owned, written first). Privacy-reviewer's two proposed gates therefore become:
+
 - **HG-13** — pseudonymized reprisal-feed projection (ADR-0003 Amendment D) + forensic-reveal 4-eyes (Amendment E) + reprisal-log intake consent surface (ADR-0007 amendment) — **bundled as a single architect-owned gate**.
 - **HG-14** — per-event-type audit-log retention schedule (ADR-0015).
 
@@ -8149,28 +8460,28 @@ HG-13 and HG-14 are recorded in this summary table and cross-referenced from eac
 
 **Cross-table mapping (source → amendment → task):**
 
-| Source | Amendment | Task |
-|---|---|---|
-| privacy-review §2.3 (Option c) | ADR-0003 Amendment D | T13, T14 (extension) |
-| privacy-review §2.4 (consent copy) | ADR-0007 amendment | T13 |
-| privacy-review §3.3 (per-event schedule table) | ADR-0015 | T16 |
-| privacy-review §3.5 (underlying-record-ceiling rule) | ADR-0015 | T16 |
-| privacy-review §4 cross-cutting #1 (`retention_class` column) | ADR-0015 schema | T16 |
-| privacy-review §4 cross-cutting #2 (4-eyes forensic reveal) | ADR-0003 Amendment E | T13 |
-| privacy-review §4 cross-cutting #3 (HMAC_PSEUDONYM_KEY escrow + rotation) | **DEFERRED** to next pass | n/a (deferred) |
-| privacy-review §4 cross-cutting #4 (README.md §1 reasoning correction) | ADR-0015 cross-reference; observability-setup next pass | n/a (observability follow-on) |
-| privacy-review §4 cross-cutting #5 (default list payload) | ADR-0003 Amendment D | T13 |
-| privacy-review §5 fold-in 1 (Amendment B pattern extension) | ADR-0003 Amendment D | T13 |
-| privacy-review §5 fold-in 2 (ADR-0007 extension OR ADR-0016) | ADR-0007 amendment (preferred per privacy-reviewer recommendation) | T13 |
-| privacy-review §5 fold-in 3 (plan §8 retention pointer) | ADR-0015 supersedes uniform 24mo | T16 |
-| privacy-review §5 fold-in 4 (ADR-0012 crypto-shred coherence) | ADR-0012 amendment | T16 / T17 (structural, no new test) |
-| privacy-review §5 fold-in 5 (observability/audit-log.md §3 update) | ADR-0015 cross-reference; observability-setup next pass | n/a (observability follow-on) |
-| privacy-review §5 fold-in 6 (observability/README.md §10 finding #2) | ADR-0015 cross-reference; observability-setup next pass | n/a (observability follow-on) |
-| privacy-review §5 fold-in 7 (HG-9 ratification) | ADR-0015 HG-14 (subset of HG-9 scope) | T16 |
-| privacy-review §7 test obligations 1–6 | ADR-0003 Amendment D + Amendment E + ADR-0007 amendment | T13, T14 |
-| privacy-review §7 test obligations 7–11 | ADR-0015 + T16 acceptance | T16 |
-| threat-model F-53 M-53a/b/c | ADR-0003 Amendment C extension (9.a/9.b/9.c) | T11, T13 (already in §8 test obligations) |
-| threat-model F-54 M-54a/b/c/d | ADR-0003 Amendment F | T07, T19 |
+| Source                                                                    | Amendment                                                          | Task                                      |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------- |
+| privacy-review §2.3 (Option c)                                            | ADR-0003 Amendment D                                               | T13, T14 (extension)                      |
+| privacy-review §2.4 (consent copy)                                        | ADR-0007 amendment                                                 | T13                                       |
+| privacy-review §3.3 (per-event schedule table)                            | ADR-0015                                                           | T16                                       |
+| privacy-review §3.5 (underlying-record-ceiling rule)                      | ADR-0015                                                           | T16                                       |
+| privacy-review §4 cross-cutting #1 (`retention_class` column)             | ADR-0015 schema                                                    | T16                                       |
+| privacy-review §4 cross-cutting #2 (4-eyes forensic reveal)               | ADR-0003 Amendment E                                               | T13                                       |
+| privacy-review §4 cross-cutting #3 (HMAC_PSEUDONYM_KEY escrow + rotation) | **DEFERRED** to next pass                                          | n/a (deferred)                            |
+| privacy-review §4 cross-cutting #4 (README.md §1 reasoning correction)    | ADR-0015 cross-reference; observability-setup next pass            | n/a (observability follow-on)             |
+| privacy-review §4 cross-cutting #5 (default list payload)                 | ADR-0003 Amendment D                                               | T13                                       |
+| privacy-review §5 fold-in 1 (Amendment B pattern extension)               | ADR-0003 Amendment D                                               | T13                                       |
+| privacy-review §5 fold-in 2 (ADR-0007 extension OR ADR-0016)              | ADR-0007 amendment (preferred per privacy-reviewer recommendation) | T13                                       |
+| privacy-review §5 fold-in 3 (plan §8 retention pointer)                   | ADR-0015 supersedes uniform 24mo                                   | T16                                       |
+| privacy-review §5 fold-in 4 (ADR-0012 crypto-shred coherence)             | ADR-0012 amendment                                                 | T16 / T17 (structural, no new test)       |
+| privacy-review §5 fold-in 5 (observability/audit-log.md §3 update)        | ADR-0015 cross-reference; observability-setup next pass            | n/a (observability follow-on)             |
+| privacy-review §5 fold-in 6 (observability/README.md §10 finding #2)      | ADR-0015 cross-reference; observability-setup next pass            | n/a (observability follow-on)             |
+| privacy-review §5 fold-in 7 (HG-9 ratification)                           | ADR-0015 HG-14 (subset of HG-9 scope)                              | T16                                       |
+| privacy-review §7 test obligations 1–6                                    | ADR-0003 Amendment D + Amendment E + ADR-0007 amendment            | T13, T14                                  |
+| privacy-review §7 test obligations 7–11                                   | ADR-0015 + T16 acceptance                                          | T16                                       |
+| threat-model F-53 M-53a/b/c                                               | ADR-0003 Amendment C extension (9.a/9.b/9.c)                       | T11, T13 (already in §8 test obligations) |
+| threat-model F-54 M-54a/b/c/d                                             | ADR-0003 Amendment F                                               | T07, T19                                  |
 
 ---
 
@@ -8181,6 +8492,7 @@ The amendment pass #3 closes privacy-review Q1 (HG-13 bundling ADR-0003 Amendmen
 **Test-writer is next.** This is the canonical handoff: privacy-reviewer and threat-modeler second-pass are both complete (this file's amendments operationalize their outputs); no further reviewer pass is required before the test-writer lands the full obligation set.
 
 **Test-writer inputs (read in this order):**
+
 1. `/home/user/agent-os/.context/decisions.md` (this file, final state) — particularly **ADR-0015** (per-event retention schedule + schema + ceiling rule), **ADR-0003 Amendment C extension** (Invariants 9.a/9.b/9.c), **ADR-0003 Amendment D** (pseudonymized projection), **ADR-0003 Amendment E** (forensic-reveal 4-eyes), **ADR-0003 Amendment F** (recovery-passphrase show-again), **ADR-0007 amendment** (reprisal-log intake consent surface), **ADR-0012 amendment** (crypto-shred coherence note), and the T07 / T13 / T16 / T19 amended acceptance blocks.
 2. `/home/user/agent-os/.context/threat-model.md` §8 (test obligations per task ID — pre-loaded by threat-modeler first + second passes), §3.3 (F-53 / M-53a/b/c assertion shapes), §3.1 (F-54 / M-54a/b/c/d assertion shapes), §9 (HG-11 / HG-12 permanent gates), §11 (second-pass summary).
 3. `/home/user/agent-os/.context/privacy-review.md` §7 (test obligations 1–11 — the canonical privacy test obligation list for T13 and T16).
@@ -8191,6 +8503,7 @@ The amendment pass #3 closes privacy-review Q1 (HG-13 bundling ADR-0003 Amendmen
 **Test-writer obligation set (full T02 / T05 / T07 / T08 / T10 / T11 / T12 / T13 / T14 / T16 / T17 / T18 / T19 — pre-implementer):**
 
 For brevity the test-writer's full obligation list is the union of:
+
 - threat-model §8 — every bullet, grouped by task ID.
 - privacy-review §7 — eleven obligations (1–6 to T13 + T14; 7–11 to T16).
 - observability/README.md §11 — pre-task test artifacts per task (subject to the amendment-pass #3 prioritization note above).
@@ -8233,6 +8546,7 @@ For brevity the test-writer's full obligation list is the union of:
   - Invariant 9.c NEW: underlying surface `inert` + `tabindex=-1` from t=0; scrim capture-phase `keydown` swallows Tab/Enter/Space/Escape during transition; pointer click at underlying coordinates lands on scrim, not underlying button.
 
 **Carry-over from amendment pass #2 (still binding, restated for completeness):**
+
 - **RA-2 tests (T18):** live-vs-backup-diff alert; no-false-positive-on-newer-rows; closed-enum coverage enumerating every `audit_emit(...)` caller; volumetric-event exclusion for `auth.passkey.assert`.
 - **F-C tests (T14):** direct-bypass; indirection-success; atomicity; coverage-via-`pg_proc` on `work_refusal_read_audited` + `s51_evidence_read_audited`.
 - **F-B verifier rule:** semgrep `no-inspection-synced-hmac-fail-alias` with allowlist for the three permitted files.
@@ -8255,25 +8569,25 @@ For brevity the test-writer's full obligation list is the union of:
 
 T05 (auth core + auth migration) verifier + security-reviewer + privacy-reviewer all returned with consolidated blocker set B1–B4 plus eight cross-cutting observations + seven advisories. Amendment pass #4 closes the four blockers, folds the cross-cutting observations into the T05 respin where they are cheaper to land now than later, and ratifies the semgrep rule. New artifacts: **ADR-0016** (top-of-file; operational-table retention + HMAC-pseudonymization standard); **ADR-0002 Amendment G** (T05 auth-side-table reconciliation, TOTP consumed-log, plaintext-code drop, HMAC standard adopted, retention_class + request_id fold-ins, alert.fired meta rename); **§PI inventory amendments** (per privacy-review-t05 §7 + Amendment G.3); **HG-15 (NEW)** — bundled user-ratification gate covering ADR-0016 + Amendment G.
 
-| Change | Source | Amendment artifact | Downstream task(s) |
-|---|---|---|---|
-| **B1 — HMAC-not-SHA for all pseudonym derivations + TOTP code hashing** | privacy-review-t05 §2.1 Finding 2; consolidated security-reviewer B1 | **ADR-0016** (general HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC standard); **ADR-0002 Amendment G.4** (auth-specific application at four migration sites). Algorithm: HMAC-SHA-256. Key storage: Postgres GUC `app.hmac_pseudonym_key`. TS-side parity via `HMAC_PSEUDONYM_KEY` env var + boot smoke test. | **T05 migration-handler respin** (replace `digest('sha256')` with `hmac(..., current_setting('app.hmac_pseudonym_key'), 'sha256')` at all 4 sites; add `ALTER DATABASE ... SET app.hmac_pseudonym_key` deploy step). **T05 implementer respin** (`safe-fields.ts` + `memory-store.ts` HMAC parity; boot smoke test). |
-| **B2 — Document `auth_totp_consumed_log` table** | privacy-review-t05 §2.1 Finding 1 + §2.2; consolidated security-reviewer B2 | **ADR-0002 Amendment G.1** (purpose, classification, HMAC pseudonymization); **ADR-0016** retention schedule row (24h after `consumed_at`); **§PI inventory** new rows for `user_id`, `totp_code_hash`, `consumed_at`. | **T16 acceptance extended** (the retention sweep covers ADR-0016 operational-table schedule in addition to ADR-0015 audit-log schedule). **HG-15 user ratification** (NEW) before T16 ships. |
-| **B3 — `public.users` field-set divergence** | privacy-review-t05 §3.3 Finding 5; consolidated security-reviewer B3 | **ADR-0002 Amendment G.3** — PI inventory amended to match the T05 migration. `active` / `role` / `totp_destroyed_at` are T05-owned in `users`; `display_name` / `off_employer_contact` deferred to T06; `identity_pubkey` / `identity_privkey_recovery_blob` deferred to T07; `committee_membership` is a T06 concept. | **T06 acceptance cross-referenced** (T06 creates `committee_membership`; cannot retroactively drop `users.active` / `users.role` without a successor amendment). **T07 acceptance cross-referenced** (T07 adds identity-key columns to `users`). |
-| **B4 — `auth_totp_bootstraps.totp_code` plaintext column** | privacy-review-t05 §3.5 Finding 6; consolidated security-reviewer B4 | **ADR-0002 Amendment G.2** — column dropped; UNIQUE constraint becomes `(user_id)` only; `enroll_first_passkey` rewrites comparison to `v_bootstrap.secret_hash = hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')`. | **T05 migration-handler respin** (drop column, rewrite constraint, rewrite function body). |
-| **Privacy-review-t05 §8 obs #1 — `audit_log` stub vs T18 hash-chain backfill** | privacy-review-t05 §8 cross-cutting #1 | **ADR-0002 Amendment G.9** — T18 starts the chain fresh (or seeds from the last pre-T18 row; T18 migration-handler's call). Deliberately accepted gap. | **T18 acceptance cross-referenced** — chain genesis-or-backfill choice documented in T18 commit. |
-| **Privacy-review-t05 §8 obs #2 — `audit_emit` missing `retention_class`** | privacy-review-t05 §8 cross-cutting #2 | **ADR-0002 Amendment G.6** — column AND `audit_emit` write added in T05 migration (not T18 backfill); cheaper now. | **T05 migration-handler respin** (`audit_log.retention_class text NOT NULL` + `audit_emit` writes it). |
-| **Privacy-review-t05 §8 obs #3 — `audit_log` RLS deny-default vs Amendment B/D projection** | privacy-review-t05 §8 cross-cutting #3 | **ADR-0002 Amendment G.8** — deny-default at T05 is correct (no view exists yet); T13 replaces the policy with the Amendment D projection-view SELECT path when T13 ships. Documented as T13 prerequisite. | **T13 acceptance cross-referenced** — the T13 migration REPLACES the deny-default audit_log SELECT policy. |
-| **Privacy-review-t05 §8 obs #4 — `audit_emit` missing `p_request_id`** | privacy-review-t05 §8 cross-cutting #4 | **ADR-0002 Amendment G.7** — `p_request_id uuid` parameter added in T05; pre-T18 callers may pass null. Cheaper than rewriting every caller in T18. | **T05 migration-handler respin** (`audit_emit(..., p_request_id uuid)` signature). |
-| **Privacy-review-t05 §8 obs #5 — `alert.fired` meta `actor_pseudonym` collision** | privacy-review-t05 §8 cross-cutting #5 | **ADR-0002 Amendment G.4** — rename `meta.actor_pseudonym` to `meta.subject_pseudonym` in the `alert.fired` row shape. The outer row's `actor_pseudonym` is the dispatcher; the embedded one is the subject. Different semantics, different names. | **T05 implementer respin** (rename in the alert-emitter code). **observability-setup next pass** — documents `subject_pseudonym` in `observability/audit-log.md §1` `alert.fired` meta shape. |
-| **Privacy-review-t05 §3.3 Finding 3 / G.5 — `auth.passkey.assert` per-attempt vs per-success canonical wording** | privacy-review-t05 §3 Finding 3 | **ADR-0002 Amendment G.5** — adopt **per-attempt** as canonical; matches current code; failure-path emissions provide operational signal. Wording in ADR-0003 Amendment A extension line ~1927 clarified, not replaced. | **No code change; documentation only.** |
-| **Security-reviewer A3 — memory-store should HMAC the TOTP code** | consolidated security-reviewer A3 | Folded into **ADR-0016 §Decision 3** (TS-side parity) and **ADR-0002 Amendment G.4**. | **T05 implementer respin** (memory-store mirrors prod HMAC). |
-| **Security-reviewer A4 — TOTP-attempt enumeration differential (401 vs 410 vs 429)** | consolidated security-reviewer A4 | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Collapse to uniform 401 to client; differential reason → `audit_log.meta` only. | **T05 implementer respin** (collapse client response code; preserve audit-side differential). |
-| **Security-reviewer A5 — SECURITY DEFINER GRANT EXECUTE** | consolidated security-reviewer A5 | Captured in **ADR-0016 follow-up** (T05 migration-handler respin item). `GRANT EXECUTE ... TO supabase_auth_admin` (or chosen server role). | **T05 migration-handler respin** (explicit GRANT). |
-| **Security-reviewer A6 — burst-alert duplicates emission** | consolidated security-reviewer A6 | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Emit once per threshold crossing. | **T05 implementer respin** (deduplicate). |
-| **Security-reviewer A7 — dead `revoked_at` arithmetic branch** | consolidated security-reviewer A7 | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Remove the dead branch. | **T05 implementer respin** (remove dead code). |
-| **Privacy-review-t05 §3 Finding 4 — `actor_pseudonym` omitted from structured-log INFO** | privacy-review-t05 §3 Finding 4 | **Deferred.** T05-prod-deployment obligation; test-writer adds. Not architect-amendable shape; structurally a code-side fix in the production wiring. | **T05 test-writer adds** the obligation; **T05 implementer** addresses in production wiring (browser-side intentionally omits per spec; server-side includes). |
-| **Semgrep rule ratification** | privacy-review-t05 §9 item 6; consolidated security-reviewer ratification ask | **ADR-0016 §Operational rules 2** ratifies the rule's existence + scope. File path: `.semgrep/no-bare-sha256-in-migrations.yml`. Architect does NOT write the file; migration-handler or implementer adds it. | **T05 migration-handler or implementer respin** (write the semgrep file). **CI**: rule enforced on every PR touching `supabase/migrations/`. |
+| Change                                                                                                           | Source                                                                        | Amendment artifact                                                                                                                                                                                                                                                                                                      | Downstream task(s)                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **B1 — HMAC-not-SHA for all pseudonym derivations + TOTP code hashing**                                          | privacy-review-t05 §2.1 Finding 2; consolidated security-reviewer B1          | **ADR-0016** (general HMAC-SHA-256 + `app.hmac_pseudonym_key` GUC standard); **ADR-0002 Amendment G.4** (auth-specific application at four migration sites). Algorithm: HMAC-SHA-256. Key storage: Postgres GUC `app.hmac_pseudonym_key`. TS-side parity via `HMAC_PSEUDONYM_KEY` env var + boot smoke test.            | **T05 migration-handler respin** (replace `digest('sha256')` with `hmac(..., current_setting('app.hmac_pseudonym_key'), 'sha256')` at all 4 sites; add `ALTER DATABASE ... SET app.hmac_pseudonym_key` deploy step). **T05 implementer respin** (`safe-fields.ts` + `memory-store.ts` HMAC parity; boot smoke test). |
+| **B2 — Document `auth_totp_consumed_log` table**                                                                 | privacy-review-t05 §2.1 Finding 1 + §2.2; consolidated security-reviewer B2   | **ADR-0002 Amendment G.1** (purpose, classification, HMAC pseudonymization); **ADR-0016** retention schedule row (24h after `consumed_at`); **§PI inventory** new rows for `user_id`, `totp_code_hash`, `consumed_at`.                                                                                                  | **T16 acceptance extended** (the retention sweep covers ADR-0016 operational-table schedule in addition to ADR-0015 audit-log schedule). **HG-15 user ratification** (NEW) before T16 ships.                                                                                                                         |
+| **B3 — `public.users` field-set divergence**                                                                     | privacy-review-t05 §3.3 Finding 5; consolidated security-reviewer B3          | **ADR-0002 Amendment G.3** — PI inventory amended to match the T05 migration. `active` / `role` / `totp_destroyed_at` are T05-owned in `users`; `display_name` / `off_employer_contact` deferred to T06; `identity_pubkey` / `identity_privkey_recovery_blob` deferred to T07; `committee_membership` is a T06 concept. | **T06 acceptance cross-referenced** (T06 creates `committee_membership`; cannot retroactively drop `users.active` / `users.role` without a successor amendment). **T07 acceptance cross-referenced** (T07 adds identity-key columns to `users`).                                                                     |
+| **B4 — `auth_totp_bootstraps.totp_code` plaintext column**                                                       | privacy-review-t05 §3.5 Finding 6; consolidated security-reviewer B4          | **ADR-0002 Amendment G.2** — column dropped; UNIQUE constraint becomes `(user_id)` only; `enroll_first_passkey` rewrites comparison to `v_bootstrap.secret_hash = hmac(p_totp_code, current_setting('app.hmac_pseudonym_key'), 'sha256')`.                                                                              | **T05 migration-handler respin** (drop column, rewrite constraint, rewrite function body).                                                                                                                                                                                                                           |
+| **Privacy-review-t05 §8 obs #1 — `audit_log` stub vs T18 hash-chain backfill**                                   | privacy-review-t05 §8 cross-cutting #1                                        | **ADR-0002 Amendment G.9** — T18 starts the chain fresh (or seeds from the last pre-T18 row; T18 migration-handler's call). Deliberately accepted gap.                                                                                                                                                                  | **T18 acceptance cross-referenced** — chain genesis-or-backfill choice documented in T18 commit.                                                                                                                                                                                                                     |
+| **Privacy-review-t05 §8 obs #2 — `audit_emit` missing `retention_class`**                                        | privacy-review-t05 §8 cross-cutting #2                                        | **ADR-0002 Amendment G.6** — column AND `audit_emit` write added in T05 migration (not T18 backfill); cheaper now.                                                                                                                                                                                                      | **T05 migration-handler respin** (`audit_log.retention_class text NOT NULL` + `audit_emit` writes it).                                                                                                                                                                                                               |
+| **Privacy-review-t05 §8 obs #3 — `audit_log` RLS deny-default vs Amendment B/D projection**                      | privacy-review-t05 §8 cross-cutting #3                                        | **ADR-0002 Amendment G.8** — deny-default at T05 is correct (no view exists yet); T13 replaces the policy with the Amendment D projection-view SELECT path when T13 ships. Documented as T13 prerequisite.                                                                                                              | **T13 acceptance cross-referenced** — the T13 migration REPLACES the deny-default audit_log SELECT policy.                                                                                                                                                                                                           |
+| **Privacy-review-t05 §8 obs #4 — `audit_emit` missing `p_request_id`**                                           | privacy-review-t05 §8 cross-cutting #4                                        | **ADR-0002 Amendment G.7** — `p_request_id uuid` parameter added in T05; pre-T18 callers may pass null. Cheaper than rewriting every caller in T18.                                                                                                                                                                     | **T05 migration-handler respin** (`audit_emit(..., p_request_id uuid)` signature).                                                                                                                                                                                                                                   |
+| **Privacy-review-t05 §8 obs #5 — `alert.fired` meta `actor_pseudonym` collision**                                | privacy-review-t05 §8 cross-cutting #5                                        | **ADR-0002 Amendment G.4** — rename `meta.actor_pseudonym` to `meta.subject_pseudonym` in the `alert.fired` row shape. The outer row's `actor_pseudonym` is the dispatcher; the embedded one is the subject. Different semantics, different names.                                                                      | **T05 implementer respin** (rename in the alert-emitter code). **observability-setup next pass** — documents `subject_pseudonym` in `observability/audit-log.md §1` `alert.fired` meta shape.                                                                                                                        |
+| **Privacy-review-t05 §3.3 Finding 3 / G.5 — `auth.passkey.assert` per-attempt vs per-success canonical wording** | privacy-review-t05 §3 Finding 3                                               | **ADR-0002 Amendment G.5** — adopt **per-attempt** as canonical; matches current code; failure-path emissions provide operational signal. Wording in ADR-0003 Amendment A extension line ~1927 clarified, not replaced.                                                                                                 | **No code change; documentation only.**                                                                                                                                                                                                                                                                              |
+| **Security-reviewer A3 — memory-store should HMAC the TOTP code**                                                | consolidated security-reviewer A3                                             | Folded into **ADR-0016 §Decision 3** (TS-side parity) and **ADR-0002 Amendment G.4**.                                                                                                                                                                                                                                   | **T05 implementer respin** (memory-store mirrors prod HMAC).                                                                                                                                                                                                                                                         |
+| **Security-reviewer A4 — TOTP-attempt enumeration differential (401 vs 410 vs 429)**                             | consolidated security-reviewer A4                                             | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Collapse to uniform 401 to client; differential reason → `audit_log.meta` only.                                                                                                                                                                       | **T05 implementer respin** (collapse client response code; preserve audit-side differential).                                                                                                                                                                                                                        |
+| **Security-reviewer A5 — SECURITY DEFINER GRANT EXECUTE**                                                        | consolidated security-reviewer A5                                             | Captured in **ADR-0016 follow-up** (T05 migration-handler respin item). `GRANT EXECUTE ... TO supabase_auth_admin` (or chosen server role).                                                                                                                                                                             | **T05 migration-handler respin** (explicit GRANT).                                                                                                                                                                                                                                                                   |
+| **Security-reviewer A6 — burst-alert duplicates emission**                                                       | consolidated security-reviewer A6                                             | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Emit once per threshold crossing.                                                                                                                                                                                                                     | **T05 implementer respin** (deduplicate).                                                                                                                                                                                                                                                                            |
+| **Security-reviewer A7 — dead `revoked_at` arithmetic branch**                                                   | consolidated security-reviewer A7                                             | Captured in **ADR-0016 follow-up** (T05 implementer respin item). Remove the dead branch.                                                                                                                                                                                                                               | **T05 implementer respin** (remove dead code).                                                                                                                                                                                                                                                                       |
+| **Privacy-review-t05 §3 Finding 4 — `actor_pseudonym` omitted from structured-log INFO**                         | privacy-review-t05 §3 Finding 4                                               | **Deferred.** T05-prod-deployment obligation; test-writer adds. Not architect-amendable shape; structurally a code-side fix in the production wiring.                                                                                                                                                                   | **T05 test-writer adds** the obligation; **T05 implementer** addresses in production wiring (browser-side intentionally omits per spec; server-side includes).                                                                                                                                                       |
+| **Semgrep rule ratification**                                                                                    | privacy-review-t05 §9 item 6; consolidated security-reviewer ratification ask | **ADR-0016 §Operational rules 2** ratifies the rule's existence + scope. File path: `.semgrep/no-bare-sha256-in-migrations.yml`. Architect does NOT write the file; migration-handler or implementer adds it.                                                                                                           | **T05 migration-handler or implementer respin** (write the semgrep file). **CI**: rule enforced on every PR touching `supabase/migrations/`.                                                                                                                                                                         |
 
 ## New artifacts in this file (pass #4)
 
@@ -8300,36 +8614,36 @@ All amendments use the additive "amends" / "extends" pattern. Original ADR-0002 
 - ADR-0001 hosting tradeoff preserved.
 - ADR-0002 passkeys + TOTP-enrollment-bootstrap posture preserved (Amendment G is operational, not architectural — passkeys-only stays; TOTP-bootstrap-then-destroy stays).
 - ADR-0010 "Sentry is the only non-Supabase PI-adjacent subprocessor" preserved.
-- ADR-0015 per-event-type retention preserved (ADR-0016 sits *beside*, not on top of, ADR-0015).
+- ADR-0015 per-event-type retention preserved (ADR-0016 sits _beside_, not on top of, ADR-0015).
 - No new cross-border transfers. No new PI subprocessors.
 
 ## Cross-table mapping (source → amendment → task)
 
-| Source | Amendment | Task |
-|---|---|---|
-| privacy-review-t05 §2.1 Finding 1 + §2.2 (consumed-log) | ADR-0002 Amendment G.1 + ADR-0016 schedule row | T05 respin, T16 |
-| privacy-review-t05 §2.1 Finding 2 (HMAC-not-SHA) | ADR-0016 §Decision 1 + ADR-0002 Amendment G.4 | T05 respin (migration + auth-core) |
-| privacy-review-t05 §3.3 Finding 5 (`users` field set) | ADR-0002 Amendment G.3 + §PI inventory amendments | T05 (no code change), T06 (cross-ref), T07 (cross-ref) |
-| privacy-review-t05 §3.5 Finding 6 (plaintext `totp_code`) | ADR-0002 Amendment G.2 | T05 migration respin |
-| privacy-review-t05 §8 obs #1 (audit_log chain backfill) | ADR-0002 Amendment G.9 | T18 (cross-ref) |
-| privacy-review-t05 §8 obs #2 (`retention_class`) | ADR-0002 Amendment G.6 | T05 migration respin |
-| privacy-review-t05 §8 obs #3 (RLS deny-default) | ADR-0002 Amendment G.8 | T13 (cross-ref) |
-| privacy-review-t05 §8 obs #4 (`p_request_id`) | ADR-0002 Amendment G.7 | T05 migration respin |
-| privacy-review-t05 §8 obs #5 (`subject_pseudonym`) | ADR-0002 Amendment G.4 | T05 implementer respin + observability-setup next pass |
-| privacy-review-t05 §3 Finding 3 (per-attempt wording) | ADR-0002 Amendment G.5 | (documentation only) |
-| privacy-review-t05 §3 Finding 4 (`actor_pseudonym` in INFO) | Deferred to T05 production wiring + test-writer | T05 implementer + test-writer |
-| privacy-review-t05 §9 item 1 (Amendment G — TOTP consumed-log) | ADR-0002 Amendment G.1 | T05, T16 |
-| privacy-review-t05 §9 item 2 (PI inventory) | §PI inventory amendments | T05 |
-| privacy-review-t05 §9 item 3 (operational-table retention schedule) | ADR-0016 | T05, T16 |
-| privacy-review-t05 §9 item 4 (Amendment A wording) | ADR-0002 Amendment G.5 | (documentation only) |
-| privacy-review-t05 §9 item 5 (observability/audit-log.md `alert.fired`) | Deferred to observability-setup next pass | (observability follow-on) |
-| privacy-review-t05 §9 item 6 (semgrep rule) | ADR-0016 §Operational rules 2 (ratification) | T05 (file written by migration-handler or implementer) |
-| privacy-review-t05 §9 item 7 (HG-9 / HG-14 ratification) | HG-15 (new; bundled with ADR-0016 + Amendment G) | T16 |
-| consolidated security-reviewer A3 (memory-store HMAC parity) | ADR-0016 §Decision 3 + ADR-0002 Amendment G.4 follow-up | T05 implementer respin |
-| consolidated security-reviewer A4 (TOTP-attempt enumeration differential) | ADR-0016 follow-up | T05 implementer respin |
-| consolidated security-reviewer A5 (SECURITY DEFINER GRANT) | ADR-0016 follow-up | T05 migration-handler respin |
-| consolidated security-reviewer A6 (burst-alert deduplication) | ADR-0016 follow-up | T05 implementer respin |
-| consolidated security-reviewer A7 (dead `revoked_at` branch) | ADR-0016 follow-up | T05 implementer respin |
+| Source                                                                    | Amendment                                               | Task                                                   |
+| ------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
+| privacy-review-t05 §2.1 Finding 1 + §2.2 (consumed-log)                   | ADR-0002 Amendment G.1 + ADR-0016 schedule row          | T05 respin, T16                                        |
+| privacy-review-t05 §2.1 Finding 2 (HMAC-not-SHA)                          | ADR-0016 §Decision 1 + ADR-0002 Amendment G.4           | T05 respin (migration + auth-core)                     |
+| privacy-review-t05 §3.3 Finding 5 (`users` field set)                     | ADR-0002 Amendment G.3 + §PI inventory amendments       | T05 (no code change), T06 (cross-ref), T07 (cross-ref) |
+| privacy-review-t05 §3.5 Finding 6 (plaintext `totp_code`)                 | ADR-0002 Amendment G.2                                  | T05 migration respin                                   |
+| privacy-review-t05 §8 obs #1 (audit_log chain backfill)                   | ADR-0002 Amendment G.9                                  | T18 (cross-ref)                                        |
+| privacy-review-t05 §8 obs #2 (`retention_class`)                          | ADR-0002 Amendment G.6                                  | T05 migration respin                                   |
+| privacy-review-t05 §8 obs #3 (RLS deny-default)                           | ADR-0002 Amendment G.8                                  | T13 (cross-ref)                                        |
+| privacy-review-t05 §8 obs #4 (`p_request_id`)                             | ADR-0002 Amendment G.7                                  | T05 migration respin                                   |
+| privacy-review-t05 §8 obs #5 (`subject_pseudonym`)                        | ADR-0002 Amendment G.4                                  | T05 implementer respin + observability-setup next pass |
+| privacy-review-t05 §3 Finding 3 (per-attempt wording)                     | ADR-0002 Amendment G.5                                  | (documentation only)                                   |
+| privacy-review-t05 §3 Finding 4 (`actor_pseudonym` in INFO)               | Deferred to T05 production wiring + test-writer         | T05 implementer + test-writer                          |
+| privacy-review-t05 §9 item 1 (Amendment G — TOTP consumed-log)            | ADR-0002 Amendment G.1                                  | T05, T16                                               |
+| privacy-review-t05 §9 item 2 (PI inventory)                               | §PI inventory amendments                                | T05                                                    |
+| privacy-review-t05 §9 item 3 (operational-table retention schedule)       | ADR-0016                                                | T05, T16                                               |
+| privacy-review-t05 §9 item 4 (Amendment A wording)                        | ADR-0002 Amendment G.5                                  | (documentation only)                                   |
+| privacy-review-t05 §9 item 5 (observability/audit-log.md `alert.fired`)   | Deferred to observability-setup next pass               | (observability follow-on)                              |
+| privacy-review-t05 §9 item 6 (semgrep rule)                               | ADR-0016 §Operational rules 2 (ratification)            | T05 (file written by migration-handler or implementer) |
+| privacy-review-t05 §9 item 7 (HG-9 / HG-14 ratification)                  | HG-15 (new; bundled with ADR-0016 + Amendment G)        | T16                                                    |
+| consolidated security-reviewer A3 (memory-store HMAC parity)              | ADR-0016 §Decision 3 + ADR-0002 Amendment G.4 follow-up | T05 implementer respin                                 |
+| consolidated security-reviewer A4 (TOTP-attempt enumeration differential) | ADR-0016 follow-up                                      | T05 implementer respin                                 |
+| consolidated security-reviewer A5 (SECURITY DEFINER GRANT)                | ADR-0016 follow-up                                      | T05 migration-handler respin                           |
+| consolidated security-reviewer A6 (burst-alert deduplication)             | ADR-0016 follow-up                                      | T05 implementer respin                                 |
+| consolidated security-reviewer A7 (dead `revoked_at` branch)              | ADR-0016 follow-up                                      | T05 implementer respin                                 |
 
 ---
 
@@ -8342,6 +8656,7 @@ Amendment pass #4 closes the T05 verifier + security-reviewer + privacy-reviewer
 **The canonical pipeline is:**
 
 **1. migration-handler respins the T05 migration `supabase/migrations/00000000000001_auth.sql`** — per Amendment G + ADR-0016 follow-ups:
+
 - B1: replace `digest(..., 'sha256')` at lines 294-295, 317, 357, 437 with `hmac(..., current_setting('app.hmac_pseudonym_key'), 'sha256')`; add deploy-time `ALTER DATABASE ... SET app.hmac_pseudonym_key = '...'` (or `_setup_app_settings.sql` companion).
 - B2: no migration change beyond G.1 documentation; the existing `auth_totp_consumed_log` table shape is correct once the hash column is HMAC.
 - B3: no migration change; the `public.users` field set as-shipped is ratified.
@@ -8353,6 +8668,7 @@ Amendment pass #4 closes the T05 verifier + security-reviewer + privacy-reviewer
 - semgrep rule: write `.semgrep/no-bare-sha256-in-migrations.yml` per ADR-0016 §Operational rules 2.
 
 **2. implementer respins the auth-core `apps/web/src/lib/auth/auth-core.ts` + `memory-store.ts` + `safe-fields.ts`** — per Amendment G + ADR-0016 follow-ups:
+
 - A3: memory-store stores HMAC-of-code (not plaintext); mirrors prod.
 - A4: collapse the TOTP-attempt enumeration differential (401 / 410 / 429) to uniform `401 UNAUTHORIZED` for the unauthenticated client; preserve the differential reason in the audit-log meta only.
 - A6: burst-alert emission deduplicated to one emission per threshold crossing.
@@ -8361,6 +8677,7 @@ Amendment pass #4 closes the T05 verifier + security-reviewer + privacy-reviewer
 - G.4: rename any `meta.actor_pseudonym` write inside the `alert.fired` emitter to `meta.subject_pseudonym`.
 
 **3. verifier + security-reviewer + privacy-reviewer re-review** the respun migration + auth-core. Verifier asserts:
+
 - The four blockers (B1–B4) are addressed in the diff.
 - The cross-cutting #1–#5 fold-ins are present.
 - The seven advisories (A3–A7 + the two non-blocking findings 3 + 4) are addressed.
@@ -8385,32 +8702,33 @@ Security-reviewer asserts the HMAC-keyed pseudonyms hold equality across SQL ↔
 
 ### 1. ADR-0016 schedule row — `concerns` (G-T08-4)
 
-| Table | Retention | Class | Basis |
-|---|---|---|---|
+| Table      | Retention   | Class              | Basis                                                                                                                                                                                                                                                                                                                                                            |
+| ---------- | ----------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `concerns` | **7 years** | `fixed_years` / 7y | OHSA record-keeping obligation — `concerns` is already enumerated among the 7y PI-bearing operational tables in the ADR-0018 backup-scope decision ("`concerns`, `inspections`, … carry 7y OHSA obligations"). The T16 retention sweep keys off this row; the T16.1 `audit_log_retention_schedule` / operational schedule table is the authoritative SQL mirror. |
 
-**HG-15 (new server↔DB table):** fires for the `concerns` + `concern_rate_log` tables landed by the T08.1 migration; collect user re-ratification at T08.1 PR submission. `concern_rate_log` is an **operational** rate-limit ledger (no PI beyond the actor anchor); recommended retention **24mo** (or shorter — the T16 sweep prunes it; it carries no OHSA obligation). 
+**HG-15 (new server↔DB table):** fires for the `concerns` + `concern_rate_log` tables landed by the T08.1 migration; collect user re-ratification at T08.1 PR submission. `concern_rate_log` is an **operational** rate-limit ledger (no PI beyond the actor anchor); recommended retention **24mo** (or shorter — the T16 sweep prunes it; it carries no OHSA obligation).
 
 ### 2. §PI inventory rows — `concerns` columns (G-T08-5)
 
 All client-sealed columns are committee-key ciphertext (E2EE; the server never sees plaintext). Residency ca-central-1; retention 7y (per §1).
 
-| Column | Data class | Notes |
-|---|---|---|
-| `concerns.id` | C0 | opaque uuid |
-| `concerns.actor_id` | C1 | submitter anchor — F-17, ALWAYS present (never null), independent of the anonymous toggle |
-| `concerns.title_ct` | C3 | committee-key-sealed title |
-| `concerns.body_ct` | C3 | committee-key-sealed body |
-| `concerns.source_name_ct` | **C4** | committee-key-sealed source name; NULL when logged anonymously; omitted from `concerns_default_view` (F-18) |
-| `concerns.source_passphrase_hash` | C1 | pgcrypto-bf hash of the per-record reveal passphrase (UX gate, not the crypto gate, G-T08-6); not reversible to the source name |
-| `concerns.hazard_class` / `severity` / `location_id` | C1 | classification metadata |
-| `concerns.created_at` / `updated_at` | C1 | timestamps |
+| Column                                               | Data class | Notes                                                                                                                           |
+| ---------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `concerns.id`                                        | C0         | opaque uuid                                                                                                                     |
+| `concerns.actor_id`                                  | C1         | submitter anchor — F-17, ALWAYS present (never null), independent of the anonymous toggle                                       |
+| `concerns.title_ct`                                  | C3         | committee-key-sealed title                                                                                                      |
+| `concerns.body_ct`                                   | C3         | committee-key-sealed body                                                                                                       |
+| `concerns.source_name_ct`                            | **C4**     | committee-key-sealed source name; NULL when logged anonymously; omitted from `concerns_default_view` (F-18)                     |
+| `concerns.source_passphrase_hash`                    | C1         | pgcrypto-bf hash of the per-record reveal passphrase (UX gate, not the crypto gate, G-T08-6); not reversible to the source name |
+| `concerns.hazard_class` / `severity` / `location_id` | C1         | classification metadata                                                                                                         |
+| `concerns.created_at` / `updated_at`                 | C1         | timestamps                                                                                                                      |
 
 ### 3. `concern.updated` audit-enum authorization (G-T08-9)
 
 `concern.updated` is hereby authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). It is emitted by `concern_update` (F-16) carrying `meta.prev_field_hashes` — the **server-computed** SHA-256 of each prior sealed column, so a body/title rewrite is forensically detectable without revealing plaintext. Threat-model §3.2 F-16's spelling is reconciled to the past-tense `concern.updated` (matching `member.role_changed` / `auth.passkey.enrolled`).
 
 Six-mirror status (same split that landed `member.role_changed` and `panic_wipe.invoked`):
+
 - [x] TS const — `CONCERN_AUDIT_EVENTS` in `apps/web/src/lib/concerns/types.ts` (already present)
 - [x] `audit-log.md §1` "Concern intake (T08)" table row (this fold-in)
 - [x] `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` (this fold-in)
@@ -8427,6 +8745,7 @@ Six-mirror status (same split that landed `member.role_changed` and `panic_wipe.
 - [ ] **HG-10 labour-lawyer** ratification of the source-name consent copy (G-T08-11) — separate human gate, before first production concern data.
 
 ### Follow-ups
+
 - [ ] Architect ratifies this fold-in (the 7y class, the PI rows, the `concern.updated` authorization).
 - [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` row for `concern.updated` (with the other carried-forward enum values).
 
@@ -8442,11 +8761,11 @@ The 4-eyes ledger ships as **one** `pending_four_eyes_ops` table with a `kind` d
 
 ### 2. ADR-0016 schedule rows (G-T13-4)
 
-| Table | Retention | Class | Basis |
-|---|---|---|---|
-| `reprisal_log` | **7 years** | `fixed_years` / 7y | OHSA reprisal record (PI-bearing C4); listed among the 7y operational tables in the ADR-0018 backup scope. |
-| `pending_four_eyes_ops` | **24mo** | `fixed_months` / 24mo | Operational 4-eyes ledger (C1 pseudonyms + C0 references); forensic rows clear `revealed_actor_pseudonym` at the 24h window (`expire_forensic_reveals`). |
-| `reprisal_rate_log` | **24mo** | operational | Rate ledger (actor anchor only); the T16 sweep prunes it. |
+| Table                   | Retention   | Class                 | Basis                                                                                                                                                    |
+| ----------------------- | ----------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reprisal_log`          | **7 years** | `fixed_years` / 7y    | OHSA reprisal record (PI-bearing C4); listed among the 7y operational tables in the ADR-0018 backup scope.                                               |
+| `pending_four_eyes_ops` | **24mo**    | `fixed_months` / 24mo | Operational 4-eyes ledger (C1 pseudonyms + C0 references); forensic rows clear `revealed_actor_pseudonym` at the 24h window (`expire_forensic_reveals`). |
+| `reprisal_rate_log`     | **24mo**    | operational           | Rate ledger (actor anchor only); the T16 sweep prunes it.                                                                                                |
 
 **HG-15 (new tables):** fires for `reprisal_log`, `pending_four_eyes_ops`, `reprisal_rate_log`; collect user re-ratification at T13.1 PR submission.
 
@@ -8454,27 +8773,29 @@ The 4-eyes ledger ships as **one** `pending_four_eyes_ops` table with a `kind` d
 
 Residency ca-central-1; `reprisal_log` retention 7y (per §2). Sealed columns are committee-key ciphertext (E2EE; server never sees plaintext).
 
-| Column | Class | Notes |
-|---|---|---|
-| `reprisal_log.id` | C0 | opaque uuid |
-| `reprisal_log.actor_id` | C1 | author anchor — F-17, never null (no anonymous mode on reprisals) |
-| `reprisal_log.title_ct` / `body_ct` | **C4** | committee-key-sealed; `body_ct` is the highest-sensitivity plaintext in the system |
-| `reprisal_log.per_record_passphrase_hash` | C1 | pgcrypto-bf; UX friction gate, not reversible to the body |
-| `reprisal_log.status` / `created_at` / `updated_at` | C1 | lifecycle metadata |
-| `pending_four_eyes_ops.proposer_id` / `approver_id` | C1 | actor anchors |
-| `pending_four_eyes_ops.target_table` / `target_id` / `kind` / `new_status` / `reveal_reason` | C0/C1 | op references + reason text |
-| `pending_four_eyes_ops.revealed_actor_pseudonym` | C1 | revealed for ≤24h, then cleared (Amendment E) |
+| Column                                                                                       | Class  | Notes                                                                              |
+| -------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `reprisal_log.id`                                                                            | C0     | opaque uuid                                                                        |
+| `reprisal_log.actor_id`                                                                      | C1     | author anchor — F-17, never null (no anonymous mode on reprisals)                  |
+| `reprisal_log.title_ct` / `body_ct`                                                          | **C4** | committee-key-sealed; `body_ct` is the highest-sensitivity plaintext in the system |
+| `reprisal_log.per_record_passphrase_hash`                                                    | C1     | pgcrypto-bf; UX friction gate, not reversible to the body                          |
+| `reprisal_log.status` / `created_at` / `updated_at`                                          | C1     | lifecycle metadata                                                                 |
+| `pending_four_eyes_ops.proposer_id` / `approver_id`                                          | C1     | actor anchors                                                                      |
+| `pending_four_eyes_ops.target_table` / `target_id` / `kind` / `new_status` / `reveal_reason` | C0/C1  | op references + reason text                                                        |
+| `pending_four_eyes_ops.revealed_actor_pseudonym`                                             | C1     | revealed for ≤24h, then cleared (Amendment E)                                      |
 
 ### 4. Audit-enum authorization (G-T13-14)
 
 Authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). `reprisal.update` and `sensitive.access_attempt` were missing from the gate + doc and are added now; the forensic pair was already present. Mirror status:
+
 - [x] TS const — `REPRISAL_AUDIT_EVENTS` in `apps/web/src/lib/reprisal/types.ts` (all 8 present)
 - [x] `audit-log.md §1` rows for `reprisal.update`, `sensitive.access_attempt`, `audit.forensic_reveal.4eyes_pending/completed` (this fold-in)
 - [x] `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` adds `reprisal.update` + `sensitive.access_attempt` (this fold-in)
-- [x] retention → `match_underlying` for the target-bearing reprisal.* events (follow the `reprisal_log` 7y); the forensic `audit.*` events carry no target_id and take the audit-log default
+- [x] retention → `match_underlying` for the target-bearing reprisal._ events (follow the `reprisal_log` 7y); the forensic `audit._` events carry no target_id and take the audit-log default
 - [ ] SQL `audit_log.event_type` CHECK + `audit_log_retention_schedule` rows — **deferred to T18** (as with `member.role_changed` / `concern.updated`)
 
 ### Compliance check
+
 - [x] PIPEDA 4.5 — reprisal 7y OHSA-bound; T16 sweep enforces it.
 - [x] No new cross-border flow / subprocessor (ca-central-1, in-stack).
 - [x] ADR-0003 Invariant 4 untouched (libsodium client-side seal + pgcrypto-bf server-side hash only).
@@ -8482,6 +8803,7 @@ Authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). `re
 - [ ] **HG-10** labour-lawyer ratification of the reprisal consent copy (G-T13-13) — before first production reprisal data.
 
 ### Follow-ups
+
 - [ ] Architect ratifies this fold-in (the schedule, the PI rows, the enum authorization, the unified-table shape).
 - [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` rows for the new reprisal enum values.
 
@@ -8493,10 +8815,10 @@ Authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). `re
 
 ### 1. ADR-0016 schedule rows (G-T14-4)
 
-| Table | Retention | Class | Basis |
-|---|---|---|---|
+| Table          | Retention   | Class              | Basis                                                                                                 |
+| -------------- | ----------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
 | `work_refusal` | **7 years** | `fixed_years` / 7y | OHSA s.43 record; PI-bearing C4. Listed among the 7y operational tables in the ADR-0018 backup scope. |
-| `s51_evidence` | **7 years** | `fixed_years` / 7y | OHSA s.51 critical-injury record; PI-bearing C4 (notes + per-photo sealed blobs). Same OHSA basis. |
+| `s51_evidence` | **7 years** | `fixed_years` / 7y | OHSA s.51 critical-injury record; PI-bearing C4 (notes + per-photo sealed blobs). Same OHSA basis.    |
 
 (No new "pending" or "rate" tables here — T14 reuses T13's `pending_four_eyes_ops` only if a future flow needs 4-eyes, and has no rate ledger by design — F-21's certified-only write is the throttle.)
 
@@ -8506,25 +8828,26 @@ Authorized on the closed `audit_log.event_type` enum (ADR-0003 Amendment A). `re
 
 Residency ca-central-1; retention 7y (per §1). Sealed columns are committee-key ciphertext (E2EE).
 
-| Column | Class | Notes |
-|---|---|---|
-| `work_refusal.id` | C0 | opaque uuid |
-| `work_refusal.actor_id` | C1 | statutory filer anchor — F-17, never null (no anonymous mode on s.43) |
-| `work_refusal.title_ct` | C3 | committee-key-sealed title |
-| `work_refusal.notes_ct` | **C4** | committee-key-sealed s.43 narrative |
-| `work_refusal.per_record_passphrase_hash` | C1 | pgcrypto-bf; UX friction gate (G-T14-5/10) |
-| `work_refusal.status` / `created_at` / `updated_at` | C1 | lifecycle metadata |
-| `s51_evidence.id` | C0 | opaque uuid |
-| `s51_evidence.actor_id` | C1 | statutory filer anchor — F-17, never null |
-| `s51_evidence.title_ct` | C3 | committee-key-sealed title |
-| `s51_evidence.notes_ct` | **C4** | committee-key-sealed s.51 narrative |
-| `s51_evidence.photos_ct` (bytea[]) | **C4** | per-photo sealed blobs (ADR-0011 amendment); each entry `nonce || ciphertext` |
-| `s51_evidence.per_record_passphrase_hash` | C1 | pgcrypto-bf |
-| `s51_evidence.status` / `created_at` / `updated_at` | C1 | lifecycle metadata |
+| Column                                              | Class  | Notes                                                                 |
+| --------------------------------------------------- | ------ | --------------------------------------------------------------------- | --- | ----------- |
+| `work_refusal.id`                                   | C0     | opaque uuid                                                           |
+| `work_refusal.actor_id`                             | C1     | statutory filer anchor — F-17, never null (no anonymous mode on s.43) |
+| `work_refusal.title_ct`                             | C3     | committee-key-sealed title                                            |
+| `work_refusal.notes_ct`                             | **C4** | committee-key-sealed s.43 narrative                                   |
+| `work_refusal.per_record_passphrase_hash`           | C1     | pgcrypto-bf; UX friction gate (G-T14-5/10)                            |
+| `work_refusal.status` / `created_at` / `updated_at` | C1     | lifecycle metadata                                                    |
+| `s51_evidence.id`                                   | C0     | opaque uuid                                                           |
+| `s51_evidence.actor_id`                             | C1     | statutory filer anchor — F-17, never null                             |
+| `s51_evidence.title_ct`                             | C3     | committee-key-sealed title                                            |
+| `s51_evidence.notes_ct`                             | **C4** | committee-key-sealed s.51 narrative                                   |
+| `s51_evidence.photos_ct` (bytea[])                  | **C4** | per-photo sealed blobs (ADR-0011 amendment); each entry `nonce        |     | ciphertext` |
+| `s51_evidence.per_record_passphrase_hash`           | C1     | pgcrypto-bf                                                           |
+| `s51_evidence.status` / `created_at` / `updated_at` | C1     | lifecycle metadata                                                    |
 
 ### 3. Audit-enum authorization — status
 
 The enum-mirror for `work_refusal.{created,read,update}` + `s51_evidence.{created,read,update}` (plus the shared `sensitive.access_attempt`) is **already in the closed enum** as of PR #19's fix:
+
 - [x] TS const (`WORK_REFUSAL_AUDIT_EVENTS` / `S51_EVIDENCE_AUDIT_EVENTS`)
 - [x] `audit-log.md §1` (the "Work refusal + s.51 evidence (T14)" section)
 - [x] `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` (44 values total)
@@ -8533,6 +8856,7 @@ The enum-mirror for `work_refusal.{created,read,update}` + `s51_evidence.{create
 - [ ] `s51_evidence.create.rejected` (G-T14-12) — library-side concern (photo-format reject); separate enum addition when the library fix lands.
 
 ### Compliance check
+
 - [x] PIPEDA 4.5 — 7y OHSA-bound; T16 sweep enforces it.
 - [x] No new cross-border flow / subprocessor (ca-central-1).
 - [x] ADR-0003 Invariant 4 untouched (libsodium client-side seal + pgcrypto-bf server-side hash).
@@ -8540,6 +8864,7 @@ The enum-mirror for `work_refusal.{created,read,update}` + `s51_evidence.{create
 - [ ] **HG-10** labour-lawyer ratification of the s.43 / s.51 consent copy (G-T13-13 mirror).
 
 ### Follow-ups
+
 - [ ] Architect ratifies this fold-in (the 7y schedule, the PI rows).
 - [ ] When the library `node:crypto` + photo-reject (G-T14-12) lands, add `s51_evidence.create.rejected` to the enum mirror.
 - [ ] T18 lands the SQL CHECK + retention-schedule rows for the new T14 enum values.
@@ -8552,14 +8877,14 @@ The T07.1 sibling task lands incrementally per ADR-0002 Amendment H. This PR is 
 
 ### 1. ADR-0016 schedule rows for the six new operational tables (G-T07-4)
 
-| Table | Retention class | Source |
-|---|---|---|
-| `identity_keys` | `membership+7y` | identity is the binding for every audit-log row keyed to the user (F-17) |
-| `recovery_blobs` | `membership+24mo` | blob ciphertext keyed to membership; aligns with `identity_privkey.recovery_blob.*` audit retention |
-| `recovery_blob_resets` | `membership+24mo` | mirrors `recovery_blobs` — the consumed-reset record is part of the same recovery accountability chain |
-| `committee_data_keys` | `7y_from_rotation` | rotation-axis retention so a rotated-out epoch's metadata survives the longest pre-rotation forensic window |
-| `committee_key_wraps` | `7y_from_rotation` | mirrors `committee_data_keys` |
-| `committee_key_wraps_history` | `7y_from_rotation` | mirrors `committee_data_keys` — the archived wrap is the F-05 forensic anchor for member revocation |
+| Table                         | Retention class    | Source                                                                                                      |
+| ----------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `identity_keys`               | `membership+7y`    | identity is the binding for every audit-log row keyed to the user (F-17)                                    |
+| `recovery_blobs`              | `membership+24mo`  | blob ciphertext keyed to membership; aligns with `identity_privkey.recovery_blob.*` audit retention         |
+| `recovery_blob_resets`        | `membership+24mo`  | mirrors `recovery_blobs` — the consumed-reset record is part of the same recovery accountability chain      |
+| `committee_data_keys`         | `7y_from_rotation` | rotation-axis retention so a rotated-out epoch's metadata survives the longest pre-rotation forensic window |
+| `committee_key_wraps`         | `7y_from_rotation` | mirrors `committee_data_keys`                                                                               |
+| `committee_key_wraps_history` | `7y_from_rotation` | mirrors `committee_data_keys` — the archived wrap is the F-05 forensic anchor for member revocation         |
 
 The strict CHECK on `audit_log.event_type` + the `audit_log_retention_schedule` row insertions are owned by T18 (same carry-forward as `member.role_changed` / `panic_wipe.invoked`).
 
@@ -8567,19 +8892,19 @@ The strict CHECK on `audit_log.event_type` + the `audit_log_retention_schedule` 
 
 Residency ca-central-1. The private-half of any keypair NEVER lands here (Invariant 1); the symmetric committee data key NEVER lands here (Invariant 1). What does land:
 
-| Column | Class | Notes |
-|---|---|---|
-| `identity_keys.user_id` | C1 | binds the row to the user; cross-row pseudonym for forensic correlation goes via `_committee_pseudonym(uid)` |
-| `identity_keys.public_key` (bytea, 32) | C1 | X25519 public half (G-T07-11 relocation of the originally-planned `users.identity_pubkey` column) |
-| `identity_keys.created_at` / `revoked_at` | C1 | lifecycle metadata |
-| `recovery_blobs.user_id` | C1 | binding |
-| `recovery_blobs.blob_ciphertext` (bytea) | **C3** | secretbox of the user's identity privkey under their passphrase — opaque to the server (Invariant 1); KDF-bound floor is Argon2id (F-08) |
-| `recovery_blobs.kdf_params` (jsonb) | C1 | non-secret KDF parameters; needed by the on-device restore path |
-| `recovery_blobs.created_at` / `restored_at` | C1 | lifecycle metadata |
-| `recovery_blob_resets.id` / `target_user_id` / `issued_by` / `issued_at` / `consumed_at` | C1 | co-chair-action accountability surface (G-T07-8); the row is the structural part of the F-12 reset path |
-| `committee_data_keys.key_id` / `epoch` / `created_at` / `rotated_at` | C1 | metadata only; the symmetric key bytes NEVER appear |
-| `committee_key_wraps.user_id` / `key_id` / `wrapped_ciphertext` / `created_at` | **C2** | sealed-box ciphertext addressed to the member's pubkey — only that member's privkey can open; metadata maps the routing for F-01 |
-| `committee_key_wraps_history.*` | **C2** | as `committee_key_wraps`; preserves the wrap-as-it-was for F-05 forensics |
+| Column                                                                                   | Class  | Notes                                                                                                                                    |
+| ---------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity_keys.user_id`                                                                  | C1     | binds the row to the user; cross-row pseudonym for forensic correlation goes via `_committee_pseudonym(uid)`                             |
+| `identity_keys.public_key` (bytea, 32)                                                   | C1     | X25519 public half (G-T07-11 relocation of the originally-planned `users.identity_pubkey` column)                                        |
+| `identity_keys.created_at` / `revoked_at`                                                | C1     | lifecycle metadata                                                                                                                       |
+| `recovery_blobs.user_id`                                                                 | C1     | binding                                                                                                                                  |
+| `recovery_blobs.blob_ciphertext` (bytea)                                                 | **C3** | secretbox of the user's identity privkey under their passphrase — opaque to the server (Invariant 1); KDF-bound floor is Argon2id (F-08) |
+| `recovery_blobs.kdf_params` (jsonb)                                                      | C1     | non-secret KDF parameters; needed by the on-device restore path                                                                          |
+| `recovery_blobs.created_at` / `restored_at`                                              | C1     | lifecycle metadata                                                                                                                       |
+| `recovery_blob_resets.id` / `target_user_id` / `issued_by` / `issued_at` / `consumed_at` | C1     | co-chair-action accountability surface (G-T07-8); the row is the structural part of the F-12 reset path                                  |
+| `committee_data_keys.key_id` / `epoch` / `created_at` / `rotated_at`                     | C1     | metadata only; the symmetric key bytes NEVER appear                                                                                      |
+| `committee_key_wraps.user_id` / `key_id` / `wrapped_ciphertext` / `created_at`           | **C2** | sealed-box ciphertext addressed to the member's pubkey — only that member's privkey can open; metadata maps the routing for F-01         |
+| `committee_key_wraps_history.*`                                                          | **C2** | as `committee_key_wraps`; preserves the wrap-as-it-was for F-05 forensics                                                                |
 
 **G-T07-11 relocation note.** Originally the §PI inventory anticipated a `users.identity_pubkey` column. The T07.1 design relocates that to a 1:1 row on `identity_keys.public_key`, mirroring the ADR-0002 Amendment G.3 pattern that moved `committee_membership` off `users`. The audit-log enum gate (`scripts/check-audit-enum-coverage.sh`) is not affected (the gate scans event_type names, not column references); the privacy-review pass should annotate the row-shift on the existing PI inventory entry rather than introduce a new column row.
 
@@ -8587,14 +8912,14 @@ Residency ca-central-1. The private-half of any keypair NEVER lands here (Invari
 
 Two new enum values land in the closed enum with this keystone PR. Per the standard ADR-0003 Amendment A six-mirror dance:
 
-| Mirror | `recovery_reset.issued` (T07.1) | `panic_wipe.invoked` (T19; ADR-0020 Decision 5) |
-|---|---|---|
-| TS const | [ ] adds in SupabaseKeyStore wire-up PR (no library emitter today) | [x] already in `apps/web/src/lib/lock/wipe-store.ts` |
-| `audit-log.md §1` table | [x] this PR | [x] this PR |
-| `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` | [x] this PR (47 values total) | [x] this PR |
-| SQL `retention_class_for(...)` arm | [x] `membership+24mo` (this PR) | [x] `7y` (this PR) |
-| SQL `audit_log.event_type` CHECK | [ ] **deferred to T18** | [ ] **deferred to T18** |
-| `audit_log_retention_schedule` row | [ ] **deferred to T18** | [ ] **deferred to T18** |
+| Mirror                                                 | `recovery_reset.issued` (T07.1)                                    | `panic_wipe.invoked` (T19; ADR-0020 Decision 5)      |
+| ------------------------------------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------- |
+| TS const                                               | [ ] adds in SupabaseKeyStore wire-up PR (no library emitter today) | [x] already in `apps/web/src/lib/lock/wipe-store.ts` |
+| `audit-log.md §1` table                                | [x] this PR                                                        | [x] this PR                                          |
+| `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM` | [x] this PR (47 values total)                                      | [x] this PR                                          |
+| SQL `retention_class_for(...)` arm                     | [x] `membership+24mo` (this PR)                                    | [x] `7y` (this PR)                                   |
+| SQL `audit_log.event_type` CHECK                       | [ ] **deferred to T18**                                            | [ ] **deferred to T18**                              |
+| `audit_log_retention_schedule` row                     | [ ] **deferred to T18**                                            | [ ] **deferred to T18**                              |
 
 Both deferrals match the precedent set by `member.role_changed` (T06.1 → T18).
 
@@ -8622,6 +8947,7 @@ Both deferrals match the precedent set by `member.role_changed` (T06.1 → T18).
 `enroll_identity_keypair` and `record_recovery_blob_restored` accept PRE-HASHED fingerprints from the caller (the libsodium BLAKE2b digest the JS lib already computes via `pubkeyFingerprint` / `hashFingerprint`). The SQL functions validate the shape (64 hex chars = BLAKE2b-32-hex) and emit verbatim. Server-side SHA-256 is intentionally avoided here per `.semgrep/no-bare-sha256-in-migrations.yml`; the audit-row identifier is the same primitive on both tiers (cross-tier correlation property).
 
 ### Compliance check
+
 - [x] PIPEDA 4.5 — 7y / membership+24mo retentions match OHSA + the existing membership-bound schedule rows.
 - [x] No new cross-border flow / subprocessor (ca-central-1).
 - [x] ADR-0003 Invariant 1 untouched — neither the identity privkey nor the symmetric committee data key ever traverses this layer.
@@ -8629,6 +8955,7 @@ Both deferrals match the precedent set by `member.role_changed` (T06.1 → T18).
 - [ ] **HG-15** user ratification of the six new tables — at this PR's submission.
 
 ### Follow-ups
+
 - [ ] Architect ratifies the new `recovery_reset.issued` enum + retention class + the six schedule rows.
 - [ ] SupabaseKeyStore + Edge Function increment (G-T07-2 / G-T07-9 resolution).
 - [ ] `libsodium-wrappers-sumo` increment (G-T07-12 resolution).
