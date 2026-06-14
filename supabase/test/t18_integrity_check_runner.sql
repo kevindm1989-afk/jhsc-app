@@ -46,7 +46,7 @@ SELECT throws_ok(
 -- ---------------------------------------------------------------------------
 SELECT ok(
   (SELECT public.integrity_check_runner(
-    'scheduled', 1700000000000::bigint, 60000::bigint, 'node@v20', 'sh1')
+    'scheduled', 1700000000000::bigint, 60000::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'sh1')
      IS NOT NULL),
   'first pass with empty chain returns non-null run_id');
 
@@ -61,7 +61,7 @@ SELECT is(
 -- ---------------------------------------------------------------------------
 SELECT is(
   public.integrity_check_runner(
-    'scheduled', 1700000010000::bigint, 60000::bigint, 'node@v20', 'sh1'),
+    'scheduled', 1700000010000::bigint, 60000::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'sh1'),
   NULL::uuid,
   'second pass inside lease window returns NULL');
 
@@ -97,7 +97,7 @@ SELECT
 
 SELECT ok(
   (SELECT public.integrity_check_runner(
-    'scheduled', 1700100000000::bigint, 1000::bigint, 'node@v20', 'sh2')
+    'scheduled', 1700100000000::bigint, 1000::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'sh2')
      IS NOT NULL),
   'matched-head pass returns non-null run_id');
 
@@ -119,7 +119,7 @@ VALUES
 
 SELECT ok(
   (SELECT public.integrity_check_runner(
-    'scheduled', 1700200000000::bigint, 1000::bigint, 'node@v20', 'sh3')
+    'scheduled', 1700200000000::bigint, 1000::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'sh3')
      IS NOT NULL),
   'drift pass returns non-null run_id');
 

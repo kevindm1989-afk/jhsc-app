@@ -20,6 +20,12 @@ SELECT plan(12);
 
 -- ---------------------------------------------------------------------------
 -- backup_manifests.node_runtime_pin
+--
+-- The full INSERT shape matches migration #020:
+--   (run_id, started_at_ms, object_ref, encryption_kid, blob_sha256,
+--    blob_bytes, audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
+--    retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin)
+-- blob_sha256 must match ^[0-9a-f]{64}$ per the existing CHECK.
 -- ---------------------------------------------------------------------------
 
 -- (1) Constraint exists.
@@ -34,11 +40,13 @@ SELECT ok(
 -- (2) Valid semver-shape pin is accepted.
 SELECT lives_ok(
   $$INSERT INTO public.backup_manifests
-      (run_id, started_at_ms, committee_data_key_kid, sha256, bytes,
-       audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
+      (run_id, started_at_ms, object_ref, encryption_kid, blob_sha256,
+       blob_bytes, audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
        retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin)
-    VALUES (gen_random_uuid(), 1700000000000::bigint, 'kid_test',
-            '\x00'::bytea, 0, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
+    VALUES (gen_random_uuid(), 1700000000000::bigint,
+            'br_test/20231101/test.dump', 'kid_test',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            0::bigint, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
             1700000000000::bigint, 'sh',
             '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   'backup_manifests accepts valid semver-shape node_runtime_pin');
@@ -46,11 +54,13 @@ SELECT lives_ok(
 -- (3) Hostname-shape pin is rejected.
 SELECT throws_ok(
   $$INSERT INTO public.backup_manifests
-      (run_id, started_at_ms, committee_data_key_kid, sha256, bytes,
-       audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
+      (run_id, started_at_ms, object_ref, encryption_kid, blob_sha256,
+       blob_bytes, audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
        retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin)
-    VALUES (gen_random_uuid(), 1700000000001::bigint, 'kid_test',
-            '\x00'::bytea, 0, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
+    VALUES (gen_random_uuid(), 1700000000001::bigint,
+            'br_test/20231101/test.dump', 'kid_test',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            0::bigint, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
             1700000000000::bigint, 'sh',
             '{"node_version":"hostname.example.com","openssl_version":"3.0.13"}')$$,
   '23514', NULL,
@@ -59,11 +69,13 @@ SELECT throws_ok(
 -- (4) FS-path-shape pin is rejected.
 SELECT throws_ok(
   $$INSERT INTO public.backup_manifests
-      (run_id, started_at_ms, committee_data_key_kid, sha256, bytes,
-       audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
+      (run_id, started_at_ms, object_ref, encryption_kid, blob_sha256,
+       blob_bytes, audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
        retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin)
-    VALUES (gen_random_uuid(), 1700000000002::bigint, 'kid_test',
-            '\x00'::bytea, 0, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
+    VALUES (gen_random_uuid(), 1700000000002::bigint,
+            'br_test/20231101/test.dump', 'kid_test',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            0::bigint, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
             1700000000000::bigint, 'sh',
             '{"node_version":"20.0.0","openssl_version":"/usr/bin/openssl"}')$$,
   '23514', NULL,
@@ -72,27 +84,33 @@ SELECT throws_ok(
 -- (5) Extra-key pin is rejected (no fingerprintable third field).
 SELECT throws_ok(
   $$INSERT INTO public.backup_manifests
-      (run_id, started_at_ms, committee_data_key_kid, sha256, bytes,
-       audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
+      (run_id, started_at_ms, object_ref, encryption_kid, blob_sha256,
+       blob_bytes, audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
        retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin)
-    VALUES (gen_random_uuid(), 1700000000003::bigint, 'kid_test',
-            '\x00'::bytea, 0, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
+    VALUES (gen_random_uuid(), 1700000000003::bigint,
+            'br_test/20231101/test.dump', 'kid_test',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            0::bigint, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
             1700000000000::bigint, 'sh',
             '{"node_version":"20.0.0","openssl_version":"3.0.13","hostname":"leaked"}')$$,
   '23514', NULL,
   'backup_manifests rejects extra-key node_runtime_pin');
 
--- (6) Non-JSON pin is rejected.
+-- (6) Non-JSON pin is rejected. The text-to-jsonb cast inside
+-- is_valid_node_runtime_pin raises 22P02 (invalid_text_representation)
+-- which we accept as the rejection mechanism — the value never lands.
 SELECT throws_ok(
   $$INSERT INTO public.backup_manifests
-      (run_id, started_at_ms, committee_data_key_kid, sha256, bytes,
-       audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
+      (run_id, started_at_ms, object_ref, encryption_kid, blob_sha256,
+       blob_bytes, audit_log_head_id, audit_log_head_ts_ms, audit_log_head_hash,
        retention_sweep_runs_snapshot_ts_ms, schedule_hash, node_runtime_pin)
-    VALUES (gen_random_uuid(), 1700000000004::bigint, 'kid_test',
-            '\x00'::bytea, 0, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
+    VALUES (gen_random_uuid(), 1700000000004::bigint,
+            'br_test/20231101/test.dump', 'kid_test',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            0::bigint, 1::bigint, 1700000000000::bigint, '\x00'::bytea,
             1700000000000::bigint, 'sh',
             'just-some-string')$$,
-  NULL, NULL,
+  '22P02', NULL,
   'backup_manifests rejects non-JSON node_runtime_pin');
 
 -- ---------------------------------------------------------------------------

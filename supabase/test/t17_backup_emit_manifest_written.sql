@@ -81,7 +81,7 @@ SELECT public.backup_emit_manifest_written(
   7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
   jsonb_build_object('session.revoked', 2),
   jsonb_build_object('audit_log', 42),
-  1700000000000::bigint, 'sch-hash-abc', 'node@v20'
+  1700000000000::bigint, 'sch-hash-abc', '{"node_version":"20.0.0","openssl_version":"3.0.13"}'
 );
 
 -- (7) audit row exists.

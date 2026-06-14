@@ -40,7 +40,7 @@ SELECT public.integrity_check_record_run_started(
   '11111111-1111-1111-1111-111111111111'::uuid,
   'scheduled',
   1700000000000::bigint,
-  'node@v20',
+  '{"node_version":"20.0.0","openssl_version":"3.0.13"}',
   'sched_hash_1'
 );
 
@@ -69,7 +69,7 @@ SELECT public.integrity_check_record_run_started(
   '22222222-2222-2222-2222-222222222222'::uuid,
   'scheduled',
   1700001000000::bigint,
-  'node@v20',
+  '{"node_version":"20.0.0","openssl_version":"3.0.13"}',
   'sched_hash_2'
 );
 SELECT public.integrity_check_emit_run_and_mismatches(

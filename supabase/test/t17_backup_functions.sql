@@ -74,7 +74,7 @@ SELECT public.backup_write_manifest_pending(
   'cdk_kid_42',
   100::bigint, 1700000000000::bigint, '\x00'::bytea,
   '{}'::jsonb, '{}'::jsonb,
-  1699999900000::bigint, 'sha256:hh', 'node@v20'
+  1699999900000::bigint, 'sha256:hh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}'
 );
 
 SELECT is(
