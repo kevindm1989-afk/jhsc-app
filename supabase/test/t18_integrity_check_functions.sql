@@ -47,7 +47,7 @@ SELECT public.integrity_check_record_run_started(
   '11111111-1111-1111-1111-111111111111'::uuid,
   'scheduled',
   1700000000000::bigint,
-  'node@v20',
+  '{"node_version":"20.0.0","openssl_version":"3.0.13"}',
   'sched_hash_1'
 );
 
@@ -60,7 +60,7 @@ SELECT is(
 -- (8) invalid trigger raises 22023.
 SELECT throws_ok(
   $$SELECT public.integrity_check_record_run_started(
-      gen_random_uuid(), 'not_a_trigger', 0::bigint, 'pin', 'h')$$,
+      gen_random_uuid(), 'not_a_trigger', 0::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   '22023', NULL,
   'invalid trigger raises 22023');
 
@@ -85,7 +85,7 @@ INSERT INTO public.backup_manifests (
   '22222222-2222-2222-2222-222222222222'::uuid,
   1700001000000::bigint, 1700001200000::bigint, 'bucket://a', repeat('a',64),
   100::bigint, 'kid', 7::bigint, 1700001000000::bigint, '\x00'::bytea,
-  '{}'::jsonb, '{}'::jsonb, 1700001000000::bigint, 'sh', 'pin',
+  '{}'::jsonb, '{}'::jsonb, 1700001000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}',
   'committed', 1700001200000::bigint + 42::bigint * 86400000
 );
 

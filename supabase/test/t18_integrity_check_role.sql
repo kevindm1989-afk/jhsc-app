@@ -31,7 +31,7 @@ SELECT has_table('public', 'audit_chain_anchors',
 SELECT throws_ok(
   $$INSERT INTO public.integrity_check_runs
       (run_id, trigger, started_at_ms, node_runtime_pin, schedule_hash)
-    VALUES (gen_random_uuid(), 'not_a_trigger', 0, 'pin', 'h')$$,
+    VALUES (gen_random_uuid(), 'not_a_trigger', 0, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   '23514', NULL,
   'integrity_check_runs.trigger CHECK rejects unknown values');
 
@@ -39,7 +39,7 @@ SELECT throws_ok(
 SELECT throws_ok(
   $$INSERT INTO public.integrity_check_runs
       (run_id, trigger, started_at_ms, status, node_runtime_pin, schedule_hash)
-    VALUES (gen_random_uuid(), 'scheduled', 0, 'not_a_status', 'pin', 'h')$$,
+    VALUES (gen_random_uuid(), 'scheduled', 0, 'not_a_status', '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   '23514', NULL,
   'integrity_check_runs.status CHECK rejects unknown values');
 
@@ -47,17 +47,17 @@ SELECT throws_ok(
 SELECT lives_ok(
   $$INSERT INTO public.integrity_check_runs
       (run_id, trigger, started_at_ms, node_runtime_pin, schedule_hash)
-    VALUES (gen_random_uuid(), 'scheduled', 0, 'pin', 'h'),
-           (gen_random_uuid(), 'post_rotation', 0, 'pin', 'h'),
-           (gen_random_uuid(), 'post_export', 0, 'pin', 'h'),
-           (gen_random_uuid(), 'weekly_anchor', 0, 'pin', 'h')$$,
+    VALUES (gen_random_uuid(), 'scheduled', 0, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h'),
+           (gen_random_uuid(), 'post_rotation', 0, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h'),
+           (gen_random_uuid(), 'post_export', 0, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h'),
+           (gen_random_uuid(), 'weekly_anchor', 0, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   'integrity_check_runs accepts all 4 closed-set trigger values');
 
 -- (8) "finished status implies completed_at_ms" CHECK works.
 SELECT throws_ok(
   $$INSERT INTO public.integrity_check_runs
       (run_id, trigger, started_at_ms, status, node_runtime_pin, schedule_hash)
-    VALUES (gen_random_uuid(), 'scheduled', 0, 'ok', 'pin', 'h')$$,
+    VALUES (gen_random_uuid(), 'scheduled', 0, 'ok', '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   '23514', NULL,
   'finished status with NULL completed_at_ms is rejected');
 

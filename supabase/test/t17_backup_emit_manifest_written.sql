@@ -40,7 +40,7 @@ SELECT throws_ok(
       100::bigint, 'kid-v1',
       7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
       '{}'::jsonb, '{}'::jsonb,
-      1700000000000::bigint, 'sh', 'pin')$$,
+      1700000000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '22023', NULL,
   'invalid sha256 raises 22023');
 
@@ -53,7 +53,7 @@ SELECT throws_ok(
       -1::bigint, 'kid-v1',
       7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
       '{}'::jsonb, '{}'::jsonb,
-      1700000000000::bigint, 'sh', 'pin')$$,
+      1700000000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '22023', NULL,
   'negative bytes raises 22023');
 
@@ -66,7 +66,7 @@ SELECT throws_ok(
       100::bigint, '',
       7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
       '{}'::jsonb, '{}'::jsonb,
-      1700000000000::bigint, 'sh', 'pin')$$,
+      1700000000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '22023', NULL,
   'empty committee_data_key_kid raises 22023');
 
@@ -81,7 +81,7 @@ SELECT public.backup_emit_manifest_written(
   7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
   jsonb_build_object('session.revoked', 2),
   jsonb_build_object('audit_log', 42),
-  1700000000000::bigint, 'sch-hash-abc', 'node@v20'
+  1700000000000::bigint, 'sch-hash-abc', '{"node_version":"20.0.0","openssl_version":"3.0.13"}'
 );
 
 -- (7) audit row exists.

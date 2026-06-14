@@ -74,7 +74,7 @@ SELECT public.backup_write_manifest_pending(
   'cdk_kid_42',
   100::bigint, 1700000000000::bigint, '\x00'::bytea,
   '{}'::jsonb, '{}'::jsonb,
-  1699999900000::bigint, 'sha256:hh', 'node@v20'
+  1699999900000::bigint, 'sha256:hh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}'
 );
 
 SELECT is(
@@ -108,7 +108,7 @@ SELECT public.backup_write_manifest_pending(
   '22222222-2222-2222-2222-222222222222'::uuid,
   1700001000000::bigint, 'b', repeat('b', 64), 1::bigint, 'k',
   1::bigint, 1::bigint, '\x00'::bytea, '{}'::jsonb, '{}'::jsonb,
-  1::bigint, 'h', 'pin'
+  1::bigint, 'h', '{"node_version":"20.0.0","openssl_version":"3.0.13"}'
 );
 
 SELECT throws_ok(
