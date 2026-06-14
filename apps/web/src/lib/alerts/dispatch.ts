@@ -15,8 +15,8 @@
  *      emits a single canonical log line per fire so the alert pipeline
  *      can pick it up by `event` name.
  *
- * Each alert's runbook lives at `playbooks/runbooks/<symbol>.md` (a
- * follow-on docs PR fills these in). The dispatch layer never enriches
+ * Each alert's runbook lives at `docs/runbooks/<symbol>.md` (#231
+ * landed the M9 stubs). The dispatch layer never enriches
  * the meta with PI — only structural fields. The structured logger's
  * SAFE_FIELDS_ALLOWLIST is the second-layer defense.
  */
@@ -25,7 +25,7 @@
  * Closed union of alert symbols. Adding a new symbol:
  *   - add to this union
  *   - add the severity row to `ALERT_SEVERITY` below
- *   - add a runbook stub in `playbooks/runbooks/`
+ *   - add a runbook stub in `docs/runbooks/A-<NAME>.md`
  *
  * `A-RETENTION-001` is the M6 over-delete alarm (F-57). The library
  * surfaces it via `alarm_fired: true` on a `RetentionPassResult` — the

@@ -11,7 +11,8 @@
 > 4. `observability/audit-log.md` (the tamper-evident first-class data store).
 > 5. `observability/alerts.md` (catalogue with runbook links).
 > 6. `observability/dashboards.md`.
-> 7. `playbooks/runbooks/*` (one per alert).
+> 7. `docs/runbooks/*` (one per alert symbol; see `docs/runbooks/README.md` for the index).
+> 8. `apps/web/src/lib/alerts/dispatch.ts` (M9 alert-dispatch infrastructure — closed `AlertSymbol` union + `ALERT_SEVERITY` table + `StructuredLogAlertSink`).
 
 This document is the contract. If you change anything that affects what
 leaves the browser, what hits Sentry, or what becomes an alert, this
@@ -100,9 +101,10 @@ From the PI inventory:
   `reprisal_log.body_ciphertext`, `work_refusal.notes_ciphertext`,
   `s51_evidence.*_ciphertext`. Any appearance of any of these field
   names in an error event triggers a **P0** incident, not just a
-  redaction — see `playbooks/runbooks/sentry-self-test-failed.md` for
-  the "C4 plaintext seen in stack trace" branch. The scrub config drops
-  the entire event in that case, not just the field.
+  redaction — the "C4 plaintext seen in stack trace" branch fires the
+  Sentry-self-test P0 (runbook stub deferred to a follow-on T02 pass —
+  TBD in `docs/runbooks/`). The scrub config drops the entire event in
+  that case, not just the field.
 - **Auth material:** Authorization headers, cookies, JWTs, TOTP codes
   (during T05 bootstrap window), passkey assertions / credentials,
   recovery passphrases. These are stripped at the SDK; if they appear,
@@ -189,8 +191,10 @@ sensitive-path regex.
 | **P2** | Next business hour. Suspected misuse or degraded function. | Sentry → email; recorded in `audit_log` as `alert.fired`. |
 | **P3** | Backlog. Cost / dependency / drift trend. | Weekly digest email. |
 
+**M9 dispatch (`apps/web/src/lib/alerts/`).** Library-emitted alerts (the M6/M8 `would_fire_alert` symbols) route through `dispatchAlert(symbol, source, ts_ms, meta)` → `StructuredLogAlertSink` → one structured-log line per fire (`event: 'alert.fired'`, `attributes.alert.symbol`, severity-routed to `log.error/warn/info`). The dispatch severity vocabulary (`page` / `warn` / `info`) bridges to the P1/P2/P3 catalogue above per the table in `alerts.md` §1 ("Severity ↔ M9 dispatch mapping"). The on-call surface picks up alerts by `event: 'alert.fired'` and routes to `docs/runbooks/<alert.symbol>.md`.
+
 **Every alert has a runbook.** No alert ships without
-`playbooks/runbooks/<alert-id>.md`. See `alerts.md` for the table.
+`docs/runbooks/<alert-id>.md`. See `alerts.md` for the table.
 
 ---
 
@@ -327,7 +331,7 @@ Rollout-gating signals:
 
 ### For the incident-responder
 
-- `playbooks/runbooks/` — every alert has a stub here.
+- `docs/runbooks/` — every M9-dispatched alert symbol has a stub here (see `docs/runbooks/README.md` for the index). Future T07/T10/T11/T13 alerts (A-KEY-ROT-001, A-QUEUE-001, A-SW-001, A-EXPORT-*, A-C4-*, A-AUTH-*, etc.) get stubs added in the same PR that wires the alert.
 - `playbooks/incident-response.md` (existing pack file) — overarching
   process; runbook stubs link back to it.
 - Correlation: a Sentry event → `request_id` → Edge Function log line
@@ -373,9 +377,9 @@ the implementer/test-writer must produce as part of T02.
 
 1. **Synthetic error → Sentry**. Trigger a synthetic error in the
    browser, scoped by a build-time `SENTRY_SELFTEST=1` env. Verify a
-   scrubbed event appears in Sentry within 5 minutes. The runbook
-   `playbooks/runbooks/sentry-self-test-failed.md` covers the failure
-   branches.
+   scrubbed event appears in Sentry within 5 minutes. The Sentry-
+   self-test runbook stub (TBD at `docs/runbooks/A-SENTRY-001.md`;
+   T02 implementer pass owns the stub) covers the failure branches.
 2. **Canary PI never appears in Sentry**. Submit a known canary
    (`CANARY_PII_X` for free-text fields; a synthetic phone-shaped
    string for contact fields; a libsodium-private-key-shape 32-byte

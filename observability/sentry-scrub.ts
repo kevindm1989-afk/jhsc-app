@@ -326,7 +326,7 @@ function eventContainsAnyCanary(serialized: string): boolean {
  *  NOT Sentry itself (we just rejected the event to Sentry). The
  *  implementer routes this to the structured logger with a known
  *  `event: 'sentry.scrub.canary_seen'` which the alert pipeline
- *  watches as a P0 — see playbooks/runbooks/sentry-self-test-failed.md. */
+ *  watches as a P0 — see docs/runbooks/A-SENTRY-001.md (TBD; T02 owns). */
 export type PanicSink = (reason: 'canary' | 'c4_field' | 'oversize', meta: Record<string, string>) => void;
 
 let panicSink: PanicSink = () => undefined;
