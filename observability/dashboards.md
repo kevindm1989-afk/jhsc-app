@@ -152,7 +152,7 @@ that would let a coerced reader figure out who reads what.
 3. **Per-trigger run counts (30d)** — scheduled / post-rotation /
    post-export.
 4. **Failures (last 90d)** — should be 0 entries. Any entry links
-   directly to the `playbooks/runbooks/audit-log-integrity-break.md`
+   directly to the [`docs/runbooks/A-AUDIT-001.md`](../docs/runbooks/A-AUDIT-001.md)
    runbook.
 5. **Key-rotation enum-gap status** — has `A-KEY-ROT-001` fired in the
    last 30d? Green/red.
