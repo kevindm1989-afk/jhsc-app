@@ -331,8 +331,8 @@ All eight are ratified under ADR-0002 Amendment H + ADR-0007 + the T08 four-revi
 **Source:** second-opinion-reviewer T08 Concern 3 (cross-cuts G-T08-8).
 **Finding:** Harness `callProtected` consults `isActiveMember` synchronously; `advanceBy(60_000)` in the F-30 test is decorative. Test asserts direction-of-behavior but not the 60s budget.
 **Resolution scope (T08.1 pgTAP):** at least one case at >0s and one ≤60s; pin G-T08-8.
-**Status (still open — pgTAP gap):** `supabase/test/concerns_rls.sql` covers the SQL contract but doesn't include the F-30 timing-budget cases the gap text named. Adding a >0s + ≤60s case is straightforward pgTAP work but hasn't landed yet.
-**Blocker for:** none architecturally (gate is enforced); pgTAP timing-budget coverage tracked here.
+**Status (closed):** `supabase/test/concerns_rls.sql` now carries four new F-30 timing-budget cases (test rows #30–#34): (a) sanity that an active member can submit BEFORE the flip; (b) `request.jwt.claims` re-uses the same session, `committee_membership.active=false` is applied via `UPDATE`, the next `concern_submit` is denied with `%rls_denied%`; (c) wall-clock elapsed between the membership flip and the denial is captured via `clock_timestamp()` and asserted `≤ 60_000 ms` (the F-30 budget); (d) the elapsed is also asserted `> 0 ms` so the test isn't a no-op; (e) post-`pg_sleep(0.05)` robustness — denial still holds, no eviction-window race. plan(29) → plan(34).
+**Blocker for:** closed.
 
 ### G-T08-17 — `border.width.thin` design token
 **Source:** second-opinion-reviewer T08 Concern 8 (cross-cuts security-reviewer informational note).
