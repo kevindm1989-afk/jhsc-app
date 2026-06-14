@@ -608,13 +608,15 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** observability/audit-log.md §1 — closed-enum coverage; §6 finding #3 already flags the gap.
 **Finding:** the library emits `work_refusal.created`, `work_refusal.read`, `work_refusal.update`, `s51_evidence.created`, `s51_evidence.read`, `s51_evidence.update`. None are listed in observability/audit-log.md §1 (the document references "the same pattern is replicated for work_refusal and s51_evidence in T14" but does not enumerate). `scripts/check-audit-enum-coverage.sh` needs the new values too.
 **Resolution scope (T14.1):** add the six new event types to observability/audit-log.md §1; add to `scripts/check-audit-enum-coverage.sh`; the ADR-0003 Amendment A extension already authorizes them (decisions.md line 546 + line 478 of the retention schedule).
-**Blocker for:** T14.1 PR submission.
+**Status (closed — already in both mirrors):** all six T14 events live in `observability/audit-log.md` §1 (lines 96–101) and in `scripts/check-audit-enum-coverage.sh` `EXPECTED_ENUM`. ADR-0003 Amendment A extension in `.context/decisions.md` (line 5835 — the two `*.read` enum additions) ratifies the `work_refusal.read` and `s51_evidence.read` paths; the `*.created` / `*.update` event_types ride the original Amendment A audit-event closed allowlist alongside the analogous T13 events. The audit-log §6 finding #3 ("`work_refusal.read` / `s51_evidence.read` are not enumerated in the architect's amendment") is now stale — the enumeration landed when this gap closure landed structurally. Mirror count: TS audit-emit call-sites + SQL CHECK constraint + EXPECTED_ENUM + audit-log.md §1 + ADR-0003 Amendment A extension table + library types (six mirrors aligned).
+**Blocker for:** closed.
 
 ### G-T14-8 — `notes_ct` column-name parity with PI inventory
 **Source:** threat-model §3.4 PI inventory.
 **Finding:** the threat-model PI inventory uses `work_refusal.notes_ct` and `s51_evidence.*_ct`. The T14 library types use `notes_ct` for the s.43 narrative and the s.51 narrative bodies — matching. The SQL migration in T14.1 MUST use the same column name (not `body_ct` as the reprisal_log table does); the harness adminQuery handler hardcodes `notes_ct` so a column-name divergence would silently break the test path.
 **Resolution scope (T14.1):** confirm `notes_ct` is the chosen column name in the migration; if changed, update the harness handler in lockstep.
-**Blocker for:** T14.1 PR submission.
+**Status (partial close — library-as-pin pending architect ratification):** `notes_ct` is committed to in `apps/web/src/lib/work-refusal/work-refusal-store.ts:74` (`WorkRefusalRow.notes_ct: Uint8Array`) and `apps/web/src/lib/s51-evidence/s51-evidence-store.ts:72` (`S51EvidenceRow.notes_ct: Uint8Array`). The harness adminQuery handler hard-codes `notes_ct` accordingly. The G-T14-1 SQL migration writer enumerates this verbatim from the library; no `body_ct` mismatch with `reprisal_log` because the two registers are intentionally distinct (reprisal carries `body_ct`, s.43/s.51 carry `notes_ct` — the privacy semantics differ). Same library-as-pin pattern as G-T13-11 (column names pinned in library + this status block; architect ADR ratification rides with the migration PR).
+**Blocker for:** none (pin documented in library + this status block). Formal architect ratification rides with G-T14-1.
 
 ### G-T14-9 — F-21 SELECT-via-view audit semantics for co-chair
 **Source:** F-21 — co-chairs MUST be able to read s.43 + s.51 via the view; INSERT/UPDATE is denied.
@@ -657,7 +659,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-reviewer T14 T14-A1 / Q1.
 **Finding:** ADR-0003 Amendment A extension table header "Class" overloads C3/C4 vocabulary. ADR-0003 Amendment A calls `work_refusal.read` a "C3 read" (audit-event class) while §PI inventory classifies the underlying data as C4. The library correctly uses `target_class: 'C4'`; the ambiguity is in the architectural documentation, not the code.
 **Resolution scope (T14.1 architect pass):** change the column header from "Class" to "Audit-event class" with a footnote pointing back to §PI inventory for the underlying data class.
-**Blocker for:** none. Documentation hygiene.
+**Status (closed):** the ADR-0003 Amendment A extension table header in `.context/decisions.md` (the `work_refusal.read` / `s51_evidence.read` enum-additions table) is renamed from "Class" → "Audit-event class¹" with a footnote that explicitly disambiguates: the column classifies the audit-log row (read-event surface, HG-6 server-emitted, no plaintext PI in the row), NOT the underlying record (the `notes_ct` / sealed-photo bodies remain C4 per §PI inventory). The library's `target_class: 'C4'` emission is unchanged and correct. The footnote cross-references G-T14-15 so a future architect pass can find the disambiguation reasoning.
+**Blocker for:** closed.
 
 ### G-T14-16 — RLS-WHERE-filters-before-audit invariant for SECURITY DEFINER view bodies
 **Source:** privacy-reviewer T14 T14-A6.

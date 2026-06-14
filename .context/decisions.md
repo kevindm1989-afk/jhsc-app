@@ -5832,10 +5832,12 @@ This rule is the closed test: any new event proposed for audit-log emission MUST
 
 **Enum additions (chain-participating; appended to the closed allowlist):**
 
-| Enum value | Class | When emitted | Required fields |
+| Enum value | Audit-event class¹ | When emitted | Required fields |
 |---|---|---|---|
 | `work_refusal.read` | C3 read (T14) | Server-emitted from the `SECURITY DEFINER` view `work_refusal_read_audited`, atomic with the SELECT (same enforcement shape as Amendment B). | `work_refusal_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
 | `s51_evidence.read` | C3 read (T14) | Server-emitted from the `SECURITY DEFINER` view `s51_evidence_read_audited`, atomic with the SELECT. | `s51_evidence_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
+
+¹ "Audit-event class" classifies the AUDIT-LOG ROW (the read-event surface); it is NOT the data classification of the underlying record. The underlying `work_refusal` / `s51_evidence` BODIES are C4 per the §PI inventory (`notes_ct` / sealed photos sit at-rest under the committee data key). The library correctly uses `target_class: 'C4'` when emitting these events; the "C3 read" label here means the audit-row carries no plaintext PI and is readable by active members under HG-6. Disambiguation per privacy-review-t14 T14-A1 / Q1 (G-T14-15).
 
 These two values bring T14's `work_refusal` and `s51_evidence` C3-read paths under the same server-enforced indirection as Amendment B's `reprisal.read` (HG-6). T14 acceptance is amended accordingly (see Task-list amendments at end). The audit-log spec (`observability/audit-log.md` §1) already anticipates this extension; this amendment ratifies it as part of the closed enum.
 
