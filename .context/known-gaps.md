@@ -1049,14 +1049,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** threat-model.md §3.9 F-59; ADR-0017 §6 step 1.
 **Finding:** library lease (5-min in-memory checkpoint) is the cooperative-caller defense. Hostile-concurrent-caller defense requires `pg_try_advisory_xact_lock(hashtext('retention_sweep'))` at the top of the T16.1 SQL function.
 **Resolution scope (T16.1):** wrap `runRetentionPass` invocation inside a Postgres transaction that holds the advisory lock for the full pass duration.
-**Blocker for:** production deploy.
+**Status (closed):** migration `00000000000026_t16_retention_sweep_runner.sql` ships `retention_sweep_runner()` which calls `pg_try_advisory_xact_lock(hashtext('retention_sweep'))` at the top of the fn and returns NULL on contention (no-op a duplicate cron tick). Pattern mirrored by the M8.A backup pass + M8.B integrity_check_runner.
+**Blocker for:** closed.
 
 ### G-T16-2 — Statement timeout + lock_timeout (F-60 production half)
 
 **Source:** threat-model.md §3.9 F-60.
 **Finding:** library row-cap (20000 default) bounds the per-pass volume. Production needs `SET LOCAL statement_timeout='60s'` + `lock_timeout='5s'` on the SQL function to prevent high-churn-table starvation.
 **Resolution scope (T16.1):** SQL function preamble.
-**Blocker for:** production deploy.
+**Status (closed):** migration `00000000000026_t16_retention_sweep_runner.sql` carries `SET LOCAL statement_timeout = '60s'` + `SET LOCAL lock_timeout = '5s'` in the runner preamble (verified in fn body); fn comment line records the same. Same pattern as the M8.B integrity_check_runner.
+**Blocker for:** closed.
 
 ### G-T16-3 — pg_cron schedule 03:30 ET
 
@@ -1077,7 +1079,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** threat-model.md §3.9 F-57 + RA-2 reconciliation.
 **Finding:** F-57 over-delete alarm is library-side `alarm_fired: true` in the result. Production needs the alert sink: A-RETENTION-001 fires when `alarm_fired === true` OR when `would_delete_total > expected_p99_for_event_class`.
 **Resolution scope (T16.1 → observability pass):** define A-RETENTION-001 with runbook; route to on-call.
-**Blocker for:** RA-1 compensating-control monitoring posture.
+**Status (closed via M9 dispatch):** A-RETENTION-001 wired into the closed `AlertSymbol` union (`apps/web/src/lib/alerts/dispatch.ts:42`) with `'page'` severity (line 56) and runbook at `docs/runbooks/A-RETENTION-001.md`. `apps/web/src/lib/alerts/result-adapters.ts:21-26` lifts retention-pass results (`alarm_fired: true` or `status: 'capped'`) into dispatch calls. Same M9 dispatch pattern as A-BACKUP-001 / A-AUDIT-001 / A-INTEGRITY-001 / A-INTEGRITY-002.
+**Blocker for:** closed.
 
 ### G-T16-6 — HG-15 re-ratification at T16.1
 
@@ -1098,14 +1101,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** threat-model.md §3.9 F-69 + RA-2 trigger #3.
 **Finding:** library writes `retention_sweep_runs.per_event_counts` mirroring `retention.deleted.meta.deleted_per_table.audit_log_per_event_type`. T18's integrity job must reconcile live-chain row counts against this anchor across the latest pg_dump.
 **Resolution scope (T18):** integrity-job join over (audit_log, retention_sweep_runs, pg_dump snapshot); diverge ⇒ A-INTEGRITY-002.
-**Blocker for:** RA-2 trigger #3 monitoring posture.
+**Status (closed):** T18 ships the reconciliation surface end-to-end. `apps/web/src/lib/audit-integrity/integrity-core.ts:453-454` calls `store.listRetentionSweepRunsThrough(manifest.retention_sweep_runs_snapshot_ts_ms)` for the Option G attribution walk. SQL side: `integrity_check_runner()` (migration `00000000000030_t18_integrity_check_runner.sql`) does the join over (audit_log, retention_sweep_runs, backup_manifests); `unattributable_count > 0` routes to A-INTEGRITY-002 via M9 dispatch. F-92 (a)-(e) test coverage in `apps/web/test/T18/audit-integrity-check.test.ts`.
+**Blocker for:** closed.
 
 ### G-T16-9 — `xact_start()` shim swap-in
 
 **Source:** threat-model.md §3.9 F-66; G-T08-14 / G-T13-9 mirror.
 **Finding:** library returns `Date.now()` + monotonic floor for `transaction_ts_ms`. T16.1's SQL function uses `xact_start()`.
 **Resolution scope (T16.1):** SQL function uses `xact_start()`; library shim is replaced by the real transaction timestamp.
-**Blocker for:** none. Hygiene.
+**Status (closed via reframe — TS-clock-authoritative, same closure as G-T17-PRIV-7 / G-T18-2):** the production retention architecture is TS-clock-authoritative throughout. The TS caller passes `nowMs` into the SECURITY DEFINER fns (`retention_sweep_runner(p_now_ms, p_run_id, ...)`); SQL anchors `clock_timestamp()` solely for the tail `v_completed_at_ms`. All cross-side comparisons (lease window, alarm threshold) compare values from the same TS clock — no SQL-vs-TS skew. The gap framing assumed a `Date.now()` vs `xact_start()` skew that the implemented architecture removed by making TS the single clock source.
+**Blocker for:** closed.
 
 ### G-T16-10 — SECURITY DEFINER signatures + REVOKE posture
 
@@ -1120,7 +1125,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t16.md Q3 ADVISORY.
 **Finding:** `MemoryRetentionStore.emitRetentionDeletedAndRegisterRun` inlines pseudonym into `meta.actor_pseudonym` (memory-retention-store.ts:272) — acceptable for in-memory testing but `SupabaseRetentionStore` MUST put `actor_pseudonym` only in the top-level `audit_log` column. G-T11-14 / T13 hygiene lineage.
 **Resolution scope (T16.1):** `SupabaseRetentionStore` writes `actor_pseudonym` to the column directly; meta jsonb carries only counts + status + schedule_hash + run_id.
-**Blocker for:** PIPEDA 4.7 audit-shape clarity at T16.1 PR.
+**Status (closed):** migration `00000000000022_t16_retention_sweep_functions.sql:285-308` calls `audit_emit(p_actor_pseudonym => v_actor_pseudonym, p_meta => jsonb_build_object(...))`. `actor_pseudonym` lands ONLY at the top-level `p_actor_pseudonym` argument (→ `audit_log.actor_pseudonym` column); `meta` jsonb carries only structural fields: `run_id, started_at_ms, completed_at_ms, schedule_hash, per_event_counts, per_table_counts, truncated_to_row_cap, alarm_fired, status`. Same posture as G-T11-14 / T13 hygiene lineage.
+**Blocker for:** closed.
 
 ### G-T16-PRIV-3 — Operator-side structured Error logging (BLOCKING-IN-T16.1)
 
@@ -1162,7 +1168,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t16.md Cross-cutting C.
 **Finding:** library `systemActorPseudonym()` returns 32-char hex from HMAC-SHA-256 (memory-retention-store.ts:151-153). T16.1's `SupabaseRetentionStore` MUST share the AuthStore's HMAC key (ADR-0016 §Decision 1) so pseudonym values are cross-correlatable across audit-log readers.
 **Resolution scope (T16.1):** `SupabaseRetentionStore` reads the production HMAC key via the shared GUC `app.hmac_pseudonym_key` per ADR-0016.
-**Blocker for:** forensic-reveal correlation at T16.1.
+**Status (closed):** migration `00000000000022_t16_retention_sweep_functions.sql:275-283` derives `v_actor_pseudonym` as `LEFT(encode(hmac('system:retention'::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16)` — uses the shared `app.hmac_pseudonym_key` GUC per ADR-0016 §Decision 1, truncated to 16 hex chars (matching the library's HMAC-SHA-256 → 16-hex shape). Same pattern as M8.A backup pass + M8.B integrity-check pass `system:backup-pass` / `system:integrity-check` system pseudonyms; forensic readers can correlate across all three subsystems.
+**Blocker for:** closed.
 
 ### G-T16-PRIV-6 — Privacy-reviewer revisits Q9 (no caller WHERE) at T16.1 SQL signature
 
@@ -1176,7 +1183,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t16.md Cross-cutting findings.
 **Finding:** when T18 integrity-job lands (G-T16-8), the live-chain ↔ `retention_sweep_runs.per_event_counts` reconciliation join MUST read only structural fields (run_id, ms-epoch, per-event counts) — never surface any pseudonym across the integrity-job output.
 **Resolution scope (T18 design):** integrity-job query projects only the structural fields; pseudonyms remain in audit_log.
-**Blocker for:** T18 privacy review approval.
+**Status (closed):** T18's `RetentionSweepRunSnapshot` type (`apps/web/src/lib/audit-integrity/types.ts:113-119`) reads ONLY `run_id, started_at_ms, completed_at_ms, per_event_counts, status` — purely structural fields, no `actor_pseudonym`, no PI. `listRetentionSweepRunsThrough(snapshot_ts_ms)` (integrity-store.ts:157-159) is the only T18→retention join surface; its return shape is the snapshot type. Privacy posture matches the original ask.
+**Blocker for:** closed.
 
 ## T17 — Backup object-lock
 
