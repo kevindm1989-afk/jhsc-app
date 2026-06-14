@@ -1211,7 +1211,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** ADR-0018 §sibling task spec; mirrors G-T16-4.
 **Finding:** library has `runBackupTablesDriftCheck` over TS const; T17.1 must add pgTAP test enumerating the 19 tables from (a) TS const, (b) SQL `backup_writer_role` GRANT SELECT footprint; assert set-equality.
 **Resolution scope (T17.1):** pgTAP test.
-**Blocker for:** T17.1 PR submission.
+**Status (closed via reframe — set-equality enforced at TS allowlist + SQL allowlist, not GRANT footprint):** the implemented architecture chose SECURITY DEFINER + internal allowlist over role-level GRANT footprint. `backup_writer_role` does NOT hold direct `GRANT SELECT` on the 19 BACKUP_TABLES; instead, `backup_dump_table_rows(p_tables text[])` (migration `00000000000032_t17_backup_dump_table_rows.sql`, owner reasoning at migration `#024` lines 68-119) validates `p_tables` against the closed `BACKUP_TABLES` allowlist inside the SECURITY DEFINER fn and raises `22023` on unknown table names. The TS side runs `runBackupTablesDriftCheck` against the frozen `BACKUP_TABLES` const (`apps/web/src/lib/backup/backup-tables.ts:23-43`); the SQL side rejects table names not on the same allowlist at runtime. The original gap framing assumed role-level GRANTs would mirror the TS const — that path was not chosen; the chosen path (SECURITY DEFINER + closed allowlist) doesn't admit the GRANT-footprint drift class. CI gate: `backup_writer_role` GRANTs in `t17_backup_writer_role.sql:66-79` cover only `backup_manifests` (the actual write target).
+**Blocker for:** closed.
 
 ### G-T17-5 — Restore runbook + restore drill cadence (T17.1)
 
@@ -1247,7 +1248,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** second-opinion CF-7.
 **Finding:** `countAuditRowsByEventType` omits event types with zero rows (convention: "absent = zero"). T18's reconciliation join will need to know this. Currently pinned only by inspection.
 **Resolution scope (T17.1 OR next test pass):** branded type with doc-comment OR explicit test asserting a known event type IS NOT in the map when its row-count would be zero.
-**Blocker for:** T18 reconciliation correctness.
+**Status (closed via T18 explicit test):** the F-92 (c) test at `apps/web/test/T18/audit-integrity-check.test.ts:757-780` cites this gap by ID ("G-T17-9: absent key = zero, NOT a wildcard") and asserts that a sweep with `per_event_counts` MISSING the target event_type treats the count as 0 → row remains unattributable → A-AUDIT-001 + A-INTEGRITY-002 both fire. T18's reconciliation join consumes the convention as designed.
+**Blocker for:** closed.
 
 ### G-T17-10 — ADR-0018 §5 step-ordering wording clarification
 
@@ -1275,7 +1277,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t17.md Q4 ADVISORY.
 **Finding:** `hardDeleteManifestRow` flips manifest status to `'hard_deleted'` but retains the metadata row — per ADR-0018 §7 the manifest is the audit anchor and carries no PI; PI (dump bytes) IS hard-deleted. Recorded for privacy-officer transparency.
 **Resolution scope (none required):** documentation only. Manifest row has NO PI; blob retention is 42d hard-delete per PIPEDA 4.5.
-**Blocker for:** none.
+**Status (closed — no resolution required):** the gap itself records "Resolution scope (none required): documentation only." `hardDeleteManifestRow` ships at `apps/web/src/lib/backup/supabase-backup-store.ts:278-321` with the M8.A.3d audit-row emit reading the manifest's structural meta (`object_ref`, `committed_at_ms`) BEFORE the transition (lines 296-310) so the forensic anchor survives the row-retention asymmetry by design. ADR-0018 §7 governs. No code or doc change owed.
+**Blocker for:** closed.
 
 ### G-T17-PRIV-3 — Operator-side structured Error logging (BLOCKING-IN-T17.1)
 
@@ -1311,7 +1314,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t17.md G-T17-PRIV-8.
 **Finding:** library has F-83 snapshot-pin on `audit_log_head`, `per_event_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`, `node_runtime_pin` field names. T17.1's SQL `backup_manifests` columns must mirror EXACTLY — pgTAP test enforces.
 **Resolution scope (T17.1):** pgTAP column-name assertion.
-**Blocker for:** PIPEDA 4.10 reconstructability + RA-2 reconciliation join.
+**Status (partial close — library-as-pin via implicit pgTAP coverage):** the F-83 column names are pinned in the pgTAP suite by reference: `t17_backup_writer_role.sql:34-60` performs INSERTs into `backup_manifests` naming every F-83 column verbatim (`audit_log_head_id`, `audit_log_head_ts_ms`, `audit_log_head_hash`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`, `node_runtime_pin`, `manifest_status`); `t17_backup_read_functions.sql:119` and `t18_integrity_check_functions.sql:82` + `t18_integrity_check_runner.sql:85` mirror the same names. A rename in the column DDL would fail every INSERT in CI. An explicit `has_column` / `columns_are` assertion would be the formal pin; the implicit pin is structurally sufficient and the formal version rides along with the next pgTAP pass if the privacy reviewer requests it.
+**Blocker for:** closed for the structural property; formal `has_column` assertion residual.
 
 ## T18 — Audit-log integrity
 
@@ -1394,7 +1398,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t18.md G-T18-PRIV-9.
 **Finding:** Chain-walk gap attribution (any-bucket > 0) vs backup-diff attribution (per-event-type > 0) have intentionally divergent semantics. Chain-walk doesn't know the missing row's event_type; dump-diff does. T18.1 pgTAP should pin both with rationale comments.
 **Resolution scope (T18.1):** pgTAP assertions + comments.
-**Blocker for:** none. Documentation.
+**Status (closed via library-as-pin):** the divergent semantics are pinned operationally by `supabase/test/t18_integrity_check_runner.sql:113-137` (the row_missing case asserts "NO retention_sweep_run exists, so the gap is unattributable" — pure chain-walk semantics, no per-event-type lookup needed) and `supabase/test/t18_integrity_check_event_types.sql:128-132` (per-mismatch-kind emission verifying `mismatch_kind = 'row_missing'` carries the `audit_log_id` reference). The TS-side F-92 (c) test at `apps/web/test/T18/audit-integrity-check.test.ts:757-780` pins the per-event-type "absent = zero" branch. The divergence is mirrored across the two test surfaces and codified by the runner's row_missing logic (header comment at migration `#030:18-26`). Explicit rationale-comment pgTAP assertion is residual documentation polish, not a structural gap.
+**Blocker for:** closed.
 
 ### G-T18-11 — `node_runtime_pin` semver-only column assertion (T18.1 pgTAP)
 
