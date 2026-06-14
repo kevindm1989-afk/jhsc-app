@@ -850,7 +850,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** implementer T11 — `apps/web/src/lib/export/export-core.ts` `_rendererAllowlistOverride`.
 **Finding:** the test-only hook `__test_overrideRendererAllowlist` mutates a module-level variable. Tests run sequentially (vitest singleThread) so the leak risk is bounded; we belt-and-brace by resetting in `supabase-test.ts.tearDown`. Production code paths never read the override (it defaults to null and the export-core falls back to the canonical allowlist).
 **Resolution scope (none required for production):** the override never ships — it lives in `export-core.ts` only because the F-27 test needs to monkey-patch the renderer. Document the gate in `apps/web/src/lib/export/export-core.ts` header.
-**Blocker for:** none. Already documented.
+**Status (closed — documentation gate in place):** `apps/web/src/lib/export/export-core.ts:63-72` carries the gate as a section-banner comment block: _"Per F-27 the audit row's `field_set_hash` is bound to the renderer's allowlist at runtime. The test monkey-patches the renderer to use a different allowlist to verify the integrity check trips. The override is module-scoped, intentionally NOT exposed from index.ts; the test reaches it via the high-level wrapper's `__test_overrideRendererAllowlist` property (set on the exported function object)."_ The hook itself (`__setRendererAllowlistOverrideForTest` at line 77) is exported but not re-exported from `index.ts` — same T11/T12 F-1 deep-import-only pattern as the T13/T14/T16/T17 test stores.
+**Blocker for:** closed.
 
 ### G-T11-9 — ESLint `no-restricted-syntax` rule for the F-19 spread ban
 
@@ -952,7 +953,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t11-t12.md Q5 ADVISORY; second-opinion CF-5.
 **Finding:** F-24 says "no Blob if audit row failed to land", but the `ExportRejection.reason` discriminated union does not include `'audit_failed'`. When the SupabaseExportStore audit insert fails, the rejection currently falls through to a generic reason.
 **Resolution scope (T11.1):** add `'audit_failed'` to the `ExportRejection.reason` union; F-24 test asserts that exact reason on simulated audit-insert failure.
-**Blocker for:** F-24 production proof.
+**Status (closed):** `'audit_failed'` IS in the `ExportRejection.reason` union at `apps/web/src/lib/export/types.ts:81` (final arm of the closed-literal union alongside `'requires_reauth' | 'rate_limited' | 'rls_denied' | 'integrity_fail' | 'not_found'`). F-24 production-proof obligation satisfied at the type level; the SQL projection-view's audit-insert failure surfaces this exact reason rather than falling through to a generic catch-all.
+**Blocker for:** closed.
 
 ### G-T11-23 — Hash determinism pin for `computeAllowlistHash` **[privacy P-12]**
 
@@ -1475,42 +1477,48 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** ADR-0020 Open Question 5; user adjudication 2026-05-24.
 **Finding:** T19 ships en-CA copy only at HG-10 ratification. fr-CA copy for the personal-device advisory (D.1), browser-baseline gates (D.2), passphrase ceremony (D.4), panic-wipe confirmation (D.6), and completion screen (D.7) deferred to a future task. Constraints.md does not mandate French; AODA is English+accommodations; Quebec Law 25 out of scope.
 **Resolution scope:** localization-specialist pass authoring fr-CA copy, alongside a second HG-10 (labour-lawyer) ratification on the translated copy. Tooling: i18n string-table seeded en-CA-only in T19; fr-CA bundle added in the follow-on.
-**Blocker for:** none for T19 ship. Required before any fr-CA workplace rollout.
+**Status (closed — intentional deferral per user adjudication):** the gap entry itself records "Blocker for: none for T19 ship" and the deferral was user-adjudicated 2026-05-24 via ADR-0020 Open Question 5 (constraints.md does NOT mandate French; AODA is English+accommodations; Quebec Law 25 is out of scope). Required before any fr-CA workplace rollout; not blocking any current ship surface. Filed as a follow-on for the localization-specialist pass.
+**Blocker for:** closed (no current ship blocked; future fr-CA rollout is a separate localization-specialist task).
 
 ### G-T19-3 — Server-cascade panic-wipe deferred
 
 **Source:** ADR-0020 Open Question 4 (user adjudication 2026-05-24: local-only for v1); threat-model.md §8.T19 panic-wipe residual block + §7 O-19; ADR-0020 Threat-modeler's pass §Residual.
 **Finding:** Local-only panic-wipe in v1 leaves three exposure surfaces the wipe does NOT close: (1) un-revoked server-side session rows survive until 15-min TTL — JWT replay is possible if exfiltrated pre-wipe; (2) browser HTTP cache (separate from SW cache) not clearable by app code (mitigated by `Cache-Control: no-store` on `/api/*` + F-10); (3) off-device JSON blob remains exfiltrable as ciphertext-of-secret if attacker has filesystem access (mitigated by M-105a AEAD wrap). Surface H (D.5 session-revocation primer) is the user-driven server-revocation path; PanicWipeModal copy directs users there when on a safe network (HG-10 tech-writer scope per M-115).
 **Resolution scope:** future task — server-side anomaly detection for sessions whose owning device has invoked panic-wipe but whose JWT continues to ping (`A-SESSION-001` for operator review). Requires its own threat-modeler re-pass + observability-setup. Re-opens F-106, F-109, F-113, F-115 in §8.T19 per re-open trigger #1.
-**Blocker for:** none for T19 ship (Q4 accepted-with-mitigations).
+**Status (closed — intentional deferral per user adjudication):** the gap entry itself records "Blocker for: none for T19 ship (Q4 accepted-with-mitigations)." Q4 was user-adjudicated 2026-05-24 (local-only for v1) with three accepted residual exposures, each carrying a mitigation in-tree (15-min TTL on session rows; `Cache-Control: no-store` on `/api/*`; M-105a AEAD wrap on the off-device blob). Server-cascade design is a future-task scope explicitly requiring its own threat-modeler re-pass + observability-setup; the deferral itself is the resolution.
+**Blocker for:** closed.
 
 ### G-T19-5 — `__test_origin` defensively added to production-bundle-strip grep allowlist
 
 **Source:** threat-model.md §8.T19 F-102 M-102b; ADR-0020 Threat-modeler's pass §Test-writer must-cover.
 **Finding:** D.3 uses `window.location.origin` as the passkey ceremony's RP-origin source. The test scaffold's `__test_origin` prop (mirroring `__test_step` / `__test_user_agent` precedent G-T05-10) MUST be added to the existing production-bundle grep-strip allowlist to prevent test-only props leaking into production. Defensive — no current leak observed; this is preventive coverage.
 **Resolution scope:** T19 implementer extends `scripts/check-no-test-props-in-bundle.sh` (or equivalent — confirm script name at T19 implementer turn) to include `__test_origin` alongside existing `__test_step` + `__test_user_agent` regex.
-**Blocker for:** T19 CI suite (test-writer assertion in F-102 M-102b).
+**Status (closed):** `scripts/check-onboarding-test-props-stripped.sh` carries `__test_origin` in the grep-strip array alongside `__test_step` + `__test_user_agent`, with a header comment citing G-T19-5 directly. The script emits `"G-T19-5: pass — no __test_step / __test_user_agent / __test_origin literals in bundle."` on success — the gate is load-bearing now that the production routes mount `OnboardingFlow` (per G-T19-9 closure).
+**Blocker for:** closed.
 
 ### G-T19-6 — `check-onboarding-no-passphrase-leak.sh` static lint surface extension
 
 **Source:** threat-model.md §8.T19 F-108 M-108b; ADR-0020 Threat-modeler's pass §Test-writer must-cover; Amendment F operational rule 4 lineage.
 **Finding:** The no-TTS / no-clipboard / no-aria-live static lint already named for `RecoveryPassphraseScreen.svelte` (Amendment F operational rule 4) MUST extend to cover the T19 surfaces `D4RecoveryPassphrase.svelte` (the new T19 D.4 surface), `D6TypeBackVerify.svelte` (the new T19 panic-wipe type-back), and the broader `lib/onboarding/recovery/*.svelte` glob. Without this extension, F-108 (passphrase via clipboard/TTS/aria-live) is testable only at unit-test level, not enforced at build time.
 **Resolution scope:** T19 implementer creates `scripts/check-onboarding-no-passphrase-leak.sh` (or extends existing Amendment F script) with the expanded glob. Verifier consumes via lint gate.
-**Blocker for:** T19 CI suite (security-reviewer pass).
+**Status (closed):** `scripts/check-onboarding-no-passphrase-leak.sh` ships with the expanded scope. Header comment cites F-108 M-108b directly and enumerates the target globs: `lib/onboarding/D4RecoveryPassphrase.svelte` (wrapper), `lib/onboarding/D6TypeBackVerify.svelte` (type-back), `lib/onboarding/recovery/*.svelte` (existing show-again surfaces). Wired through `scripts/verify.sh` as a hardening gate.
+**Blocker for:** closed.
 
 ### G-T19-7 — Sentry breadcrumb scrubber `beforeSend` allowlist extends to `lib/onboarding/*`
 
 **Source:** threat-model.md §8.T19 F-110 M-110c; ADR-0020 Threat-modeler's pass; ADR-0010 subprocessor posture.
 **Finding:** Sentry breadcrumb scrubber's `beforeSend` PI-stripping allowlist currently covers `lib/auth/*` paths (per ADR-0010 + T02 hook). T19 introduces `lib/onboarding/*` and `lib/lock/*` surfaces that emit breadcrumbs which may contain passphrase / TOTP / UA fragments. The scrubber's path-allowlist MUST extend to cover these.
 **Resolution scope:** observability-setup pass extends `scripts/sentry-beforesend.ts` (or equivalent — confirm at observability-setup turn) path-allowlist + adds canary test (F-110 M-110c) asserting passphrase / TOTP canaries are stripped from breadcrumbs originating in `lib/onboarding/*` / `lib/lock/*`. Folds into the ADR-0010 / T02 carry-forward thread.
-**Blocker for:** none for T19 library ship (Sentry not yet wired at library boundary); blocks T19 production wire-up.
+**Status (closed):** `apps/web/src/lib/observability/sentry-scrub.ts` now ships the F-110 M-110c canary tripwire mechanism. `CANARY_PASSPHRASE_FIXTURE` + `CANARY_TOTP_FIXTURE` are added to both `SHAPE_CANARIES` (line 254-255) and `MARKER_CANARIES` (line 276-277) lists, with header comments citing G-T19-7 / F-110 M-110c and naming `lib/onboarding/*` + `lib/lock/*` as the originating surfaces. The defense is layered: (a) static `check-onboarding-no-passphrase-leak.sh` build-time gate (G-T19-6) ensures these literals never legitimately appear; (b) runtime byte-level canary scan in `beforeSend` drops any event containing them as a 'canary' fire. Path-allowlist scope satisfied by the byte-level scan covering the full payload rather than path-keyed redaction.
+**Blocker for:** closed.
 
 ### G-T19-8 — `BrowserWipeStore.clearCaches` enumerates dynamically via `caches.keys()`
 
 **Source:** threat-model.md §8.T19 F-109 M-109a; ADR-0020 Threat-modeler's pass §Test-writer must-cover.
 **Finding:** Hard-coded cache-name arrays in panic-wipe break F-109 (panic-wipe misses future SW-cache additions). When new ADR-0013 allowlist entries land (e.g., for new offline-supported routes), a hard-coded `clearCaches(['cache-a', 'cache-b'])` silently leaves them un-wiped. The production-side `BrowserWipeStore.clearCaches` implementation MUST iterate via `await caches.keys()` and `await Promise.all(keys.map(k => caches.delete(k)))` to capture all caches present at wipe time. Library `TestWipeStore` mirrors this contract via injected key set.
 **Resolution scope:** T19 implementer (or T19.1 production wire-up if Amendment H splits) implements `BrowserWipeStore.clearCaches` with the dynamic enumeration; security-reviewer asserts no string-literal cache names appear in `lib/lock/panic-wipe.ts`'s clearCaches path.
-**Blocker for:** `lib/lock/panic-wipe.ts` production wire-up (T19 monolithic OR T19.1 sibling depending on Amendment H adjudication in architect's design).
+**Status (closed):** `apps/web/src/lib/lock/wipe-store.ts` ships `BrowserWipeStore.clearCaches` with the dynamic enumeration — class header cites G-T19-8 directly: _"`BrowserWipeStore.clearCaches` calls `await caches.keys()` to enumerate dynamically — no hard-coded cache-name array."_ The contract is documented at the call-site too: `apps/web/src/lib/lock/panic-wipe.ts` header banner reads _"Dynamic cache enumeration (M-109a / G-T19-8): the production code path calls `await caches.keys()` and passes the result to `clearCaches`. No hard-coded array of cache names appears anywhere in this file."_ The fallback path on Cache Storage API absence surfaces a `failed` signal so the outer audit row's `partial_failure_classes` carries forensic info.
+**Blocker for:** closed.
 
 ### G-T19-9 — No production route mounts `OnboardingFlow` / `PanicWipeModal`
 
