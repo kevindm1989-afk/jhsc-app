@@ -35,7 +35,7 @@ SELECT throws_ok(
        audit_log_head_hash, retention_sweep_runs_snapshot_ts_ms,
        schedule_hash, node_runtime_pin)
     VALUES (gen_random_uuid(), 0, 'r', 'not-a-sha', 0, 'kid', 0, 0,
-            '\x00'::bytea, 0, 'h', 'pin')$$,
+            '\x00'::bytea, 0, 'h', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '23514', NULL,
   'backup_manifests.blob_sha256 CHECK rejects non-hex value');
 
@@ -47,7 +47,7 @@ SELECT throws_ok(
        audit_log_head_hash, retention_sweep_runs_snapshot_ts_ms,
        schedule_hash, node_runtime_pin, manifest_status)
     VALUES (gen_random_uuid(), 0, 'r', repeat('a',64), 0, 'kid', 0, 0,
-            '\x00'::bytea, 0, 'h', 'pin', 'not_a_status')$$,
+            '\x00'::bytea, 0, 'h', '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'not_a_status')$$,
   '23514', NULL,
   'backup_manifests.manifest_status CHECK rejects unknown values');
 
@@ -59,7 +59,7 @@ SELECT throws_ok(
        audit_log_head_hash, retention_sweep_runs_snapshot_ts_ms,
        schedule_hash, node_runtime_pin)
     VALUES (gen_random_uuid(), 0, 'r', repeat('a',64), -1, 'kid', 0, 0,
-            '\x00'::bytea, 0, 'h', 'pin')$$,
+            '\x00'::bytea, 0, 'h', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '23514', NULL,
   'backup_manifests.blob_bytes >= 0 CHECK rejects negative');
 

@@ -124,7 +124,7 @@ INSERT INTO public.backup_manifests (
   'backups/x', repeat('a',64), 100::bigint, 'kid',
   7::bigint, 1700000000000::bigint, '\x00'::bytea,
   '{}'::jsonb, '{}'::jsonb, 1700000000000::bigint,
-  'sh', 'pin', 'committed', 1700000200000::bigint + 42::bigint * 86400000
+  'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'committed', 1700000200000::bigint + 42::bigint * 86400000
 );
 
 SELECT is(

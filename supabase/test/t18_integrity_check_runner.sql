@@ -24,19 +24,19 @@ SELECT ok(
 -- (3)-(5) input validation.
 SELECT throws_ok(
   $$SELECT public.integrity_check_runner(
-      'not_a_trigger', 1700000000000::bigint, 60000::bigint, 'pin', 'h')$$,
+      'not_a_trigger', 1700000000000::bigint, 60000::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   '22023', NULL,
   'invalid trigger raises 22023');
 
 SELECT throws_ok(
   $$SELECT public.integrity_check_runner(
-      'scheduled', 0::bigint, 60000::bigint, 'pin', 'h')$$,
+      'scheduled', 0::bigint, 60000::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   '22023', NULL,
   'p_now_ms=0 raises 22023');
 
 SELECT throws_ok(
   $$SELECT public.integrity_check_runner(
-      'scheduled', 1700000000000::bigint, -1::bigint, 'pin', 'h')$$,
+      'scheduled', 1700000000000::bigint, -1::bigint, '{"node_version":"20.0.0","openssl_version":"3.0.13"}', 'h')$$,
   '22023', NULL,
   'negative lease window raises 22023');
 
@@ -92,7 +92,7 @@ SELECT
   (SELECT head_id FROM public.integrity_check_extract_chain_head()),
   (SELECT head_ts_ms FROM public.integrity_check_extract_chain_head()),
   (SELECT head_hash FROM public.integrity_check_extract_chain_head()),
-  '{}'::jsonb, '{}'::jsonb, 1700001000000::bigint, 'sh', 'pin',
+  '{}'::jsonb, '{}'::jsonb, 1700001000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}',
   'committed', 1700001200000::bigint + 42::bigint * 86400000;
 
 SELECT ok(

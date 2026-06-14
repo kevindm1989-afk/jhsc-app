@@ -1406,7 +1406,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t18.md G-T18-PRIV-10.
 **Finding:** ran-row `meta.node_runtime_pin` carries `{node_version, openssl_version}`. NOT PI but fingerprintable platform metadata; T18.1 pgTAP should add column-level assertion that values are semver-shape only (no hostname, no FS path, no env content).
 **Resolution scope (T18.1):** pgTAP column assertion.
-**Blocker for:** none. Defense-in-depth.
+**Status (closed):** migration `00000000000034_node_runtime_pin_semver_check.sql` adds a SQL CHECK constraint to both `backup_manifests.node_runtime_pin` and `integrity_check_runs.node_runtime_pin`. The constraint enforces: (a) value is valid JSON parseable to an object; (b) object has EXACTLY the two keys `{node_version, openssl_version}` (no extra fingerprintable fields); (c) each value matches a semver-shape regex (digit-triple prefix; pre-release / build-metadata suffix tolerated). pgTAP coverage at `supabase/test/node_runtime_pin_semver_check.sql` runs 12 assertions across positive (valid pin accepted, pre-release suffix tolerated) and negative (hostname-shape rejected, FS-path-shape rejected, env-content-shape rejected, extra-key rejected, missing-key rejected, non-JSON rejected, non-object JSON rejected) paths on both tables. The 21 existing test fixtures using the `'pin'` stub were updated to the canonical `'{"node_version":"20.0.0","openssl_version":"3.0.13"}'` shape so the CHECK doesn't false-fire on unrelated tests.
+**Blocker for:** closed.
 
 ### G-T18-12 — Off-app weekly anchor email delivery to worker co-chair (T18.1)
 

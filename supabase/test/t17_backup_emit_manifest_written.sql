@@ -40,7 +40,7 @@ SELECT throws_ok(
       100::bigint, 'kid-v1',
       7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
       '{}'::jsonb, '{}'::jsonb,
-      1700000000000::bigint, 'sh', 'pin')$$,
+      1700000000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '22023', NULL,
   'invalid sha256 raises 22023');
 
@@ -53,7 +53,7 @@ SELECT throws_ok(
       -1::bigint, 'kid-v1',
       7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
       '{}'::jsonb, '{}'::jsonb,
-      1700000000000::bigint, 'sh', 'pin')$$,
+      1700000000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '22023', NULL,
   'negative bytes raises 22023');
 
@@ -66,7 +66,7 @@ SELECT throws_ok(
       100::bigint, '',
       7::bigint, 1700000000000::bigint, '\xdeadbeef'::bytea,
       '{}'::jsonb, '{}'::jsonb,
-      1700000000000::bigint, 'sh', 'pin')$$,
+      1700000000000::bigint, 'sh', '{"node_version":"20.0.0","openssl_version":"3.0.13"}')$$,
   '22023', NULL,
   'empty committee_data_key_kid raises 22023');
 
