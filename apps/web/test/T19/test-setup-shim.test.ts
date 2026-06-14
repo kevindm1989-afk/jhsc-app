@@ -7,7 +7,7 @@
  * fail at runtime with a missing-file error if it disappeared.
  *
  * What's NOT pinned is the file's CONTENT. The shim it installs is
- * load-bearing for two distinct test-runner contracts:
+ * load-bearing for the testing-library/dom timer-detection contract:
  *
  *   - `globalThis.jest` with `advanceTimersByTime` mapped to
  *     `vi.advanceTimersByTime` — without this, testing-library/dom's
@@ -18,14 +18,14 @@
  *     to decide whether to use fake-timer advancement; Vitest's API
  *     is compatible but isn't auto-detected.
  *
- *   - `globalThis.vi` (Vitest itself) — pinned because the T13
- *     reprisal-log test references `vi.fn()` without an explicit
- *     import, and `globals: false` in vitest.config.ts (also pinned)
- *     means the symbol isn't on the global by default. Removing the
- *     shim would break that test's pre-consent gate assertion.
- *
- * A refactor that accidentally drops either shim would land here
+ * A refactor that accidentally drops the jest-shim would land here
  * BEFORE the test suite goes red on flaky timeouts in CI.
+ *
+ * G-T13-12 history: setup.ts also briefly exposed `globalThis.vi` so
+ * the T13 reprisal-log test's bare `vi.fn()` would resolve under
+ * `globals: false`. That shim was removed (G-T13-12 closure); the
+ * test now imports `vi` explicitly from `'vitest'`. The convention
+ * pin lives in the second describe block below.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -68,15 +68,26 @@ describe('T19.1 — globalThis.jest shim for testing-library/dom waitFor', () =>
   });
 });
 
-describe('T19.1 — globalThis.vi shim for the T13 reprisal-log test', () => {
+describe('T19.1 — T13 reprisal-log vi import convention (G-T13-12 closure)', () => {
   const src = readFileSync(SETUP_PATH, 'utf8');
 
-  it('exposes vi on globalThis (T13 reprisal-log uses bare vi.fn())', () => {
-    // vitest.config.ts pins `globals: false`, so the `vi` symbol
-    // isn't on the global by default. The T13 reprisal-log test
-    // references `vi.fn()` without an explicit import per .context/
-    // test-plan.md §6 (tests are read-only). The shim makes that
-    // bare reference resolve.
-    expect(src).toMatch(/globalThis[^=]*\.vi\b[^=]*=\s*vi\b/);
+  it('does NOT expose vi on globalThis (the G-T13-12 shim was removed in favour of explicit import)', () => {
+    // vitest.config.ts pins `globals: false`. G-T13-12 originally
+    // landed a `(globalThis as ...).vi = vi` shim so the T13
+    // reprisal-log test's bare `vi.fn()` would resolve. The closure
+    // pass removed the shim AND added `vi` to the explicit
+    // `'vitest'` import in apps/web/test/T13/reprisal-log.test.ts.
+    // The repo convention is now "explicit import per test file"
+    // and matches every other test in the suite. This pin guards
+    // against the shim returning silently.
+    expect(src).not.toMatch(/globalThis[^=]*\.vi\b[^=]*=\s*vi\b/);
+  });
+
+  it('the T13 reprisal-log test imports vi explicitly from vitest', () => {
+    const t13src = readFileSync(resolve(__dirname, '../T13/reprisal-log.test.ts'), 'utf8');
+    // Match: `import { ..., vi, ... } from 'vitest'` — the bare-vi
+    // line at :464 of the test is now resolved by the import, not
+    // the globalThis shim.
+    expect(t13src).toMatch(/import\s*\{[^}]*\bvi\b[^}]*\}\s*from\s*['"]vitest['"]/);
   });
 });
