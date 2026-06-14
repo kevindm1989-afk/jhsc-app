@@ -19,7 +19,7 @@
  *   - privacy-review §7 obligations 1–6.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/svelte';
 import ReprisalIntakeForm from '../../src/lib/reprisal/ReprisalIntakeForm.svelte';
 import { freezeClock, advanceBy, restoreClock } from '../_helpers/clock';

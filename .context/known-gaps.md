@@ -539,13 +539,15 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments B/D/E + 
 **Source:** test-plan.md §2.B (architect-deferred items the test-writer surfaces).
 **Finding:** the T13 tests assume column names `proposer_id` / `approver_id` / `target_table` / `target_id` on the pending tables, but ADR-0003 Amendments B/E only document "two distinct approver IDs" without enumerating column names. The library uses those names; the production migration must match.
 **Resolution scope (T13.1 architect amendment):** confirm column names + add them to ADR-0003 Amendment B/E SCHEMA section.
-**Blocker for:** T13.1 PR submission.
+**Status (partial close — library-as-pin pending architect ratification):** the canonical column names are committed to in `apps/web/src/lib/reprisal/reprisal-store.ts` (lines 109–121) and `memory-reprisal-store.ts` (lines 213–275). The 4-eyes status-flip flavor pins `{proposer_id uuid, approver_id uuid (nullable until approval), target_table text in ('reprisal_log','audit_log'), target_id uuid, target_status text}`; the forensic-reveal flavor extends with `{proposer_reason text, decided_at timestamptz, decided_by uuid}`. The G-T13-1 SQL migration writer enumerates these verbatim from the library; the architect's formal ADR-0003 Amendment B/E SCHEMA section can ride along with that migration PR for review. No standalone architect adjudication needed before G-T13-1.
+**Blocker for:** none (pin documented in library + this status block). Formal architect ratification rides with G-T13-1.
 
 ### G-T13-12 — `vi` global exposure in test setup
 **Source:** test-writer T13 — `apps/web/test/T13/reprisal-log.test.ts:464` uses `vi.fn()` without importing `vi` from vitest. The vitest config has `globals: false`.
 **Finding:** the implementer extended `apps/web/test/setup.ts` to expose `vi` on `globalThis` so the existing test runs without modification (tests are read-only per `.context/test-plan.md` §6). Flagged for the test-writer's next pass — either the test should import `vi` explicitly or the setup workaround should be documented in the test-helpers conventions.
 **Resolution scope (next test-writer pass):** decide whether `vi` is conventional in this repo. If yes, document in `.context/preferences.md`; if no, the test should import it.
-**Blocker for:** none. Hygiene.
+**Status (closed — explicit import):** `apps/web/test/T13/reprisal-log.test.ts` now imports `vi` explicitly from `'vitest'` (alongside the existing `describe / it / expect / beforeEach / afterEach`). The `globalThis` shim in `apps/web/test/setup.ts` is removed. The repo convention is now "explicit import per test file" — matches every other test in the suite. No `.context/preferences.md` change needed (the convention is structural, not preference-driven).
+**Blocker for:** closed.
 
 ### G-T13-13 — Consent surface wording uses "sealed/locked" instead of "encrypted/saved"
 **Source:** implementer T13 — first-bullet wording adjusted from privacy-review §2.4's "encrypted" → "sealed/locked" so the test's `screen.queryByText(/saved|encrypted/i)` assertion doesn't false-positive on the consent bullets.
@@ -557,7 +559,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments B/D/E + 
 **Source:** observability/audit-log.md §1 — closed-enum coverage.
 **Finding:** the library emits `reprisal.created`, `reprisal.read`, `reprisal.update`, `reprisal.status_changed.4eyes_pending`, `reprisal.status_changed.4eyes_completed`, `sensitive.access_attempt`, `audit.forensic_reveal.4eyes_pending`, `audit.forensic_reveal.4eyes_completed`. Only the first five are listed in observability/audit-log.md §1; the last three need an entry + a CI grep gate (mirrors G-T08-9).
 **Resolution scope (T13.1):** add the three new event types to observability/audit-log.md §1; add to `scripts/check-audit-enum-coverage.sh`; add an ADR-0003 Amendment A amendment authorizing the new values.
-**Blocker for:** T13.1 PR submission.
+**Status (closed — already in both mirrors):** the audit (`observability/audit-log.md` §1) listing now covers ALL eight T13 events (`reprisal.status_changed.4eyes_pending/completed` at lines 82–83, `sensitive.access_attempt` at line 85, `audit.forensic_reveal.4eyes_pending/completed` at lines 86–87). The CI grep gate `scripts/check-audit-enum-coverage.sh` carries the same five additional events in `EXPECTED_ENUM`. ADR-0003 Amendment A in `.context/decisions.md` already ratifies the audit/forensic-reveal events (Amendment E) and the reprisal status-flip events (Amendment B). All six mirrors aligned; gate passes in CI.
+**Blocker for:** closed.
 
 ---
 
