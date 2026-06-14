@@ -91,9 +91,14 @@ function generateRunId(): string {
  *
  * Shape: `<prefix>/<YYYYMMDD>/<run_id>.dump`. Date prefix gives the storage
  * bucket a human-scannable folder hierarchy without leaking any PII shape.
+ *
+ * `dateAnchorMs` is the timestamp used to derive the YYYYMMDD folder. The
+ * caller passes `startedAtMs` (not `committedAtMs`) so the date is fixed
+ * BEFORE the dump runs — a date flip mid-pass would otherwise produce a
+ * folder that disagrees with the manifest's `committed_at_ms` date.
  */
-function deriveObjectRef(runId: string, committedAtMs: number): string {
-  const d = new Date(committedAtMs);
+function deriveObjectRef(runId: string, dateAnchorMs: number): string {
+  const d = new Date(dateAnchorMs);
   const yyyy = d.getUTCFullYear().toString().padStart(4, '0');
   const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0');
   const dd = d.getUTCDate().toString().padStart(2, '0');
