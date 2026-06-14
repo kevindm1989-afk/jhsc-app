@@ -1299,7 +1299,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t17.md HG-15 + architect flag.
 **Finding:** §PI inventory amendments needed for new `backup_manifests` row (NO PI — structural metadata only). Architect flagged `training_records` PI class verification as deferred to T17.1 architect.
 **Resolution scope (T17.1):** add row(s) to §PI inventory; verify training_records PI class.
-**Blocker for:** T17.1 PR submission.
+**Status (closed):** `backup_manifests.*` row added to `decisions.md` §PI inventory in this pass (2026-06-14) — C0, NO PI, 7y row retention as audit anchor per ADR-0018 §7, 42d blob hard-delete per ADR-0012 amendment, full F-83 column shape enumerated. `training_records.evidence_ciphertext` PI class verified at C2 / E2EE (line 7324 unchanged): certified-member proof is identity-adjacent but ciphertext-bound and not C3-level operational PI — C2 fits.
+**Blocker for:** closed.
 
 ### G-T17-PRIV-7 — `xact_start()` over `Date.now()` for production lock arithmetic
 
@@ -1371,7 +1372,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t18.md G-T18-PRIV-1.
 **Finding:** §PI inventory amendments needed for `integrity_check_runs` (no PI; structural counts + run metadata) + optional `audit_chain_anchors` (no PI; head triple + delivery timestamp).
 **Resolution scope (T18.1):** add rows to §PI inventory.
-**Blocker for:** T18.1 PR submission.
+**Status (closed):** both rows added to `decisions.md` §PI inventory in this pass (2026-06-14). `integrity_check_runs.*` — C0, NO PI, 24mo operational telemetry per ADR-0016, full T18.1 column shape enumerated (run_id, trigger, timestamps, counts, runtime pin, schedule hash). `audit_chain_anchors.*` — C0, NO PI, 7y load-bearing forensic per ADR-0016, head triple + delivery timestamp only; hash is structurally non-PII per `observability/audit-log.md` §2.
+**Blocker for:** closed.
 
 ### G-T18-8 — A-AUDIT-001 / A-INTEGRITY-001 / A-INTEGRITY-002 alert sink wiring (observability-setup, post-T18.1)
 
