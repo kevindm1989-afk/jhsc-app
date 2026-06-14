@@ -34,6 +34,8 @@ interface RawTokens {
     hairline?: string;
     default?: string;
     thick?: string;
+    c4_stripe?: string;
+    step_indicator?: string;
     focus_inner?: string;
     focus_outer?: string;
   };
@@ -68,6 +70,8 @@ export const tokens = {
     hairline: raw.border_width?.hairline ?? '',
     default: raw.border_width?.default ?? '',
     thick: raw.border_width?.thick ?? '',
+    c4_stripe: raw.border_width?.c4_stripe ?? '',
+    step_indicator: raw.border_width?.step_indicator ?? '',
     focus_inner: raw.border_width?.focus_inner ?? '',
     focus_outer: raw.border_width?.focus_outer ?? ''
   }

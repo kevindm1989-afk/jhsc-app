@@ -377,7 +377,7 @@
     color: var(--color-fg);
     background-color: var(--color-bg-elevated);
     border-style: solid;
-    border-width: 1px;
+    border-width: var(--border-width-hairline);
     border-color: var(--color-border-strong);
     border-radius: var(--radius-md);
     transition:
@@ -420,7 +420,7 @@
     background-color: var(--color-bg-elevated);
     color: var(--color-fg);
     border-style: solid;
-    border-width: 1px;
+    border-width: var(--border-width-hairline);
     border-color: var(--color-border-strong);
     border-radius: var(--radius-md);
     cursor: pointer;
@@ -467,7 +467,7 @@
     background-color: var(--color-tint-red-bg);
     color: var(--color-tint-red-fg);
     border-inline-start-style: solid;
-    border-inline-start-width: 4px;
+    border-inline-start-width: var(--border-width-c4-stripe);
     border-inline-start-color: var(--color-tint-red-border);
   }
 
@@ -493,7 +493,7 @@
     font-weight: 600;
     background-color: var(--color-accent);
     color: var(--color-accent-fg);
-    border: 1px solid var(--color-accent);
+    border: var(--border-width-hairline) solid var(--color-accent);
     border-radius: var(--radius-md);
     cursor: pointer;
   }
