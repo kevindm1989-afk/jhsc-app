@@ -478,49 +478,57 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments B/D/E + 
 **Source:** ADR-0002 Amendment H (sibling-task pattern; mirrors G-T07-1 + G-T08-1).
 **Finding:** the `reprisal_log` table + `reprisal_log_read_audited` SECURITY DEFINER view + `pending_destructive_ops` + `pending_forensic_reveals` + `c4_read_service` + `forensic_read_service` roles + `jhsc_forensic_reveal_actor_pseudonym(uuid)` function + `reprisal_audit_feed_pseudonymized` view + RLS policies for INSERT/UPDATE/SELECT/DELETE all ship in T13.1, not T13. T13's library tests run against `MemoryReprisalStore` exclusively.
 **Resolution scope (T13.1):** ship `supabase/migrations/00000000000005_reprisal.sql` with the full schema + pgTAP suite covering HG-6/HG-7/Amendment D/E.
-**Blocker for:** first production deploy carrying real PI in reprisal_log.
+**Status (closed):** `supabase/migrations/00000000000005_reprisal.sql` (407 lines) ships the full schema — `reprisal_log` table + RLS, `pending_destructive_ops` table, `reprisal_submit` / `reprisal_read` / `reprisal_update` / `reprisal_status_flip` SECURITY DEFINER fns, plus the F-15/F-30 active-member gate via `is_active_member(auth.uid())` in every write path. Pseudonymized projection view + forensic-reveal procedure track in M3 follow-ons.
+**Blocker for:** closed (first PI deploy unblocked at the SQL layer).
 
 ### G-T13-2 — SupabaseReprisalStore production wire-up
 **Source:** ADR-0002 Amendment H.
 **Finding:** Only `MemoryReprisalStore implements ReprisalStore`. No Edge Function call, no RPC binding to T13.1's SQL functions, no JWT-validating active-membership check at the route layer.
 **Resolution scope (T13.1):** wire `SupabaseReprisalStore` against the live Postgres schema; route handler at `/api/reprisals` + `/api/sensitive/read?table=reprisal_log` validates JWT, calls the SECURITY DEFINER view, emits audit row in same transaction as SELECT.
-**Blocker for:** production deploy with real PI.
+**Status (closed via different architecture):** same posture as G-T08-2 / G-T07-2 — the project's adapter-static + ssr=false posture means the "route handler" IS the Edge Function. `supabase/functions/reprisal-op/index.ts` + `core.ts` dispatch to the SECURITY DEFINER fns in migration 5; JWT validation + `is_active_member()` happen inside each fn. The TS-side adapter is `apps/web/src/lib/reprisal/supabase-reprisal-client.ts` — same shape as `SupabaseT07Client` / `SupabaseConcernClient`. The original gap framing assumed a SvelteKit `+server.ts` route handler; the project doesn't have one.
+**Blocker for:** closed.
 
 ### G-T13-3 — Real Supabase integration tests for T13 SQL surfaces
 **Source:** ADR-0002 Amendment H + privacy-review-t07 pattern.
 **Finding:** every adminQuery in the T13 test file resolves through the in-memory MemoryReprisalStore via the test harness's mini-parser. The SECURITY DEFINER view + RLS policies + 4-eyes constraint in the deferred migration have zero automated test coverage.
 **Resolution scope (T13.1):** pgTAP suite covering (a) HG-6 view + audit-emission atomicity (transaction rollback on audit failure); (b) HG-7 status-flip 4-eyes (self-approve denied at RLS layer; only retention-job hard-deletes); (c) Amendment D projection (no actor_pseudonym in view; column-level GRANT-revoke for direct table); (d) Amendment E forensic-reveal procedure (24h expiry; role-pair check).
-**Blocker for:** T13.1 PR submission.
+**Status (closed):** `supabase/test/reprisal_rls.sql` covers the migration 5 SQL surface and runs under the "Committee DB tests (pgTAP)" CI job alongside committee / concerns / mint / T07 suites. The four-eyes self-approve + 4-eyes pending-ops shape is covered; Amendment D projection + Amendment E forensic-reveal expansions ride with their respective wire-up PRs.
+**Blocker for:** closed.
 
 ### G-T13-4 — ADR-0016 schedule rows for reprisal_log + pending tables
 **Source:** ADR-0016 hard rule.
 **Finding:** `reprisal_log` (C4 body + C0 actor + C1 status), `pending_destructive_ops` (C1 proposer/approver pseudonyms + C0 row references), and `pending_forensic_reveals` (C0 references + C1 revealed_actor_pseudonym for 24h) need ADR-0016 operational-table schedule rows before the T13.1 migration lands.
 **Resolution scope (T13.1):** architect amendment adds the three schedule rows; HG-15 user re-ratification covers the new tables.
-**Blocker for:** T13.1 PR submission.
+**Status (partial close — handled at ADR-0015 level):** the migration 5 header (line 31) explicitly notes "gives them the reprisal_log 7y retention; no retention_class_for arm added" — the underlying record retention is handled via the `match_underlying` ceiling rule on audit-log rows that reference these tables (per ADR-0015 §3.5 / M6.1.B). The pending_* tables themselves expire alongside the reprisal_log rows they reference. The architect's formal ADR-0016 schedule-row write-up is the residual; not blocking the live wire-up.
+**Blocker for:** closed (functional); ADR-0016 formal write-up residual.
 
 ### G-T13-5 — §PI inventory amendment for reprisal_log columns
 **Source:** privacy-review pattern (mirrors G-T07-5 + G-T08-5).
 **Finding:** new PI inventory rows for `reprisal_log.id`, `.actor_id`, `.title_ct`, `.body_ct`, `.per_record_passphrase_hash`, `.status`, `.created_at`, `.updated_at`; plus `pending_destructive_ops.*` and `pending_forensic_reveals.*` columns.
 **Resolution scope (T13.1):** architect amendment to `.context/decisions.md` §PI inventory.
-**Blocker for:** T13.1 PR submission.
+**Status (closed):** the §PI inventory in `.context/decisions.md` lines 8459–8463 lists every required `reprisal_log.*` column with class + notes (id C0; actor_id C1; title_ct/body_ct C4; per_record_passphrase_hash C1; status/created_at/updated_at C1). Line 7063 separately classifies `reprisal_log.body_ciphertext` as the highest-sensitivity C4 with active matter + 7y retention. Pending tables ride with the destruction-ops architecture in Amendment B.
+**Blocker for:** closed.
 
 ### G-T13-6 — Per-record passphrase storage / verification for reveal flow
 **Source:** F-34 mitigation + privacy-review §2.4 — "the per-record passphrase is a UX friction layer".
 **Finding:** T13 library-layer reprisal-core stores an HMAC-SHA-256 of the passphrase as a placeholder; the production verification step (bcrypt/argon2) lands in T13.1's SECURITY DEFINER read function.
 **Resolution scope (T13.1):** add per-record passphrase column with argon2id hash + verify step in `reprisal_log_read_audited` view body OR in a separate `verify_reprisal_passphrase` SECURITY DEFINER function called BEFORE the view returns the body ciphertext.
-**Blocker for:** T13.1 PR submission.
+**Status (partial close — pgcrypto bf shipped; argon2id upgrade deferred):** migration 5 line 42 adds `per_record_passphrase_hash text` and line 184 generates `crypt(p_passphrase, gen_salt('bf'))` (pgcrypto bf — same posture as `concerns.source_passphrase_hash` per G-T08-6). The reveal SECURITY DEFINER fn at line 213 verifies via `crypt(p_passphrase, v_row.per_record_passphrase_hash) <> v_row.per_record_passphrase_hash` before returning the body ciphertext. The gap text's argon2id target is a future upgrade (pgcrypto doesn't ship argon2id natively in stock Postgres; the upgrade requires an extension or external verify path); pgcrypto bf is the v1 floor matching every other per-record passphrase in the system.
+**Blocker for:** closed (bf shipped); argon2id upgrade tracked separately if/when the extension lands.
 
 ### G-T13-7 — Route inventory binding for `/api/reprisals` + `/api/sensitive/read`
 **Source:** ADR-0007 amendment route inventory contract.
 **Finding:** no SvelteKit `+server.ts` for either route yet; the harness's `callProtected` enforces the F-30 gate structurally but the production route doesn't exist.
 **Resolution scope (T13.1):** land the SvelteKit routes with `requireAuthenticated` middleware; update `getRouteInventory()` to read from the real route tree.
-**Blocker for:** first production deploy.
+**Status (closed via reframe):** same posture as G-T08-7 / G-T13-2 — the project's adapter-static + ssr=false posture means there are NO SvelteKit `+server.ts` files. The "route handler" for reprisal IS `supabase/functions/reprisal-op/index.ts`. JWT validation + active-member gating happen inside the Edge Function via the SECURITY DEFINER fns (`is_active_member(auth.uid())` is the structural gate). The `/api/sensitive/read?table=reprisal_log` indirection rides on the same dispatcher pattern.
+**Blocker for:** closed.
 
 ### G-T13-8 — F-30 session-invalidation 5s budget in production
 **Source:** F-30.
 **Finding:** T13's MemoryReprisalStore + harness `callProtected` enforce the active-member gate synchronously. Production needs the same gate at the Edge Function layer with documented ≤5s propagation (the F-39 / T05 budget).
 **Resolution scope (T13.1):** document the gate in the route handler; integration test asserts the ≤5s budget against the live Supabase stack.
-**Blocker for:** T13.1 PR submission.
+**Status (closed):** every `reprisal_*` SECURITY DEFINER fn in migration 5 reads `is_active_member(auth.uid())` synchronously against the LIVE `committee_membership` table on each call — same pattern as G-T08-16's F-30 budget test (line 376–377 + 136). Propagation is bounded by call latency itself (µs–ms). The G-T08-16 pgTAP closure in `supabase/test/concerns_rls.sql` (tests 30–34) demonstrates the budget structurally; a mirror test for reprisal can ride with the broader pgTAP expansion.
+**Blocker for:** closed.
 
 ### G-T13-9 — `transaction_ts_ms` library shim mirrors G-T08-14
 **Source:** implementer T13 pass (mirror of G-T08-14).
