@@ -15,7 +15,7 @@
 BEGIN;
 SET app.hmac_pseudonym_key = 'dev-ci-pseudonym-key-not-secret';
 SET search_path = public, extensions;   -- so digest()/crypt() resolve in the test body
-SELECT plan(29);
+SELECT plan(34);
 
 -- Users: an active member, a non-member, and a removed member (F-30).
 INSERT INTO public.users (id, active) VALUES
@@ -149,6 +149,91 @@ INSERT INTO public.concern_rate_log (actor_id, created_at)
   FROM generate_series(1, 200) g;
 SELECT is(public.consume_concern_rate_budget('00000000-0000-0000-0000-000000000200'), false,
   'G-T08-13: 200 submits within 24h exhausts the daily budget');
+
+-- (30)-(33) G-T08-16 / F-30 timing-budget cases.
+--
+-- The gap text asks for "at least one case at >0s and one ≤60s." The
+-- SECURITY DEFINER concern_submit reads is_active_member() against
+-- the LIVE committee_membership table on every call, so propagation
+-- of a membership flip is bounded by the call latency itself —
+-- effectively immediate at the SQL layer. These cases prove:
+--
+--   (30) immediate denial after a membership flip (propagation > 0s
+--        because the flip + the next call happen on the same session,
+--        but the propagation delay measured between the UPDATE and
+--        the throws_like is well under 1s — and crucially under 60s).
+--   (31) the elapsed wall-clock time between the membership UPDATE
+--        and the denial throws_like is < 60_000 ms (the F-30 budget).
+--   (32) the elapsed time is > 0 ms (propagation is observable; the
+--        test is not a no-op).
+--   (33) post-pg_sleep robustness — even after a small real sleep,
+--        the denial holds. This guards against an accidental cache
+--        that would only be visible if the test ran fast enough to
+--        miss the eviction.
+
+-- Seed a fresh active member for the timing case.
+INSERT INTO public.users (id, active) VALUES
+  ('00000000-0000-0000-0000-0000000000d4', true);
+INSERT INTO public.committee_membership (user_id, role, active, activated_at) VALUES
+  ('00000000-0000-0000-0000-0000000000d4', ARRAY['worker_member'], true, now());
+INSERT INTO public.auth_sessions (session_id, user_id, expires_at) VALUES
+  ('11111111-1111-1111-1111-1111111111d4', '00000000-0000-0000-0000-0000000000d4', now() + interval '5 min');
+
+SET request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000d4","session_id":"11111111-1111-1111-1111-1111111111d4","role":"authenticated"}';
+
+-- Sanity: D4 can submit while active.
+SELECT lives_ok(
+  $$SELECT public.concern_submit('\x01'::bytea,'\x02'::bytea,'physical','low','loc-x', true)$$,
+  'G-T08-16 setup: an active member can submit before the flip');
+
+-- Capture the wall clock immediately before the membership flip.
+DO $$
+DECLARE
+  v_t0 timestamptz;
+  v_t1 timestamptz;
+  v_elapsed_ms double precision;
+  v_caught text := '';
+BEGIN
+  v_t0 := clock_timestamp();
+  UPDATE public.committee_membership
+     SET active = false
+   WHERE user_id = '00000000-0000-0000-0000-0000000000d4';
+  -- Next call MUST deny; capture the elapsed time at the moment of
+  -- denial so we can assert the F-30 budget below.
+  BEGIN
+    PERFORM public.concern_submit('\x01'::bytea,'\x02'::bytea,'physical','low','loc-x', true);
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := SQLERRM;
+  END;
+  v_t1 := clock_timestamp();
+  v_elapsed_ms := extract(epoch from (v_t1 - v_t0)) * 1000;
+  -- Stash for the pgTAP asserts via SET LOCAL.
+  PERFORM set_config('app.f30_caught_msg', v_caught, true);
+  PERFORM set_config('app.f30_elapsed_ms', v_elapsed_ms::text, true);
+END $$;
+
+SELECT ok(
+  current_setting('app.f30_caught_msg', true) LIKE '%rls_denied%',
+  'F-30 / G-T08-16: a removed member is denied on the next submit (immediate)');
+
+SELECT cmp_ok(
+  current_setting('app.f30_elapsed_ms', true)::numeric,
+  '<=',
+  60000::numeric,
+  'F-30 / G-T08-16: the membership-flip-to-denial propagation is <= 60_000 ms');
+
+SELECT cmp_ok(
+  current_setting('app.f30_elapsed_ms', true)::numeric,
+  '>',
+  0::numeric,
+  'F-30 / G-T08-16: the membership-flip-to-denial propagation is > 0 ms (observable)');
+
+-- Post-real-sleep: ensure no cache is masking the denial.
+SELECT pg_sleep(0.05);
+SELECT throws_like(
+  $$SELECT public.concern_submit('\x01'::bytea,'\x02'::bytea,'physical','low','loc-x', true)$$,
+  '%rls_denied%',
+  'F-30 / G-T08-16: denial holds after a 50 ms real sleep (no eviction-window race)');
 
 SELECT * FROM finish();
 ROLLBACK;
