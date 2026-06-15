@@ -3311,6 +3311,8 @@ Algorithm:
 }
 ```
 
+**Intentional `meta.run_id` redundancy (G-T16-PRIV-2 clarification, 2026-06-15):** the `meta.run_id` field above and `retention_sweep_runs.run_id` are intentionally redundant. The duplication lets a forensic reader pair the audit row with the corresponding `retention_sweep_runs` checkpoint row without performing a join — important because audit-log access is the highest-trust read path (privacy reviewer + compliance auditor surface) and `retention_sweep_runs` lives behind `retention_service_role`. Future ADR readers should NOT attempt to normalize the redundancy away; the audit row is meant to be reconstructable from the audit-log row alone.
+
 ### 8. Underlying-record-ceiling enforcement (binding; mirrors ADR-0015 §"underlying-record-ceiling rule" verbatim)
 
 For every audit-log event whose `RETENTION_SCHEDULE` kind is `'match_underlying'`, the sweep applies:
