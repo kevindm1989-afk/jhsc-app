@@ -1314,7 +1314,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t17.md Q7 ADVISORY; mirrors G-T16-PRIV-3.
 **Finding:** library swallows thrown Errors completely in 4-5 catch paths (now wrapped in try/catch with closed-literal error_codes; underlying Error.message discarded). Correct for client-facing payloads but degrades operator observability for diagnosing the underlying failure.
 **Resolution scope (T17.1):** route swallowed Error to server-side structured-log sink with PI scrubbing.
-**Blocker for:** PIPEDA 4.10 operator reconstructability.
+**Status (closed):** all 11 catch sites in `backup-core.ts` (8 in `runBackupPass`, 3 in `runBackupRetentionPass`) now route the underlying Error to the structured logger as a CLASS-ONLY line via the same `errorClassOf(e)` helper as G-T16-PRIV-3. Each emits `log.error({ event: 'backup.pass.<step>_failed' | 'backup.retention.<step>_failed', outcome: <closed literal>, error_class })` — top-level PI-free fields only; the `.message` is never logged. The three best-effort swallows (abort-transition, object-delete, manifest-row-delete) — which previously lost their ONLY operator signal because they set a flag and continued without returning an error_code — now surface the failure class too (e.g., `backup.retention.manifest_row_delete_failed` captures the "object gone, row stuck" forensic state). Client-facing `error_code` contract unchanged (F-81). New test `apps/web/test/T17/backup-operator-error-log.test.ts` drives kid-lookup / head-pointer / manifest-write failures via the `__force*` hooks and asserts (a) one matching ERROR line per failure with `error_class` + `outcome`, (b) no email / over-64-hex PI shape, (c) a clean pass emits zero ERROR lines.
+**Blocker for:** closed.
 
 ### G-T17-PRIV-5 — HG-15 re-ratification at T17.1
 
