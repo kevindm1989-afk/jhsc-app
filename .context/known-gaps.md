@@ -970,7 +970,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t11-t12.md Q1 ADVISORY.
 **Finding:** `computeAllowlistHash` is deterministic under Node's `crypto.subtle` + the current iteration order of `Object.freeze([] as const)`. A future TS upgrade or constants reordering could silently change the hash → SQL projection-view binding breaks.
 **Resolution scope (T11.1):** add a pinned-value test (e.g., `expect(computeAllowlistHash(EXPORT_ALLOWLIST_MINUTES)).toBe('<frozen hex>')`); regenerate the pinned value only when the allowlist intentionally changes.
-**Blocker for:** none. Drift detector.
+**Status (closed):** pinned hex KAT lands at `apps/web/test/T11_T12/allowlist-hash-pin.test.ts`. 4 assertions: (1) `EXPORT_ALLOWLIST_MINUTES` hash = `1bb78b…675da`; (2) `EXPORT_ALLOWLIST_RECOMMENDATION` hash = `dadb87…3d01`; (3) hash differs when list is reversed (Object.freeze insertion-order sanity); (4) hash differs when a field is added. Header comment documents the regeneration policy (only on intentional allowlist change) and the failure-mode classification (drift vs Node/OpenSSL upgrade). Pinned 2026-06-16 against Node 20.x / OpenSSL 3.0.x.
+**Blocker for:** closed.
 
 ### G-T11-24 — ESLint rule for the F-19 spread ban (verification) **[privacy P-13]**
 
