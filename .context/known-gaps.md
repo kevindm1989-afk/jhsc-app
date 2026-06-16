@@ -871,7 +871,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** F-19 mitigation — "an ESLint rule forbids spread-into-export-payload outside that module".
 **Finding:** the rule is NOT yet wired in `.eslintrc`. The library's `projectMinutesByAllowlist` / `projectRecommendationByAllowlist` are written as literal switch statements over the allowlist keys (compile-time exhaustiveness via the `never` cast) so a spread would not type-check anyway, but the rule is an additional belt.
 **Resolution scope (T11.1 or next lint-config pass):** add the rule with the message "spread-into-export-payload forbidden outside src/lib/export/export-renderer.ts; use the allowlist switch statement".
-**Blocker for:** none. The compile-time exhaustiveness is the load-bearing gate.
+**Status (closed):** `apps/web/eslint.config.js` now carries a `no-restricted-syntax` block scoped to the two payload-construction modules (`export-renderer.ts` + `export-core.ts`) banning `ObjectExpression > SpreadElement[argument.type='Identifier']` — i.e., spreading a bound source-object variable (`{ ...row }`) into the payload, the exact F-19 anti-pattern that would carry un-allowlisted columns through. The selector is deliberately narrowed to Identifier args so the two legitimate idioms in these files are untouched: array spreads (`[...row.agenda_items]`, `[...allowlist]` — ArrayExpression) and the conditional-optional-field spread (`...(cond ? { x } : {})` — spreads an inline ConditionalExpression, not an identifier). The block is placed AFTER the G-T17-8 block because ESLint flat config is last-match-wins per rule and G-T17-8's broader `src/**/*.ts` `no-restricted-syntax` would otherwise clobber it; both selectors are carried in the export block so nothing is lost on the override. The compile-time `never`-cast exhaustiveness remains the load-bearing gate; this is the belt-and-braces F-19 contract.
+**Blocker for:** closed.
 
 ### G-T11-10 — Protected-modal harness mounts a stub, not the real Svelte component
 
@@ -983,7 +984,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t11-t12.md Q1 ADVISORY; pairs with G-T11-9.
 **Finding:** G-T11-9 already records that the ESLint `no-restricted-syntax` rule is unwired; privacy review confirms verification needed at T11.1 — must prove the rule actually rejects a synthetic spread in CI.
 **Resolution scope (T11.1):** add a `__lint_negative__.ts.disabled` file + CI step that runs `eslint` against it and asserts non-zero exit.
-**Blocker for:** none. Verification of G-T11-9.
+**Status (closed — verified by construction during G-T11-9 PR):** the rule was verified to fire by injecting a synthetic `{ ...row }` into `projectMinutesByAllowlist` and confirming `eslint` reported the `G-T11-9 / F-19` error (exit non-zero), then reverting. The clean tree passes `eslint .` at exit 0 — so the rule is BOTH active (fires on the anti-pattern) AND non-false-positive (the existing conditional-field spread at `export-core.ts:350` is correctly allowed). The narrowed `[argument.type='Identifier']` selector is what makes both true. A standalone `.ts.disabled` negative fixture was considered but is redundant: the `hardening-gates` CI job already runs `eslint .` over the full tree on every PR, and the lint config block itself is the durable record. If a future reviewer wants a permanent negative fixture, the selector + scope are documented inline in `eslint.config.js`.
+**Blocker for:** closed.
 
 ### G-T11-25 — RA-1 trigger #5 monitoring alert (`A-EXPORT-002`) **[privacy P-14]**
 

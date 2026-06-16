@@ -247,6 +247,49 @@ export default [
     }
   },
   {
+    // G-T11-9 / G-T11-24 / F-19 — the export payload is built field-by-field
+    // from the closed allowlist (the `projectMinutesByAllowlist` /
+    // `projectRecommendationByAllowlist` switch statements in
+    // export-renderer.ts). Spreading a source row object into the payload
+    // (`{ ...row }`) would bypass the allowlist and leak un-allowlisted
+    // columns — the exact F-19 LAUNCH-BLOCKER anti-pattern. The compile-time
+    // exhaustiveness (`never` cast in the switch default) is the load-bearing
+    // gate; this lint rule is the belt-and-braces F-19 contract the threat
+    // model named ("an ESLint rule forbids spread-into-export-payload").
+    //
+    // Scoped to the two payload-construction modules. The banned pattern is
+    // spreading a BOUND IDENTIFIER (a source row/object variable —
+    // `{ ...row }`, `{ ...event }`) into an object literal, which would carry
+    // un-allowlisted columns straight through. Legitimate idioms are NOT
+    // touched: array spreads (`[...row.agenda_items]`, `[...allowlist]`) are
+    // ArrayExpression; the conditional-optional-field idiom
+    // (`...(cond ? { x } : {})`) spreads an inline expression, not an
+    // identifier. memory-export-store.ts (test store; defensive clones) is
+    // out of scope.
+    //
+    // MUST come AFTER the G-T17-8 block: ESLint flat config is last-match-wins
+    // per rule, and G-T17-8's broader `src/**/*.ts` scope would otherwise
+    // clobber this `no-restricted-syntax`. Both selectors are carried here so
+    // the two export files keep the BACKUP_TABLES ban too (harmless — they
+    // never reference it — but loses nothing on the override).
+    files: ['src/lib/export/export-renderer.ts', 'src/lib/export/export-core.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "ObjectExpression > SpreadElement[argument.type='Identifier']",
+          message:
+            'G-T11-9 / F-19: spreading a source object variable into the export payload (`{ ...row }`) is forbidden — it bypasses the closed allowlist and leaks un-allowlisted columns. Build the payload field-by-field from EXPORT_ALLOWLIST_* (see projectMinutesByAllowlist). Array spreads + conditional-field spreads are fine.'
+        },
+        {
+          selector: "SpreadElement[argument.name='BACKUP_TABLES']",
+          message:
+            'G-T17-8 / ADR-0018 §task #8: spreading BACKUP_TABLES into an array defeats the F-70 closed-allowlist invariant.'
+        }
+      ]
+    }
+  },
+  {
     // G-T18-4 / ADR-0019 §13 — audit-integrity library MUST NOT depend
     // on either the retention library OR the backup library. The
     // integrity check reads `retention_sweep_runs` rows through a
