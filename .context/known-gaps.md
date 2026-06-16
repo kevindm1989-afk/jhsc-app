@@ -1171,7 +1171,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t16.md Q3 ADVISORY.
 **Finding:** summary `meta.run_id` and `retention_sweep_runs.run_id` are intentionally redundant (lets a forensic reader pair the audit row with the run row without a join). ADR should record this intent so future readers don't try to normalize.
 **Resolution scope (next ADR pass):** one-line addition to ADR-0017 §7.
-**Blocker for:** none. Documentation.
+**Status (closed):** ADR-0017 §7 now carries the intentional-redundancy paragraph (`.context/decisions.md`, immediately after the `retention.deleted` schema block). The note explains: the duplication lets a forensic reader pair the audit row with the corresponding `retention_sweep_runs` checkpoint row without performing a join — important because audit-log access is the highest-trust read path (privacy reviewer + compliance auditor surface) and `retention_sweep_runs` lives behind `retention_service_role`. Future ADR readers are explicitly told not to normalize the redundancy away.
+**Blocker for:** closed.
 
 ### G-T16-PRIV-5 — HMAC pseudonym shape cross-mirror
 
