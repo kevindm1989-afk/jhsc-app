@@ -30,6 +30,40 @@ import type {
   S51EvidenceStatus
 } from './types';
 
+/**
+ * Test-only superset of the production `S51EvidenceStore` (G-T14-17 split).
+ *
+ * Adds the seeding + poisoning hooks the T14 test files consume via deep
+ * import. `SupabaseS51EvidenceStore` (T14.1) MUST implement
+ * `S51EvidenceStore` only — narrowing it back to `TestS51EvidenceStore` is
+ * a type error.
+ *
+ * Mirrors the T18 `TestIntegrityStore` pattern + the T14 work-refusal
+ * sibling and the privacy-reviewer T14-A7 obligation.
+ */
+export interface TestS51EvidenceStore extends S51EvidenceStore {
+  /** Test-only — install / remove active members. */
+  __setActiveMember(user_id: string, active: boolean): void;
+  /** Test-only — grant the write role to a uid. */
+  __grantWriteRole(user_id: string): void;
+  /** Test-only — grant the read-only role to a uid. */
+  __grantReadOnlyRole(user_id: string): void;
+  /** Underlying audit row debug accessor — forensic/test use only. */
+  __debugAuditRows(): ReadonlyArray<{
+    id: number;
+    ts: string;
+    event_type: S51EvidenceAuditEvent;
+    actor_pseudonym: string;
+    target_id: string;
+    target_class: 'C4';
+    prev_hash: Buffer;
+    hash: Buffer;
+    meta: Record<string, unknown>;
+  }>;
+  /** Underlying s.51-evidence-row debug accessor — test use only. */
+  __debugS51EvidenceRows(): readonly S51EvidenceEntry[];
+}
+
 interface AuditRow {
   id: number;
   ts: string;
@@ -57,7 +91,7 @@ function bucketToHour(ts_ms: number): number {
   return Math.floor(ts_ms / HOUR_MS) * HOUR_MS;
 }
 
-export class MemoryS51EvidenceStore implements S51EvidenceStore {
+export class MemoryS51EvidenceStore implements TestS51EvidenceStore {
   private rows = new Map<string, S51EvidenceEntry>();
   private writeAuthorized = new Set<string>();
   private readAuthorized = new Set<string>();

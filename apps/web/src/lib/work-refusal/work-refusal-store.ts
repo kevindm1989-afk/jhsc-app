@@ -63,9 +63,6 @@ export interface WorkRefusalStore {
    */
   canReadWorkRefusal(user_id: string): Promise<boolean>;
 
-  /** Test-only — install / remove active members. */
-  __setActiveMember(user_id: string, active: boolean): void;
-
   // ---- Work-refusal entries ----
   insertWorkRefusal(opts: {
     actor_id: string;
@@ -104,19 +101,6 @@ export interface WorkRefusalStore {
    * ms-epoch of the event truncated to the nearest hour boundary.
    */
   listWorkRefusalFeed(): Promise<WorkRefusalListItem[]>;
-
-  /** Underlying audit row debug accessor — forensic/test use only. */
-  __debugAuditRows(): ReadonlyArray<{
-    id: number;
-    ts: string;
-    event_type: WorkRefusalAuditEvent;
-    actor_pseudonym: string;
-    target_id: string;
-    target_class: 'C4';
-    prev_hash: Buffer;
-    hash: Buffer;
-    meta: Record<string, unknown>;
-  }>;
 
   // ---- Audit ----
   /**
