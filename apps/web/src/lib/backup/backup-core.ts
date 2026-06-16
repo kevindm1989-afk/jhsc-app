@@ -55,6 +55,22 @@ import {
   BACKUP_OBJECT_LOCK_DAYS,
   BACKUP_OBJECT_REF_PREFIX
 } from './types';
+import { log } from '../log';
+
+/**
+ * Operator-side error class extraction (G-T17-PRIV-3; mirrors G-T16-PRIV-3).
+ *
+ * Every catch in the backup pass swallows the thrown Error and returns a
+ * closed-literal `error_code` to the caller (F-81: no PI in error paths).
+ * That keeps the client payload clean but leaves operators blind to WHY a
+ * backup pass failed. This helper extracts ONLY the JS constructor name so
+ * the server-side structured-log sink records the failure CLASS without ever
+ * logging the `.message` (which may carry PI). Mirrors the pattern at
+ * `lib/auth/server/key-parity.ts:180` + `lib/retention/retention-core.ts`.
+ */
+function errorClassOf(e: unknown): string {
+  return e instanceof Error ? e.constructor.name : 'Error';
+}
 
 function nodeRuntimePin(): BackupNodeRuntimePin {
   return {
@@ -177,7 +193,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
     if (await store.hasOpenBackupRunWithinWindow(startedAtMs, lease_window_ms)) {
       return { status: 'skipped', reason: 'pass_already_in_window' };
     }
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.pass.lease_check_failed',
+      outcome: 'lease_check_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id: generateRunId(), error_code: 'lease_check_failed' };
   }
 
@@ -187,7 +208,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
   let kid: string;
   try {
     kid = await store.getCurrentKid();
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.pass.kid_lookup_failed',
+      outcome: 'kid_lookup_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'kid_lookup_failed' };
   }
 
@@ -197,7 +223,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
   let auditLogHead: BackupAuditLogHead | null;
   try {
     auditLogHead = await store.extractAuditLogHead();
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.pass.head_pointer_failed',
+      outcome: 'head_pointer_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'head_pointer_failed' };
   }
 
@@ -206,7 +237,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
   let dump: Awaited<ReturnType<BackupStore['dumpClosedAllowlist']>>;
   try {
     dump = await store.dumpClosedAllowlist();
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.pass.dump_failed',
+      outcome: 'dump_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'dump_failed' };
   }
 
@@ -247,7 +283,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
       schedule_hash,
       node_runtime_pin
     });
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.pass.manifest_write_failed',
+      outcome: 'manifest_write_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'manifest_write_failed' };
   }
 
@@ -260,8 +301,16 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
     // error return (the in-flight pending manifest is itself the audit anchor).
     try {
       await store.transitionManifestStatus(run_id, abortedStatus, store.nowMs());
-    } catch {
+    } catch (err) {
       // Swallow: the pending row remains the audit anchor; no PII leak.
+      // G-T17-PRIV-3: the best-effort transition lost its only operator
+      // signal here — surface the failure CLASS so an operator can tell a
+      // bucket-upload abort left a stuck-pending manifest behind.
+      log.error({
+        event: 'backup.pass.abort_transition_failed',
+        outcome: abortedStatus,
+        error_class: errorClassOf(err)
+      });
     }
     return { status: 'errored', run_id, error_code: errorCode };
   }
@@ -270,7 +319,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
   const committedAtMs = store.nowMs();
   try {
     await store.transitionManifestStatus(run_id, 'committed', committedAtMs);
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.pass.transition_failed',
+      outcome: 'transition_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'transition_failed' };
   }
 
@@ -299,7 +353,12 @@ export async function runBackupPass(opts: RunBackupPassOpts): Promise<BackupPass
   };
   try {
     await store.emitBackupManifestWritten(auditRow);
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.pass.audit_emit_failed',
+      outcome: 'audit_emit_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'audit_emit_failed' };
   }
 
@@ -325,7 +384,12 @@ export async function runBackupRetentionPass(
   let committed: readonly { run_id: string; object_ref: string; committed_at_ms: number }[];
   try {
     committed = await store.listCommittedManifests();
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'backup.retention.list_failed',
+      outcome: 'retention_list_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', error_code: 'retention_list_failed' };
   }
 
@@ -352,7 +416,15 @@ export async function runBackupRetentionPass(
     let result: Awaited<ReturnType<BackupStore['deleteObjectIfUnlocked']>>;
     try {
       result = await store.deleteObjectIfUnlocked(m.object_ref);
-    } catch {
+    } catch (err) {
+      // G-T17-PRIV-3: best-effort hard-delete — the failure only sets a
+      // flag, so this log line is the operator's only signal that an
+      // object-delete threw mid-retention-pass.
+      log.error({
+        event: 'backup.retention.object_delete_failed',
+        outcome: 'object_delete_failed',
+        error_class: errorClassOf(err)
+      });
       nonStillLockedFailure = true;
       continue;
     }
@@ -360,7 +432,15 @@ export async function runBackupRetentionPass(
       try {
         await store.hardDeleteManifestRow(m.run_id, store.nowMs());
         deleted_count += 1;
-      } catch {
+      } catch (err) {
+        // G-T17-PRIV-3: the object bytes were deleted but the manifest-row
+        // hard-delete threw — "object gone, row stuck" is exactly the
+        // forensic state an operator must be able to see.
+        log.error({
+          event: 'backup.retention.manifest_row_delete_failed',
+          outcome: 'manifest_row_delete_failed',
+          error_class: errorClassOf(err)
+        });
         nonStillLockedFailure = true;
       }
       continue;
