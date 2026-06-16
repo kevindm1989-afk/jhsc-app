@@ -69,7 +69,14 @@ export interface QuarantinedEntry extends QueuedEntry {
 }
 
 export interface EnqueueResult {
-  status: 'ok' | 'rejected_queue_full';
+  /**
+   * G-T10-17 — distinct rejection reasons. `rejected_queue_full` fires
+   * when the queue is at `QUEUE_CAP`; `rejected_no_session_key` fires
+   * when the in-memory `k_hmac` is null (post-session-end re-mount with
+   * no re-auth). Callers MUST be able to distinguish the two — only the
+   * second is recoverable by re-authenticating.
+   */
+  status: 'ok' | 'rejected_queue_full' | 'rejected_no_session_key';
   id?: string;
 }
 
@@ -100,6 +107,16 @@ export interface InspectionSession {
   data_key: Uint8Array;
   /** Strictly-monotonic sequence counter for the session. */
   next_seq: bigint;
+  /**
+   * G-T10-14 — high-water mark of the most-recently-drained seq.
+   * Subsequent drains start the contiguity check at `drained_seq + 1`
+   * so a successful drain that empties `entries` followed by a new
+   * enqueue doesn't false-fail on the missing predecessor (seq 1..N-1
+   * are no longer in the queue but were verified on the prior drain).
+   * Initialised to 0n; advanced to the highest successfully-posted seq
+   * at the end of each `drainQueue` call.
+   */
+  drained_seq: bigint;
   /** Queue store. */
   entries: QueuedEntry[];
   /** Pending offline audit rows. */
@@ -198,7 +215,9 @@ export async function enqueueInspection(
   if (session.k_hmac === null) {
     // Out-of-band guard: an enqueue without an in-memory key would create
     // an entry we cannot later verify. Refuse rather than persist garbage.
-    return { status: 'rejected_queue_full' };
+    // G-T10-17: distinct status from queue-full so the caller can decide
+    // to prompt for re-auth (recoverable) vs. show the cap banner.
+    return { status: 'rejected_no_session_key' };
   }
   const ciphertext = await encryptPayload(session.data_key, input);
   const seq = session.next_seq;
@@ -270,12 +289,17 @@ export async function drainQueue(session: InspectionSession): Promise<DrainResul
       await quarantine(session, entry, 'user_id_mismatch');
       continue;
     }
-    // 3) Sequence contiguity — every predecessor seq from 1 up to this
-    //    entry's seq must be present in the queue at drain time. If any
-    //    is missing, an in-place reorder / drop occurred — reject this
-    //    entry. (The first-issued seq in a session is 1.)
+    // 3) Sequence contiguity — every predecessor seq from
+    //    `session.drained_seq + 1` up to this entry's seq must be
+    //    present in the queue at drain time. If any is missing, an
+    //    in-place reorder / drop occurred — reject this entry.
+    //    G-T10-14: start at `drained_seq + 1`, not at 1n, so a
+    //    successful drain that empties the queue does NOT false-fail
+    //    a subsequent enqueue's contiguity check (those predecessors
+    //    were already verified + posted on the prior drain).
+    const gapStart = session.drained_seq + 1n;
     let gap = false;
-    for (let s = 1n; s < entry.sequence_number; s++) {
+    for (let s = gapStart; s < entry.sequence_number; s++) {
       if (!issuedSet.has(s.toString())) {
         gap = true;
         break;
@@ -330,6 +354,13 @@ export async function drainQueue(session: InspectionSession): Promise<DrainResul
   // drainQueue empties the queue: rejected entries went to quarantine
   // (their bytes still exist in `pending_audits` until goOnline); posted
   // entries went to the server. Re-running drain finds an empty queue.
+  //
+  // G-T10-14: advance the drained-seq watermark to the highest seq we
+  // walked this pass. Subsequent enqueues will start the contiguity
+  // check at `drained_seq + 1` instead of 1n.
+  if (highWater > session.drained_seq) {
+    session.drained_seq = highWater;
+  }
   session.entries = [];
   return { posted, rejected, status: 'ok', rejection_reasons };
 }
@@ -407,6 +438,7 @@ export async function createInspectionSession(opts: {
     k_hmac,
     data_key: opts.data_key,
     next_seq: 1n,
+    drained_seq: 0n,
     entries: [],
     pending_audits: [],
     actor_pseudonym: opts.actor_pseudonym,
@@ -417,7 +449,22 @@ export async function createInspectionSession(opts: {
   };
   if (opts.onPost) session.__onPost = opts.onPost;
   if (opts.onAudit) session.__onAudit = opts.onAudit;
-  session.idb = makeIdbControl(session);
+  // G-T10-13: install the test-mutator surface ONLY in test builds.
+  // `makeIdbControl` returns a bag of tampering helpers (mutate
+  // ciphertext byte, drop entry, force salt-version mismatch, etc.)
+  // that exist to drive the F-44/F-45/F-47/HG-4 tests; a production
+  // UI / extension / devtools surface should never see them, even
+  // though the underlying interface is type-private.
+  //
+  // The MODE check is statically evaluated by Vite/SvelteKit at build
+  // time: in production builds the entire `makeIdbControl` call is
+  // tree-shaken out. `session.idb` stays typed as `SessionIdbControl`
+  // (the `{} as SessionIdbControl` placeholder above) and any
+  // production caller that reaches into `session.idb.<helper>` gets
+  // a runtime `undefined is not a function` — the desired outcome.
+  if (import.meta.env.MODE === 'test') {
+    session.idb = makeIdbControl(session);
+  }
   session.goOnline = async () => {
     // Flush pending audits to the server-side audit sink. Each row is
     // posted exactly once; the test asserts `count = 1` after goOnline.
