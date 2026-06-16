@@ -74,23 +74,22 @@ export {
 // ---------------------------------------------------------------------------
 
 import { __setRendererAllowlistOverrideForTest, proceedExport } from './export-core';
-import type { ExportKind, ExportRequest, ExportResult, ReauthAssertion } from './types';
-import type { ExportStore } from './export-store';
+import type { ExportKind, ExportRequest, ExportResult } from './types';
+import type { TestExportClient } from './test-client';
 
 /**
- * Adapter shape the test's `supa.client(user)` returns. The harness wires
- * these methods to the in-memory export store + the auth session +
- * pseudonym lookup.
+ * Type guard with a useful error if the harness wired the surface wrong.
+ *
+ * G-T11-21 split: `TestExportClient extends ExportClient` lives in
+ * `./test-client.ts` (deep-import only — NOT re-exported from this barrel).
+ * Production callers narrow to `ExportClient` (empty marker) and reach
+ * `proceedExport` directly; test code shapes `supa.client(user)` to
+ * satisfy `TestExportClient` and goes through the convenience wrappers
+ * below. The runtime typeguard fails loud on any client that lacks the
+ * test-only hooks.
  */
-interface ExportCapableClient {
-  __getActorUserId(): string;
-  __getExportStore(): ExportStore;
-  __getReauthAssertion(): ReauthAssertion | null;
-}
-
-/** Type guard with a useful error if the harness wired the surface wrong. */
-function asExportClient(client: unknown): ExportCapableClient {
-  const c = client as Partial<ExportCapableClient> & Record<string, unknown>;
+function asExportClient(client: unknown): TestExportClient {
+  const c = client as Partial<TestExportClient> & Record<string, unknown>;
   if (
     typeof c.__getActorUserId !== 'function' ||
     typeof c.__getExportStore !== 'function' ||
@@ -102,7 +101,7 @@ function asExportClient(client: unknown): ExportCapableClient {
         'Wire via the supabase-test harness or call proceedExport directly.'
     );
   }
-  return c as ExportCapableClient;
+  return c as TestExportClient;
 }
 
 async function exportOne(
