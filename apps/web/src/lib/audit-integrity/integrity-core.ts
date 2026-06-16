@@ -52,6 +52,23 @@ import {
   type IntegrityRunResult,
   type RetentionSweepRunSnapshot
 } from './types';
+import { log } from '../log';
+
+/**
+ * Operator-side error class extraction (G-T18-3; mirrors G-T16-PRIV-3 +
+ * G-T17-PRIV-3).
+ *
+ * Every catch in the integrity check + weekly-anchor paths swallows the
+ * thrown Error and returns a closed-literal `error_code` to the caller
+ * (F-100: no PI in error paths). This helper extracts ONLY the JS
+ * constructor name so the server-side structured-log sink records the
+ * failure CLASS for operator diagnosis without ever logging the `.message`.
+ * Mirrors the pattern at `lib/auth/server/key-parity.ts:180` +
+ * `lib/retention/retention-core.ts` + `lib/backup/backup-core.ts`.
+ */
+function errorClassOf(e: unknown): string {
+  return e instanceof Error ? e.constructor.name : 'Error';
+}
 
 /**
  * Pseudonym + phone shapes — used by `generateRunId` to rejection-sample
@@ -406,7 +423,12 @@ export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<In
   let leaseOpen: boolean;
   try {
     leaseOpen = await store.hasOpenIntegrityRunWithinWindow(startedAtMs, lease_window_ms);
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'integrity.check.lease_check_failed',
+      outcome: 'lease_check_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id: generateRunId(), error_code: 'lease_check_failed' };
   }
   if (leaseOpen) {
@@ -421,7 +443,12 @@ export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<In
   let manifest: BackupManifestSnapshot | null;
   try {
     manifest = await store.readLatestCommittedBackupManifest();
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'integrity.check.manifest_read_failed',
+      outcome: 'head_read_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'head_read_failed' };
   }
 
@@ -439,7 +466,12 @@ export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<In
   // Step 5 — record run row in `running` status.
   try {
     await store.recordIntegrityRunStarted({ run_id, trigger, started_at_ms: startedAtMs });
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'integrity.check.run_start_failed',
+      outcome: 'run_start_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', run_id, error_code: 'run_start_failed' };
   }
 
@@ -453,7 +485,12 @@ export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<In
       sweepRuns = await store.listRetentionSweepRunsThrough(
         manifest.retention_sweep_runs_snapshot_ts_ms
       );
-    } catch {
+    } catch (err) {
+      log.error({
+        event: 'integrity.check.sweep_runs_read_failed',
+        outcome: 'chain_walk_failed',
+        error_class: errorClassOf(err)
+      });
       store.restore(snapshotToken);
       return { status: 'errored', run_id, error_code: 'chain_walk_failed' };
     }
@@ -462,7 +499,12 @@ export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<In
   let chainWalkOutcome: ChainWalkOutcome;
   try {
     chainWalkOutcome = await walkChain({ store, start_after_id: null, sweep_runs: sweepRuns });
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'integrity.check.chain_walk_failed',
+      outcome: 'chain_walk_failed',
+      error_class: errorClassOf(err)
+    });
     store.restore(snapshotToken);
     return { status: 'errored', run_id, error_code: 'chain_walk_failed' };
   }
@@ -490,7 +532,12 @@ export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<In
         live_rows_by_id: liveById,
         sweep_runs: sweepRuns
       });
-    } catch {
+    } catch (err) {
+      log.error({
+        event: 'integrity.check.backup_diff_failed',
+        outcome: 'backup_diff_failed',
+        error_class: errorClassOf(err)
+      });
       store.restore(snapshotToken);
       return { status: 'errored', run_id, error_code: 'backup_diff_failed' };
     }
@@ -603,7 +650,12 @@ export async function runIntegrityCheck(opts: RunIntegrityCheckOpts): Promise<In
       mismatches: mismatchRows,
       ran_row: ranRow
     });
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'integrity.check.audit_emit_failed',
+      outcome: 'audit_emit_failed',
+      error_class: errorClassOf(err)
+    });
     store.restore(snapshotToken);
     return { status: 'errored', run_id, error_code: 'audit_emit_failed' };
   }
@@ -684,7 +736,12 @@ export async function runWeeklyChainAnchor(
   let head: AuditChainRowMaterialized | null;
   try {
     head = await store.readChainHead();
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'integrity.anchor.head_read_failed',
+      outcome: 'head_read_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', error_code: 'head_read_failed' };
   }
   if (head === null) {
@@ -706,7 +763,12 @@ export async function runWeeklyChainAnchor(
   };
   try {
     await store.emitChainAnchorWeekly(row);
-  } catch {
+  } catch (err) {
+    log.error({
+      event: 'integrity.anchor.audit_emit_failed',
+      outcome: 'audit_emit_failed',
+      error_class: errorClassOf(err)
+    });
     return { status: 'errored', error_code: 'audit_emit_failed' };
   }
   return {

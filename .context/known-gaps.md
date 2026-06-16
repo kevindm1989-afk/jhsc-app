@@ -1374,7 +1374,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t18.md G-T18-PRIV-3; security Finding 1 lineage; mirrors G-T16-PRIV-3 + G-T17-PRIV-3.
 **Finding:** integrity-core.ts now wraps all 8 store-call paths in try/catch with closed-literal error_codes (BLOCK 1 closed in cycle). Operator observability behind the structured error_code surface still needs server-side structured Error logging with PI scrubbing. The closed-literal contract is intact; the underlying Error.message is discarded.
 **Resolution scope (T18.1):** route swallowed Error to server-side log sink with PI scrubbing.
-**Blocker for:** PIPEDA 4.10 operator reconstructability.
+**Status (closed):** all 9 catch sites in `integrity-core.ts` (7 in `runIntegrityCheck` — lease, manifest-read, run-start, sweep-runs-read, chain-walk, backup-diff, terminal-emit; 2 in `runWeeklyChainAnchor` — head-read, anchor-emit) now route the underlying Error to the structured logger as a CLASS-ONLY line via the same `errorClassOf(e)` helper as G-T16-PRIV-3 / G-T17-PRIV-3. Each emits `log.error({ event: 'integrity.check.<step>_failed' | 'integrity.anchor.<step>_failed', outcome: <closed literal>, error_class })`. The two same-`error_code` catches (`sweep_runs_read` + `chain_walk`, both `chain_walk_failed`) get distinct event names so an operator can tell which store call threw. Top-level PI-free fields only; the `.message` is never logged. Client-facing `error_code` contract unchanged (F-100). New test `apps/web/test/T18/integrity-operator-error-log.test.ts` drives terminal-emit failure (via `__forceSummaryEmitFailure`) + weekly-anchor head-read failure (via `__forceHeadReadException`) and asserts (a) one matching ERROR line per failure with `error_class` + `outcome`, (b) no email / over-64-hex PI shape, (c) a clean check emits zero ERROR lines.
+**Blocker for:** closed.
 
 ### G-T18-4 — CI no-import test (T18→T16, T18→T17 architectural purity)
 
