@@ -30,10 +30,15 @@ import type { ReauthAssertion } from './types';
  * code path. Future production methods can be added here if architect
  * decides; for now the empty marker forbids the test-only `__` hooks at
  * the type level.
+ *
+ * The empty-interface lint is intentionally disabled — the structural
+ * "extends" relationship between `TestExportClient` and `ExportClient`
+ * is what makes the split a compile-time defense (narrowing back from
+ * `TestExportClient` to `ExportClient` is fine; the reverse requires
+ * an explicit cast that a reviewer would flag).
  */
-export interface ExportClient {
-  // Empty marker — production callers go through `proceedExport` directly.
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ExportClient {}
 
 /**
  * Test-only superset. Adds the three hooks the harness wires onto its
