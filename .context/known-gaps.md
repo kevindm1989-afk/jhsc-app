@@ -1103,7 +1103,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** ADR-0017 §sibling task spec.
 **Finding:** the two new physical tables need §PI inventory rows. Neither holds PI (counts + hashes + UUIDs); inventory still must record them.
 **Resolution scope (T16.1):** add 2 rows to §PI inventory in `decisions.md`; privacy-reviewer re-runs with the diff.
-**Blocker for:** T16.1 PR submission.
+**Status (closed):** both rows added to `decisions.md` §PI inventory in this pass (2026-06-15). `retention_sweep_runs.*` — C0, NO PI, 24mo operational telemetry per ADR-0016, full column shape enumerated (run_id, timestamps, schedule_hash, per_event/table_counts, truncated_to_row_cap, alarm_fired, status); T18 reads `per_event_counts` as Option G attribution anchor. `audit_log_retention_schedule.*` — C0, NO PI, policy table seed-only, public-policy rules per ADR-0015 §3.3 + Amendment I; SELECT granted to `authenticated` for operator UI display.
+**Blocker for:** closed.
 
 ### G-T16-8 — T18 integrity-job reconciliation join
 
