@@ -25,6 +25,26 @@ short code example
 
 ## Entries
 
+## operator-side structured-error logging on swallowed catches (add observability, freeze the client contract)
+
+**When to use:** a security-core file swallows failures with `catch {}` then returns a client-facing closed-literal `error_code`, and operators have no signal about what actually failed. You want to ADD operator observability WITHOUT changing the byte-for-byte client contract.
+
+**How:** turn each `catch {}` into `catch (err)` and, immediately before the existing `store.restore()` + `return { status:'errored', error_code }`, emit `log.error({ event: '<domain>.<step>_failed', outcome: '<closed-literal error_code>', error_class: errorClassOf(err) })`. Log the JS constructor name ONLY — `errorClassOf(e) = e instanceof Error ? e.constructor.name : 'Error'` — never `err.message` (it may carry PI). Use top-level `LogCall` fields only (event/outcome/error_class), never `attributes`. Prove the no-PI property with a NEW test (existing tests are read-only per test-plan.md §6) that installs the log sink (`__setTestSink` / `__getCapturedLines`) and asserts: exactly one ERROR line per forced failure carrying `error_class` + `outcome`, no email/uuid/over-64-hex/raw-message shape; zero ERROR lines on a clean pass.
+
+**Example:** PRs #268/#269/#270 (G-T16-PRIV-3 / G-T17-PRIV-3 / G-T18-3) — same shape across `retention-core.ts`, `backup-core.ts`, `integrity-core.ts` (~22 catch sites); precedent at `lib/auth/server/key-parity.ts:180`.
+
+**When not to use:** for events that participate in the audit-log chain (use the six-mirror dance). Never log `err.message`, stack frames, or any input value — only the constructor name + the already-public closed-literal code.
+
+## pinned-hex KAT for any digest a SQL/wire contract binds to
+
+**When to use:** a hash/HMAC output is bound by a SQL projection-view, a CHECK, or a wire contract (e.g. `computeAllowlistHash`, queue HMAC). An idempotency-only assertion (`tag === tag2`) passes even when a toolchain regression makes the digest consistently-but-wrongly different.
+
+**How:** pin the exact hex digest of a FIXED input in a test, with a header comment classifying the two failure modes — (a) intentional input/algorithm change → regenerate the hex AND coordinate the SQL/wire binding; (b) Node/OpenSSL/libsodium toolchain upgrade → coordinate the runtime upgrade with the binding. For multi-step derivations (KDF→MAC) pin BOTH the intermediate and final digests so a regression isolates to the right step.
+
+**Example:** PR #264 (G-T11-23 `computeAllowlistHash` — minutes + recommendation digests), PR #265 (G-T10-11 queue HMAC — pins both `K_hmac` and the final `tag`).
+
+**When not to use:** for non-deterministic outputs (anything with a random nonce/salt not fixed by the fixture), or where no downstream contract binds the digest — there an idempotency or round-trip assertion is enough.
+
 ## library-as-pin (closing architect-silent column/shape gaps)
 
 **When to use:** an ADR is silent on a column name or payload shape, but the TS library (types / exported const) already commits to one. Multiple known-gaps were waiting on a formal architect ratification that never materialized.

@@ -21,6 +21,36 @@ Append newest on top. Be specific — vague lessons don't prevent anything.
 
 ## Entries
 
+## 2026-06-16 — ESLint flat-config `no-restricted-syntax`: two traps (last-match clobber + too-broad selector)
+
+**Symptom:** (1) a newly-added `no-restricted-syntax` block scoped to two files did NOTHING — the rule never fired. (2) A first-cut selector `ObjectExpression > SpreadElement` (all object-literal spread) false-positived on a legitimate `...(cond ? { x } : {})` idiom.
+
+**Root cause:** (1) ESLint flat config is last-match-wins PER RULE — when multiple config objects set the same rule for an overlapping `files` glob, the LAST one fully REPLACES the value (no array merge). An earlier broad block (`src/**/*.ts`, G-T17-8) clobbered the new narrower block back to its own selectors. (2) The selector matched a structural shape rather than the actual anti-pattern (spreading a bound source-object variable `{ ...row }`, the F-19 leak risk).
+
+**Fix:** (1) move the narrower block AFTER the broad one and carry BOTH selectors so nothing is lost on the override. (2) narrow on the AST node's discriminating property — `ObjectExpression > SpreadElement[argument.type='Identifier']` bans `{ ...row }` while allowing inline-conditional + array spreads (PR #271, G-T11-9, `apps/web/eslint.config.js`).
+
+**Prevention:** after adding/editing any array-valued flat-config rule, never trust that adding the block is sufficient — verify it fires with a synthetic probe (inject the banned syntax, run eslint, confirm the error, revert), and run the candidate selector against the WHOLE tree first to catch false-positives. Narrow on AST properties; do NOT carve per-file exceptions (they let real violations slip through new files).
+
+## 2026-06-16 — A Postgres CHECK cannot contain a subquery; wrap the predicate in an IMMUTABLE function
+
+**Symptom:** a CHECK using `(SELECT count(*) FROM jsonb_object_keys(...))` for an exactly-N-keys assertion failed at migration time with "cannot use subquery in check constraint".
+
+**Root cause:** Postgres forbids subqueries inside CHECK constraints. Separately, adding a column CHECK retroactively invalidates every existing fixture that used a now-illegal stub value — and those stubs were spread across ~7 pgTAP files in more than one spelling (`'pin'` AND `'node@v20'`).
+
+**Fix:** move the predicate into an `IMMUTABLE` SQL function and have the CHECK invoke it scalar-wise; sweep all fixtures to valid shapes (PR #255, G-T18-11). The first sweep missed the second stub spelling, costing two CI round-trips.
+
+**Prevention:** for any non-trivial CHECK (counts, key-shape assertions) write it as an `IMMUTABLE` function call from the start. When adding a column CHECK to an existing table, grep ALL pgTAP/fixture files for EVERY spelling of the stub values the new constraint will reject, and fix them in one pass before pushing.
+
+## 2026-06-16 — A failed third-party CI action (network fetch / install) on an unrelated PR is infra flake — re-run, don't "fix"
+
+**Symptom:** CI failed on a docs-only PR because `supabase/setup-cli@v1` returned a Gateway Timeout fetching the latest CLI release. All other gates were green.
+
+**Root cause:** a transient upstream infra failure in an action's release-fetch step, unrelated to the diff — a docs-only PR cannot break the Supabase CLI download.
+
+**Fix:** recognized it as non-code (other gates green; error is in an action's network fetch) and re-ran the job rather than attempting a code change (PR #260).
+
+**Prevention:** before "fixing" a CI failure, read WHICH gate failed and WHERE. If it's a third-party action's network fetch / install (timeout, 5xx, rate-limit) and the change can't plausibly cause it — especially docs-only PRs — re-run first; only treat it as real if it reproduces. (Single occurrence; kept as a generalizable autonomous-CI-watching rule.)
+
 ## 2026-06-14 — Skip HG-10 / external-blocker items in cleanup batches
 
 **Symptom:** during fast cleanup sweeps, the natural temptation is to mark every "still open" gap as closeable. Items blocked on external review (labour-lawyer HG-10 ratification of consent copy, privacy-lawyer DPA review, external pen-test findings) get attempted and either stall or get reverted.
