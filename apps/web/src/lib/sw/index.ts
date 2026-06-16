@@ -155,6 +155,26 @@ export interface PendingCacheViolation {
   queued_at: string;
 }
 
+/**
+ * G-T10-16 — intentionally module-scoped state.
+ *
+ * `pendingViolations` is a process-singleton: it lives at module scope
+ * and is shared across every consumer of this file within a JS realm.
+ * That matches the production runtime exactly — a real ServiceWorker
+ * is itself a per-origin singleton, so a per-instance queue would just
+ * duplicate effort.
+ *
+ * The downside: the test harness lacks per-test isolation and relies
+ * on the `tearDown` ordering inside `apps/web/test/_helpers/supabase-
+ * test.ts` to drain this array between tests. The harness today calls
+ * `drainPendingCacheViolations()` during cleanup; a future regression
+ * that adds a new test path without that tear-down step would see
+ * leaked violations from the previous test.
+ *
+ * Resolution if leakage becomes a real issue: bind this state to a
+ * `CachesLike` instance (the ADR-0013 store handle). For now the
+ * module-scoped behaviour is intentional and matches production.
+ */
 const pendingViolations: PendingCacheViolation[] = [];
 
 /** Test/observability surface — pop the queued violations. */

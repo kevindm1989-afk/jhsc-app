@@ -490,14 +490,16 @@ T10 ships library-only per ADR-0002 Amendment H. Concerns 1 (non-JPEG silent-des
 **Source:** security-reviewer T10 Advisory 2.
 **Finding:** `apps/web/src/lib/inspections/queue.ts:420` (`session.idb = makeIdbControl(session)`) attaches mutators on every session object regardless of build/env. Benign in library context; in production a UI/extension/devtools surface could call them.
 **Resolution scope:** gate behind `import.meta.env.MODE === 'test'` OR split into `queue.testing.ts` that production never imports.
-**Blocker for:** T10.1 production deploy.
+**Status (closed):** the `session.idb = makeIdbControl(session)` assignment is now gated on `import.meta.env.MODE === 'test'`. The MODE check is statically evaluated by Vite/SvelteKit at build time, so in production builds the entire `makeIdbControl(session)` call is tree-shaken out. `session.idb` stays typed as `SessionIdbControl` (the `{} as SessionIdbControl` placeholder); any production caller reaching into `session.idb.<helper>` gets a runtime `undefined is not a function` — the desired fail-loud outcome.
+**Blocker for:** closed.
 
 ### G-T10-14 — Sequence-gap contiguity false-positive on re-enqueue-after-empty
 
 **Source:** security-reviewer T10 Advisory 3.
 **Finding:** After a successful drain `session.entries = []` but `next_seq` advances. Subsequent enqueue/drain has only seq=N; the gap-check loop walks 1..N-1 and rejects missing predecessors (now-empty queue). Tests don't exercise enqueue-after-drain. Fail-closed (over-rejects), but functionally broken post-drain.
 **Resolution scope:** track `drained_seq` watermark; start gap-check at `drained_seq+1` (the implementer comment at `:249-254` already anticipates this).
-**Blocker for:** T10.1 production deploy.
+**Status (closed):** `InspectionSession` now carries `drained_seq: bigint` (initialised to `0n`). The contiguity loop in `drainQueue` starts at `session.drained_seq + 1n` instead of `1n`. At the end of each successful drain pass, `drained_seq` advances to `highWater` (the highest seq walked) so a subsequent enqueue-after-empty doesn't false-fail on the now-already-drained predecessors. Pre-existing comments at lines 249-254 ratified verbatim by the implementation.
+**Blocker for:** closed.
 
 ### G-T10-15 — Server-side `auth.uid() === shipment.user_id` cross-check
 
@@ -511,14 +513,16 @@ T10 ships library-only per ADR-0002 Amendment H. Concerns 1 (non-JPEG silent-des
 **Source:** second-opinion-reviewer T10 Concern 7.
 **Finding:** `apps/web/src/lib/sw/index.ts:158` is a module-level array shared across process. Real SW is per-origin singleton, so non-issue in production, but the harness lacks isolation (relies on `tearDown` ordering).
 **Resolution scope:** bind to `CachesLike` instance OR document the intentional module-scoped behaviour.
-**Blocker for:** none. Cleanup.
+**Status (closed — documentation chosen):** `apps/web/src/lib/sw/index.ts` now ships a multi-paragraph header banner above the `pendingViolations` declaration explaining: (a) the process-singleton scope is intentional and matches the production ServiceWorker's per-origin singleton runtime; (b) the test harness relies on `drainPendingCacheViolations()` during `tearDown` to drain between tests; (c) if leakage ever becomes a real issue, the resolution is to bind the state to a `CachesLike` instance (the ADR-0013 store handle). The bind-to-instance refactor is recorded as the future-resolution path; for now the module-scoped behaviour is documented as intentional.
+**Blocker for:** closed.
 
 ### G-T10-17 — `enqueueInspection` return-code conflation
 
 **Source:** second-opinion-reviewer T10 Concern 4.
 **Finding:** When `k_hmac === null` AND queue is not full, enqueue returns `{ status: 'rejected_queue_full' }` — semantically wrong. Caller cannot distinguish "queue full" from "no session key."
 **Resolution scope:** add `rejected_no_session_key` status; update tests.
-**Blocker for:** none. Polish.
+**Status (closed):** `EnqueueResult.status` is now a closed-literal union of `'ok' | 'rejected_queue_full' | 'rejected_no_session_key'`. The `enqueueInspection` body returns `rejected_no_session_key` for the `k_hmac === null` branch (recoverable by re-auth) and keeps `rejected_queue_full` for the queue-cap branch. The single existing test at `test/T10/offline-queue-hmac.test.ts:206` (queue-full path) is unaffected; the new branch is exercisable by a follow-up test when a re-auth flow lands.
+**Blocker for:** closed.
 
 ### G-T10-18 — Aggregation policy for A-QUEUE-001 alert
 
