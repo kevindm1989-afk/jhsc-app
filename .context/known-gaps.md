@@ -790,7 +790,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-reviewer T14 T14-A7.
 **Finding:** `MemoryWorkRefusalStore.__debugAuditRows()` and `MemoryS51EvidenceStore.__debugAuditRows()` return raw `actor_pseudonym` to any caller. Library-internal; MUST NOT survive into the corresponding Supabase store implementations. Extends G-T13-15 to T14 surfaces.
 **Resolution scope (T14.1):** interface split — read interface vs debug interface. The Supabase store implementation only implements the read interface.
-**Blocker for:** T14.1 PR submission.
+**Status (closed):** test-only hooks split out of the production interfaces. `WorkRefusalStore` and `S51EvidenceStore` no longer declare `__setActiveMember` / `__debugAuditRows`; the test-only superset interfaces `TestWorkRefusalStore extends WorkRefusalStore` and `TestS51EvidenceStore extends S51EvidenceStore` live in `memory-work-refusal-store.ts` and `memory-s51-evidence-store.ts` (deep-import only — NOT re-exported from the public `lib/work-refusal` / `lib/s51-evidence` barrels). Both add `__setActiveMember`, `__grantWriteRole`, `__grantReadOnlyRole`, `__debugAuditRows`, and the respective `__debug*Rows` row accessor. `Memory*Store implements Test*Store` so test code consuming the Memory class can still call every hook; production code holding a `WorkRefusalStore` / `S51EvidenceStore`-typed reference cannot. Same posture as T18's `TestIntegrityStore extends IntegrityStore`. Future `SupabaseWorkRefusalStore` / `SupabaseS51EvidenceStore` (T14.1) implement the production interface only — narrowing back to the Test variant is a type error.
+**Blocker for:** closed.
 
 ### G-T14-18 — Resolve declared-but-unimplemented `rate_limited` denial branch
 

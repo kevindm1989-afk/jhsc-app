@@ -29,6 +29,42 @@ import type {
   WorkRefusalStatus
 } from './types';
 
+/**
+ * Test-only superset of the production `WorkRefusalStore` (G-T14-17 split).
+ *
+ * Adds the seeding + poisoning hooks the T14 test files consume via deep
+ * import. `SupabaseWorkRefusalStore` (T14.1) MUST implement `WorkRefusalStore`
+ * only — narrowing it back to `TestWorkRefusalStore` is a type error.
+ *
+ * Mirrors the T18 `TestIntegrityStore` pattern and the privacy-reviewer
+ * T14-A7 obligation: production callers see a narrow interface that cannot
+ * reach `__debug*` hooks at runtime. Eslint rule
+ * `no-restricted-imports` (apps/web/eslint.config.js) keeps this file out
+ * of the public `lib/work-refusal` barrel — test code deep-imports it.
+ */
+export interface TestWorkRefusalStore extends WorkRefusalStore {
+  /** Test-only — install / remove active members. */
+  __setActiveMember(user_id: string, active: boolean): void;
+  /** Test-only — grant the write role to a uid. */
+  __grantWriteRole(user_id: string): void;
+  /** Test-only — grant the read-only role to a uid. */
+  __grantReadOnlyRole(user_id: string): void;
+  /** Underlying audit row debug accessor — forensic/test use only. */
+  __debugAuditRows(): ReadonlyArray<{
+    id: number;
+    ts: string;
+    event_type: WorkRefusalAuditEvent;
+    actor_pseudonym: string;
+    target_id: string;
+    target_class: 'C4';
+    prev_hash: Buffer;
+    hash: Buffer;
+    meta: Record<string, unknown>;
+  }>;
+  /** Underlying work-refusal-row debug accessor — test use only. */
+  __debugWorkRefusalRows(): readonly WorkRefusalEntry[];
+}
+
 interface AuditRow {
   id: number;
   ts: string;
@@ -57,7 +93,7 @@ function bucketToHour(ts_ms: number): number {
   return Math.floor(ts_ms / HOUR_MS) * HOUR_MS;
 }
 
-export class MemoryWorkRefusalStore implements WorkRefusalStore {
+export class MemoryWorkRefusalStore implements TestWorkRefusalStore {
   private rows = new Map<string, WorkRefusalEntry>();
   private writeAuthorized = new Set<string>();
   private readAuthorized = new Set<string>();

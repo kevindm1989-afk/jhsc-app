@@ -61,9 +61,6 @@ export interface S51EvidenceStore {
    */
   canReadS51Evidence(user_id: string): Promise<boolean>;
 
-  /** Test-only — install / remove active members. */
-  __setActiveMember(user_id: string, active: boolean): void;
-
   // ---- s.51 evidence entries ----
   insertS51Evidence(opts: {
     actor_id: string;
@@ -103,19 +100,6 @@ export interface S51EvidenceStore {
    * ms-epoch of the event truncated to the nearest hour boundary.
    */
   listS51EvidenceFeed(): Promise<S51EvidenceListItem[]>;
-
-  /** Underlying audit row debug accessor — forensic/test use only. */
-  __debugAuditRows(): ReadonlyArray<{
-    id: number;
-    ts: string;
-    event_type: S51EvidenceAuditEvent;
-    actor_pseudonym: string;
-    target_id: string;
-    target_class: 'C4';
-    prev_hash: Buffer;
-    hash: Buffer;
-    meta: Record<string, unknown>;
-  }>;
 
   // ---- Audit ----
   /**
