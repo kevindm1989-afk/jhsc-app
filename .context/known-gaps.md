@@ -953,7 +953,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t11-t12.md hygiene; second-opinion CF-4.
 **Finding:** the `ExportCapableClient` interface (export/index.ts:85) merges production methods with test-only hooks (`__getActorUserId` / `__getExportStore` / `__getReauthAssertion`). Same shape as G-T13-15 / G-T14-17 — production code paths can read the `__` hooks at runtime.
 **Resolution scope (T11.1):** split into `ExportClient` (production) + `TestExportClient extends ExportClient` (test-only); production callers narrow to `ExportClient`; harness widens to `TestExportClient`.
-**Blocker for:** none. Hygiene mirror.
+**Status (closed):** the `ExportCapableClient` interface is gone. `ExportClient` (production marker, empty) + `TestExportClient extends ExportClient` (the three `__` hooks) live in `apps/web/src/lib/export/test-client.ts` (deep-import only — NOT re-exported from the public `lib/export` barrel). `index.ts` imports `TestExportClient` and the runtime typeguard narrows `unknown` → `TestExportClient` for the test-bridge convenience wrappers (`exportMinutes` / `exportRecommendation`). Production callers consume `proceedExport({store, now}, request, assertion)` directly with explicit deps — they never see the `__` hooks. Future `SupabaseExportClient` (T11.1) implements `ExportClient` only; narrowing back to `TestExportClient` is a type error. Same posture as T13 / T14 / T18 TestStore splits.
+**Blocker for:** closed.
 
 ### G-T11-22 — `'audit_failed'` missing from `ExportRejection.reason` union **[privacy P-11 + SO CF-5]**
 
