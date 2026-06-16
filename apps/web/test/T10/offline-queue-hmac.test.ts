@@ -163,6 +163,34 @@ describe('T10 / HG-4 / ADR-0014 — offline-queue HMAC integrity', () => {
     expect(HMAC_QUEUE_SALT_V1).toBe('jhsc.queue.hmac.v1');
   });
 
+  it('T10 / HG-4 / G-T10-11 — pinned hex KAT: same inputs yield a documented BLAKE2b-keyed digest (catches libsodium / byte-order regressions)', async () => {
+    // Pinned 2026-06-16. Same fixture inputs as the idempotency test
+    // above (idPriv = 32×0x42, userId = SYNTHETIC_USER_A bytes,
+    // seq = 1, ciphertext = "deadbeefcafe"). A digest mismatch surfaces
+    // as either (a) a libsodium-wrappers / OpenSSL toolchain upgrade
+    // (coordinate with the deploy team — the queue-MAC binding is a
+    // device-local secret, no SQL-side coordination needed, but the
+    // change-set itself is a reviewer event); or (b) an unintentional
+    // change to the BLAKE2b key-derivation / message-construction code
+    // path in `queue-hmac.ts` (revert).
+    const idPriv = Buffer.alloc(32, 0x42);
+    const userId = Buffer.from(SYNTHETIC_USER_A.replace(/-/g, ''), 'hex');
+    const cipher = Buffer.from('deadbeefcafe', 'hex');
+    const seq = 1n;
+    const K = await deriveQueueHmacKey({ identity_privkey: idPriv, user_id: userId });
+    const tag = await computeQueueHMAC({ k: K, seq, user_id: userId, ciphertext: cipher });
+
+    // K_hmac = BLAKE2b-256(key=idPriv, msg=salt||userId).
+    expect(Buffer.from(K).toString('hex')).toBe(
+      'd36580934efe60140fb9d347e2369d2a4d2f084528fbf8b5820e945ff3ec0870'
+    );
+
+    // tag = BLAKE2b-256(key=K, msg=u64be(seq)||userId||cipher).
+    expect(Buffer.from(tag).toString('hex')).toBe(
+      'c10d0313c8cca5b28f4731a1a91c9a47f4bb24d1659ee084ed552e1febd30e7f'
+    );
+  });
+
   it('T10 / observability-alerts A-QUEUE-001 — every queue.integrity_fail row fires alert (no rate threshold)', async () => {
     const user = await supa.enrollUser(SYNTHETIC_USER_A);
     const session = await supa.startInspectionSession(user);

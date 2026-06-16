@@ -476,7 +476,8 @@ T10 ships library-only per ADR-0002 Amendment H. Concerns 1 (non-JPEG silent-des
 **Source:** second-opinion-reviewer T10 Concern 6.
 **Finding:** `apps/web/test/T10/offline-queue-hmac.test.ts:151-164` asserts `tag === tag2` (idempotency), not a pinned hex KAT. A libsodium-wrappers regression or subtle byte-order bug would produce two consistent-but-wrong tags; test still passes.
 **Resolution scope:** add `expect(Buffer.from(tag).toString('hex')).toBe('<pinned-hex>')` with fixed inputs (e.g., idPriv = 32×0x42, user_id = SYNTHETIC_USER_A bytes, seq=1, ciphertext = "deadbeefcafe").
-**Blocker for:** none directly; defense-in-depth.
+**Status (closed):** pinned hex KAT lands as a new test next to the idempotency assertion in `apps/web/test/T10/offline-queue-hmac.test.ts` (T10 / HG-4 / G-T10-11). Same fixture inputs: idPriv = 32×0x42, userId = `SYNTHETIC_USER_A` bytes, seq = 1n, ciphertext = `'deadbeefcafe'`. Asserts both the intermediate `K_hmac` digest (`d36580…0870`) AND the final tag (`c10d03…0e7f`) so a regression isolates to KDF vs MAC. Header comment classifies failure modes: (a) libsodium / OpenSSL toolchain upgrade — reviewer event; (b) unintentional change to BLAKE2b key-derivation / message-construction code path — revert. Pinned 2026-06-16.
+**Blocker for:** closed.
 
 ### G-T10-12 — HKDF device_id missing from queue-hmac KDF info
 
