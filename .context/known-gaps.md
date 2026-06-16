@@ -1261,14 +1261,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** ADR-0018 §13; privacy-review-t17.md G-T17-PRIV-4.
 **Finding:** ADR §13 mandates a CI test parsing imports under `src/lib/retention/` and asserting no `backup/` path appears. Test file does not exist. Today the property is true by inspection (verified by privacy reviewer); the ADR wanted it CI-enforced.
 **Resolution scope (T17.1 OR next library pass):** add the import-graph test OR an ESLint rule banning `lib/backup/**` imports from within `lib/retention/**`.
-**Blocker for:** none. Structural seal.
+**Status (closed):** ESLint rule landed in `apps/web/eslint.config.js`. New override block scoped to `src/lib/retention/**/*.ts` bans the patterns `**/lib/backup/**`, `**/backup/**`, `$lib/backup/**`, `../backup/**`, `../../backup/**`, `./backup/**` via `no-restricted-imports` with a custom error message naming ADR-0018 §13 + Option G. Manual probe: writing a synthetic `src/lib/retention/__probe.ts` with `import { BACKUP_TABLES } from '../backup/backup-tables'` triggers the gate (verified before commit; probe removed). The hardening-gates CI job runs `pnpm lint` which fail-closes on the violation.
+**Blocker for:** closed.
 
 ### G-T17-8 — `no-spread-into-backup-tables` ESLint rule (T17.1)
 
 **Source:** ADR-0018 §task #8; second-opinion CF-6.
 **Finding:** ADR named a custom ESLint rule mirroring T11/T12/T16 spread bans. Not in eslint.config.js. Object.freeze on BACKUP_TABLES closes the runtime attack; this is defense-in-depth.
 **Resolution scope (T17.1):** custom ESLint rule.
-**Blocker for:** none. Belt-and-braces.
+**Status (closed):** `no-restricted-syntax` rule landed in `apps/web/eslint.config.js` matching `SpreadElement[argument.name='BACKUP_TABLES']`. Scoped to `src/**/*.ts` with an exemption for `src/lib/backup/backup-tables.ts` (where the const lives and where the `BACKUP_TABLE_KEYS_RUNTIME` mirror legitimately enumerates the same const for drift checking). Manual probe: writing `[...BACKUP_TABLES, 'sneaky']` in a source file triggers the gate (verified before commit; probe removed). Belt-and-braces against the Object.freeze runtime guard.
+**Blocker for:** closed.
 
 ### G-T17-9 — Zero-event-count convention pinning
 
@@ -1377,7 +1379,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t18.md G-T18-PRIV-4.
 **Finding:** T18 has zero imports from `../retention/` or `../backup/` (verified by reviewer inspection). The structural property must be enforced by CI, not by reviewer inspection. ESLint rule banning `lib/{retention,backup}/**` imports from within `lib/audit-integrity/**` is the cleanest fix.
 **Resolution scope (T18.1):** ESLint rule extension + CI test.
-**Blocker for:** PIPEDA 4.5 enforcement independence.
+**Status (closed):** ESLint rule landed in `apps/web/eslint.config.js`. New override block scoped to `src/lib/audit-integrity/**/*.ts` bans the patterns `**/lib/retention/**`, `**/lib/backup/**`, `**/retention/**`, `**/backup/**`, `$lib/retention/**`, `$lib/backup/**`, `../retention/**`, `../../retention/**`, `./retention/**`, `../backup/**`, `../../backup/**`, `./backup/**` via `no-restricted-imports` with a custom error message naming ADR-0019 §13. The audit-integrity library reaches `retention_sweep_runs` + `backup_manifests` only through the narrow SECURITY DEFINER fn boundary (verified). Manual probe: writing `import { BACKUP_TABLES } from '../backup/backup-tables'` inside `src/lib/audit-integrity/__probe.ts` triggers the gate (verified before commit; probe removed). The hardening-gates CI job runs `pnpm lint` which fail-closes on the violation.
+**Blocker for:** closed.
 
 ### G-T18-5 — HG-15 re-ratification at T18.1
 
