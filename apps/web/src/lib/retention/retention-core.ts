@@ -47,6 +47,22 @@ import type {
   RetentionScheduleEntry
 } from './types';
 import { randomUUID } from 'node:crypto';
+import { log } from '../log';
+
+/**
+ * Operator-side error class extraction (G-T16-PRIV-3).
+ *
+ * The library returns a closed-literal `error_code` to the caller (no PI
+ * per F-67); the underlying thrown Error is swallowed in each catch so its
+ * `.message` — which may carry PI from a failed delete batch — never reaches
+ * the client. This helper extracts ONLY the JS constructor name so the
+ * server-side structured-log sink can record the failure CLASS for operator
+ * diagnosis without ever logging the message. Mirrors the established
+ * pattern at `lib/auth/server/key-parity.ts:180`.
+ */
+function errorClassOf(e: unknown): string {
+  return e instanceof Error ? e.constructor.name : 'Error';
+}
 
 /**
  * Generate a run_id that is structurally distinguishable from PII shapes.
@@ -271,10 +287,19 @@ export async function runRetentionPass(opts: RunRetentionPassOpts): Promise<Rete
       deletedTotal += r.deleted_count;
       if (r.deleted_count < wanted) truncated = true;
     }
-  } catch {
+  } catch (err) {
     // F-58: a delete batch threw mid-flight → roll back ALL in-flight
     // deletes. Distinct from the summary-emit catch below so a forensic
     // reader can tell the failure category from the audit row's error_code.
+    //
+    // G-T16-PRIV-3: route the swallowed Error to the operator log as a
+    // CLASS-ONLY line (no message — the delete batch may carry PI). The
+    // client-facing `error_code` below is unchanged (F-67 closed literal).
+    log.error({
+      event: 'retention.sweep.delete_failed',
+      outcome: 'delete_failed',
+      error_class: errorClassOf(err)
+    });
     store.restore(snapshotToken);
     return {
       status: 'errored',
@@ -335,9 +360,18 @@ export async function runRetentionPass(opts: RunRetentionPassOpts): Promise<Rete
         status
       }
     });
-  } catch {
+  } catch (err) {
     // F-58: emit failed → roll back ALL in-flight deletes. Structured error
     // code only; no PII (F-67).
+    //
+    // G-T16-PRIV-3: operator-log the failure CLASS (no message). The run_id
+    // is structurally PII-free (G-T16-PRIV-3 rejection-sample) so it rides
+    // along in `outcome` for cross-correlation with the would-be sweep row.
+    log.error({
+      event: 'retention.sweep.emit_failed',
+      outcome: 'audit_emit_failed',
+      error_class: errorClassOf(err)
+    });
     store.restore(snapshotToken);
     return {
       status: 'errored',

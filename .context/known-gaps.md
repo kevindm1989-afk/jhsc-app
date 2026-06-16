@@ -1151,7 +1151,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t16.md Q4 ADVISORY.
 **Finding:** `runRetentionPass` swallows thrown Errors completely (retention-core.ts:252, :313). Correct for client-facing payloads (constraints.md:111 — no PI in error messages returned to clients) but degrades operator observability for diagnosing the underlying failure.
 **Resolution scope (T16.1):** route swallowed Error to server-side structured-log sink with PI scrubbing; PIPEDA Principle 4.10 (Challenging Compliance).
-**Blocker for:** operator debugging of T16.1 production failures.
+**Status (closed):** both swallowed-catch sites in `retention-core.ts` now route the underlying Error to the structured logger as a CLASS-ONLY line via the new `errorClassOf(e)` helper (`e instanceof Error ? e.constructor.name : 'Error'` — the established pattern from `lib/auth/server/key-parity.ts:180`). The delete-batch catch emits `log.error({ event: 'retention.sweep.delete_failed', outcome: 'delete_failed', error_class })`; the emit-failure catch emits `event: 'retention.sweep.emit_failed', outcome: 'audit_emit_failed'`. Only top-level PI-free fields are used (no `attributes`), so the message — which may carry PI from a failed delete batch — is never logged. Client-facing `error_code` contract unchanged (F-67). New test `apps/web/test/T16/retention-operator-error-log.test.ts` installs the log sink and asserts (a) exactly one ERROR line on emit-failure with `error_class` + `outcome`, (b) no email/uuid/raw-message PI shape in any captured line, (c) successful sweeps emit zero ERROR lines.
+**Blocker for:** closed.
 
 ### G-T16-RECONCILE-CEILING — Per-event attribution of ceiling-driven deletes
 
