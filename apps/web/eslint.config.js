@@ -191,6 +191,100 @@ export default [
     }
   },
   {
+    // G-T17-7 / ADR-0018 §13 — retention library MUST NOT depend on the
+    // backup library. The retention sweep and the backup pass are
+    // independent passes (Option G binding in ADR-0018); the architectural
+    // seal is structural (verified by code review today) and
+    // ESLint-enforced from this PR onward. A retention->backup import is
+    // a re-architecture event, not a refactor; the ban fail-closes it
+    // until a deliberate amendment to ADR-0017/0018 lands.
+    files: ['src/lib/retention/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/lib/backup/**',
+                '**/backup/**',
+                '$lib/backup/**',
+                '../backup/**',
+                '../../backup/**',
+                './backup/**'
+              ],
+              message:
+                'G-T17-7 / ADR-0018 §13: retention library MUST NOT import the backup library. The two passes are independent (Option G). A retention->backup dependency re-couples them; if you genuinely need this, propose an architect amendment first.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    // G-T17-8 / ADR-0018 §task #8 — `BACKUP_TABLES` is a closed allowlist
+    // by construction (F-70 / SECURITY DEFINER + closed-set invariant).
+    // Spreading it into another array (`[...BACKUP_TABLES, ...]`)
+    // creates a derived mutable list that defeats the closed-set
+    // guarantee — a regression could silently widen the dump scope. The
+    // belt-and-braces ban catches that pattern at lint time; the
+    // Object.freeze(BACKUP_TABLES) at the declaration site is the
+    // runtime backstop. The backup-tables.ts source file itself is
+    // exempt — it's where `BACKUP_TABLES` is declared + frozen, and
+    // the `BACKUP_TABLE_KEYS_RUNTIME` mirror legitimately enumerates
+    // the same const for drift checking.
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: ['src/lib/backup/backup-tables.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "SpreadElement[argument.name='BACKUP_TABLES']",
+          message:
+            'G-T17-8 / ADR-0018 §task #8: spreading BACKUP_TABLES into an array defeats the F-70 closed-allowlist invariant. Pass BACKUP_TABLES directly, or open an architect amendment if the closed-set contract needs to widen.'
+        }
+      ]
+    }
+  },
+  {
+    // G-T18-4 / ADR-0019 §13 — audit-integrity library MUST NOT depend
+    // on either the retention library OR the backup library. The
+    // integrity check reads `retention_sweep_runs` rows through a
+    // dedicated SECURITY DEFINER fn boundary (NOT via the library's
+    // public surface) and reads backup manifests through a similarly
+    // narrow fn boundary. The structural property is checked by code
+    // review today; from this PR the ESLint rule fail-closes a
+    // cross-library import attempt.
+    files: ['src/lib/audit-integrity/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/lib/retention/**',
+                '**/lib/backup/**',
+                '**/retention/**',
+                '**/backup/**',
+                '$lib/retention/**',
+                '$lib/backup/**',
+                '../retention/**',
+                '../../retention/**',
+                './retention/**',
+                '../backup/**',
+                '../../backup/**',
+                './backup/**'
+              ],
+              message:
+                'G-T18-4 / ADR-0019 §13: audit-integrity library MUST NOT import the retention or backup libraries. Reach `retention_sweep_runs` + `backup_manifests` only through the narrow SECURITY DEFINER fn boundary. A cross-library TS import re-couples them.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     ignores: [
       'node_modules/',
       '.svelte-kit/',
