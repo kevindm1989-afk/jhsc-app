@@ -586,6 +586,7 @@
       "validation": {
         "title_required": "Add a short title.",
         "body_required": "Describe what happened.",
+        "source_name_required": "Add the worker's name, or switch back to anonymous.",
         "hazard_required": "Pick a hazard class.",
         "severity_required": "Pick a severity.",
         "location_required": "Pick a location."
