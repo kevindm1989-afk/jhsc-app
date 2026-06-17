@@ -218,12 +218,20 @@ jobs:
             echo "applying $f"
             sudo -u postgres psql -v ON_ERROR_STOP=1 -d jhsc_test -f "$f"
           done
-          # Run every staged .sql that is NOT a migration or the fixture.
+          # Run every staged .sql that is NOT a migration, the fixture, or on
+          # the deferred-test skip list. New tests under supabase/test/ are
+          # auto-picked-up; deferred files name a gap that gates re-inclusion.
+          #
+          # Deferred:
+          #   - c4_read_audited_rls.sql — forward-looking HG-6 / T13.1 / T14.1
+          #     test for the C4 `*_read_audited` SECURITY DEFINER views that
+          #     have not yet been migrated. Re-enable when the views land.
           TEST_FILES=()
           for f in /tmp/dbtest/*.sql; do
             bn="$(basename "$f")"
             case "$bn" in
               000000000000*|local_shim.sql) ;;
+              c4_read_audited_rls.sql) ;;
               *) TEST_FILES+=("$f") ;;
             esac
           done
