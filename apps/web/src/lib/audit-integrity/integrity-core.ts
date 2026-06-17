@@ -109,15 +109,11 @@ function assertValidTrigger(trigger: IntegrityCheckTrigger): IntegrityCheckTrigg
   }
 }
 
-/** Numeric-aware id comparator. Matches MemoryIntegrityStore's. */
-function compareIds(a: string, b: string): number {
-  const an = Number(a);
-  const bn = Number(b);
-  if (Number.isFinite(an) && Number.isFinite(bn) && String(an) === a && String(bn) === b) {
-    return an - bn;
-  }
-  return a < b ? -1 : a > b ? 1 : 0;
-}
+// G-T18-17: `compareIds` removed — zero internal callers, only consumer
+// was the dead-code re-export at the bottom of the file. The store
+// already returns rows in id order; `isNextSequentialId` below covers
+// the only ordering-aware call site. Re-instate from history if a
+// future ordering surface needs it.
 
 /** Pure helper: detect whether two ids are sequential (b == a + 1) for numeric ids. */
 function isNextSequentialId(prev: string, next: string): boolean {
@@ -780,7 +776,11 @@ export async function runWeeklyChainAnchor(
   };
 }
 
-// compareIds is reserved for future ordering work but unused by the current
-// orchestrator path (the store returns rows already ordered). Re-export
-// to document the contract and avoid a no-unused-locals notice.
-export { compareIds };
+// G-T18-17: `compareIds` was previously re-exported here as
+// "reserved for future ordering work but unused by the current
+// orchestrator path." The removal disposition was chosen over the
+// move-to-_internal.ts option: zero current callers + the helper is a
+// 12-line pure function easily re-instated from history if a future
+// ordering surface needs it. Removing avoids the dead-code-now /
+// live-code-later trap the gap flagged. The helper itself remains as
+// a file-private function above; the export is what's gone.

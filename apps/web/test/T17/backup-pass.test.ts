@@ -1154,12 +1154,17 @@ describe('T17 / F-84 — no caller-supplied object_ref / table_list / lock_durat
 
 describe('T17 / F-85 — BackupStore vs TestBackupStore interface split', () => {
   it('T17 / F-85 — BackupStore (production interface) has zero `__` properties at the type level', () => {
-    const store: BackupStore = makeStore();
-    const narrowed = store as BackupStore & Record<string, unknown>;
-    // The PRODUCTION interface MUST NOT declare these keys. We confirm at
-    // compile time via @ts-expect-error directives; tsc fails the build if
-    // any of the suppressed lines actually type-checks (which would mean
-    // the implementer leaked a `__*` hook onto BackupStore).
+    // G-T17-12: drop the previous `& Record<string, unknown>` intersection.
+    // That intersection made ANY string-key access type-check, so the
+    // `@ts-expect-error` directives below were unused-but-silent — tsc
+    // didn't actually verify the production interface was clean. The
+    // bare `BackupStore` reference (mirroring the pattern at the next
+    // test, line 1192) makes each `narrowed.__<hook>` access genuinely
+    // fail type-check; the `@ts-expect-error` then SUPPRESSES the
+    // genuine error, and tsc fails the build if any suppression becomes
+    // unused (which would mean the implementer leaked a `__*` hook onto
+    // BackupStore).
+    const narrowed: BackupStore = makeStore();
     // @ts-expect-error — `__debugListManifests` is not on BackupStore.
     void narrowed.__debugListManifests;
     // @ts-expect-error — `__forceUploadFailure` is not on BackupStore.

@@ -771,8 +771,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** second-opinion-reviewer T14 Concern 4.
 **Finding:** The shared `c4ReadServiceAuditInsertBlocked` toggle blocks `reprisal.read` + `work_refusal.read` + `s51_evidence.read` simultaneously (matches production where one `c4_read_service` role owns all three views). No test asserts the shared-role atomicity — the T14 atomicity test only checks work_refusal. A future refactor introducing a `c3_read_service` separation would silently diverge.
 **Resolution scope:** add a test that calls `__test_revoke_audit_insert_for_role('c4_read_service')` once and asserts ALL THREE of `reprisal.read`, `work_refusal.read`, `s51_evidence.read` abort with `audit_failed`. Test-writer follow-up.
-**Status (partial close — three separate atomicity tests exercise the same toggle; explicit "all three at once" residual):** three separate atomicity tests exercise the shared toggle against each surface independently: `apps/web/test/T13/reprisal-log.test.ts:96` (reprisal.read), `apps/web/test/T14/c3-read-audit.test.ts:122-137` (work_refusal.read), and the immediately-following test at `c3-read-audit.test.ts:139+` (s51_evidence.read). All three reference the same `'c4_read_service'` role string, so a future refactor introducing a separate `c3_read_service` would fail every one of them. The explicit "ONE toggle blocks all three simultaneously" test is residual defense-in-depth (test-writer follow-up).
-**Blocker for:** closed for the structural property; explicit shared-toggle test is residual hygiene.
+**Status (closed — fully now):** the residual single-test was the only thing missing. New file `apps/web/test/T14/c4-read-service-shared-toggle-atomicity.test.ts` issues ONE `__test_revoke_audit_insert_for_role('c4_read_service')` then exercises all three SELECTs in sequence within the same test body, asserting (a) every row returns null (no plaintext), (b) zero audit rows landed for any of the three event_types. A future refactor that introduced a separate `c3_read_service` role for any one of the three surfaces would fail this single test on that surface — proving the shared-role invariant by direct counter-example. Restores the role at the end so afterEach() teardown is clean.
+**Blocker for:** closed.
 
 ### G-T14-15 — Class-vocabulary disambiguation in Amendment A extension table
 
@@ -1171,7 +1171,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** T16 second-opinion review CF-1.
 **Finding:** `MemoryRetentionStore.snapshot()` captures `auditRows` + `operational` only — NOT `deletedRecords` or `sweepRuns`. Safe today by construction (production methods only mutate audit/operational arrays; the only `sweepRuns.push` is inside the same method that throws BEFORE the push) but a future edit reordering `emitRetentionDeletedAndRegisterRun` could silently break rollback.
 **Resolution scope (T16.1 OR next library pass):** either (a) widen Snapshot to capture every mutable field on the store, OR (b) add a snapshot-completeness invariant test that asserts byte-identical store state after rollback.
-**Blocker for:** none. Future-proofing.
+**Status (closed via option (b)):** new file `apps/web/test/T16/snapshot-completeness-invariant.test.ts` defines a `fingerprint(store)` over the audit-row + operational + sweep-run surfaces (every surface the sweep itself reads through) and asserts three round-trips: (1) snapshot → audit-row insert → restore → fingerprint matches; (2) snapshot → operational-table insert → restore → fingerprint matches; (3) snapshot → `__debugRegisterTargetDeletion` → restore — documents the present-day invariant that `deletedRecords` is outside the snapshot AND that the audit/operational/sweepRuns surfaces are unaffected by `deletedRecords` mutation under the snapshot. If a future edit moves a `deletedRecords` mutation inside a method that returns between `snapshot()` and `restore()`, the third assertion's documentation comment tells the reviewer the fix is to widen Snapshot (option (a)). Tests-only; no library change.
+**Blocker for:** closed.
 
 ### G-T16-SO-2 — Alarm scope is per-event-type only by construction
 
@@ -1305,7 +1306,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** second-opinion CF-3; implementer-acknowledged limitation.
 **Finding:** F-85 inner-narrowing test at backup-pass.test.ts:1163-1177 uses `BackupStore & Record<string, unknown>` intersection that makes ANY string-key access type-check, defeating the `@ts-expect-error` directives. Runtime barrel test at 1199-1217 provides actual structural enforcement.
 **Resolution scope (next test pass):** drop the `Record<string, unknown>` intersection; use `@ts-expect-error` on bare `BackupStore` reference (pattern that already works at line 1192). Test-writer scope, not implementer.
-**Blocker for:** none. Runtime test catches real risk.
+**Status (closed):** dropped the `& Record<string, unknown>` intersection at `apps/web/test/T17/backup-pass.test.ts:1155-1184`; `narrowed` is now a bare `BackupStore` reference (mirroring the pattern at the next test at line 1192). Each `narrowed.__<hook>` access now genuinely fails type-check; the surrounding `@ts-expect-error` SUPPRESSES the genuine error, so tsc fails the build if any suppression becomes unused (which would mean the implementer leaked a `__*` hook onto BackupStore — the exact regression F-85 is meant to catch). Inline comment explains the rationale so a future maintainer doesn't re-introduce the intersection. The runtime barrel test (line 1199+) is unchanged and continues to backstop.
+**Blocker for:** closed.
 
 ### G-T17-PRIV-1 — `backup_manifests` row 7y vs blob 42d retention asymmetry (documentation)
 
@@ -1487,14 +1489,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 - A backup_manifest with `audit_log_rows_in_dump: []` (empty dump; should produce zero mismatches with `backup_diff_performed: true`).
 - A chain-walk over an empty chain after `readLatestCommittedBackupManifest` returns non-null (manifest sees rows; live chain is empty — should fire backup_diff mismatches on every dump row older than cutoff).
   **Resolution scope (next test-writer pass):** 4 additional tests.
-  **Blocker for:** none. Coverage enhancement.
+  **Status (closed):** new file `apps/web/test/T18/integrity-coverage-residual.test.ts` ships all four coverage cases. (1) Concurrent in-process calls — `Promise.all` of two `runIntegrityCheck`s with NO awaiting between; both complete (the library lease is not race-safe in-process by design; the test pins the WEAKER library guarantee + documents that the production race defense is `pg_advisory_xact_lock` in migration `#030`). A regression that ADDED in-process serialisation would flip the assertion, surfacing the change. (2) Straddling sweep_run — sweep started before committed_at and completed after; snapshot captures it as visible; gap is attributable; no alert. (3) Empty dump — manifest inserted BEFORE seeding chain so `audit_log_rows_in_dump = []`; `backup_diff_performed: true` with `mismatches_count: 0`. (4) Empty chain after non-null manifest — chain deleted post-manifest with no attributing sweep; `unattributable_count > 0`.
+  **Blocker for:** closed.
 
 ### G-T18-17 — `compareIds` exported but currently unused (dead code now / live code later)
 
 **Source:** privacy-review-t18.md G-T18-PRIV-12.
 **Finding:** `compareIds` exported from `integrity-core.ts:680` is documented as "reserved for future ordering work"; NOT re-exported via barrel. Consider moving to a `_internal.ts` to make the dead-code-now / live-code-later transition explicit, OR remove until needed.
 **Resolution scope (next library pass):** move or remove.
-**Blocker for:** none. Code organization.
+**Status (closed via removal):** chose the `remove` disposition over the `move-to-_internal.ts` option. The dead `export { compareIds }` was deleted from `apps/web/src/lib/audit-integrity/integrity-core.ts`; the function itself (a 12-line pure numeric-aware comparator) had zero internal callers and was also removed — `isNextSequentialId` already covers the only ordering-aware use site (sequential-id gap detection in `walkChain`). A breadcrumb comment at the prior declaration site documents the disposition + that the helper can be re-instated from git history if a future ordering surface needs it; removal avoids the dead-code-now / live-code-later trap the gap names.
+**Blocker for:** closed.
 
 ## T19 — identity-recovery onboarding (Phase 3, in flight)
 
