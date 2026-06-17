@@ -20,7 +20,7 @@
     "@sveltejs/adapter-static": "3.0.6",
     "@sveltejs/kit": "2.61.0",
     "@sveltejs/vite-plugin-svelte": "4.0.0",
-    "@testing-library/svelte": "5.2.4",
+    "@testing-library/svelte": "5.3.1",
     "@types/node": "22.10.1",
     "@typescript-eslint/eslint-plugin": "8.18.0",
     "@typescript-eslint/parser": "8.18.0",
@@ -36,7 +36,7 @@
     "svelte-eslint-parser": "0.43.0",
     "typescript": "5.7.2",
     "vite": "5.4.21",
-    "vitest": "2.1.9"
+    "vitest": "3.2.6"
   },
   "dependencies": {
     "@sentry/sveltekit": "10.58.0",
