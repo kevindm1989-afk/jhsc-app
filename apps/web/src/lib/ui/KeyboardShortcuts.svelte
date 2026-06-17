@@ -90,7 +90,6 @@
 </script>
 
 {#if open}
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     class="ks-backdrop"
     data-testid="keyboard-shortcuts-backdrop"
@@ -103,6 +102,7 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="ks-heading"
+      tabindex={-1}
       data-testid="keyboard-shortcuts-dialog"
       on:click|stopPropagation
       on:keydown|stopPropagation
