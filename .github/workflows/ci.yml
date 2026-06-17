@@ -155,6 +155,13 @@ jobs:
         # cannot catch.
         run: bash scripts/check-onboarding-test-props-stripped.sh
 
+      - name: Bundle-size regression gate
+        # Asserts `apps/web/build/_app/immutable/chunks/` stays under the
+        # checked-in byte budget. Catches accidental dep-bloat (lodash full,
+        # heavy icon set, dep-graph expansion) before it ships. Bumped
+        # consciously via the budget constant in the script.
+        run: bash scripts/check-bundle-size.sh
+
       - name: KEY_PARITY entropy invariant (ADR-0024 §6 / F-124 M-124a)
         # Asserts the length floor on a SYNTHETIC fixture (NEVER against the
         # real production secret — that's the deploy job's job). The fixture
