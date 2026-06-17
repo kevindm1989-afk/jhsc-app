@@ -30,8 +30,8 @@ importers:
         specifier: 4.0.0
         version: 4.0.0(svelte@5.56.3(@typescript-eslint/types@8.18.0))(vite@5.4.21(@types/node@22.10.1))
       '@testing-library/svelte':
-        specifier: 5.2.4
-        version: 5.2.4(svelte@5.56.3(@typescript-eslint/types@8.18.0))(vite@5.4.21(@types/node@22.10.1))(vitest@3.2.6(@types/node@22.10.1)(jsdom@25.0.1))
+        specifier: 5.3.1
+        version: 5.3.1(svelte@5.56.3(@typescript-eslint/types@8.18.0))(vite@5.4.21(@types/node@22.10.1))(vitest@3.2.6(@types/node@22.10.1)(jsdom@25.0.1))
       '@types/node':
         specifier: 22.10.1
         version: 22.10.1
@@ -797,8 +797,14 @@ packages:
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
     engines: {node: '>=18'}
 
-  '@testing-library/svelte@5.2.4':
-    resolution: {integrity: sha512-EFdy73+lULQgMJ1WolAymrxWWrPv9DWyDuDFKKlUip2PA/EXuHptzfYOKWljccFWDKhhGOu3dqNmoc2f/h/Ecg==}
+  '@testing-library/svelte-core@1.0.0':
+    resolution: {integrity: sha512-VkUePoLV6oOYwSUvX6ShA8KLnJqZiYMIbP2JW2t0GLWLkJxKGvuH5qrrZBV/X7cXFnLGuFQEC7RheYiZOW68KQ==}
+    engines: {node: '>=16'}
+    peerDependencies:
+      svelte: ^3 || ^4 || ^5 || ^5.0.0-next.0
+
+  '@testing-library/svelte@5.3.1':
+    resolution: {integrity: sha512-8Ez7ZOqW5geRf9PF5rkuopODe5RGy3I9XR+kc7zHh26gBiktLaxTfKmhlGaSHYUOTQE7wFsLMN9xCJVCszw47w==}
     engines: {node: '>= 10'}
     peerDependencies:
       svelte: ^3 || ^4 || ^5 || ^5.0.0-next.0
@@ -2704,9 +2710,14 @@ snapshots:
       picocolors: 1.1.1
       pretty-format: 27.5.1
 
-  '@testing-library/svelte@5.2.4(svelte@5.56.3(@typescript-eslint/types@8.18.0))(vite@5.4.21(@types/node@22.10.1))(vitest@3.2.6(@types/node@22.10.1)(jsdom@25.0.1))':
+  '@testing-library/svelte-core@1.0.0(svelte@5.56.3(@typescript-eslint/types@8.18.0))':
+    dependencies:
+      svelte: 5.56.3(@typescript-eslint/types@8.18.0)
+
+  '@testing-library/svelte@5.3.1(svelte@5.56.3(@typescript-eslint/types@8.18.0))(vite@5.4.21(@types/node@22.10.1))(vitest@3.2.6(@types/node@22.10.1)(jsdom@25.0.1))':
     dependencies:
       '@testing-library/dom': 10.4.1
+      '@testing-library/svelte-core': 1.0.0(svelte@5.56.3(@typescript-eslint/types@8.18.0))
       svelte: 5.56.3(@typescript-eslint/types@8.18.0)
     optionalDependencies:
       vite: 5.4.21(@types/node@22.10.1)
