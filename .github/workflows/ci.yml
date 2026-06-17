@@ -89,6 +89,20 @@ jobs:
         with:
           deno-version: v1.46.x
 
+      - name: Cache deno modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/deno
+          key: ${{ runner.os }}-deno-v1.46-${{ hashFiles('supabase/functions/**/*.ts', 'scripts/**/*.ts') }}
+          restore-keys: |
+            ${{ runner.os }}-deno-v1.46-
+
+      - name: Cache semgrep venv
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/semgrep-venv
+          key: ${{ runner.os }}-semgrep-1.95.0
+
       - name: Install gitleaks
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz \
@@ -100,10 +114,16 @@ jobs:
         # site-packages carry system urllib3/chardet that conflict with
         # semgrep's pins and made the CLI exit 7 before scanning. A clean
         # venv with an upgraded pip resolves a self-consistent dependency set.
+        #
+        # Idempotent on cache hit — the venv at $RUNNER_TEMP/semgrep-venv is
+        # cached on the pinned semgrep version above; only build it when the
+        # binary is absent.
         run: |
-          python3 -m venv "$RUNNER_TEMP/semgrep-venv"
-          "$RUNNER_TEMP/semgrep-venv/bin/pip" install --upgrade pip
-          "$RUNNER_TEMP/semgrep-venv/bin/pip" install semgrep==1.95.0
+          if [ ! -x "$RUNNER_TEMP/semgrep-venv/bin/semgrep" ]; then
+            python3 -m venv "$RUNNER_TEMP/semgrep-venv"
+            "$RUNNER_TEMP/semgrep-venv/bin/pip" install --upgrade pip
+            "$RUNNER_TEMP/semgrep-venv/bin/pip" install semgrep==1.95.0
+          fi
           echo "$RUNNER_TEMP/semgrep-venv/bin" >> "$GITHUB_PATH"
 
       - name: Install pgTAP runtime (perl + pg_prove)
@@ -254,7 +274,10 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned per .context/lessons.md 2026-06-16 — `version: latest`
+          # triggered a gateway-timeout flake on docs-only PRs by re-fetching
+          # the floating tag list every run.
+          version: 2.106.0
 
       - name: Install pg_prove
         run: |
@@ -296,10 +319,21 @@ jobs:
         with:
           deno-version: v1.46.x
 
+      - name: Cache deno modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/deno
+          key: ${{ runner.os }}-deno-v1.46-${{ hashFiles('supabase/functions/**/*.ts', 'scripts/**/*.ts') }}
+          restore-keys: |
+            ${{ runner.os }}-deno-v1.46-
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned per .context/lessons.md 2026-06-16 — `version: latest`
+          # triggered a gateway-timeout flake on docs-only PRs by re-fetching
+          # the floating tag list every run.
+          version: 2.106.0
 
       - name: Run the mint live-trust e2e
         run: bash scripts/mint-live-e2e.sh
