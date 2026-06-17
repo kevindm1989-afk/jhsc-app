@@ -73,6 +73,11 @@
   const helperOnId = 'concern-anon-helper-on';
   const titleErrId = 'concern-title-err';
   const bodyErrId = 'concern-body-err';
+  // G-T08-12 — per-submit error id for the named-source name field,
+  // mirroring the title/body error pattern. The library 403 on empty
+  // source_name remains as defense-in-depth; this is the user-visible
+  // gate so the empty-name case is caught BEFORE submit.
+  const sourceNameErrId = 'concern-source-name-err';
 
   /**
    * Toggle handler — routes through the consent gate before mutating
@@ -119,6 +124,11 @@
   // Validation helpers — surface inline errors; do NOT submit on invalid.
   $: titleInvalid = state === 'error' && title.trim().length === 0;
   $: bodyInvalid = state === 'error' && body.trim().length === 0;
+  // G-T08-12: surface the per-submit empty-source-name error when the
+  // user has switched OFF anonymous (so the source-name input is shown)
+  // and left it blank. Suppressed while anonymous=true because the
+  // input is hidden from the DOM in that branch.
+  $: sourceNameInvalid = state === 'error' && !anonymous && sourceName.trim().length === 0;
 </script>
 
 <!--
@@ -140,7 +150,10 @@
   <form
     on:submit|preventDefault={() => {
       // Validation gate — surface inline errors instead of submitting.
-      if (title.trim().length === 0 || body.trim().length === 0) {
+      // G-T08-12: empty `sourceName` when named-source is selected is
+      // ALSO a pre-submit error; the library 403 still defends in depth.
+      const sourceNameMissing = !anonymous && sourceName.trim().length === 0;
+      if (title.trim().length === 0 || body.trim().length === 0 || sourceNameMissing) {
         state = 'error';
         errorMessage = t('common.errors.generic');
         return;
@@ -207,10 +220,16 @@
           autocomplete="off"
           inputmode="text"
           bind:value={sourceName}
-          aria-describedby={advisoryId}
           aria-required="true"
+          aria-invalid={sourceNameInvalid ? 'true' : 'false'}
+          aria-describedby={sourceNameInvalid ? `${advisoryId} ${sourceNameErrId}` : advisoryId}
           data-testid="concern-source-name"
         />
+        {#if sourceNameInvalid}
+          <p id={sourceNameErrId} role="alert" class="field-error">
+            {t('concern.intake.validation.source_name_required')}
+          </p>
+        {/if}
       </div>
     {/if}
 
