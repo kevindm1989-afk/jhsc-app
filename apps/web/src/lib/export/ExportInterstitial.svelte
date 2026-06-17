@@ -121,11 +121,12 @@
   style:--color-focus-inner={tokens.focus.inner}
 ></div>
 
-<section
+<div
   class="export-interstitial"
   role="dialog"
   aria-modal="true"
   aria-labelledby={headingId}
+  tabindex={-1}
   data-testid="export-interstitial"
   style:--color-focus-outer={tokens.focus.outer}
   style:--color-focus-inner={tokens.focus.inner}
@@ -198,7 +199,7 @@
       {t('export.confirm.button_label')}
     </button>
   </footer>
-</section>
+</div>
 
 <style>
   /* All values come from CSS custom properties bound by `style:` above.

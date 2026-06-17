@@ -228,7 +228,6 @@
 
 {#if open}
   <div class="panic-backdrop">
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <!-- The keydown listener implements the WAI-ARIA modal focus trap (Tab/Shift+Tab
          wrap); the dialog role + tabindex=-1 is the correct pattern. The listener is
          focus management, not a click affordance. -->
