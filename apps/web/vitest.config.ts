@@ -72,6 +72,10 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     // Edge-function Deno tests live outside this runner.
     exclude: ['**/node_modules/**', '**/.svelte-kit/**', '../../supabase/functions/**'],
+    // Vitest 2.x default was 5000ms; carry the same budget but raise the
+    // floor for CI variance (T07 multi-await tests routinely pass in <1s
+    // locally but brush against 5s under runner load).
+    testTimeout: 10000,
     // Determinism per test-plan.md §3.J
     sequence: {
       shuffle: false,
