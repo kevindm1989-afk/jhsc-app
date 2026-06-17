@@ -35,3 +35,15 @@ import { vi } from 'vitest';
   useFakeTimers: vi.useFakeTimers.bind(vi),
   useRealTimers: vi.useRealTimers.bind(vi)
 };
+
+// jsdom does not implement Blob URL APIs. CsvDownloadButton's click
+// handler calls URL.createObjectURL(blob) to materialise a download — in
+// jsdom this would throw. We stub both halves with no-ops so the click
+// path can complete without affecting the assertion surface (no test
+// asserts against the returned URL string).
+if (typeof URL.createObjectURL !== 'function') {
+  URL.createObjectURL = () => 'blob:test-stub';
+}
+if (typeof URL.revokeObjectURL !== 'function') {
+  URL.revokeObjectURL = () => {};
+}
