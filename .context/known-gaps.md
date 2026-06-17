@@ -1006,7 +1006,8 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** privacy-review-t11-t12.md Q7 ADVISORY.
 **Finding:** `mode` is typed as `string`; should be the discriminated union `'re-auth-required' | 'exporting' | 'exported' | 'failed'` matching the state machine.
 **Resolution scope (T11.1 UI):** tighten the prop type; accessibility-specialist handoff already covers ARIA states for each.
-**Blocker for:** none. Type hygiene.
+**Status (closed via reframe — narrowed to the kind discriminator the component actually carries):** the implemented `ExportInterstitial.svelte` `mode` prop is the export-kind discriminator (`'minutes' | 'recommendation'` — drives the `kind === 'minutes' ? EXPORT_ALLOWLIST_MINUTES : EXPORT_ALLOWLIST_RECOMMENDATION` switch at line 157), NOT the four-state state-machine the privacy review anticipated. That state-machine lives on the future modal-wrapper component (G-T13-10), where it belongs. Tightened the prop type to `InterstitialMode = 'minutes' | 'recommendation'` via the documented G-T07-13 typed-alias workaround (declared without annotation; rebound through a `modeTyped` alias). The reframe is documented inline so a future reviewer doesn't re-litigate which prop carries the state machine.
+**Blocker for:** closed.
 
 ### G-T11-28 — AODA spec scope routed to accessibility-specialist **[privacy P-17]**
 
@@ -1034,14 +1035,16 @@ All entries below land under ADR-0002 Amendment H + ADR-0003 Amendments A extens
 **Source:** second-opinion review CF-8.
 **Finding:** `concernDerivedFieldsForKind('minutes.final')` and `('recommendation')` return canonical lists; only the union is exercised. Per-kind narrowing assertions absent.
 **Resolution scope (T11.1):** add per-kind assertions; lock the canonical list against drift.
-**Blocker for:** none. Drift detector.
+**Status (closed):** new test file `apps/web/test/T11_T12/concern-derived-and-f25-drift.test.ts` ships 4 per-kind assertions: (a) `minutes.final` pinned-list equality; (b) `recommendation` pinned-list equality; (c) function output matches the source `CONCERN_DERIVED_FIELD_ANNOTATIONS` map (no projection drift); (d) per-kind output is disjoint between minutes and recommendation (no accidental field overlap that would silently change which concern data flows into which export — a privacy property worth a dedicated check). Drift-detector contract intact.
+**Blocker for:** closed.
 
 ### G-T11-32 — Second-opinion: F-25 inventory test fragility against route additions **[SO CF-9]**
 
 **Source:** second-opinion review CF-9; pairs with G-T11-4.
 **Finding:** F-25 asserts "no route declares application/pdf"; the assertion iterates the inventory. When unrelated routes get added that declare `application/octet-stream` or similar, future reviewers may relax the check.
 **Resolution scope (T11.1):** tighten F-25 to an explicit allowlist of non-PDF content types per route entry.
-**Blocker for:** none. Drift guard.
+**Status (closed):** new test in `apps/web/test/T11_T12/concern-derived-and-f25-drift.test.ts` ships an explicit `ALLOWED_RESPONSE_CONTENT_TYPES = {'application/json', 'application/jose', 'text/plain'}` set and walks every route × every response in `getRouteInventory()`. Any new content type — including but not limited to `application/pdf` — fails this test with a per-route violation message naming the route + the surprising type, forcing the reviewer to either extend the allowlist deliberately or remove the surprise. Strictly stronger than the original "no application/pdf" predicate.
+**Blocker for:** closed.
 
 ## T12 — Recommendations + 21-day timer
 

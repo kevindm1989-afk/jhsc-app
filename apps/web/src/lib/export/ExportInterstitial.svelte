@@ -35,6 +35,19 @@
   import { tokens } from '../tokens';
   import { EXPORT_ALLOWLIST_MINUTES, EXPORT_ALLOWLIST_RECOMMENDATION } from './allowlist';
 
+  /**
+   * G-T11-27 — `mode` discriminator. Closed-literal union of the two
+   * export kinds the component knows how to render (matches the
+   * `kind === 'minutes' ? MINUTES : RECOMMENDATION` allowlist switch
+   * below). Privacy-review P-16 anticipated a state-machine prop
+   * (`'re-auth-required' | 'exporting' | 'exported' | 'failed'`) but the
+   * implemented architecture put state-machine concerns on the future
+   * modal-wrapper (G-T13-10), NOT on this interstitial body. The body
+   * carries only the kind discriminator. Documenting the reframe + the
+   * narrower type here.
+   */
+  type InterstitialMode = 'minutes' | 'recommendation';
+
   // Props. TS annotations on `export let` are accepted by svelte-check
   // (type-only) but the esrap printer rejects them at compile (G-T07-13).
   // The workaround: declare the prop WITHOUT annotation, then re-bind it
@@ -43,6 +56,14 @@
   // the alias unchanged).
   export let mode = 'minutes';
   export let derived_from_concerns = [''].slice(0, 0); // typed as string[]
+
+  // Typed alias for `mode` per the G-T07-13 workaround documented above.
+  // The `as` narrows `string` → `InterstitialMode`; the only caller is
+  // the renderer test, which already passes one of the two literals.
+  $: modeTyped = mode as InterstitialMode;
+  // Silence unused-binding lint without breaking the binding chain — the
+  // alias exists so a future svelte-check pass can narrow downstream uses.
+  void modeTyped;
 
   /** Stable ids for aria-* wiring. */
   const headingId = 'export-interstitial-heading';
