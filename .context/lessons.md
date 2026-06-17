@@ -21,6 +21,26 @@ Append newest on top. Be specific — vague lessons don't prevent anything.
 
 ## Entries
 
+## 2026-06-17 — Bias-toward-skip after a long orchestration session; independent audit before declaring an arc done
+
+**Symptom:** after PR #272 the orchestrator declared "nothing actionable remains" in the open-gap registry. An independent librarian audit then surfaced ~10 real closures wrongly bucketed into HG-10 / HG-15 / T_n.1 skip categories. Bundle E (PRs #273–#276) shipped all of them.
+
+**Root cause:** the HG-10 / external-blocker skip rule (lesson 2026-06-14) is correct in isolation, but applied at the end of a long batching session the orchestrator's threshold for "skip-eligible" drifts upward — borderline items get rolled into skip buckets to close the session. The skip filter compounds across iterations.
+
+**Fix:** spawn the librarian as an independent pass with the explicit prompt "find what the orchestrator missed," not "confirm the orchestrator's bucketing." Re-audit using the registry as the source of truth, not the orchestrator's running notes.
+
+**Prevention:** before declaring any multi-PR arc done, run an independent librarian pass against the gap registry with a bias-toward-finding mandate. If the audit returns zero, the arc is done; if it returns N>0, ship them as the next bundle before closing. Do NOT trust the orchestrator's own "nothing remains" claim after a long session.
+
+## 2026-06-17 — `@ts-expect-error` is silent under a type-broadening intersection
+
+**Symptom:** the F-85 type-test pinned that backup-store internals `__<hook>` are NOT publicly accessible via `@ts-expect-error` on each access. `tsc` passed even though the suppressions were doing nothing — the regression the test exists to catch (a hook leaking into the public type) would not have failed CI.
+
+**Root cause:** the test cast the store as `BackupStore & Record<string, unknown>`. The `Record<string, unknown>` arm makes EVERY string-key access type-check, so each `@ts-expect-error` was an unused-but-silent suppression. `tsc` does not flag unused `@ts-expect-error` under a permissive intersection because the directive's "expected error" never had a chance to fire.
+
+**Fix:** drop the intersection; reference the store as bare `BackupStore`. Each `narrowed.__<hook>` access now genuinely fails type-check, the suppression catches it, and `tsc`'s unused-directive rule fails the build if the suppression ever becomes redundant (PR #274, G-T17-12).
+
+**Prevention:** when adding `@ts-expect-error` to assert "this MUST not type-check," verify by REMOVING the suppression and confirming `tsc` complains. If it doesn't complain, the surrounding type assertion is too broad and the test is a no-op. Mirrors the synthetic-probe rule for ESLint flat-config from 2026-06-16.
+
 ## 2026-06-16 — ESLint flat-config `no-restricted-syntax`: two traps (last-match clobber + too-broad selector)
 
 **Symptom:** (1) a newly-added `no-restricted-syntax` block scoped to two files did NOTHING — the rule never fired. (2) A first-cut selector `ObjectExpression > SpreadElement` (all object-literal spread) false-positived on a legitimate `...(cond ? { x } : {})` idiom.

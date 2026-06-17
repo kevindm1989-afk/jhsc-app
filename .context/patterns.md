@@ -25,6 +25,16 @@ short code example
 
 ## Entries
 
+## library-level lease test pins the WEAKER guarantee; production race defense lives at the SQL layer
+
+**When to use:** a TS library implements a cooperative checkpoint (in-memory lease window, last-run timestamp, soft-debounce) that callers honour, but the real race defense is a DB-side `pg_advisory_xact_lock` / unique constraint / serializable txn at the migration layer.
+
+**How:** in the library-level test, assert the HONEST weaker guarantee — e.g. for two concurrent `Promise.all` calls, assert BOTH complete (the in-memory window is checked before either writes the 'running' row, so the lease cannot serialise them). Add a header comment naming the production race defense (file:line of the advisory-lock / constraint) so a reader knows where to look. A future regression that ADDED in-process serialisation would flip the assertion and surface as a test failure — which is the point: the library's contract changed.
+
+**Example:** PR #274 (G-T18-16, `integrity-core.runIntegrityCheck` — library test asserts both concurrent runs complete; production serialisation is `pg_advisory_xact_lock` invoked from the T18.1 migration's `integrity_check_runner` fn at `supabase/migrations/00000000000030_t18_integrity_check_runner.sql`).
+
+**When not to use:** when the library IS the race defense (no DB-side backup). There the test must assert serialisation, and the implementation must actually serialise (mutex / queue / single-flight).
+
 ## operator-side structured-error logging on swallowed catches (add observability, freeze the client contract)
 
 **When to use:** a security-core file swallows failures with `catch {}` then returns a client-facing closed-literal `error_code`, and operators have no signal about what actually failed. You want to ADD operator observability WITHOUT changing the byte-for-byte client contract.
