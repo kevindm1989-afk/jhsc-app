@@ -17,7 +17,8 @@ import path from 'node:path';
 export default defineConfig({
   plugins: [
     svelte({
-      hot: false,
+      // `hot` was removed from vite-plugin-svelte 7's options surface
+      // (HMR is now controlled by the vite mode, not a plugin flag).
       compilerOptions: {
         dev: true
       },
@@ -82,11 +83,19 @@ export default defineConfig({
       concurrent: false
     },
     setupFiles: ['./test/setup.ts'],
+    // Vitest 4 migration:
+    //   - `poolOptions.threads.singleThread: true` was replaced by the
+    //     top-level `fileParallelism: false` (per the v4 migration notes).
+    //     Combined with `sequence.concurrent: false` above, this preserves
+    //     the test-plan.md §3.J determinism contract.
+    //   - `isolate: true` (the v4 default) gives each test file a fresh
+    //     module/DOM context. The cost is ~12x wall-clock locally vs the
+    //     v3 `isolate: false` equivalent, but CI's timeout budget
+    //     (20–25 min) easily absorbs it (~200s), and isolate=true
+    //     contains the PanicWipeModal `componentApi: 4` cleanup races
+    //     that surfaced under v3+isolate-false.
     pool: 'threads',
-    poolOptions: {
-      threads: {
-        singleThread: true
-      }
-    }
+    fileParallelism: false,
+    isolate: true
   }
 });
