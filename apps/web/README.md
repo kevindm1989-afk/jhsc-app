@@ -38,7 +38,7 @@ given task.
 
 ```sh
 # From the repo root (/home/user/agent-os):
-nvm use                          # picks Node 22 per .nvmrc
+nvm use                          # picks Node 24 per .nvmrc
 pnpm install                     # installs workspace deps
 
 # Web app
