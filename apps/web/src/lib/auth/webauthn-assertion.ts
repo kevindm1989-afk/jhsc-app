@@ -90,7 +90,10 @@ export async function webauthnGetAssertion(
   try {
     credential = await credentials.get({
       publicKey: {
-        challenge: challengeBytes,
+        // TS 6 narrows the Uint8Array buffer parameter; the WebAuthn types
+        // want the BufferSource narrow form. Cast at the boundary — the
+        // runtime contract is identical.
+        challenge: challengeBytes as BufferSource,
         rpId: opts.rpId,
         // Empty allowCredentials lets the platform surface every eligible
         // credential — typical for sign-in with a residentKey (e.g. a
