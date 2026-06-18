@@ -33,6 +33,12 @@ export default [
     },
     rules: {
       ...tsPlugin.configs.recommended.rules,
+      // `no-undef` is a JS-only rule (it cannot see TypeScript type
+      // declarations). DOM type aliases like BufferSource / BlobPart trip
+      // it as false positives. TypeScript already enforces undefined-
+      // identifier checking via the compiler — this is the standard
+      // @typescript-eslint recommendation.
+      'no-undef': 'off',
       'no-console': ['error', { allow: ['warn', 'error'] }],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': [

@@ -10,9 +10,15 @@
  * SHA-256 (not BLAKE2b) so the hex matches the server's
  * `encode(digest(ct,'sha256'),'hex')` in `concern_update` (F-16 prev_field_hashes)
  * and the prior `node:crypto.createHash('sha256')` output byte-for-byte.
+ *
+ * TS 6 typing note: `Uint8Array` now carries a buffer-type parameter
+ * (`<ArrayBufferLike>` by default) that is strictly distinct from the narrow
+ * `<ArrayBuffer>` variant WebCrypto's `BufferSource` accepts. Bytes coming in
+ * from arbitrary call sites are wide; the runtime check is the same — cast at
+ * the boundary so callers don't have to track the parameter.
  */
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
   const out = new Uint8Array(digest);
   let hex = '';
   for (const b of out) hex += b.toString(16).padStart(2, '0');
@@ -28,9 +34,13 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * byte-identical to the previous `node:crypto.createHmac('sha256', key)`.
  */
 export async function hmacSha256(message: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
-  const ck = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign'
-  ]);
-  const sig = await crypto.subtle.sign('HMAC', ck, message);
+  const ck = await crypto.subtle.importKey(
+    'raw',
+    key as BufferSource,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', ck, message as BufferSource);
   return new Uint8Array(sig);
 }

@@ -128,8 +128,10 @@ async function exportOne(
   if (result.status === 'ok' && typeof URL?.createObjectURL === 'function') {
     try {
       // The Blob is constructed from the bytes the library produced. The
-      // global Blob constructor in jsdom accepts a BlobPart[].
-      const blob = new Blob([result.pdfBytes], { type: 'application/pdf' });
+      // global Blob constructor in jsdom accepts a BlobPart[]. TS 6 narrows
+      // the Uint8Array buffer parameter; cast at the boundary (runtime
+      // contract is identical to TS 5.x).
+      const blob = new Blob([result.pdfBytes as BlobPart], { type: 'application/pdf' });
       // Ignore the returned URL — the test's spy records the call; the
       // library does not retain the URL beyond returning the bytes.
       void URL.createObjectURL(blob);
