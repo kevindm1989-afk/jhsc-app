@@ -163,8 +163,7 @@
         bind:value={body}
         aria-required="true"
         data-testid="reprisal-body"
-        rows="8"
-      ></textarea>
+        rows="8"></textarea>
     </div>
 
     <div class="field">
