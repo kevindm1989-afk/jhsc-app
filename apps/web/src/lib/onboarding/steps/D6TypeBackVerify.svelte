@@ -26,8 +26,7 @@
     autocomplete="off"
     spellcheck="false"
     autocapitalize="none"
-    autocorrect="off"
-  ></textarea>
+    autocorrect="off"></textarea>
 </section>
 
 <style>

@@ -262,8 +262,7 @@
         aria-invalid={bodyInvalid ? 'true' : 'false'}
         aria-describedby={bodyInvalid ? bodyErrId : undefined}
         data-testid="concern-body"
-        rows="6"
-      ></textarea>
+        rows="6"></textarea>
       {#if bodyInvalid}
         <p id={bodyErrId} role="alert" class="field-error">
           {t('concern.intake.validation.body_required')}
