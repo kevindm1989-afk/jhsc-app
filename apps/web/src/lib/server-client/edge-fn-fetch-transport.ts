@@ -86,7 +86,7 @@ export function createEdgeFnFetchTransport(
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
 
   return async (body) => {
-    let jwt: string | null = null;
+    let jwt: string | null;
     try {
       jwt = await Promise.resolve(opts.getJwt());
     } catch {

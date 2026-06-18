@@ -72,7 +72,12 @@
     }
   }
 
+  // The `lastSessionId = …` below is READ on the NEXT reactive invocation
+  // (the `$: if` predicate one line up), not within this block. The
+  // no-useless-assignment rule's intra-block flow analysis cannot see
+  // cross-invocation reads, so the assignment is suppressed.
   $: if (enrollment_session_id !== lastSessionId) {
+    // eslint-disable-next-line no-useless-assignment
     lastSessionId = enrollment_session_id;
     unsubscribe();
     controller = createShowAgainController({

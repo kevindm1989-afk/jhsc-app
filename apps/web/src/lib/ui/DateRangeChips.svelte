@@ -38,9 +38,11 @@
 
   // Local bindings so the worker can type a custom range without
   // navigating mid-keystroke. The Apply link's href reactively
-  // composes the new URL.
-  let localFrom = '';
-  let localTo = '';
+  // composes the new URL. Inits omitted — the `$:` blocks below
+  // assign on the initial run (Svelte reactive declarations fire
+  // before first DOM read).
+  let localFrom;
+  let localTo;
   $: localFrom = fromParam ?? '';
   $: localTo = toParam ?? '';
 
