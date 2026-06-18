@@ -106,7 +106,7 @@ runner. Locally, install only what a given task needs.
 ## Quick start
 
 ```sh
-nvm use                 # Node 22 per .nvmrc
+nvm use                 # Node 24 per .nvmrc
 pnpm install            # workspace deps (run from the repo root)
 
 pnpm dev                # dev server (apps/web)
