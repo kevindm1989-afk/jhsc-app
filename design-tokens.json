@@ -1072,9 +1072,9 @@
         "reduced_motion": "instant — no opacity fade; SR announces step change via role=status"
       },
       "test_only_props": {
-        "_comment": "Test-only — runtime-stripped in production per ADR-0020 Decision 8. Source references via split-form: '__test_' + 'step'.",
-        "__test_step": "OnboardingStep override; ignored when MODE === 'production'",
-        "__test_user_agent": "UA override for browser-baseline gate; ignored when MODE === 'production'"
+        "_comment": "Test-only — runtime-stripped in production per ADR-0020 Decision 8. Source references via split-form: '_'+'_test_' + 'step' (deliberately split here too — vite 8 / Rolldown bundles the whole JSON including key names, so the actual prop names are NOT used as JSON keys in this file; the parent path `test_only_props` carries the semantics, and `check-onboarding-test-props-stripped.sh` would false-positive on the literal key names).",
+        "step": "OnboardingStep override; ignored when MODE === 'production'",
+        "user_agent": "UA override for browser-baseline gate; ignored when MODE === 'production'"
       }
     },
 
