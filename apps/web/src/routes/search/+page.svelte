@@ -47,9 +47,14 @@
   let lastRecorded = '';
   $: {
     const q = $page.url.searchParams.get('q')?.trim() ?? '';
+    // `lastRecorded = q` below is READ on the NEXT reactive invocation (the
+    // `q !== lastRecorded` predicate two lines up), not in this block. The
+    // no-useless-assignment rule's intra-block flow analysis cannot see
+    // cross-invocation reads, so the assignment is suppressed.
     if (q && q !== lastRecorded) {
       recordRecentSearch(q);
       recents = listRecentSearches();
+      // eslint-disable-next-line no-useless-assignment
       lastRecorded = q;
     }
   }

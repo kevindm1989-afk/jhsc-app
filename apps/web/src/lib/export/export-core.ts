@@ -213,7 +213,7 @@ export async function proceedExport(
   // 3. F-22 — RLS-gated row fetch.
   let minutesRow: MinutesFinalRow | null = null;
   let recommendationRow: RecommendationRow | null = null;
-  let derived: readonly string[] = [];
+  let derived: readonly string[];
   if (request.kind === 'minutes.final') {
     const r = await store.fetchMinutesFinalRow(request.actor_user_id, request.target_id);
     if (r.ok === false)

@@ -86,7 +86,6 @@ export class PhotoUnsupportedFormatError extends Error {
 
 function stripJpegMetadata(input: Uint8Array): Uint8Array {
   const out: number[] = [];
-  let i = 0;
   // Fail-closed for non-JPEG inputs (HEIC, PNG, WebP). Silent destroy
   // would be a production-critical bug — see PhotoUnsupportedFormatError
   // above. T10.1 / G-T10-5 wires the real canvas decode-and-re-encode
@@ -95,7 +94,7 @@ function stripJpegMetadata(input: Uint8Array): Uint8Array {
     throw new PhotoUnsupportedFormatError();
   }
   out.push(MARK, M_SOI);
-  i = 2;
+  let i = 2;
   while (i < input.length) {
     // Find next marker.
     if (input[i] !== MARK) {
@@ -113,7 +112,6 @@ function stripJpegMetadata(input: Uint8Array): Uint8Array {
     if (m === M_EOI) {
       // End of image.
       out.push(MARK, M_EOI);
-      i = segStart;
       break;
     }
     if (m === M_SOI) {

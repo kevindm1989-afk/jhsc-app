@@ -84,7 +84,7 @@
     }
 
     /** @type {Uint8Array | null} */
-    let privateKey = null;
+    let privateKey;
     try {
       privateKey = await getIdentityPrivateKey(userId);
     } catch {
