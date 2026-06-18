@@ -620,6 +620,16 @@ export async function mountDestructiveConfirmWithDelayedReady(opts: {
   // Focus inside the modal at t=0 (M-53a).
   primaryButton.focus();
 
+  // Install fake timers BEFORE scheduling the ready-delay setTimeout. Under
+  // vitest 4's stricter scheduling, scheduling the timeout against the REAL
+  // clock and then swapping to fake timers afterward leaves the timeout
+  // queued on the real clock — by the time the test runs `advanceBy(10)` the
+  // real clock has already elapsed ≥`ready_delay_ms` (200ms baseline) and the
+  // ready gate has already opened, so the gate-check assertions panic. In
+  // vitest 3 useFakeTimers retroactively captured already-queued timers; v4
+  // does not. Install first, then queue.
+  vi.useFakeTimers({ shouldAdvanceTime: false });
+
   let resolveFn: () => void = () => {
     state.isReady = true;
     primaryButton.setAttribute('aria-disabled', 'false');
@@ -633,8 +643,6 @@ export async function mountDestructiveConfirmWithDelayedReady(opts: {
     state.isReady = true;
     primaryButton.setAttribute('aria-disabled', 'false');
   };
-
-  vi.useFakeTimers({ shouldAdvanceTime: false });
 
   return {
     modalSubtree: dialog,

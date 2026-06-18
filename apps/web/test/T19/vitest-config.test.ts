@@ -28,10 +28,12 @@
  *     leak the structured logger to real console + real Date.now,
  *     making half the time-sensitive tests flaky.
  *
- *   - `pool: 'threads'` + `singleThread: true` — single-threaded
+ *   - `pool: 'threads'` + `fileParallelism: false` — single-threaded
  *     execution. The determinism contract assumes serial execution;
- *     drift to `'forks'` or multi-thread breaks the singleThread
- *     guarantee that the assertion helpers depend on.
+ *     drift to `'forks'` or multi-thread breaks the single-thread
+ *     guarantee that the assertion helpers depend on. (Vitest 4
+ *     migration: the v3-era `poolOptions.threads.singleThread: true`
+ *     was replaced by the top-level `fileParallelism: false`.)
  */
 
 import { describe, expect, it } from 'vitest';
@@ -70,10 +72,12 @@ describe('T19.1 — vitest.config.ts structural contract', () => {
     expect(src).toMatch(/setupFiles:\s*\[\s*['"]\.\/test\/setup\.ts['"]\s*\]/);
   });
 
-  it('uses pool: \'threads\' with singleThread: true (serial-execution determinism)', () => {
+  it("uses pool: 'threads' with fileParallelism: false (serial-execution determinism)", () => {
     const src = readFileSync(CONFIG_PATH, 'utf8');
     expect(src).toMatch(/\bpool:\s*['"]threads['"]/);
-    expect(src).toMatch(/\bsingleThread:\s*true/);
+    // Vitest 4 replaced v3's `poolOptions.threads.singleThread: true` with
+    // the top-level `fileParallelism: false`.
+    expect(src).toMatch(/\bfileParallelism:\s*false/);
   });
 
   it('excludes the Deno edge-functions test root (those run in a separate Deno runner)', () => {
