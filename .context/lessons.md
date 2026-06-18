@@ -21,6 +21,26 @@ Append newest on top. Be specific — vague lessons don't prevent anything.
 
 ## Entries
 
+## 2026-06-18 — Vitest 4 does NOT retroactively capture setTimeouts scheduled before `vi.useFakeTimers()`
+
+**Symptom:** `d6-panic-wipe.test.ts` flaked under every major-bump matrix this morning (I-batch + J1 attempts). The H3 investigation chased inter-file pollution exhaustively (per-file forks, isolate modes, bisection by directory) and found no single-file culprit. The flake persisted.
+
+**Root cause:** the modal harness at `apps/web/test/_helpers/protected-modal-harness.ts` scheduled the ready-delay `setTimeout` against the real clock, THEN called `vi.useFakeTimers()`. Vitest 3 silently captured pre-existing timers retroactively; Vitest 4 does not — the timer stays on the real clock and fires by wall-time, making the spec race-y against any test setup that takes longer than `ready_delay_ms` (200ms baseline).
+
+**Fix:** swap the order — `vi.useFakeTimers()` FIRST, then schedule the `setTimeout` (PR #292 J1, `protected-modal-harness.ts`).
+
+**Prevention:** in any test helper that mixes fake timers with scheduled callbacks, install fake timers BEFORE scheduling. Treat the pre-Vitest-4 retroactive-capture behaviour as a historical accident, not the contract. When a flake survives an inter-file pollution audit (per-file forks, isolate-true all-pass-equivalent), check intra-file timer-install ordering NEXT — it's the next-most-common cause and the cheapest to verify.
+
+## 2026-06-18 — Rolldown (Vite 8) bundles unused JSON keys; Rollup (Vite 5/7) tree-shook them
+
+**Symptom:** PR #292 J1 (vite 7→8) tripped the G-T19-5 strip gate on the production bundle. Three banned literals (`__test_step`, `__test_user_agent`, `__test_*` family) leaked into `apps/web/build/_app/immutable/nodes/0.<hash>.js`. The runtime never reads those keys; they're documentation entries in `design-tokens.json`.
+
+**Root cause:** Rolldown's JSON handling bundles the entire object including key names; Rollup's JSON plugin tree-shook unreferenced keys. The `_comment` field in `design-tokens.json:1074` already noted "Source references via split-form: '__test_' + 'step'" — the author had anticipated grep evasion but left the LITERAL key names in the JSON. Rollup masked it; Rolldown exposed it.
+
+**Fix:** rename the doc keys so the leaked names aren't test-prop strings — the parent path `test_only_props.*` already carries semantics; inner keys don't need to mirror prop names verbatim. Renamed `__test_step` → `step`, `__test_user_agent` → `user_agent` (PR #292 fixup).
+
+**Prevention:** under Rolldown, treat JSON key names as part of the shipped bundle. Don't encode test-only or sensitive vocabulary into JSON keys assuming tree-shaking will strip them. Lean on G-T19-5 / similar strip gates as a safety net, but design source so the gate never has to catch it.
+
 ## 2026-06-18 — Test-runtime cleanup must be EXPLICIT; auto-cleanup detection breaks at every major matrix bump
 
 **Symptom:** `d6-panic-wipe.test.ts` failed intermittently with "multiple dialog in DOM" across THREE separate major-bump combos in one week — F2 (vitest 2→3 + svelte 5.56, PR #282), G1 (sveltekit 2.65 attempt, deferred), G2 (jsdom 25→29, PR #284). Each time the surface symptom was identical; each time the proximate fix was a different testing-library version pin.
@@ -51,15 +71,15 @@ Append newest on top. Be specific — vague lessons don't prevent anything.
 
 **Prevention:** when adding `@ts-expect-error` to assert "this MUST not type-check," verify by REMOVING the suppression and confirming `tsc` complains. If it doesn't complain, the surrounding type assertion is too broad and the test is a no-op. Mirrors the synthetic-probe rule for ESLint flat-config from 2026-06-16.
 
-## 2026-06-16 — ESLint flat-config `no-restricted-syntax`: two traps (last-match clobber + too-broad selector)
+## 2026-06-16 — ESLint flat-config rule traps: last-match clobber, too-broad selector, intra-block flow analysis vs cross-invocation reads
 
-**Symptom:** (1) a newly-added `no-restricted-syntax` block scoped to two files did NOTHING — the rule never fired. (2) A first-cut selector `ObjectExpression > SpreadElement` (all object-literal spread) false-positived on a legitimate `...(cond ? { x } : {})` idiom.
+**Symptom:** (1) a newly-added `no-restricted-syntax` block scoped to two files did NOTHING — the rule never fired. (2) A first-cut selector `ObjectExpression > SpreadElement` (all object-literal spread) false-positived on a legitimate `...(cond ? { x } : {})` idiom. (3, added 2026-06-18 via PR #289) `eslint:recommended` in ESLint v10 enabled `no-useless-assignment` — 9 errors surfaced; 7 were genuine init-shadowed-before-read, 2 were FALSE POSITIVES on Svelte `$:` reactive blocks where the assigned value IS read on a LATER reactive invocation.
 
-**Root cause:** (1) ESLint flat config is last-match-wins PER RULE — when multiple config objects set the same rule for an overlapping `files` glob, the LAST one fully REPLACES the value (no array merge). An earlier broad block (`src/**/*.ts`, G-T17-8) clobbered the new narrower block back to its own selectors. (2) The selector matched a structural shape rather than the actual anti-pattern (spreading a bound source-object variable `{ ...row }`, the F-19 leak risk).
+**Root cause:** (1) ESLint flat config is last-match-wins PER RULE — when multiple config objects set the same rule for an overlapping `files` glob, the LAST one fully REPLACES the value (no array merge). An earlier broad block (`src/**/*.ts`, G-T17-8) clobbered the new narrower block back to its own selectors. (2) The selector matched a structural shape rather than the actual anti-pattern (spreading a bound source-object variable `{ ...row }`, the F-19 leak risk). (3) `no-useless-assignment`'s flow analysis is intra-block; it cannot see cross-invocation reads. Svelte `$: if (foo !== last) { last = foo; … }` reads `last` on the NEXT reactive pass; the rule sees only the current block and reports the assignment as dead.
 
-**Fix:** (1) move the narrower block AFTER the broad one and carry BOTH selectors so nothing is lost on the override. (2) narrow on the AST node's discriminating property — `ObjectExpression > SpreadElement[argument.type='Identifier']` bans `{ ...row }` while allowing inline-conditional + array spreads (PR #271, G-T11-9, `apps/web/eslint.config.js`).
+**Fix:** (1) move the narrower block AFTER the broad one and carry BOTH selectors so nothing is lost on the override. (2) narrow on the AST node's discriminating property — `ObjectExpression > SpreadElement[argument.type='Identifier']` bans `{ ...row }` while allowing inline-conditional + array spreads (PR #271, G-T11-9, `apps/web/eslint.config.js`). (3) suppress the two false positives with `eslint-disable-next-line no-useless-assignment` AND a doc comment naming the cross-invocation reader; drop the genuine init for the other seven (PR #289 I2).
 
-**Prevention:** after adding/editing any array-valued flat-config rule, never trust that adding the block is sufficient — verify it fires with a synthetic probe (inject the banned syntax, run eslint, confirm the error, revert), and run the candidate selector against the WHOLE tree first to catch false-positives. Narrow on AST properties; do NOT carve per-file exceptions (they let real violations slip through new files).
+**Prevention:** after adding/editing any array-valued flat-config rule, never trust that adding the block is sufficient — verify it fires with a synthetic probe (inject the banned syntax, run eslint, confirm the error, revert), and run the candidate selector against the WHOLE tree first to catch false-positives. Narrow on AST properties; do NOT carve per-file exceptions (they let real violations slip through new files). For any rule whose flow analysis is intra-block (`no-useless-assignment`, dead-code variants), audit Svelte `$:` and component-lifecycle reads before assuming a flagged site is dead. Suppress with a named-reader comment, never bare.
 
 ## 2026-06-16 — A Postgres CHECK cannot contain a subquery; wrap the predicate in an IMMUTABLE function
 

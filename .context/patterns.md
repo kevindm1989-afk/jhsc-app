@@ -25,6 +25,16 @@ short code example
 
 ## Entries
 
+## TS 6 `BufferSource` / `BlobPart` cast at Web platform API boundaries
+
+**When to use:** passing a `Uint8Array` to `crypto.subtle.*`, WebAuthn `credentials.get/create`, `new Blob([...])`, or any Web platform API whose parameter type is `BufferSource` / `BlobPart`.
+
+**How:** TS 6 propagates the `Uint8Array`'s `<ArrayBufferLike>` default, which is strictly distinct from the narrow `<ArrayBuffer>` the platform types accept. Cast at the API boundary: `crypto.subtle.digest('SHA-256', bytes as BufferSource)`, `new Blob([bytes as BlobPart])`. Keep the cast at the call site — do NOT widen the upstream variable's type to the narrow form (that bleeds the cast up the type graph).
+
+**Example:** PR #290 I3 — 5 cast sites across `lib/crypto/hash.ts` (3 in WebCrypto digest/importKey/sign), `lib/auth/webauthn-assertion.ts` (1 in WebAuthn challenge), `lib/export/index.ts` (1 in Blob construction).
+
+**When not to use:** when the upstream producer can be typed as `Uint8Array<ArrayBuffer>` (narrow buffer) end-to-end with no ergonomic cost. Prefer narrowing at the source; the call-site cast is for boundaries where the source is third-party or shared with code that needs the wide variant.
+
 ## CI gate budget = current measured + 25% headroom
 
 **When to use:** wiring a CI regression gate against any size, latency, or throughput metric (bundle size, bench p50/p95, query plan cost, output-artifact count).
