@@ -20,7 +20,32 @@
  *     affects globalThis inside the test runner process.
  */
 
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
+import { cleanup } from '@testing-library/svelte';
+
+// Belt-and-suspenders DOM cleanup + timer reset. Three guarantees:
+//
+// (1) `@testing-library/svelte`'s auto-install `afterEach(cleanup)` is
+//     gated by a process-name detection of the test runner that has
+//     proven fragile across the vitest / svelte / jsdom / kit major-bump
+//     matrix (see PR #282 fixup). Calling cleanup() explicitly makes
+//     the unmount lifecycle independent of which runtime got detected.
+//
+// (2) `vi.clearAllTimers()` drops any setTimeout/setInterval queued by
+//     a test (a common leak shape is `setTimeout(setReady, 200)` inside
+//     a component constructor — if the test forgets to fake-advance to
+//     drain it, the callback fires DURING THE NEXT TEST'S render and
+//     mutates DOM that no longer belongs to it).
+//
+// (3) `vi.useRealTimers()` resets the timer engine so the next test
+//     starts with a real clock unless it explicitly opts in. Without
+//     this a forgotten `vi.useFakeTimers()` in one test silently
+//     replaces real timers for every subsequent test in the file.
+afterEach(() => {
+  cleanup();
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
 
 // The test-runner's `setTimeout` is whatever vitest's fake-timers swaps
 // in when `vi.useFakeTimers()` is active. We don't intercept it; we

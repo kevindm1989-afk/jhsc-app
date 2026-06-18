@@ -41,7 +41,9 @@ describe('T19.1 — test/setup.ts exists + imports vi from vitest', () => {
 
   it('imports vi from vitest (single source of truth for fake timers)', () => {
     const src = readFileSync(SETUP_PATH, 'utf8');
-    expect(src).toMatch(/import\s*{\s*vi\s*}\s*from\s*['"]vitest['"]/);
+    // Match any named-import shape that includes `vi` from 'vitest' — bare
+    // `{ vi }`, or alongside other vitest symbols like `{ afterEach, vi }`.
+    expect(src).toMatch(/import\s*\{[^}]*\bvi\b[^}]*\}\s*from\s*['"]vitest['"]/);
   });
 });
 
