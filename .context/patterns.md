@@ -25,6 +25,16 @@ short code example
 
 ## Entries
 
+## CI gate budget = current measured + 25% headroom
+
+**When to use:** wiring a CI regression gate against any size, latency, or throughput metric (bundle size, bench p50/p95, query plan cost, output-artifact count).
+
+**How:** measure the current value under the same CI environment the gate will run in, then set the threshold to `current * 1.25`. The 25% headroom absorbs legitimate growth (one feature, one new dep) without false-positive churn, while still catching accidental-doubling-class regressions. Document the source measurement and the date in the gate config so a future bump is auditable.
+
+**Example:** PR #285 (G3) bundle-size gate — measured chunks 5.25 MB, budget set to 6.65 MB. The perf-watcher's pending bench-regression gate proposal uses the same +25% formula.
+
+**When not to use:** when the baseline is a single noisy measurement. If the rme of the baseline run is comparable to or larger than 25%, a +25% gate false-positives immediately. See the F4 non-decision (PR #279): bench harness shipped WITHOUT a CI gate because the empty-scenario baseline had ±18% rme on a single run; the +25% budget would have been swallowed by run-to-run noise. Gate only after you have a multi-run baseline with rme well below the budget headroom.
+
 ## library-level lease test pins the WEAKER guarantee; production race defense lives at the SQL layer
 
 **When to use:** a TS library implements a cooperative checkpoint (in-memory lease window, last-run timestamp, soft-debounce) that callers honour, but the real race defense is a DB-side `pg_advisory_xact_lock` / unique constraint / serializable txn at the migration layer.
@@ -67,7 +77,7 @@ short code example
 
 ## status-block tidying sweep (closing known-gaps that landed structurally)
 
-**When to use:** a known-gap was resolved structurally (the code landed) but the gap entry was never updated. Sweep for entries without `**Status (...)**` blocks.
+**When to use:** a known-gap was resolved structurally (the code landed) but the gap entry was never updated. Sweep for entries without `**Status (...)**` blocks. Same hazard applies to any hand-maintained CI inventory (migration lists, pgTAP test lists, fixture lists): they silently drop new artifacts that nobody remembered to add. PR #278 (F3) replaced the `ci.yml` hand-list with a glob + deny-list after discovering 3 missing migrations + 1 orphan pgTAP test.
 
 **How:** for each gap without a status block, verify the resolution landed (grep / file inspection), then append a `**Status (closed via X):** ...` block citing the file:line that resolves it. Batch the sweep into one PR per related cluster (T13, T14, T17, etc.).
 

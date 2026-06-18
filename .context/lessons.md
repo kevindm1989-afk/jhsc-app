@@ -21,6 +21,16 @@ Append newest on top. Be specific — vague lessons don't prevent anything.
 
 ## Entries
 
+## 2026-06-18 — Test-runtime cleanup must be EXPLICIT; auto-cleanup detection breaks at every major matrix bump
+
+**Symptom:** `d6-panic-wipe.test.ts` failed intermittently with "multiple dialog in DOM" across THREE separate major-bump combos in one week — F2 (vitest 2→3 + svelte 5.56, PR #282), G1 (sveltekit 2.65 attempt, deferred), G2 (jsdom 25→29, PR #284). Each time the surface symptom was identical; each time the proximate fix was a different testing-library version pin.
+
+**Root cause:** `@testing-library/svelte` auto-detects the test runner to decide whether to install an `afterEach(cleanup)` hook. The detection probes runner-internal globals that move on every vitest / jsdom / svelte major bump. When detection fails silently, no cleanup runs, DOM accumulates across specs, and a spec that asserts on dialog uniqueness panics.
+
+**Fix:** stop depending on auto-detection. In `apps/web/test/setup.ts` install `afterEach(cleanup)` explicitly, paired with `vi.clearAllTimers()` + `vi.useRealTimers()` to also drop any fake-timer state the spec installed (PR #284, G2).
+
+**Prevention:** for any matrix dependency that ships a "we'll auto-detect your runner" cleanup helper, opt out of the auto-detection on day one and call the cleanup primitive explicitly in a global setup file. The cost is one line; the saving is not debugging the same DOM-pollution symptom every time a peer dep bumps a major.
+
 ## 2026-06-17 — Bias-toward-skip after a long orchestration session; independent audit before declaring an arc done
 
 **Symptom:** after PR #272 the orchestrator declared "nothing actionable remains" in the open-gap registry. An independent librarian audit then surfaced ~10 real closures wrongly bucketed into HG-10 / HG-15 / T_n.1 skip categories. Bundle E (PRs #273–#276) shipped all of them.
@@ -81,15 +91,15 @@ Append newest on top. Be specific — vague lessons don't prevent anything.
 
 **Prevention:** in any cleanup sweep, first filter the gap list for items whose `**Blocker for:**` line names HG-10 (or any other external gate); skip those and note them explicitly in the PR body rather than attempting structural closure.
 
-## 2026-06-14 — Batched A→E tidying cadence for max throughput
+## 2026-06-18 — Parallel small-PR shipping cadence (supersedes 2026-06-14 batched A→E entry)
 
-**Symptom:** large doc/code cleanup backlog stalls when bundled into one PR (the user has to review a single sprawling diff). Trying to do everything in one shot wastes the orchestrator's context and produces ungrokable diffs.
+**Symptom:** large cleanup or dep-bump backlogs stall when bundled into one PR; reviewability is the bottleneck. Conversely, parallel small PRs collide on `package.json` / `pnpm-lock.yaml` once any one lands.
 
-**Root cause:** PR reviewability is a hard constraint; one big PR is harder to triage than five small focused ones.
+**Root cause:** PR reviewability and parallel-merge serialization are the two opposing pressures. Bundling helps the orchestrator's context but hurts the user; over-parallelizing helps throughput but creates lockfile churn.
 
-**Fix:** during the M3 / M9 cleanup arc (PRs #229–#246), the orchestrator ran the user-requested "1 and 2", "all three", "all four", "1 and 4", and "A→B→C→D→E" patterns. Each lettered batch was an independent small PR that stayed green on `scripts/verify.sh` and merged on its own.
+**Fix:** ship lettered/numbered small PRs in parallel (M3/M9 cleanup arc PRs #229–#246; Bundle F PRs #278–#282; Bundle G PRs #283–#285). When a predecessor lands, rebase the open siblings: `git rebase main` → resolve `package.json` by KEEPING THE UNION OF DEP BUMPS (never drop a sibling's bump) → `rm pnpm-lock.yaml && pnpm install` → `pnpm test` → `git push --force-with-lease`. F2 and G2 both needed this exact sequence after their predecessors merged.
 
-**Prevention:** when the user asks for max throughput on small cleanups, ship as a lettered sequence of small PRs, not one bundle. Each PR should be individually reviewable + revertable. The orchestrator schedules N PRs and the user merges them as they come in.
+**Prevention:** open the small PRs in parallel from the start; document the rebase recipe (union-of-bumps + regenerated lockfile + force-with-lease) in the PR description template so contributors don't reinvent it. Never resolve a lockfile conflict by hand-editing — always delete and regenerate.
 
 ## 2026-06-14 — Verify the gap before scaffolding "missing" code
 
