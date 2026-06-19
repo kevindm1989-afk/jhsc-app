@@ -43,6 +43,7 @@ export const RETENTION_SCHEDULE = Object.freeze({
   'audit.integrity_check.mismatch': { kind: 'fixed_years', years: 7, no_target_id: true },
   'audit.integrity_check.ran': { kind: 'fixed_months', months: 24, no_target_id: true },
   'auth.passkey.enrolled': { kind: 'fixed_days', days: 90 },
+  'auth.passkey.enroll_failed': { kind: 'fixed_days', days: 90 },
   'auth.passkey.revoked': { kind: 'fixed_days', days: 90 },
   // M8.A.3d — ADR-0018 §J (42-day hard-delete): the audit anchor for one
   // committed manifest's hard-delete. 7y per ADR-0018 §"Option H" mirror.
@@ -186,6 +187,7 @@ const RETENTION_EVENT_TYPES_RUNTIME: readonly RetentionEventType[] = [
   'audit.integrity_check.mismatch',
   'audit.integrity_check.ran',
   'auth.passkey.enrolled',
+  'auth.passkey.enroll_failed',
   'auth.passkey.revoked',
   // M8.A.3d — ADR-0018 §J.
   'backup.hard_deleted',
