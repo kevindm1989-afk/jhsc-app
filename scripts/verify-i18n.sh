@@ -29,6 +29,11 @@ fi
 # Files allowed to contain raw English text in templates.
 ALLOWLIST=(
   "$SRC/app.html"           # static fallback shell, system-font note
+  # ADR-0025 A3: the cold-instance bootstrap UI is an operator-only
+  # ephemeral page the deploying operator visits once then DELETES along
+  # with the Edge Function (A4). Never seen by a committee worker; AODA
+  # bilingual surface doesn't apply.
+  "$SRC/routes/bootstrap/+page.svelte"
 )
 
 violations=0

@@ -10,6 +10,11 @@
 #   - app.html system-font fallback colors (scaffolder-approved as
 #     fallback values used while CSS-variable boot races; tracked).
 #   - any file ending in `.tokens.ts` or `.tokens.svelte`.
+#   - ADR-0025 A3: `routes/bootstrap/+page.svelte` is the cold-instance
+#     bootstrap UI — operator-only ephemeral page deleted with the EF
+#     after first co-chair commits (A4). Never seen by a committee
+#     worker; design-token consistency for the worker-facing surface
+#     does not apply.
 
 set -uo pipefail
 
@@ -93,6 +98,7 @@ check() {
       -type d \( -name node_modules -o -name .svelte-kit -o -name build -o -name dist -o -name coverage \) -prune -o \
       -type f \( -name '*.svelte' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.scss' \) \
       ! -name '*.tokens.ts' ! -name '*.tokens.svelte' ! -name 'tokens.ts' ! -name 'app.html' \
+      ! -path '*/routes/bootstrap/+page.svelte' \
       -print0
   )
   matches=$(printf '%s' "$matches" | sed '/^$/d')

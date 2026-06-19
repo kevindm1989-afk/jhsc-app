@@ -48,6 +48,7 @@ The first eight rows are exactly the values from the ADR. `identity_privkey.reco
 | Enum value | When emitted | Required `meta` |
 |---|---|---|
 | `auth.passkey.enrolled` | First passkey bound on an account (TOTP destroyed in same txn) | `cred_id_pseudonym` (HMAC of WebAuthn credential id) |
+| `auth.passkey.enroll_failed` | WebAuthn registration ceremony rejected (forged attestation, expired/replayed challenge, origin/rpId mismatch, alg downgrade) — bootstrap EF or future enrollment paths emit this BEFORE any user/credential write | `outcome` ∈ closed set, `rp_id`, `origin`, optional `cred_id_pseudonym` |
 | `auth.passkey.revoked` | User or co-chair revokes a passkey | `cred_id_pseudonym`, `revoked_by_actor_pseudonym` |
 | `session.revoked` | Session token explicitly revoked (user "Revoke all sessions" or co-chair removal) | `session_id_pseudonym`, `revoked_by_actor_pseudonym`, `reason` ∈ {`user_action`,`co_chair_remove`,`policy_panic`} |
 

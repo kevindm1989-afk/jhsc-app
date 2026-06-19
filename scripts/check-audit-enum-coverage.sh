@@ -39,6 +39,7 @@ EXPECTED_ENUM=(
   committee_data_key.rotation.completed
   committee_data_key.member_revoked
   auth.passkey.enrolled
+  auth.passkey.enroll_failed
   auth.passkey.revoked
   session.revoked
   concern.created

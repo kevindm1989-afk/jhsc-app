@@ -25,6 +25,7 @@ export type RetentionEventType =
   | 'audit.integrity_check.mismatch'
   | 'audit.integrity_check.ran'
   | 'auth.passkey.enrolled'
+  | 'auth.passkey.enroll_failed'
   | 'auth.passkey.revoked'
   | 'backup.hard_deleted'
   | 'backup.manifest_written'
