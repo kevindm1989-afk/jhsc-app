@@ -70,7 +70,7 @@ BEGIN
       p_severity        => 'info',
       p_request_id      => NULL,
       p_meta            => jsonb_build_object(
-        'session_id_pseudonym', LEFT(encode(hmac(p_session_id::text::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16),
+        'session_id_pseudonym', LEFT(encode(hmac(p_session_id::text::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'), 'hex'), 16),
         'revoked_by_actor_pseudonym', p_actor_pseudonym,
         'reason', p_reason
       )

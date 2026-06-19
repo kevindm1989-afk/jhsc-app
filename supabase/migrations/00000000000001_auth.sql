@@ -410,7 +410,7 @@ BEGIN
   -- B4: compare HMAC(submitted-code) to the stored secret_hash. Raw code
   -- is never persisted; this is the only point where p_totp_code is
   -- handled in the same transaction frame as the stored hash.
-  IF v_bootstrap.secret_hash <> hmac(p_totp_code::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256') THEN
+  IF v_bootstrap.secret_hash <> hmac(p_totp_code::bytea, private._hmac_pseudonym_key()::bytea, 'sha256') THEN
     UPDATE public.auth_totp_bootstraps
        SET wrong_attempts = wrong_attempts + 1,
            locked_at = CASE WHEN wrong_attempts + 1 >= 5 THEN now() ELSE locked_at END
@@ -423,7 +423,7 @@ BEGIN
   -- B1: HMAC, not bare SHA. Full 32-byte HMAC stored for byte-equality
   -- reuse detection.
   INSERT INTO public.auth_totp_consumed_log (user_id, totp_code_hash)
-    VALUES (p_user_id, hmac(p_totp_code::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'));
+    VALUES (p_user_id, hmac(p_totp_code::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'));
 
   DELETE FROM public.auth_totp_bootstraps WHERE id = v_bootstrap.id;
 
@@ -449,7 +449,7 @@ BEGIN
     p_severity        => 'info',
     p_request_id      => NULL,
     p_meta            => jsonb_build_object(
-      'cred_id_pseudonym', LEFT(encode(hmac(p_credential_id::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16)
+      'cred_id_pseudonym', LEFT(encode(hmac(p_credential_id::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'), 'hex'), 16)
     )
   );
 
@@ -494,7 +494,7 @@ BEGIN
       p_severity        => 'info',
       p_request_id      => NULL,
       p_meta            => jsonb_build_object(
-        'session_id_pseudonym', LEFT(encode(hmac(p_session_id::text::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16),
+        'session_id_pseudonym', LEFT(encode(hmac(p_session_id::text::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'), 'hex'), 16),
         'revoked_by_actor_pseudonym', p_actor_pseudonym,
         'reason', p_reason
       )
@@ -581,7 +581,7 @@ BEGIN
       p_severity        => 'info',
       p_request_id      => NULL,
       p_meta            => jsonb_build_object(
-        'cred_id_pseudonym',          LEFT(encode(hmac(p_credential_id::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16),
+        'cred_id_pseudonym',          LEFT(encode(hmac(p_credential_id::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'), 'hex'), 16),
         'revoked_by_actor_pseudonym', p_revoker_pseudonym
       )
     );
