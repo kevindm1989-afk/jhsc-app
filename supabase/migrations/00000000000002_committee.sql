@@ -189,7 +189,7 @@ RETURNS varchar(16)
 LANGUAGE sql
 STABLE
 AS $$
-  SELECT LEFT(encode(hmac(p_uid::text::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'), 'hex'), 16)::varchar(16);
+  SELECT LEFT(encode(hmac(p_uid::text::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'), 'hex'), 16)::varchar(16);
 $$;
 
 -- ===========================================================================

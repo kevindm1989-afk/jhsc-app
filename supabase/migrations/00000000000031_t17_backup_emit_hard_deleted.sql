@@ -139,7 +139,7 @@ BEGIN
   v_actor_pseudonym := LEFT(
     encode(
       hmac('system:backup-pass'::bytea,
-           current_setting('app.hmac_pseudonym_key')::bytea,
+           private._hmac_pseudonym_key()::bytea,
            'sha256'),
       'hex'
     ),

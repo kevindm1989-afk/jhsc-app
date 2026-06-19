@@ -41,7 +41,7 @@ BEGIN
   -- a missing GUC return NULL instead of raising. NULL → empty-string SHA
   -- which will never match a real key SHA, so the caller's parity check
   -- fails closed even when the GUC isn't set on this connection.
-  v_key := COALESCE(current_setting('app.hmac_pseudonym_key', true), '');
+  v_key := COALESCE(private._hmac_pseudonym_key(true), '');
   RETURN encode(digest(v_key::bytea, 'sha256'), 'hex');
 END;
 $$;

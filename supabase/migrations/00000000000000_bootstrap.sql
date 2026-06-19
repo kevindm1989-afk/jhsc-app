@@ -49,6 +49,88 @@ END $$;
 SET search_path TO public, extensions;
 
 -- ---------------------------------------------------------------------------
+-- HMAC pseudonym-key accessor (ADR-0016 / ADR-0024) — GUC-OR-Vault resolver.
+--
+-- The pseudonym key was originally a Postgres GUC (`app.hmac_pseudonym_key`).
+-- That works on plain Postgres (CI's committee-db-tests job) and the local
+-- `supabase start` stack, where a superuser can `ALTER DATABASE … SET` the GUC.
+-- It does NOT work on a hosted Supabase project: PostgreSQL 15+ requires
+-- superuser (or `GRANT SET ON PARAMETER`) to set a custom placeholder GUC, and
+-- the hosted `postgres` role is not a superuser — so the key cannot live in the
+-- GUC there (you get `42501: permission denied to set parameter`).
+--
+-- This accessor resolves the key from whichever source is configured:
+--   1. the `app.hmac_pseudonym_key` GUC          (CI plain-PG, local stack)
+--   2. the Supabase Vault secret `hmac_pseudonym_key`  (hosted Supabase)
+-- It is the single read-point every HMAC/pseudonym call site now uses (the 18
+-- former inline `current_setting(...)` reads + the key-parity SHA function).
+--
+-- Security posture:
+--   * Lives in the `private` schema, which PostgREST does NOT expose — the raw
+--     key is unreachable over the REST/RPC surface regardless of grants.
+--   * SECURITY DEFINER (owned by the migration role) so it can read
+--     `vault.decrypted_secrets` (granted to postgres/service_role on Supabase)
+--     on behalf of callers WITHOUT widening vault access to app roles. Every
+--     existing key-reading function is itself SECURITY DEFINER owned by the
+--     same migration role, so the inner call runs as the owner and needs no
+--     extra grant; EXECUTE is revoked from PUBLIC.
+--   * `SET search_path = ''` + fully-qualified references (the SECURITY DEFINER
+--     hardening pattern); `pg_catalog` is always implicitly searched, so
+--     `current_setting` / `nullif` / `pg_extension` still resolve.
+--   * No code path returns the raw key to a client: key_parity_server_sha
+--     returns only its SHA, the pseudonym fns return only HMAC outputs.
+--
+-- `p_missing_ok => true` returns NULL instead of raising when no source is
+-- configured (only the key-parity SHA fn uses that; the HMAC call sites take
+-- the default `false` and let it raise rather than silently HMAC with no key).
+-- ---------------------------------------------------------------------------
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION private._hmac_pseudonym_key(p_missing_ok boolean DEFAULT false)
+  RETURNS text
+  LANGUAGE plpgsql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = ''
+AS $$
+DECLARE
+  v_key text;
+BEGIN
+  -- 1. GUC source (CI plain-Postgres, local supabase stack).
+  v_key := nullif(current_setting('app.hmac_pseudonym_key', true), '');
+  IF v_key IS NOT NULL THEN
+    RETURN v_key;
+  END IF;
+
+  -- 2. Supabase Vault source (hosted Supabase, where the GUC cannot be set).
+  --    The pg_extension guard ensures the `vault.*` reference is never reached
+  --    on plain Postgres, where the supabase_vault extension does not exist
+  --    (plpgsql plans the inner statement lazily, so the unresolved reference
+  --    never trips on CI).
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'supabase_vault') THEN
+    SELECT nullif(s.decrypted_secret, '')
+      INTO v_key
+      FROM vault.decrypted_secrets AS s
+      WHERE s.name = 'hmac_pseudonym_key'
+      ORDER BY s.created_at DESC
+      LIMIT 1;
+    IF v_key IS NOT NULL THEN
+      RETURN v_key;
+    END IF;
+  END IF;
+
+  IF p_missing_ok THEN
+    RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'hmac_pseudonym_key is not configured (set the app.hmac_pseudonym_key GUC, or create the Supabase Vault secret named hmac_pseudonym_key)'
+    USING errcode = 'undefined_object';
+END;
+$$;
+
+REVOKE ALL ON FUNCTION private._hmac_pseudonym_key(boolean) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------------
 -- Dev/CI bootstrap for the pseudonym-key GUC (ADR-0016).
 --
 -- The auth migration (00000000000001) checks `app.hmac_pseudonym_key` at

@@ -57,7 +57,7 @@ BEGIN
     encode(
       hmac(
         v_caller_uid::text::bytea,
-        current_setting('app.hmac_pseudonym_key')::bytea,
+        private._hmac_pseudonym_key()::bytea,
         'sha256'
       ),
       'hex'
@@ -123,7 +123,7 @@ BEGIN
     encode(
       hmac(
         v_caller_uid::text::bytea,
-        current_setting('app.hmac_pseudonym_key')::bytea,
+        private._hmac_pseudonym_key()::bytea,
         'sha256'
       ),
       'hex'

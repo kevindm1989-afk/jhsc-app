@@ -122,7 +122,7 @@ BEGIN
     RAISE EXCEPTION 'duplicate' USING ERRCODE = '23505';
   END IF;
 
-  v_hash := hmac(p_raw_nonce, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256');
+  v_hash := hmac(p_raw_nonce, private._hmac_pseudonym_key()::bytea, 'sha256');
 
   -- Garbage-collect prior unconsumed challenges from this caller so a
   -- replay-or-spam attempt can't accumulate state.
@@ -178,7 +178,7 @@ BEGIN
     RAISE EXCEPTION 'challenge_expired' USING ERRCODE = 'P0001';
   END IF;
 
-  v_observed := hmac(p_raw_nonce_observed, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256');
+  v_observed := hmac(p_raw_nonce_observed, private._hmac_pseudonym_key()::bytea, 'sha256');
   IF v_observed <> v_row.nonce_hash THEN
     -- Mismatch: surface the reason. We do NOT increment a server-side
     -- counter — Postgres rolls back the whole function on RAISE so any

@@ -190,7 +190,7 @@ BEGIN
   v_actor_pseudonym := LEFT(
     encode(
       hmac('system:integrity-check'::bytea,
-           current_setting('app.hmac_pseudonym_key')::bytea,
+           private._hmac_pseudonym_key()::bytea,
            'sha256'),
       'hex'
     ),
@@ -303,7 +303,7 @@ BEGIN
   v_actor_pseudonym := LEFT(
     encode(
       hmac('system:integrity-check'::bytea,
-           current_setting('app.hmac_pseudonym_key')::bytea,
+           private._hmac_pseudonym_key()::bytea,
            'sha256'),
       'hex'
     ),

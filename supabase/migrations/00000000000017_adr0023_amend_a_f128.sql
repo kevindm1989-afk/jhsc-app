@@ -63,7 +63,7 @@ BEGIN
   -- the computation in a SECURITY DEFINER fn is the only path.
   v_pseudonym := LEFT(
     encode(
-      hmac(p_user_id::text::bytea, current_setting('app.hmac_pseudonym_key')::bytea, 'sha256'),
+      hmac(p_user_id::text::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'),
       'hex'
     ),
     16
