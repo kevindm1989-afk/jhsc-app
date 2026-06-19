@@ -192,6 +192,18 @@ AS $$
   SELECT LEFT(encode(hmac(p_uid::text::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'), 'hex'), 16)::varchar(16);
 $$;
 
+-- `_committee_pseudonym` is an INTERNAL helper, only ever evaluated nested
+-- inside the SECURITY DEFINER mutation/audit functions below (where argument
+-- evaluation runs as the function owner). It is NOT a public RPC. Postgres
+-- defaults new functions to `EXECUTE TO PUBLIC`, which — being in the
+-- PostgREST-exposed `public` schema — would otherwise let `authenticated`/
+-- `anon` invoke it directly over RPC. Revoke explicitly so the posture is
+-- closed-by-construction and matches every other `_`-prefixed internal
+-- helper. (Security-reviewer note, HMAC-key-Vault change.) The nested
+-- SECURITY DEFINER call paths are unaffected — they run as the owner, which
+-- retains EXECUTE as the function's owner.
+REVOKE ALL ON FUNCTION public._committee_pseudonym(uuid) FROM PUBLIC;
+
 -- ===========================================================================
 -- Mutations (co-chair-gated; mutation + audit in one transaction)
 -- ===========================================================================
