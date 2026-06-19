@@ -69,14 +69,20 @@ SELECT is(
   'bootstrap_consume_challenge: second consume of the same challenge returns no row (single-use)'
 );
 
--- Expired challenge: same posture as consumed.
+-- Expired challenge: same posture as consumed. NOTE: pgTAP wraps the file in
+-- a single transaction, which freezes `now()` at txn-start; `pg_sleep` does
+-- NOT move the `expires_at > now()` comparison window, so we backdate
+-- `expires_at` directly. (In production each RPC is its own statement and the
+-- TTL clamp suffices.)
 DO $$
 DECLARE c text;
 BEGIN
-  c := public.bootstrap_issue_challenge('example.com', 'https://example.com', 1);
+  c := public.bootstrap_issue_challenge('example.com', 'https://example.com', 60);
+  UPDATE public.bootstrap_challenges
+     SET expires_at = now() - interval '1 second'
+   WHERE challenge = c;
   PERFORM set_config('test.expired', c, false);
 END $$;
-SELECT pg_sleep(1.2);
 SELECT is(
   (SELECT count(*)::int FROM public.bootstrap_consume_challenge(current_setting('test.expired'))),
   0,
