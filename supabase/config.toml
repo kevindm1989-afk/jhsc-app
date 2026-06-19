@@ -77,5 +77,13 @@ policy = "oneshot"
 [functions.mint-session]
 verify_jwt = false
 
+# The bootstrap-first-co-chair function (ADR-0025) is the ONE-SHOT cold-instance
+# path: a fresh project has zero users and nobody to authenticate it, so it must
+# be invokable without a bearer token. It is NOT open — the SQL function it calls
+# is mint_writer-only and aborts (advisory-lock + count=0) once any user exists,
+# so it can succeed at most once. DELETE this function after first use (A4).
+[functions.bootstrap-first-co-chair]
+verify_jwt = false
+
 [analytics]
 enabled = false

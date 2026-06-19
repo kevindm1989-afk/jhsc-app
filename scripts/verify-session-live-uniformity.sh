@@ -58,8 +58,15 @@ EXEMPT_DURING_ROLLOUT=(
 # F-122 closed allowlist — the ONLY EFs permanently exempt from the
 # precheck. Compensated by F-128 (post-mint EXISTS check in
 # mint-session/index.ts). Expansion requires a new ADR-0023 amendment.
+#
+# bootstrap-first-co-chair (ADR-0025) is exempt for the same structural
+# reason as mint-session: it runs on a cold instance with ZERO users and no
+# session to assert. Its compensating control is the SQL one-shot guard
+# (advisory-lock + count=0, mint_writer-only) — strictly stronger than a
+# session check, since it can succeed at most once for the project's lifetime.
 PERMANENT_ALLOWLIST=(
   "mint-session"
+  "bootstrap-first-co-chair"
 )
 
 # --- 1) Closed-set invariant on the allowlist constant ---

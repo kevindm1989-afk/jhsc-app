@@ -109,7 +109,25 @@ async function generateEphemeral(): Promise<KeyState> {
 function loadKey(): Promise<KeyState> {
   if (!keyPromise) {
     const raw = env('MINT_SIGNING_JWK');
-    keyPromise = raw ? importFromJwk(JSON.parse(raw) as JsonWebKey) : generateEphemeral();
+    if (raw) {
+      keyPromise = importFromJwk(JSON.parse(raw) as JsonWebKey);
+    } else {
+      // ADR-0025 B1: an ephemeral per-cold-start key can NEVER match the JWKS
+      // registered with the project, so every minted token would be rejected
+      // by PostgREST in production. Fail closed in production; the ephemeral
+      // fallback is permitted ONLY in dev/test (the local `supabase start`
+      // stack and the Deno unit tests, which trust the EF-local key directly).
+      const mode = env('MINT_ENV') ?? env('SUPABASE_ENV') ?? 'development';
+      if (mode === 'production' || mode === 'prod') {
+        throw new Error(
+          'MINT_SIGNING_JWK is required in production: an ephemeral signing key ' +
+            'cannot match the JWKS registered with the Supabase project, so every ' +
+            'minted session token would be rejected. Set the MINT_SIGNING_JWK ' +
+            'Edge Function secret (ADR-0025).'
+        );
+      }
+      keyPromise = generateEphemeral();
+    }
   }
   return keyPromise;
 }

@@ -8968,3 +8968,92 @@ Both deferrals match the precedent set by `member.role_changed` (T06.1 → T18).
 - [ ] `libsodium-wrappers-sumo` increment (G-T07-12 resolution).
 - [ ] KeyStore interface split + `client.identity_selftest_fail` unification (G-T07-10 / G-T07-15 resolution).
 - [ ] T18 lands the SQL CHECK + `audit_log_retention_schedule` rows for `recovery_reset.issued` and `panic_wipe.invoked` (same carry-forward as `member.role_changed`).
+
+---
+
+# ADR-0025 (2026-06-19) — Auth bring-up arc for hosted Supabase: JWKS trust wiring (Problem B) + one-shot first-co-chair bootstrap (Problem A)
+
+**Status:** Proposed (human gates: HG-AUTH-JWKS operator config of project signing key; HG-AUTH-BOOTSTRAP unauthenticated user-creation path → **security-reviewer + threat-model required at PR**). Design only — no code in this entry.
+
+**Decider(s):** architect. Cross-references ADR-0003 Amendment H (ES256 vendor carve-out), ADR-0023 + Amendment A (mint path, F-116/F-117/F-118/F-128), ADR-0024 (key-parity), ADR-0001 (ca-central-1). Trigger: hosted Supabase deploy is live (35 migrations, 7 Edge Functions, Cloudflare Pages) but no one can sign in — two coupled gaps below.
+
+## Findings established from the code
+
+- `auth.uid()` (committee.sql:215) and `session_is_live()` (committee.sql:130-139) read `sub` / `session_id` from `request.jwt.claims`. PostgREST only populates those claims if the JWT verifies against a JWKS the **project** trusts. The mint ES256 key (`MINT_SIGNING_JWK` / ephemeral) is **not registered** with the project → every minted JWT is rejected → no sign-in. This is Problem B and it blocks 100% of authenticated traffic, not just bootstrap.
+- `public.users.id` (auth.sql:236) is a **bare uuid PK with NO FK to `auth.users`**. So `public.users` rows can be created without GoTrue `admin.createUser`, and `auth.uid()` resolves purely from the JWT `sub` (PostgREST never joins `auth.users`). The bootstrap is therefore self-contained in `public`.
+- `enroll_first_passkey` (auth.sql:369) hard-requires a pre-existing `public.users` row **and** a live `auth_totp_bootstraps` row. The first co-chair has neither, and `auth-op` gates every browser op behind `assertSessionLive()` — circular for a cold instance. This is Problem A.
+- `mint_writer` role + grant-to-`authenticator` already exist (mint.sql:23-34); the bootstrap RPC reuses that isolated-key trust path → **no service_role needed**.
+
+## Problem B — decision: register the mint public JWK as a project signing key (NOT Third-Party Auth, NOT a self-served JWKS endpoint)
+
+**Chosen:** Publish the mint key's **public half** into the project's *own* GoTrue signing-key set (the `iss` becomes the project's own GoTrue issuer; the mint EF keeps the private half as the active/standby signer). This is exactly the posture ADR-0003 Amendment H already wrote ("registered as a **standby** key in the stack's signing-key set so the vendor publishes its public half"). PostgREST then validates mint JWTs against the project's published JWKS — the path `auth.uid()` already assumes.
+
+**Rejected (a) Supabase Third-Party Auth (`[auth.third_party]`).** Designed for external IdPs (Firebase/Auth0/Cognito/generic OIDC issuer with a reachable JWKS URL). Using it would require the mint EF to *serve* a stable public JWKS URL and the project to trust a self-issued external issuer — more standing surface, and it muddies F-118 (the mint key stops being "the project's own key"). Rejected as heavier and semantically wrong for a self-issued token.
+
+**Rejected (b) bespoke mint-served JWKS endpoint.** A `/functions/v1/mint-jwks` route returning `publicJwk()` only helps if something *consumes* it; PostgREST consumes the **project** JWKS, not an arbitrary URL, unless wired via (a). So a standalone endpoint is operationally inert for RLS trust. (It is still useful as an *operator aid* — see task B2 — to extract the public JWK for registration, but it is not the trust mechanism.)
+
+**Code changes (Problem B):**
+1. `signing.ts`: in production, **require `MINT_SIGNING_JWK`; drop the ephemeral fallback** (an ephemeral per-cold-start key can never match a registered JWKS → every token rejected, and worse, intermittently). Fail closed (throw at `loadKey()`) when `MINT_SIGNING_JWK` is unset AND an env flag `MINT_ENV=production` is set. Local/CI keep the ephemeral path.
+2. Ensure the JWT `iss`/`kid` the signer emits match the registered key's issuer/kid (the JWK supplies `kid`; `MINT_JWT_ISS` must be set to the project GoTrue issuer once the key is registered as a project key, OR kept as `jhsc-mint` only if registered as a distinct trusted issuer — operator-confirmed at B3).
+3. Add a tiny operator-only `mint-jwks` read route returning `publicJwk()` (no secrets; `d` already stripped) to make B2 extraction reproducible.
+
+**Operator config (Problem B) — NOT code, cannot be verified without the live project:**
+- Generate/register the signing key on the project (`supabase gen signing-key` → set as `MINT_SIGNING_JWK` EF secret; register its public half as the active or standby project signing key via dashboard → Auth → Signing Keys, or `supabase config push` if the CLI revision exposes it). **This is the load-bearing step; the app cannot do it.**
+- Set EF secrets: `MINT_SIGNING_JWK`, `MINT_JWT_ISS` (project issuer), `MINT_EXPECTED_ORIGINS` (Cloudflare Pages origin), `MINT_ENV=production`.
+- Verify with `scripts/mint-live-e2e.sh` against the live project: a `mint_writer` token is accepted by PostgREST, anon denied.
+
+## Problem A — decision: a one-shot `bootstrap-first-co-chair` Edge Function + new `bootstrap_first_co_chair` SECURITY DEFINER fn (do NOT reuse `enroll_first_passkey`)
+
+Reusing `enroll_first_passkey` would mean seeding a fake TOTP row for a user that does not exist yet — two writes that must themselves be bootstrapped, re-introducing the circularity. A dedicated function is cleaner and lets the one-shot guard live in one place.
+
+**Flow (reuses the existing browser WebAuthn `create()` ceremony):**
+1. Browser detects cold instance, runs `navigator.credentials.create()` (registration ceremony, same as enroll), gets a public-key credential.
+2. Browser POSTs `{ credentialId, attestationObject/publicKey(COSE), aaguid, transports, rp_id, origin, device_label }` to `bootstrap-first-co-chair` (new EF, `verify_jwt=false`, registered in config.toml).
+3. EF verifies the attestation/registration response (reuse `@simplewebauthn/server` `verifyRegistrationResponse`, sibling of `assertion.ts`), enforces `MINT_EXPECTED_ORIGINS`, then — assuming the mint_writer isolated-key path — calls the new RPC.
+
+**New SQL `bootstrap_first_co_chair(p_credential_id, p_public_key, p_aaguid, p_transports, p_rp_id, p_device_label)` — SECURITY DEFINER, `SET search_path=public, extensions`, granted to `mint_writer` ONLY (REVOKE from PUBLIC/anon/authenticated/service_role):**
+```sql
+PERFORM 1 FROM public.users LIMIT 1 FOR UPDATE;  -- table-level intent
+IF (SELECT count(*) FROM public.users) <> 0 THEN
+  RAISE EXCEPTION 'BOOTSTRAP_ALREADY_DONE' USING ERRCODE='P0001';
+END IF;
+-- generate uid, insert public.users(id, role='worker_co_chair', active=true),
+-- insert webauthn_credentials(...), audit_emit('auth.bootstrap.first_co_chair', ...).
+```
+The one-shot guard is `count(*)=0 on public.users` evaluated **inside the SECURITY DEFINER txn**, made race-safe by an advisory lock taken first: `PERFORM pg_advisory_xact_lock(hashtext('bootstrap_first_co_chair'))` so two concurrent calls serialize and the second sees `count=1`. (A plain `count` without the lock is a TOCTOU race — see security analysis.) No FK to `auth.users` is needed (bare PK). Audit row uses a fixed pseudonym for the new actor (its own uid HMAC).
+
+**Lock-out after first use:** the guard is self-disabling (any `public.users` row → permanent refusal). Belt-and-braces: the operator deletes the `bootstrap-first-co-chair` EF (or sets EF secret `BOOTSTRAP_ENABLED=false`, which the EF checks first and 403s) after confirming the first co-chair can sign in. Both are documented in the runbook task.
+
+## Security analysis — STRIDE on the unauthenticated bootstrap path (the guard is load-bearing)
+
+- **S (Spoofing) / E (Elevation):** an attacker races the legitimate co-chair to become co-chair. **Mitigations (all required):** (1) `pg_advisory_xact_lock` + `count(*)=0` inside the txn — closes the TOCTOU window between check and insert; (2) `BOOTSTRAP_ENABLED` EF flag defaulting to a deploy-time-set value so the window is only open during the operator's chosen bootstrap window; (3) `MINT_EXPECTED_ORIGINS` enforced so only the real webapp origin is accepted; (4) the operator runbook makes the window minutes-long, not days.
+- **T (Tampering):** forged attestation. **Mitigation:** `verifyRegistrationResponse` validates the credential; RP-ID/origin pinned (F-37 parity with assertion path).
+- **R (Repudiation):** **Mitigation:** mandatory `audit_emit('auth.bootstrap.first_co_chair')` in the same txn (cannot complete without the audit row); add to `retention_class_for` (90d-class, sibling of `auth.passkey.enrolled`) and the T18 schedule.
+- **I (Information disclosure):** path leaks nothing — returns only `{ok}`; no enumeration (one-shot). Bootstrap RPC granted to `mint_writer` only → not reachable by anon even if `verify_jwt=false` (the EF self-mints the writer token).
+- **D (DoS):** unauthenticated endpoint. **Mitigation:** the existing `rate-limit.ts` posture + the one-shot guard makes repeated calls cheap-fail (single indexed count). Add the bootstrap path to any edge rate-limit allowlist.
+- **Key-parity:** EF runs `assertKeyParity()` at top (parity with mint/auth-op) so a mismatched pseudonym key cannot mis-audit the bootstrap.
+
+## Reversibility
+
+- Problem B JWKS registration: **medium** (operator config + signing.ts change; reversible by key rotation, but once tokens are trusted it is load-bearing).
+- Problem A bootstrap function: **easy to remove** post-use (drop EF + RPC in a cleanup migration); the design intends it to be vestigial after first sign-in.
+
+## Compliance check
+
+- [x] ca-central-1 only; no new subprocessor; signing + bootstrap in-process in the EF (ADR-0001).
+- [x] ADR-0003 Invariant 4 honoured — only `signing.ts` touches `crypto.subtle` (ES256 carve-out); `bootstrap-first-co-chair` does WebAuthn verification via `@simplewebauthn/server` + libsodium, no new crypto primitive; the new SQL uses pgcrypto `hmac` via `private._hmac_pseudonym_key()` (GUC-or-Vault).
+- [x] F-118 preserved — bootstrap uses the isolated mint_writer key, never service_role.
+- [x] No edit to `.context/constraints.md`.
+- [ ] **HG-AUTH-BOOTSTRAP** — security-reviewer + threat-model sign-off on the unauthenticated user-creation path (at the PR).
+
+## Ordered task breakdown (PRs, dependency order)
+
+- **B1 — Require `MINT_SIGNING_JWK` in prod; drop ephemeral fallback** (`signing.ts`). Dep: none. AC: `loadKey()` throws when `MINT_ENV=production` and `MINT_SIGNING_JWK` unset; ephemeral retained for local/CI; `signing.test.ts` covers both. Owner: implementer. Risk: med. Est: S. *security-reviewer.*
+- **B2 — Operator `mint-jwks` read route + extraction doc** (new EF or route returning `publicJwk()`). Dep: B1. AC: returns JWK with no `d`; documented as operator aid, not a trust endpoint. Owner: implementer. Risk: low. Est: S.
+- **B3 — [HUMAN-GATE / operator] Register signing key on live project + set EF secrets + run `mint-live-e2e.sh`.** Dep: B1,B2. AC: mint_writer token accepted by live PostgREST, anon denied; documented in runbook. Owner: operator (not an agent). Risk: high. Est: M. **Cannot be verified without the live project.**
+- **A1 — New migration: `bootstrap_first_co_chair` SECURITY DEFINER fn + advisory lock + grant to mint_writer + `retention_class_for` entry.** Dep: none (DB-only; can land parallel to B). AC: pgTAP — refuses when `count(users)>0`; succeeds on empty; concurrent-call test proves serialization; grants exclude anon/authenticated/service_role; audit row emitted. Owner: migration-handler. Risk: high. Est: M. *security-reviewer + threat-model; touches auth/PI.*
+- **A2 — `bootstrap-first-co-chair` Edge Function** (verify_jwt=false; key-parity; origin pin; `verifyRegistrationResponse`; mint_writer self-token; `BOOTSTRAP_ENABLED` flag). Dep: A1, B1. AC: rejects when any user exists (503/409); rejects bad origin/attestation; happy path creates co-chair + binds passkey; config.toml `[functions.bootstrap-first-co-chair] verify_jwt=false`. Owner: implementer. Risk: high. Est: M. *security-reviewer + threat-model.*
+- **A3 — Browser cold-instance bootstrap flow** (detect no-users state via A2 probe or a public "instance-status" read; run `create()`; POST to A2; on success route into normal sign-in). Dep: A2. AC: hermetic test with injected `create()` + transport; cancellation handled. Owner: implementer + designer (the cold-start screen). Risk: med. Est: M.
+- **A4 — Lock-out + runbook** (operator deletes EF or sets `BOOTSTRAP_ENABLED=false` post-bootstrap; document the minutes-long window). Dep: A3, B3. AC: runbook entry; CI/alert if `BOOTSTRAP_ENABLED=true` while `count(users)>0`. Owner: implementer + observability-setup. Risk: med. Est: S.
+
+**Human-gate items:** B3 (signing-key registration — operator), A1+A2 (security-reviewer + threat-model on the unauthenticated user-creation path), A4 (operator lock-out confirmation).
