@@ -12,6 +12,43 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgtap";
 
 -- ---------------------------------------------------------------------------
+-- Extension search_path normalisation (hosted Supabase vs plain Postgres).
+--
+-- Plain Postgres (CI's committee-db-tests job) creates pgcrypto / uuid-ossp
+-- in `public`, so later migrations resolve `hmac()`, `digest()`,
+-- `gen_random_bytes()`, `crypt()` etc. UNQUALIFIED off the default path.
+--
+-- A hosted Supabase project PRE-INSTALLS those extensions in the dedicated
+-- `extensions` schema — the `CREATE EXTENSION IF NOT EXISTS` calls above
+-- no-op ("already exists, skipping"), and `extensions` is NOT on the
+-- search_path that `supabase db push` runs migrations under. Without this
+-- block the next migration (00000000000002_committee) fails at apply time
+-- with `function hmac(bytea, bytea, unknown) does not exist`.
+--
+-- Fix: put `extensions` on the path at BOTH scopes so every apply model is
+-- covered:
+--   (a) DATABASE-level default — inherited by every NEW connection (covers
+--       `supabase start`'s connection-per-migration apply AND all runtime
+--       connections that call the pseudonym fns).
+--   (b) SESSION-level — effective immediately for the REST of this apply
+--       (covers `supabase db push`'s single-connection apply, where the
+--       ALTER DATABASE default does not affect the in-flight connection).
+-- Both are no-ops on plain Postgres: the `extensions` schema simply does not
+-- exist there, and Postgres tolerates a missing schema in a search_path.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  EXECUTE format('ALTER DATABASE %I SET search_path TO public, extensions',
+                 current_database());
+EXCEPTION WHEN insufficient_privilege THEN
+  -- `supabase start` applies migrations as a non-superuser that cannot
+  -- ALTER DATABASE; the session SET below carries the apply, and the local
+  -- stack already has `extensions` on the default path anyway.
+  NULL;
+END $$;
+SET search_path TO public, extensions;
+
+-- ---------------------------------------------------------------------------
 -- Dev/CI bootstrap for the pseudonym-key GUC (ADR-0016).
 --
 -- The auth migration (00000000000001) checks `app.hmac_pseudonym_key` at
