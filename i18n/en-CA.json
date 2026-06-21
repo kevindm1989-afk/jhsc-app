@@ -1186,6 +1186,43 @@
         "download_failed": "The JSON file couldn't be downloaded. Check that pop-ups are allowed and try again.",
         "unknown": "Something went wrong generating the recovery sheet. Try again, or contact your worker co-chair if the problem continues."
       }
+    },
+    "setupCommitteeEncryption": {
+      "heading": "Set up committee encryption",
+      "intro": "Finish setting up your account so you can read and write encrypted committee records. This creates your identity key, a recovery sheet, and the committee's shared data key — all on this device.",
+      "start": "Start setup",
+      "step": {
+        "identity": "Creating your identity key…",
+        "recovery": "Preparing your recovery sheet…",
+        "committee_key": "Setting up the committee data key…"
+      },
+      "recovery": {
+        "intro": "Write down the recovery passphrase below and keep the downloaded file somewhere safe — not at work. You'll need both to recover access if you lose this device.",
+        "regenerated_note": "If you left and came back, a new passphrase was generated. Use the one shown now; the old one no longer applies.",
+        "confirm_intro": "Type the passphrase back to confirm you've recorded it correctly.",
+        "continue": "I've saved my recovery sheet — continue",
+        "mismatch": "That doesn't match the passphrase shown above. Check it word by word and try again."
+      },
+      "success": {
+        "heading": "Committee encryption is set up.",
+        "body": "Your identity key, recovery sheet, and the committee data key are all in place. You can now read and write encrypted committee records on this device."
+      },
+      "restore_required": {
+        "heading": "Restore from your recovery sheet",
+        "body": "Your account already has an identity on the server, but this device doesn't hold the matching key. Restore from your recovery sheet instead of starting over — starting over would lock you out of existing records.",
+        "cta": "Go to recovery restore"
+      },
+      "foreign_held": {
+        "heading": "Ask an existing key-holder for access",
+        "body": "The committee's data key is held by another member, and this device can't unlock it on its own. Ask an existing key-holder to grant you access, or restore from your recovery sheet if you previously had access.",
+        "cta": "Go to recovery restore"
+      },
+      "error": {
+        "signed_out": "Your session has ended. Sign in again to finish setting up committee encryption.",
+        "denied": "This action isn't permitted for your account right now. Contact your worker co-chair if you think this is wrong.",
+        "unknown": "Something went wrong during setup. Try again — your progress is saved, so it will pick up where it left off.",
+        "retry": "Try again"
+      }
     }
   },
   "minutes": {

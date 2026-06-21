@@ -208,6 +208,226 @@ export async function restoreRecoveryBlobViaProduction(opts: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Committee data key — init + self-wrap (ADR-0026 Decision 2 + Amendment A)
+// ---------------------------------------------------------------------------
+
+export type InitCommitteeKeyProductionResult =
+  | { status: 'ok'; key_id: string; epoch: number }
+  // The live key already carries a confirmed actor wrap — nothing to do
+  // (resume success-equivalent; AC-4 / AC-5d).
+  | { status: 'already_initialised' }
+  // Edge-A sub-case (a): a live key exists, some OTHER member holds a wrap,
+  // the actor does not — and the actor holds no key material to self-wrap.
+  // Recoverable: another key-holder must grant access, or the actor restores
+  // their own prior access (Amendment A Ruling 2; AC-5c).
+  | { status: 'foreign_held'; key_id: string }
+  | { status: 'failed'; reason: T07OpReason; http: number };
+
+/**
+ * The one net-new production composition function (ADR-0026 Decision 2,
+ * corrected by Amendment A). Composes `SupabaseT07Client.initCommitteeDataKey`
+ * / `wrapCommitteeDataKeyForMember` / `rotateCommitteeDataKey` /
+ * `finalizeCommitteeDataKeyRotation` + the client-side data-key generation +
+ * seal-to-pubkey that `committee-key.ts:initCommitteeDataKey` does against the
+ * test-only `KeyStore`. Unlike that test-only path this one ZEROIZES the
+ * plaintext data key before returning (F-132 / AC-8 — the test path omits it)
+ * and delegates audit emission to the SECURITY DEFINER SQL (Amendment A
+ * single-emission-path).
+ *
+ * Resume semantics (Amendment A — branch on WRAP COUNT, never actor-wrap
+ * presence):
+ *  - probe the live (`rotated_at IS NULL`) key FIRST (a pure read):
+ *      • no live key            → fresh init (generate → wrap under new key).
+ *      • live key, actor wrapped → `already_initialised` (confirmed actor wrap;
+ *                                  never reported "done" without one — AC-5d).
+ *      • live key, zero wraps    → TRUE edge-A: rotate('incident') retires the
+ *                                  dead key, then init-equivalent under the
+ *                                  fresh key_id; finalize the rotation (AC-5b).
+ *      • live key, foreign-held  → `foreign_held` recoverable error; no init,
+ *                                  no rotate, no self-wrap (AC-5c).
+ *
+ * The plaintext 32-byte data key exists ONLY in this function's local scope,
+ * crosses no trust boundary in cleartext, and is `.fill(0)`-zeroized on every
+ * exit path that generated one.
+ *
+ * `actor_public_key` is passed in (not re-fetched) — the orchestrator already
+ * holds the freshly-enrolled pubkey from the enroll step. The sealed-box wrap
+ * needs only the recipient PUBLIC key, so no privkey read happens here;
+ * `localIdentity` is threaded for symmetry with the sibling flows.
+ */
+export async function initCommitteeDataKeyViaProduction(opts: {
+  client: SupabaseT07Client;
+  localIdentity: LocalIdentityStore;
+  user_id: string;
+  actor_public_key: Uint8Array;
+}): Promise<InitCommitteeKeyProductionResult> {
+  // 0. F-138 / AC-5d load-bearing invariant: a non-32-byte actor pubkey can
+  //    NEVER create a server-side key it cannot wrap. libsodium's
+  //    `crypto_box_seal` rejects any recipient key whose length !== 32, and it
+  //    does so only AFTER we'd already minted (init_key) or rotated a live key
+  //    — leaving a permanent zero-wrap dead key + an unrecoverable retry loop.
+  //    Validate the pubkey BEFORE any state-mutating RPC (or even the probe):
+  //    return the wire-shaped failure, never throw, never call init_key/rotate.
+  if (opts.actor_public_key.length !== 32) {
+    return { status: 'failed', reason: 'invalid_input', http: 422 };
+  }
+
+  // 1. Probe the live key state FIRST. The wrap COUNT is the discriminator
+  //    the resume branch needs (Amendment A Ruling 1); a failed probe (401 /
+  //    403) is surfaced verbatim so the card can split session-required from
+  //    rls-denied (AC-6 / F-130).
+  const probe = await opts.client.getCommitteeKeyState({ actor_user_id: opts.user_id });
+  if (!probe.ok) return { status: 'failed', reason: probe.reason, http: probe.status };
+
+  if (probe.data) {
+    // A live key already exists — resume branch.
+    if (probe.data.actor_has_wrap) {
+      // AC-4 / AC-5d: confirmed actor wrap under the current (non-retired)
+      // key — success-equivalent. No data key minted, no rotation.
+      return { status: 'already_initialised' };
+    }
+    if (probe.data.wrap_count > 0) {
+      // AC-5c: foreign-held. The actor holds no plaintext key to self-wrap.
+      // Explicit recoverable error — never init/rotate/self-wrap, never a
+      // silent "done".
+      return { status: 'foreign_held', key_id: probe.data.key_id };
+    }
+    // AC-5b — TRUE edge-A: zero wraps for ANY member. The dead key's bytes
+    // are irretrievably lost (process died between init_key and the first
+    // wrap). Retire it via rotation and re-init under the fresh key_id; never
+    // wrap_member against the dead key_id (no divergent key under a stale id).
+    return repairZeroWrapKey({ ...opts, dead_epoch: probe.data.epoch });
+  }
+
+  // 2. No live key — fresh init.
+  return freshInit(opts);
+}
+
+/**
+ * Fresh-init path (AC-2 / AC-5a): mint the metadata via `init_key`, generate a
+ * 32-byte data key client-side, seal it to the actor's pubkey, persist the
+ * self-wrap, then zeroize. A concurrent init that already landed surfaces as
+ * `already_initialised` (P0001) — mapped to the resume success-equivalent.
+ */
+async function freshInit(opts: {
+  client: SupabaseT07Client;
+  user_id: string;
+  actor_public_key: Uint8Array;
+}): Promise<InitCommitteeKeyProductionResult> {
+  // F-138 / AC-5d defense-in-depth: never call init_key toward a wrap we cannot
+  // perform. A non-32-byte pubkey would make `crypto_box_seal` throw AFTER
+  // init_key already minted a live key — the exact zero-wrap dead key F-138
+  // forbids. Validate BEFORE init_key. (The public entry point guards too; this
+  // keeps the invariant local to every state-mutating path.)
+  if (opts.actor_public_key.length !== 32) {
+    return { status: 'failed', reason: 'invalid_input', http: 422 };
+  }
+
+  const init = await opts.client.initCommitteeDataKey();
+  if (!init.ok) {
+    // A racing init that already initialised the key maps to the resume
+    // success-equivalent; everything else (401 / 403 / 422 …) is a failure.
+    if (init.reason === 'already_initialised') return { status: 'already_initialised' };
+    return { status: 'failed', reason: init.reason, http: init.status };
+  }
+
+  const s = await ready();
+  const dataKey = s.randombytes_buf(s.crypto_secretbox_KEYBYTES);
+  try {
+    const wrap = s.crypto_box_seal(dataKey, opts.actor_public_key);
+    const wrapped = await opts.client.wrapCommitteeDataKeyForMember({
+      member_user_id: opts.user_id,
+      key_id: init.data.key_id,
+      wrapped_ciphertext: wrap,
+      rotation_id: null
+    });
+    if (!wrapped.ok) {
+      // F-138 edge-A mitigation at the source: `init_key` minted a key but the
+      // self-wrap failed, so we are ONE step from leaving a zero-wrap dead key
+      // (the exact F-138 hazard). When the failure is NOT an auth failure
+      // (a 401/403 means the session/permission is gone — a follow-on retire
+      // would be denied too, and the resume path repairs it), proactively
+      // retire the stillborn key so no silent zero-wrap key is left behind.
+      // Best-effort: if the retire itself fails we still surface the original
+      // wrap failure (the resume path's wrap-count probe is the backstop).
+      if (wrapped.status !== 401 && wrapped.status !== 403) {
+        try {
+          await opts.client.rotateCommitteeDataKey({ trigger: 'incident' });
+        } catch {
+          // Swallow — the original failure below is the user-facing outcome;
+          // the resume probe (Amendment A Ruling 1) is the durable backstop.
+        }
+      }
+      return { status: 'failed', reason: wrapped.reason, http: wrapped.status };
+    }
+    return { status: 'ok', key_id: init.data.key_id, epoch: init.data.epoch };
+  } finally {
+    // F-132 / AC-8: the plaintext data key must not linger for GC.
+    dataKey.fill(0);
+  }
+}
+
+/**
+ * Edge-A repair (AC-5b / Amendment A Ruling 3): the live key has zero wraps,
+ * so its bytes are unrecoverable. Retire it via `rotate('incident')`, generate
+ * a FRESH 32-byte key, self-wrap under the NEW key_id, and finalize the
+ * rotation. Confirmation that abandoning the dead key loses nothing: in the
+ * Phase-0a ceremony no committee data can ever be sealed under a not-yet-
+ * wrapped key (Ruling 3's load-bearing invariant), so a zero-wrap key has zero
+ * ciphertext beneath it.
+ */
+async function repairZeroWrapKey(opts: {
+  client: SupabaseT07Client;
+  user_id: string;
+  actor_public_key: Uint8Array;
+  dead_epoch: number;
+}): Promise<InitCommitteeKeyProductionResult> {
+  // F-138 / AC-5d defense-in-depth: never rotate (a state-mutating RPC) toward
+  // a wrap we cannot perform. A non-32-byte pubkey would make `crypto_box_seal`
+  // throw AFTER the rotate already retired the dead key and minted a new one —
+  // a fresh zero-wrap key. Validate BEFORE rotate so the repair can never
+  // compound the very condition it exists to clear. (The public entry point
+  // guards too; this keeps the invariant local to this state-mutating path.)
+  if (opts.actor_public_key.length !== 32) {
+    return { status: 'failed', reason: 'invalid_input', http: 422 };
+  }
+
+  // 'incident' is the closest honest trigger value (Amendment A's trigger-gap
+  // note); a dedicated 'stillborn_init' value is explicitly out of scope.
+  const rotation = await opts.client.rotateCommitteeDataKey({ trigger: 'incident' });
+  if (!rotation.ok) return { status: 'failed', reason: rotation.reason, http: rotation.status };
+
+  const s = await ready();
+  const dataKey = s.randombytes_buf(s.crypto_secretbox_KEYBYTES);
+  try {
+    const wrap = s.crypto_box_seal(dataKey, opts.actor_public_key);
+    const wrapped = await opts.client.wrapCommitteeDataKeyForMember({
+      member_user_id: opts.user_id,
+      key_id: rotation.data.new_key_id,
+      wrapped_ciphertext: wrap,
+      rotation_id: rotation.data.rotation_id
+    });
+    if (!wrapped.ok) return { status: 'failed', reason: wrapped.reason, http: wrapped.status };
+
+    const finalized = await opts.client.finalizeCommitteeDataKeyRotation({
+      rotation_id: rotation.data.rotation_id,
+      new_key_id: rotation.data.new_key_id,
+      members_rewrapped_count: 1
+    });
+    if (!finalized.ok)
+      return { status: 'failed', reason: finalized.reason, http: finalized.status };
+
+    // `rotate_committee_data_key` mints the new key at dead_epoch + 1 (the
+    // SQL allocates epoch = max(epoch)+1, and the dead key was the max). The
+    // epoch is metadata only (F-135); the card round-trips via the wrap.
+    return { status: 'ok', key_id: rotation.data.new_key_id, epoch: opts.dead_epoch + 1 };
+  } finally {
+    // F-132 / AC-8: zeroize the fresh plaintext key on every exit.
+    dataKey.fill(0);
+  }
+}
+
 // Re-export the KDF_PARAMS so callers can label persisted blobs without
 // importing from `./recovery-blob` directly.
 export { KDF_PARAMS };

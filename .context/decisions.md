@@ -9057,3 +9057,208 @@ The one-shot guard is `count(*)=0 on public.users` evaluated **inside the SECURI
 - **A4 — Lock-out + runbook** (operator deletes EF or sets `BOOTSTRAP_ENABLED=false` post-bootstrap; document the minutes-long window). Dep: A3, B3. AC: runbook entry; CI/alert if `BOOTSTRAP_ENABLED=true` while `count(users)>0`. Owner: implementer + observability-setup. Risk: med. Est: S.
 
 **Human-gate items:** B3 (signing-key registration — operator), A1+A2 (security-reviewer + threat-model on the unauthenticated user-creation path), A4 (operator lock-out confirmation).
+
+# ADR-0026 (2026-06-21) — Phase 0a: first co-chair crypto-provisioning ceremony (identity enroll + recovery blob + committee-key init) on a focused Settings surface
+
+**Status:** Proposed (design only — no feature code in this entry). **Human gate: HG-AUTH-PHASE0A** — touches auth/identity-key material + PI-adjacent crypto on a security-critical path → security-reviewer + threat-modeler sign-off required at the PR (constraints.md Human Gates: "Production deploys of changes touching auth … or personal data"; preferences.md risk posture: "auth/permission changes … never auto-apply"). This gate is the standard authenticated-session review, NOT the unauthenticated-bootstrap gate HG-AUTH-BOOTSTRAP (that fired upstream in ADR-0025 and is out of scope here).
+
+**Decider(s):** architect. Branch: `claude/affectionate-carson-nqB03`. Cross-references ADR-0025 (the bootstrap that created the passkey-only first co-chair — the precondition this ADR resolves), ADR-0003 + Amendments A/F/G (E2EE key model, audit-event six-mirror dance, recovery-passphrase show-again, Argon2id fail-closed), ADR-0020 (T19 OnboardingFlow wizard — the UX whose recovery-sheet ceremony we deliberately do NOT fork), ADR-0001 (ca-central-1 residency), ADR-0004 (RLS-on-every-table). Trigger: the ADR-0025 bootstrap intentionally created ONLY `{ passkey, public.users row, committee_membership }` for the first co-chair. They are signed in (valid mint-session JWT, `session_is_live()` true) but have NO identity keypair, NO recovery blob, and NO committee data key. Until provisioned they cannot encrypt or decrypt any C2/C3/C4 committee data — the app is inert for them.
+
+## Findings established from the code (ground truth — verified this pass)
+
+- **The wizard is a UX shell with zero production wiring.** `apps/web/src/lib/onboarding/OnboardingFlow.svelte` generates the identity keypair (`generateIdentityKeypair()`, line 42/230) and the recovery passphrase in-memory and runs the full D.4 recovery-sheet + D.6 type-back ceremony, but it NEVER calls t07-op: `d3_auth = undefined` (line 208), `D3PasskeyEnrollment` receives `auth={d3_auth}` + `user_id={''}` (lines 523-528), and D.4/D.6 receive `user_id={''}`. It also assumes a FRESH user (D.3 enrolls a NEW passkey) and has NO committee-key step at all.
+- **The identity-enroll composition already exists and is reusable.** `production-flows.ts:enrollIdentityViaProduction({ client, user_id })` drives the F-02 sealed-box challenge (`SupabaseT07Client.enrollIdentityViaChallenge` → `enrollment_challenge_init` → libsodium `crypto_box_seal_open` → `enrollment_challenge_finalize`) and persists the privkey to `localIdentity` ONLY after the server accepts the unsealed nonce. Self-test (`selfTestKeypair`) gates the server touch. This is the exact wiring Phase 1 member onboarding will reuse.
+- **The recovery-blob composition already exists and is reusable.** `production-flows.ts:storeRecoveryBlobViaProduction({ client, localIdentity, user_id, passphrase })` reads the privkey from `localIdentity`, Argon2id-seals it under the passphrase (`encryptRecoveryBlob`, F-08 floor + Amendment G fail-closed), envelopes as `[salt(16)][nonce(24)][ciphertext]`, and POSTs `store_recovery`. Reusable as-is.
+- **The committee-key composition DOES NOT exist for production.** `committee-key.ts:initCommitteeDataKey(store, actor)` does the right crypto (generate 32-byte `secretbox` key → seal to actor pubkey → insert wrap → audit) but is written against the `KeyStore`/`MemoryKeyStore` abstraction with a test-only `__setDataKeyBytesForKeyId` shim — NOT against `SupabaseT07Client`. The production client's `initCommitteeDataKey()` (supabase-t07-client.ts:272) and `wrapCommitteeDataKeyForMember()` (line 276) are thin RPC dispatchers: `init_key` mints ONLY the metadata `{key_id, epoch}` and does NOT generate the data key or store any wrap; `wrap_member` persists a caller-supplied sealed ciphertext. The 32-byte key generation + the seal-to-pubkey + the self-wrap must be composed client-side BETWEEN those two RPCs. **This composition gap is the one net-new function this ADR mandates.**
+- **SQL gating (`00000000000007_t07.sql`, lines 458-509):** `init_committee_data_key()` takes no args, gates on `_t07_gate_active_member()` (= `is_active_member(auth.uid())`), raises `already_initialised` (P0001) if any row with `rotated_at IS NULL` exists, returns `{key_id, epoch}`. `wrap_committee_data_key_for_member(p_member, p_key_id, p_wrapped_ciphertext, p_rotation_id)` gates actor AND target on active membership and requires the key to exist. **Neither is co-chair-specific** — any active member passes; the co-chair-only-ness of Phase 0a is a product convention (only the co-chair runs init first), not an SQL constraint. The first co-chair IS an active member (ADR-0025 bootstrap set `active=true`), so all three RPCs are reachable from their live session.
+- **Client construction reference:** `createSupabaseT07Client({ baseUrl, getJwt, localIdentity?, onSessionRevoked })` (t07-client-factory.ts) is the canonical builder; `settings/+page.svelte:78` builds one (currently without `localIdentity`). The new surface MUST pass `localIdentity: new BrowserLocalIdentityStore()` so `enrollIdentityViaChallenge` can persist the privkey and `storeRecoveryBlobViaProduction` can read it back.
+
+## Decision 1 — UI placement: a focused "Set up committee encryption" Settings card, NOT a fork of OnboardingFlow
+
+**Chosen:** A dedicated, co-chair-only provisioning surface mounted as a Settings card (`SetupCommitteeEncryptionCard.svelte`) that orchestrates the three production-flow calls, reusing the EXISTING recovery-passphrase + sheet + type-back components (`RecoveryPassphraseScreen.svelte`, `D6TypeBackVerify.svelte`, the `recovery-blob-download` helper) as composed children — NOT a second copy of the wizard.
+
+**Rejected (a) adapt OnboardingFlow for the signed-in co-chair (skip D.3).** The wizard's load-bearing invariant (ADR-0020 §Context) is "no authenticated state without traversing D.1→D.7." The first co-chair is ALREADY authenticated with an ALREADY-enrolled passkey — D.3 (enroll a fresh passkey) is not just skippable, it is actively wrong (a second `navigator.credentials.create()` would mint a second credential). Bending the wizard to start at D.4 with a pre-existing session re-opens the exact "reach authenticated state without the advisory" surface ADR-0020 forbids, and forces `auth`/`user_id` plumbing into a component graph designed around `user_id={''}`. Reuse the wizard's COMPONENTS, not its state machine.
+
+**Rejected (b) a brand-new full route `/onboarding/co-chair`.** More surface than the task needs; a route implies a standalone flow that competes with the wizard for "the onboarding URL." A Settings card keeps Phase 0a where an already-signed-in co-chair already is, and the card self-hides once provisioning is complete (idempotent — see Decision 3).
+
+**Reusability mandate (binding for Phase 1):** the identity-enroll + recovery-store wiring lives ENTIRELY in `production-flows.ts` (already does, plus the one new function below) and in the shared recovery components. The Settings card is a thin orchestrator. Phase 1 member onboarding reuses `enrollIdentityViaProduction` + `storeRecoveryBlobViaProduction` + the recovery components unchanged; the ONLY co-chair-specific addition is the committee-key INIT step (`initCommitteeDataKeyViaProduction`), which a member never runs (a member receives a wrap from a co-chair via `wrap_member`, they do not `init_key`). Rule-of-three (preferences.md): this is the 2nd consumer of the identity/recovery wiring (wizard-shell + Phase 0a), Phase 1 is the 3rd — so the wiring stays in `production-flows.ts`, not re-abstracted.
+
+## Decision 2 — the net-new production composition function
+
+Add to `apps/web/src/lib/crypto/production-flows.ts`, mirroring `enrollIdentityViaProduction`'s shape (discriminated-union return, wire-shaped, libsodium-only, never logs key material):
+
+```ts
+export type InitCommitteeKeyProductionResult =
+  | { status: 'ok'; key_id: string; epoch: number }
+  | { status: 'already_initialised' }            // init_key returned already_initialised (P0001)
+  | { status: 'not_enrolled' }                    // actor has no identity pubkey to self-wrap to
+  | { status: 'failed'; reason: T07OpReason; http: number };
+
+export async function initCommitteeDataKeyViaProduction(opts: {
+  client: SupabaseT07Client;
+  localIdentity: LocalIdentityStore;   // unused for the SEAL (sealed-box needs only the PUBLIC key)
+                                       // but threaded for symmetry + future unwrap-source paths
+  user_id: string;
+  actor_public_key: Uint8Array;        // the identity pubkey enrolled in step 1 — passed in, NOT re-fetched
+}): Promise<InitCommitteeKeyProductionResult>;
+```
+
+**Contract / algorithm (the composition the gap requires):**
+1. `const init = await client.initCommitteeDataKey()` → on `already_initialised` reason map to `{ status: 'already_initialised' }` (resumability — see Decision 3); on other `!ok` map to `{ status: 'failed', reason, http }`.
+2. Generate the data key CLIENT-SIDE: `s.randombytes_buf(s.crypto_secretbox_KEYBYTES)` (32 bytes) — identical to `committee-key.ts:generateDataKeyBytes`. The plaintext data key exists ONLY in this function's local scope.
+3. Seal to the actor's own pubkey: `const wrap = s.crypto_box_seal(dataKey, opts.actor_public_key)` (sealed-box → recipient PUBLIC key only; no privkey read needed, mirroring `committee-key.ts:88`).
+4. `await client.wrapCommitteeDataKeyForMember({ member_user_id: opts.user_id, key_id: init.data.key_id, wrapped_ciphertext: wrap, rotation_id: null })` → on `!ok` map to `failed`.
+5. **Zeroize** the plaintext `dataKey` (`dataKey.fill(0)`) before returning — it must not linger for GC. (libsodium `memzero` if available via the `ready()` surface; else `.fill(0)`.)
+6. Return `{ status: 'ok', key_id: init.data.key_id, epoch: init.data.epoch }`.
+
+**Why `actor_public_key` is passed in, not fetched:** the orchestrator already holds the freshly-enrolled pubkey from step 1's `EnrollProductionResult.public_key`. Passing it avoids a server round-trip AND avoids depending on a "read my own pubkey" RPC that does not exist on the client. (If Phase 1 needs the pubkey from the server, that is a separate read op, out of scope.) The `record_unwrap` audit event for the actor's first unwrap is NOT part of init — it fires the first time the co-chair actually decrypts data, via the existing `unwrapForSession`/`recordCommitteeDataKeyUnwrap` path.
+
+The audit row for the self-wrap (`committee_data_key.wrapped_for_member`, actor==target) is emitted SERVER-SIDE by `wrap_committee_data_key_for_member` (the SQL owns emission per ADR-0003 Amendment A single-emission-path) — the client does NOT emit it. This differs from `committee-key.ts:initCommitteeDataKey` which emits via `store.recordKeyEvent` against the in-memory store; the production path delegates emission to SQL. This is the intended T07.1 split (supabase-t07-client.ts header: "the PRODUCTION architecture folds these steps into one SECURITY DEFINER SQL function … atomicity is the point").
+
+## Decision 3 — ordered ceremony with idempotency / resumability
+
+The co-chair's state is one of {nothing, identity-only, identity+recovery, fully-provisioned}. The card detects current state and resumes from the first incomplete step. Each step is individually idempotent or guarded:
+
+**Ceremony order (each step gates the next):**
+1. **Enroll identity** — `enrollIdentityViaProduction({ client, user_id })`. MUST precede recovery (recovery seals the privkey) AND committee-key (init self-wraps to the identity pubkey). **Resumability:** the F-02 challenge path is NOT naturally idempotent (`enrollment_challenge_init` mints a fresh challenge each call; `enroll`/`finalize` against an already-enrolled pubkey returns `duplicate`). **Guard:** before calling, probe whether an identity pubkey already exists for the actor (a "do I have an identity" read — if the client lacks one, treat a `duplicate` reason from finalize as success-equivalent: the server already has the pubkey; the local privkey is what matters). If `localIdentity.getIdentityPrivateKey(user_id)` returns a key, identity is fully done device-side → skip. If the SERVER has the pubkey but the DEVICE has no privkey (e.g. refresh after partial enroll, or new device), this is a RECOVERY scenario, NOT a re-enroll — surface "restore from recovery passphrase" (existing `restoreRecoveryBlobViaProduction`) rather than minting a second identity. **This split is a key edge case for the threat-modeler and the test-writer.**
+2. **Store recovery blob + download sheet** — run the existing D.4/D.6 ceremony (generate passphrase → show sheet → type-back verify → `storeRecoveryBlobViaProduction` → offer JSON download). **Resumability:** server-side recovery store is cap-of-1 (F-12); a second `store_recovery` for a co-chair requires a reset (G-T07-8) — so if a blob already exists, skip the store but still allow re-printing the sheet via the existing RecoveryReissueCard path (do NOT silently overwrite). The passphrase is regenerated on any restart (ADR-0020 Option B: in-memory only, never persisted) — the co-chair is told this.
+3. **Init committee data key + self-wrap** — `initCommitteeDataKeyViaProduction({ client, localIdentity, user_id, actor_public_key })`. **Resumability:** `init_key` returns `already_initialised` (P0001) on a second call → the function maps this to `{ status: 'already_initialised' }`, which the card treats as "this step already done" (success-equivalent for resumption), NOT an error toast. **Edge:** if `init_key` succeeded on a prior attempt but the self-`wrap_member` failed (process killed between the two RPCs), the key exists with NO actor wrap → the co-chair cannot unwrap. The function as written would re-enter, get `already_initialised` from init, and skip the wrap — leaving the broken state. **Mitigation:** on `already_initialised`, the card MUST verify the actor has a current wrap (a `getCurrentCommitteeKeyWrap`-equivalent read or an unwrap probe); if absent, issue the self-`wrap_member` against the existing `key_id` (which `wrap_member` permits — the key already exists, target is active) to repair. This "init-succeeded-wrap-failed" gap is a HIGH-risk edge the test-writer MUST cover.
+
+**Refresh / mid-flow crash:** wizard-style in-memory state (ADR-0020 Option B) — a refresh restarts the card, which re-probes state and resumes at the first incomplete step. No flow-state in URL/sessionStorage/localStorage. The passphrase is regenerated on restart (told to the user). Server-side state (identity pubkey, recovery blob, committee key) is the durable source of truth the probe reads.
+
+## Decision 4 — acceptance criteria (test-writer turns these into failing tests first)
+
+Hermetic: mock t07 transport + real `BrowserLocalIdentityStore` (SSR Map fallback) + real libsodium, mirroring `production-flows`' existing test surface.
+
+**Happy path:**
+- AC-1: from passkey-only state, the full ceremony produces, in order: an `identity_keys` server row (via enroll challenge), a `recovery_blobs` row (via store_recovery) AND a downloaded JSON blob, and a `committee_data_keys` row + a `committee_key_wraps` row for the actor (via init_key + wrap_member). After completion the co-chair can `unwrapForSession` and round-trip-decrypt.
+- AC-2: `initCommitteeDataKeyViaProduction` returns `{ status:'ok', key_id, epoch }` and the persisted wrap, when opened with the actor's privkey, yields the same 32 bytes that were generated.
+
+**Edge cases:**
+- AC-3 (already-enrolled identity): with a privkey already in `localIdentity`, the card skips step 1 and does NOT mint a second identity (no second `enrollment_challenge_init`).
+- AC-4 (already-initialised key): `init_key` returning `already_initialised` maps to `{ status:'already_initialised' }`, the card treats it as done, and emits NO error toast.
+- AC-5 (init-succeeded-wrap-failed repair): given a `committee_data_keys` row with NO actor wrap, the card issues a self-`wrap_member` against the existing `key_id` and the actor ends with a working wrap. (HIGH risk.)
+- AC-6 (no session / 401): any RPC returning HTTP 401 surfaces a sign-in-required state and fires `onSessionRevoked` (clears JWT); the ceremony does not persist partial local state inconsistent with the server. 403 (rls_denied) is distinct from 401 and surfaces a generic-failed copy without clearing the JWT.
+- AC-7 (server-has-pubkey, device-has-no-privkey): the card surfaces "restore from recovery passphrase," NOT a re-enroll.
+- AC-8 (key material never logged): a test asserts that across the full ceremony, no plaintext private key, no plaintext committee data key, and no passphrase appears in `console.*`, thrown error messages, the structured-log path, or any audit `meta` payload. The 32-byte data key is zeroized (`.fill(0)`) before `initCommitteeDataKeyViaProduction` returns (asserted via a spy on the buffer or a post-return zero check).
+
+## Decision 5 — security / privacy considerations (handed to the threat-modeler)
+
+- **Private key custody (ADR-0003 Invariant 1):** the identity privkey is generated client-side, persisted ONLY to IndexedDB via `BrowserLocalIdentityStore`, and persisted ONLY after the F-02 challenge succeeds. It is NEVER sent to the server in plaintext; the server receives only the public half + the sealed-nonce response.
+- **Recovery blob (F-08):** the privkey is Argon2id-sealed under the user-chosen passphrase CLIENT-SIDE (`encryptRecoveryBlob`, Amendment G fail-closed) before `store_recovery`. The server stores opaque `[salt][nonce][ciphertext]`; it cannot open it. The passphrase NEVER leaves the device, NEVER lands in URL/sessionStorage/localStorage/audit-meta, and is regenerated (not persisted) across restarts (ADR-0020 Option B).
+- **Committee data key (Invariants 1, 5, 6):** the 32-byte symmetric key is generated client-side, exists in plaintext ONLY transiently in `initCommitteeDataKeyViaProduction`'s local scope, is zeroized before return, and is persisted to the server ONLY as a sealed-box wrap addressed to an identity pubkey. The plaintext key NEVER touches the server.
+- **Audit emission is server-owned (Amendment A single-emission-path):** the self-wrap audit row (`committee_data_key.wrapped_for_member`, actor==target) and the `identity_keypair.created` row are emitted inside the SECURITY DEFINER SQL functions, atomically with the data write — the client does not and cannot forge them. Pseudonyms via `_hmac_pseudonym_key()` (ADR-0024 key-parity gate on the EF).
+- **Trust boundary:** browser ↔ t07-op Edge Function (CORS `serveWithCors`, `assertKeyParity` + `session_is_live()` gating). Every Phase 0a RPC crosses it bearing the co-chair's mint-session JWT. The data crossing the boundary is: identity PUBLIC key + fingerprint, sealed nonce response, opaque recovery ciphertext + kdf_params, sealed committee-key wrap. No plaintext secret crosses.
+- **PI classification:** the identity pubkey + fingerprint are pseudonymous identifiers, not direct PI. The recovery blob is sealed and opaque. No name/email/phone is collected by Phase 0a. Residency: all rows land in the existing ca-central-1 project (ADR-0001) — no new region, no new subprocessor.
+- **No new third party, no new data field, no new region** — this composes existing primitives only. No new retention class (existing `identity_keys` / `recovery_blob.*` / `committee_data_key.*` enums + ADR-0016 schedules cover it).
+
+## Decision 6 — ordered task breakdown (for the implementer)
+
+- **P0a-1 — Add `initCommitteeDataKeyViaProduction` to `production-flows.ts`.** Dep: none (composes existing client + libsodium). AC: AC-2, AC-4, AC-8 (zeroize). Owner: implementer. Risk: med. Est: S. *security-reviewer.*
+- **P0a-2 — Add a state-probe helper (does the actor have: device privkey? server recovery blob? current committee wrap?).** Dep: none. AC: drives AC-3/AC-5/AC-7 resumption branching; pure reads, no writes. Owner: implementer. Risk: med. Est: S.
+- **P0a-3 — `SetupCommitteeEncryptionCard.svelte` orchestrator (composes enroll → recovery → init, reusing RecoveryPassphraseScreen/D6TypeBackVerify/recovery-blob-download).** Dep: P0a-1, P0a-2. AC: AC-1, AC-6, AC-7; reuses existing recovery components (no fork); self-hides when fully provisioned. Owner: implementer + designer (card surface). Risk: high. Est: M. *security-reviewer + threat-modeler.*
+- **P0a-4 — Mount the card in Settings, co-chair-only, with `createSupabaseT07Client({ ..., localIdentity: new BrowserLocalIdentityStore() })`.** Dep: P0a-3. AC: card visible only to a co-chair who is not yet provisioned; JWT/`onSessionRevoked` wiring matches settings/+page.svelte:78. Owner: implementer. Risk: med. Est: S.
+- **P0a-5 — init-succeeded-wrap-failed repair path (on `already_initialised`, verify actor wrap; if absent, self-wrap against the existing key_id).** Dep: P0a-1, P0a-2. AC: AC-5. Owner: implementer. Risk: high. Est: S. *security-reviewer + threat-modeler.*
+- **P0a-6 — key-material-never-logged CI assertion** (extends the existing passphrase-leak gate to cover the data key + privkey across the Phase 0a ceremony). Dep: P0a-3. AC: AC-8 as a CI gate. Owner: implementer + observability-setup. Risk: low. Est: S.
+
+**Human-gate items:** P0a-3 + P0a-5 (security-reviewer + threat-modeler on the identity/committee-key provisioning path — HG-AUTH-PHASE0A); production deploy of the card (auth/PI path, never auto-merge per preferences.md).
+
+## Reversibility
+
+- `initCommitteeDataKeyViaProduction` + state-probe: **easy** (pure additive library functions; no schema, no migration; removable by deleting the functions and the card).
+- Settings-card-vs-route placement: **easy** (a mount-point change; the orchestrator logic is placement-agnostic).
+- The reuse-the-wizard-components-not-the-state-machine posture: **medium** (re-forking the wizard later would be a sprint, but the chosen path leaves the wizard untouched).
+- No hard-to-reverse choice is introduced — Phase 0a adds no migration, no new table, no new RPC, no new subprocessor, no new region.
+
+## Compliance check
+
+- [x] ca-central-1 only; no new subprocessor; no new region (ADR-0001).
+- [x] ADR-0003 Invariants 1/4/5/6 honoured — libsodium-only; privkey + data key never leave the device in plaintext; wraps addressed to pubkeys; data key zeroized after use.
+- [x] No new data field collected from users → no new purpose entry required (constraints.md hard rule 6 N/A).
+- [x] No new retention class — existing identity/recovery/committee-key enums + ADR-0016 schedules cover the surface.
+- [x] No PII in logs/URLs/errors — Decision 5 + AC-8 enforce.
+- [x] No edit to `.context/constraints.md`.
+- [ ] **HG-AUTH-PHASE0A** — security-reviewer + threat-modeler sign-off at the PR (auth/identity-key/committee-key provisioning path).
+
+## Threat-modeler handoff (mandated)
+
+This ADR MUST route to the **threat-modeler** before any P0a task ships. See the handoff block in the architect's session summary — trust boundary (browser ↔ t07-op), data-flow per ceremony step, PI/secret touchpoints (privkey, passphrase, data key — all client-custody), and the two HIGH-risk edges (init-succeeded-wrap-failed repair P0a-5; server-has-pubkey/device-has-no-privkey restore-not-reenroll P0a-3 AC-7) are the required inputs.
+
+---
+
+## Amendment A (edge-A repair ruling) — 2026-06-21
+
+**Status:** Accepted (design only — no feature code). **Decider:** architect. **Trigger:** threat-modeler finding **F-138** (threat-model.md §3.15). **Scope:** corrects the repair mechanism in Decision 3 step 3 and replaces **AC-5**; does NOT alter any other decision.
+
+### Why the original repair idea is partly impossible
+
+Decision 3 step 3 (and F-138's first-draft mitigation) said: on `already_initialised`, probe for the actor wrap; if absent, "self-wrap against the existing `key_id`." That is correct ONLY when the 32-byte plaintext data key is still obtainable. In the true edge-A — process dies AFTER `init_key` succeeds but BEFORE the first `wrap_member` — the key bytes lived only in `initCommitteeDataKeyViaProduction`'s local scope and are GONE. There is nothing to seal. You cannot `wrap_member` a key you do not hold. The threat-modeler is right: the naive repair is impossible in this sub-case, and "re-generate a fresh 32-byte key and wrap it under the SAME dead `key_id`" is actively WRONG — it would bind two different key materials to one `key_id`/epoch (a divergent key under a stale id, the F-137 hazard).
+
+### Ruling 1 — split `already_initialised`-on-resume into two sub-cases by WRAP COUNT, not by actor-wrap-presence
+
+On `already_initialised`, the state probe (P0a-2) MUST read the wrap count for the live key (`rotated_at IS NULL`), distinguishing:
+
+- **Sub-case (a) — at least one wrap exists for SOME member.** The key is live and its bytes are recoverable by at least one party. Repair is possible but does NOT require minting anything new.
+- **Sub-case (b) — ZERO wraps exist for ANY member.** This is the true edge-A. The key bytes are irretrievably lost. No `wrap_member` can repair it because no one holds the plaintext.
+
+The discriminator is **"does any wrap row exist for the live `key_id`,"** not "does the ACTOR have a wrap." The actor-wrap probe alone (the original AC-5 design) cannot tell (a) from (b) and would mis-route both into an impossible self-wrap.
+
+### Ruling 2 — sub-case (a): actor lacks a wrap but another member holds one → the actor CANNOT self-repair; route to a key-holder or to recovery
+
+The actor does not hold the plaintext data key (they have no wrap to unwrap, by hypothesis), so they cannot produce a sealed wrap for themselves. `wrap_member` requires caller-supplied sealed ciphertext = `seal(dataKey, actor_pubkey)`, and the actor cannot compute it. Correct actions, in order of preference:
+
+1. **Another active key-holder wraps the actor in:** an existing member who CAN unwrap the live key opens it client-side and calls `wrap_committee_data_key_for_member({ member_user_id: actor, key_id, wrapped_ciphertext: seal(dataKey, actor_pubkey), rotation_id: null })`. `wrap_member` permits this (key exists, target active). This is the normal "onboard a member to the existing key" path — it is NOT a Phase-0a self-repair.
+2. **Or the actor restores** their own access if THEY were previously a holder and merely lost the device privkey — that is edge-B (F-139, AC-7, restore-not-reenroll), not edge-A.
+
+In Phase 0a specifically, sub-case (a) is **not expected** — the first co-chair is the ONLY member, so "another member has a wrap" cannot arise during the first ceremony. The card MUST therefore treat sub-case (a) as an **explicit recoverable error** ("This committee key is held by another member; ask them to grant you access" / or route to restore), NEVER as a silent success and NEVER as an attempt to self-wrap key material it does not have. The path is specified so that Phase 1 (multi-member) inherits a correct ruling.
+
+### Ruling 3 — sub-case (b), the true edge-A: ABANDON the dead `key_id` via `rotate_committee_data_key`, then init-equivalent under the fresh epoch
+
+Verified against the SQL this pass (`supabase/migrations/00000000000007_t07.sql`):
+
+- `rotate_committee_data_key(p_trigger)` (line 555) gates on `_t07_gate_active_member()` only — **the first co-chair (active member, live session) can call it** (it is NOT co-chair-gated; co-chair-gating is only on `revoke_committee_member`/`issue_recovery_blob_reset`). It (i) takes a txn advisory lock (F-04), (ii) requires ≥1 active member (the co-chair satisfies this), (iii) selects the `rotated_at IS NULL` row — **which IS the dead zero-wrap key_id** — marks it `rotated_at = now()`, (iv) mints a fresh `key_id` at epoch+1, (v) emits `.rotation.started`, and returns `(rotation_id, new_key_id)`.
+- `finalize_committee_data_key_rotation(p_rotation_id, p_new_key_id, p_members_rewrapped_count)` (line 622) gates on `_t07_gate_active_member()`, pairs against the `.started` row, and validates the new key is un-rotated-out. Also co-chair-reachable.
+
+So the dead `key_id` is not "superseded by mutating it" — it is **properly retired** (`rotated_at` set) by rotation, and a genuinely fresh epoch is established. This avoids the divergent-key hazard entirely: the new 32-byte key is generated client-side and self-wrapped under the NEW `key_id`, never under the stale one.
+
+**Confirmation that abandonment loses nothing (the load-bearing fact):** In the Phase 0a ceremony, `init_committee_data_key` is the LAST write of step 3, and step 3 is the LAST step of the ceremony. **No committee data is ever encrypted under the key between `init_key` and the first `wrap_member`** — there is no data-write surface reachable in that window, and the co-chair cannot have encrypted anything because they could not yet unwrap. Therefore a zero-wrap key has, by construction, zero ciphertext sealed under it. Abandoning it forfeits nothing. (Guard restated as an invariant below — if any future change lets data be sealed under a not-yet-wrapped key, this ruling must be revisited.)
+
+**Repair algorithm for sub-case (b):**
+1. Probe confirms `already_initialised` AND zero wraps for the live `key_id`.
+2. Call `rotate_committee_data_key('incident')` → retires the dead `key_id`, returns `(rotation_id, new_key_id)`. (Trigger-value note below.)
+3. Generate a fresh 32-byte data key client-side, seal to the actor's pubkey, `wrap_committee_data_key_for_member({ member_user_id: actor, key_id: new_key_id, wrapped_ciphertext, rotation_id })`.
+4. `finalize_committee_data_key_rotation(rotation_id, new_key_id, p_members_rewrapped_count = 1)`.
+5. Zeroize the plaintext data key (`.fill(0)`) before return; round-trip-verify via `unwrapForSession`.
+
+**Trigger-value gap (flagged, not blocking):** `rotate_committee_data_key` accepts only `('scheduled','member_removal','incident')`. None names "abandon a stillborn init." `'incident'` is the closest honest fit and is what this ruling prescribes. A future migration MAY add a `'stillborn_init'` (or `'orphan_key'`) trigger value for cleaner audit provenance; that is a one-line CHECK-enum change, **easy** reversibility, and is explicitly OUT of Phase 0a scope. Until then `'incident'` is correct and callable.
+
+### Ruling 4 — replacement AC-5 (replaces the AC-5 in Decision 4; test-writer spec)
+
+The single old AC-5 is replaced by AC-5a/AC-5b/AC-5c. The card's `already_initialised` resume MUST branch on wrap count.
+
+- **AC-5a (fresh init — happy, unchanged from AC-1/AC-2):** from a clean state, `init_key` succeeds, the self-`wrap_member` succeeds, the actor ends with a working wrap; `unwrapForSession` round-trip-decrypts. No rotation invoked.
+- **AC-5b (true edge-A — init-ok / wrap-fail, ZERO wraps → rotate-and-reinit):** given a `committee_data_keys` row with `rotated_at IS NULL` and **zero `committee_key_wraps` rows for ANY user** (simulate by mocking `init_key` → success, first `wrap_member` → fail, then re-run the ceremony), assert the card: (i) detects zero wraps via the probe (NOT just "actor missing"); (ii) calls `rotate_committee_data_key('incident')` and uses the returned `new_key_id` — assert the OLD key_id is now `rotated_at`-set and is NEVER wrapped; (iii) generates a fresh 32-byte key (a NEW `randombytes_buf`), self-wraps under `new_key_id`; (iv) calls `finalize_committee_data_key_rotation(rotation_id, new_key_id, 1)`; (v) the actor's wrap, opened with the actor privkey, yields the fresh 32 bytes and `unwrapForSession` succeeds; (vi) **no `wrap_member` is ever issued against the dead key_id** (no divergent key under a stale id). The data key is `.fill(0)`-zeroized before return.
+- **AC-5c (sub-case (a) — actor missing wrap but ANOTHER member holds one):** given ≥1 `committee_key_wraps` row for some OTHER user and none for the actor, assert the card does NOT call `init_key`, does NOT call `rotate`, does NOT attempt a self-`wrap_member` (it has no key material), and surfaces an **explicit recoverable error** routing to "ask an existing key-holder to grant access" or to recovery-restore — never a silent "done."
+- **AC-5d (invariant guard, retained from old AC-5):** on ANY `already_initialised` branch the card NEVER returns "done" without a CONFIRMED working actor wrap for the CURRENT (`rotated_at IS NULL`) key. A test stubs each sub-case and asserts no short-circuit to success.
+
+### Ruling 5 — impact on the task breakdown
+
+**P0a-5 scope is amended (not split into a new task):** its title/description change from "self-wrap against the existing key_id" to **"resume-repair: branch `already_initialised` on wrap count → AC-5b rotate-and-reinit for zero-wraps, AC-5c explicit-error for foreign-held, AC-5d invariant guard."** Its dependencies (P0a-1, P0a-2) and risk (HIGH) and security-reviewer + threat-modeler gate are unchanged. Estimate moves S → **M** (it now drives the rotate/finalize pair, not a single wrap call).
+
+**P0a-2 (state-probe) scope is amended:** the probe MUST return the **wrap count for the live key** (zero / actor-only / others-present), not merely a boolean "actor has a wrap." This is the discriminator AC-5b vs AC-5c depend on.
+
+**Rotation support is IN Phase 0a scope but bounded — and fail-safe by construction:** Phase 0a does NOT build a general rotation feature; it only CALLS the existing `rotate_committee_data_key` / `finalize_committee_data_key_rotation` RPCs on the AC-5b path. Those RPCs already exist and are co-chair-reachable (verified), so no new migration is required for the happy repair. **Guard requirement (fail-safe):** if the probe cannot unambiguously establish the wrap-count sub-case, OR the rotate/finalize pair errors, the card MUST surface an **explicit recoverable error** ("Committee encryption needs repair — retry / contact support") and MUST NOT leave or create a silent dead key. A dead key that is merely surfaced as a loud recoverable error is acceptable for Phase 0a ship; a SILENT dead key is a NO-GO (matches F-138's invariant). This is the deferral guard: rotation is wired for the zero-wrap path now; any sub-case the card cannot prove safe fails loud rather than guessing.
+
+### Reversibility of this amendment
+
+- Branching the resume on wrap-count + calling the existing rotate/finalize RPCs: **easy** (pure client-side composition over RPCs that already exist; no schema, no migration; removable by reverting P0a-5/P0a-2).
+- Adding a `'stillborn_init'` trigger enum value (deferred): **easy** (one-line CHECK change), explicitly out of scope.
+- No hard-to-reverse choice is introduced. No new table, no new RPC, no new subprocessor, no new region.
+
+### Compliance check (delta only)
+
+- [x] ca-central-1 only; no new subprocessor / region — the amendment composes existing RPCs (ADR-0001).
+- [x] No new PI field, no new retention class — `committee_data_keys` / `committee_key_wraps` / rotation audit events already exist (ADR-0016 schedules cover them).
+- [x] Edge-A is an availability/data-loss event for the legitimate user, NOT a confidentiality breach — no PIPEDA s.10.1 trigger introduced (consistent with threat-model.md §6).
+- [x] No edit to `.context/constraints.md`.
+- [ ] **HG-AUTH-PHASE0A** unchanged — security-reviewer + threat-modeler sign-off at the P0a-5 PR (now covering the rotate-and-reinit repair).
