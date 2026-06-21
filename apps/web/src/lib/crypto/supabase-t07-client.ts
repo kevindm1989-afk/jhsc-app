@@ -273,6 +273,41 @@ export class SupabaseT07Client {
     return invoke<{ key_id: string; epoch: number }>(this.opts.transport, { op: 'init_key' });
   }
 
+  /**
+   * Read-only resume probe (P0a-2 / ADR-0026 Amendment A) — return the live
+   * (`rotated_at IS NULL`) committee key's id + epoch + the TOTAL wrap count
+   * and whether the actor holds a wrap. `null` when no live key exists.
+   *
+   * The wrap COUNT is the load-bearing discriminator the `already_initialised`
+   * resume branch reads to tell edge-A (zero wraps → rotate-and-reinit) from
+   * the foreign-held sub-case (some-other-member-wrapped → recoverable error).
+   * Branching on actor-wrap presence alone cannot distinguish the two
+   * (Amendment A Ruling 1). `actor_user_id` is forwarded so the server can
+   * compute `actor_has_wrap` against the caller; the SQL function ignores
+   * any mismatch with `auth.uid()` (the server is the trust boundary).
+   *
+   * Backed server-side by `committee_key_state_for_self` (migration 0037),
+   * dispatched as the `committee_key_state` op on t07-op.
+   */
+  getCommitteeKeyState(input: { actor_user_id: string }): Promise<
+    T07OpResult<{
+      key_id: string;
+      epoch: number;
+      wrap_count: number;
+      actor_has_wrap: boolean;
+    } | null>
+  > {
+    return invoke<{
+      key_id: string;
+      epoch: number;
+      wrap_count: number;
+      actor_has_wrap: boolean;
+    } | null>(this.opts.transport, {
+      op: 'committee_key_state',
+      actor_user_id: input.actor_user_id
+    });
+  }
+
   wrapCommitteeDataKeyForMember(input: {
     member_user_id: string;
     key_id: string;

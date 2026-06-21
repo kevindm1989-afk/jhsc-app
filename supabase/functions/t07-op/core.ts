@@ -342,6 +342,32 @@ export function initCommitteeDataKey(
   );
 }
 
+/**
+ * ADR-0026 Phase 0a (P0a-2) — read-only resume probe for the live committee
+ * key's state (key_id + epoch + TOTAL wrap count + actor-has-wrap). Backed by
+ * the self-only `committee_key_state_for_self` SECURITY DEFINER fn (migration
+ * 0037). The wrap COUNT is the F-138 edge-A discriminator (Amendment A
+ * Ruling 1); no key material crosses the boundary. `null` when no live key
+ * exists. The `actor_user_id` carried on the wire is forwarded by the
+ * dispatcher for symmetry with the client probe shape; the SQL computes
+ * `actor_has_wrap` against `auth.uid()` regardless (the server is the trust
+ * boundary), so a smuggled mismatch cannot widen the result.
+ */
+export function committeeKeyState(
+  rpc: RpcPort
+): Promise<
+  OpResult<{ key_id: string; epoch: number; wrap_count: number; actor_has_wrap: boolean } | null>
+> {
+  return call<
+    Array<{ key_id: string; epoch: number; wrap_count: number; actor_has_wrap: boolean }>
+  >(rpc, 'committee_key_state_for_self', {}).then((r) => {
+    if (!r.ok) return r;
+    const row = r.data?.[0];
+    if (!row) return { ok: true, data: null };
+    return { ok: true, data: row };
+  });
+}
+
 export function wrapCommitteeDataKeyForMember(
   rpc: RpcPort,
   input: {

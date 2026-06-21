@@ -72,12 +72,14 @@ export type {
 export {
   enrollIdentityViaProduction,
   storeRecoveryBlobViaProduction,
-  restoreRecoveryBlobViaProduction
+  restoreRecoveryBlobViaProduction,
+  initCommitteeDataKeyViaProduction
 } from './production-flows';
 export type {
   EnrollProductionResult,
   StoreRecoveryProductionResult,
-  RestoreRecoveryProductionResult
+  RestoreRecoveryProductionResult,
+  InitCommitteeKeyProductionResult
 } from './production-flows';
 export { ARGON2_OPS, ARGON2_MEM_BYTES, KDF_PARAMS } from './recovery-blob';
 export { generateIdentityKeypair, selfTestKeypair, pubkeyFingerprint } from './identity-keys';

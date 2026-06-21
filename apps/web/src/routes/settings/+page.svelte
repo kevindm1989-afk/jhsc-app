@@ -36,6 +36,7 @@
   import AboutCard from '../../lib/ui/AboutCard.svelte';
   import RecoveryVerifierCard from '../../lib/recovery/RecoveryVerifierCard.svelte';
   import RecoveryReissueCard from '../../lib/recovery/RecoveryReissueCard.svelte';
+  import SetupCommitteeEncryptionCard from '../../lib/crypto/SetupCommitteeEncryptionCard.svelte';
   import { BrowserLocalIdentityStore } from '../../lib/crypto/browser-local-identity-store';
   import { BrowserWipeStore } from '../../lib/lock/wipe-store';
   import { clearJwt, getJwt } from '../../lib/auth/session-jwt-store';
@@ -103,6 +104,20 @@
   // store's own fallback handles SSR / non-browser environments.
   const localIdentityStore = new BrowserLocalIdentityStore();
   const getLocalIdentityPrivateKey = (user_id) => localIdentityStore.getIdentityPrivateKey(user_id);
+
+  // Phase 0a (ADR-0026) — a SECOND t07 client that threads the device-local
+  // identity store so the committee-encryption ceremony can persist the
+  // freshly-enrolled privkey (enrollIdentityViaChallenge) and read it back for
+  // the recovery-blob seal. Same baseUrl / getJwt / onSessionRevoked wiring as
+  // the panic-wipe client above (the F-39 loop applies to every t07 client).
+  // The panic-wipe client deliberately omits localIdentity (it only emits an
+  // audit row); the committee-setup client needs it.
+  const committeeSetupClient = createSupabaseT07Client({
+    baseUrl,
+    getJwt,
+    onSessionRevoked: clearJwt,
+    localIdentity: localIdentityStore
+  });
 
   function openWipeModal() {
     modalOpen = true;
@@ -194,6 +209,15 @@
 <section class="card">
   <RecoveryVerifierCard />
 </section>
+
+{#if $isSignedIn}
+  <section class="card">
+    <SetupCommitteeEncryptionCard
+      client={committeeSetupClient}
+      localIdentity={localIdentityStore}
+    />
+  </section>
+{/if}
 
 <section class="card">
   <RecoveryReissueCard getIdentityPrivateKey={getLocalIdentityPrivateKey} />

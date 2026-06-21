@@ -2720,3 +2720,244 @@ The architect needs to land the following ADR amendments during M0 (per the arch
 The F-128 mint-race finding (M-128a integrity check) was NOT explicit in the architect's Fork 1 framing — the Fork's recommendation says "Every Edge Function dispatcher … calls `session_is_live(jti)` as its first DB query," which doesn't fit the mint-session pre-session shape. The §3.12 F-116 entry implicitly carved mint-session out, but the post-mint race-window between INSERT and SIGN was not addressed. This is a real exploitable race during legitimate co-chair revocation traffic. **Architect re-review requested**: should the ADR-0023 amendment / new ADR-0024 explicitly require the F-128 post-mint integrity check, or is the F-39 client-side propagation loop sufficient and the UX-confusion residual acceptable?
 
 ---
+
+## §3.15 — Phase 0a first-co-chair crypto-provisioning ceremony (ADR-0026)
+
+Source: threat-modeler pass 2026-06-21, gating **HG-AUTH-PHASE0A**, driven by ADR-0026 (Phase 0a: provision the already-signed-in passkey-only first co-chair with identity keypair + recovery blob + committee data key, via a co-chair-only "Set up committee encryption" Settings card). Branch: `claude/affectionate-carson-nqB03`. **No new migration, table, RPC, region, or subprocessor** — Phase 0a composes existing primitives only (constraints.md hard rules 3/4/6 are N/A by construction; verified in §6 below). F-range continues from F-128 (no renumbering of prior findings); new findings F-129…F-141. The two HIGH-risk edges the architect flagged (init-succeeded-wrap-failed; server-has-pubkey/device-has-no-privkey) are pinned at F-138 and F-139. Verdict: **GO-WITH-CONDITIONS** — every testable mitigation below is implementation-blocking and maps to ADR-0026 AC-1…AC-8 where aligned.
+
+### Scope reconciliation against existing entries
+
+- **F-02 (S, line 217)** established the F-02 sealed-box challenge as the mitigation for "enrolled pubkey whose privkey the client cannot prove possession of." Phase 0a's step 1 (`enrollIdentityViaProduction` → `enrollment_challenge_init`/`finalize`) IS that mitigation in production wiring. F-129 below pins it to the new ceremony's code path and adds the missing-test obligation (the existing F-02 testable mitigation was written against the design, not the shipped `production-flows.ts` composition).
+- **F-08 (I, line 271) + F-41 (I) + F-108/F-110/F-111 (I, §8.T19)** established the recovery-passphrase non-transmission / non-logging invariants for the wizard's D.4→D.6 ceremony. Phase 0a REUSES those exact components (`RecoveryPassphraseScreen.svelte`, `D6TypeBackVerify.svelte`, `recovery-blob-download`), so F-108/F-110/F-111 carry forward unchanged. F-132 below extends the leak-surface assertion to cover the new orchestrator (`SetupCommitteeEncryptionCard.svelte`) and the new `initCommitteeDataKeyViaProduction` data-key buffer (AC-8 widens the existing passphrase-leak CI gate, ADR-0026 task P0a-6).
+- **F-116/F-121 (E, §3.12/§3.14)** established the `session_is_live()` liveness gate on every privileged path. The t07-op dispatcher is already GATED (§3.14 table row `t07-op (all ops)`). Phase 0a's three RPCs (`enrollment_challenge_*`, `store_recovery`, `init_key`/`wrap_member`) inherit that gate; F-130 below pins the 401-vs-403 client handling to AC-6 and confirms no new ungated surface is introduced (no new op, so the F-122 grep is unaffected).
+- **F-01 (S, line 208)** established that a wrap insert for an inactive/non-member target must fail RLS. Phase 0a's self-wrap (actor==target, actor is an active member per the ADR-0025 bootstrap) passes that gate legitimately; F-137 below pins the actor-active precondition and the `already_initialised` second-init guard.
+
+### Data flow (per ceremony step; trust boundary B2 = browser ↔ t07-op, ciphertext-only past the boundary)
+
+```
+[Step 1 — Enroll identity (F-02 sealed-box challenge)]
+  Browser: generateIdentityKeypair() -> {ident_pub, ident_priv}            (RAM only)
+  Browser: selfTestKeypair(kp)  -- gates the server touch (production-flows.ts:73)
+  Browser -> t07-op enrollment_challenge_init { ident_pub }                [B2; PUBLIC key only]
+  Server: seals a fresh nonce to ident_pub; returns sealed nonce
+  Browser: crypto_box_seal_open(sealed_nonce, ident_pub, ident_priv) -> nonce
+  Browser -> t07-op enrollment_challenge_finalize { unsealed_nonce }       [B2; nonce only]
+  Server: verifies nonce == minted; INSERT identity_keys (pub + fingerprint); emits audit row
+  Browser -> IndexedDB: persist ident_priv via BrowserLocalIdentityStore   [B4] ONLY after server accepts
+  CROSSES B2: ident_pub, sealed-nonce response, unsealed nonce. NEVER ident_priv.
+
+[Step 2 — Store recovery blob + sheet]
+  Browser: generate recovery passphrase R                                  (RAM only, ADR-0020 Option B)
+  Browser: read ident_priv from BrowserLocalIdentityStore (production-flows.ts:111)
+  Browser: K_r = Argon2id(R, salt) [F-08 floor, Amendment G fail-closed]
+  Browser: blob = [salt(16)][nonce(24)][ciphertext] = secretbox(ident_priv, K_r) + kdf_params
+  Browser -> t07-op store_recovery { blob, kdf_params }                    [B2; opaque ciphertext only]
+  Server: INSERT recovery_blobs (cap-of-1, F-12); cannot open the blob
+  Browser: offer downloadable recovery sheet (JSON) -- local download, no boundary crossing
+  CROSSES B2: opaque [salt][nonce][ciphertext] + kdf_params. NEVER R, NEVER ident_priv plaintext.
+
+[Step 3 — Init committee data key + self-wrap (the one net-new composition)]
+  Browser -> t07-op init_key {}                                            [B2; mints {key_id, epoch} ONLY]
+  Server: init_committee_data_key() gates on active member; raises already_initialised (P0001) on 2nd init
+  Browser: dataKey = randombytes_buf(crypto_secretbox_KEYBYTES) (32 bytes) (RAM only, local scope)
+  Browser: wrap = crypto_box_seal(dataKey, actor_public_key)              (sealed to actor's OWN pubkey)
+  Browser -> t07-op wrap_member { member=actor, key_id, wrapped_ciphertext: wrap, rotation_id: null }  [B2]
+  Server: INSERT committee_key_wraps; emits committee_data_key.wrapped_for_member (actor==target) SERVER-SIDE
+  Browser: dataKey.fill(0) (zeroize) BEFORE return                         (ADR-0026 Decision 2 step 5; AC-8)
+  CROSSES B2: {key_id, epoch} metadata, sealed committee-key wrap. NEVER plaintext dataKey.
+```
+
+**PI classification:** identity pubkey + fingerprint are pseudonymous identifiers (not direct PI); recovery blob is sealed/opaque; committee-key wrap is ciphertext. **No name/email/phone is collected by Phase 0a.** Residency: all rows land in the existing ca-central-1 project (ADR-0001). Retention: existing `identity_keys` / `recovery_blob.*` / `committee_data_key.*` enums + ADR-0016 schedules cover the surface — no new retention class.
+
+### Spoofing (S)
+
+#### F-129 | S | Enrolled identity pubkey whose privkey the client cannot prove possession of (F-02 challenge in the shipped Phase 0a composition)
+
+A MITM on the `enrollment_challenge_init` POST (or a buggy/compromised client) substitutes an `ident_pub` for which the legitimate device does NOT hold the matching `ident_priv`. If finalize were to accept the pubkey without proof-of-possession, every subsequent committee-key wrap (step 3 self-wrap, and all future member wraps) would be addressed to a pubkey the co-chair can never open → permanent denial-of-access; if an attacker holds the corresponding privkey, the attacker can open wraps. This is F-02 instantiated on the Phase 0a code path (`production-flows.ts:enrollIdentityViaProduction` → `client.enrollIdentityViaChallenge`).
+
+- **Affected:** `enrollIdentityViaProduction` (production-flows.ts:68–88), `SupabaseT07Client.enrollIdentityViaChallenge` → `enrollment_challenge_init`/`enrollment_challenge_finalize` (t07-op).
+- **Severity:** HIGH (the F-02 surface; mitigated by design, but the shipped composition needs an explicit test).
+- **Existing mitigation:** the F-02 sealed-box challenge IS the proof-of-possession: the server seals a nonce to the SUPPLIED `ident_pub`; finalize accepts ONLY if the client returns the unsealed nonce, which requires the matching `ident_priv`. A substituted pubkey whose privkey the device lacks cannot unseal → finalize fails → no `identity_keys` row persists. Additionally `selfTestKeypair(kp)` (production-flows.ts:73) gates the server touch client-side. **The privkey is persisted to IndexedDB ONLY after `enrollment_challenge_finalize` succeeds** (ADR-0026 Decision 5 / Findings) — never before, never to the server.
+- **Testable mitigation (AC-1):**
+  - _vitest (hermetic, mock t07 transport + real libsodium):_ drive `enrollIdentityViaProduction` where the transport seals the challenge nonce to a DIFFERENT keypair's pubkey than the one the client holds; assert finalize is rejected within one request-cycle, the function returns a non-`ok` status, and `BrowserLocalIdentityStore.getIdentityPrivateKey(user_id)` is empty afterward (no privkey persisted on a failed enroll).
+  - _vitest:_ assert the privkey is persisted to `localIdentity` ONLY after the transport's `enrollment_challenge_finalize` resolves success — spy the store's write and the transport's finalize; assert write-happens-after-finalize-success ordering, and NO write occurs when finalize returns an error.
+  - _vitest:_ assert `enrollment_challenge_init` and `enrollment_challenge_finalize` request bodies contain ONLY the PUBLIC key + the unsealed nonce respectively — assert NO byte of `kp.private_key` appears in any outbound request body across the enroll path.
+
+#### F-130 | S | Forged or replayed mint-session JWT drives the ceremony as another co-chair
+
+Every Phase 0a RPC crosses B2 bearing the co-chair's mint-session JWT. A stolen/forged/replayed JWT could attempt to run the ceremony as (or against) another user, e.g. enrolling an identity or self-wrapping a committee key under an attacker-chosen `auth.uid()`.
+
+- **Affected:** all three Phase 0a RPCs through `serveWithCors` + `assertKeyParity` + `session_is_live()` on t07-op.
+- **Severity:** MEDIUM (mitigated by the existing auth stack; pinned for the new ceremony).
+- **Existing mitigation:** (1) `serveWithCors` origin allowlist (`MINT_EXPECTED_ORIGINS`) rejects off-origin callers; (2) `assertKeyParity` 503s on HMAC-pseudonym key-parity mismatch (F-124–F-126); (3) `session_is_live()` (F-116/F-121) denies a revoked-but-unexpired JWT within ≤5s; (4) F-117 guarantees `auth.uid()` is server-resolved from the verified WebAuthn assertion, never from the request body — so the JWT cannot assert an arbitrary uid; (5) `init_key`/`wrap_member` gate on active committee membership (F-01). Phase 0a adds NO new uid-bearing input and NO new ungated op (the F-122 grep is unaffected).
+- **Testable mitigation (AC-6):**
+  - _vitest:_ any Phase 0a RPC returning HTTP 401 surfaces a sign-in-required state and fires `onSessionRevoked` (clears the JWT); assert the ceremony does NOT persist partial local state inconsistent with the server (e.g. on a 401 mid-step-3, no orphan IndexedDB write referencing a non-existent server key).
+  - _vitest:_ HTTP 403 (`rls_denied`) is handled DISTINCTLY from 401 — surfaces a generic-failed copy WITHOUT clearing the JWT (asserts the AC-6 401/403 split; mirrors F-121's `rls_denied` propagation contract).
+  - _carry-forward (no new test owed):_ the t07-op `session_is_live()` gate + key-parity gate are covered by §3.14 F-121/F-126 live-stack tests; Phase 0a inherits them.
+
+### Tampering (T)
+
+#### F-131 | T | Identity privkey persisted to IndexedDB before server acceptance, or persisted on a failed/MITM'd enroll
+
+If the client persisted `ident_priv` to `BrowserLocalIdentityStore` BEFORE `enrollment_challenge_finalize` succeeds, a MITM/abort between persist and accept would leave the device holding a privkey for an identity the server never recorded — or worse, a privkey for a pubkey an attacker substituted (F-129). The persistence ordering is the tamper-resistance invariant.
+
+- **Affected:** `enrollIdentityViaProduction` persistence ordering (production-flows.ts), `BrowserLocalIdentityStore`.
+- **Severity:** MEDIUM.
+- **Existing/required mitigation:** persist `ident_priv` to IndexedDB ONLY after the server accepts the unsealed nonce (ADR-0026 Decision 5; F-129 ordering). On any failure path, persist nothing. The recovery blob (step 2) reads the privkey back from `localIdentity` (production-flows.ts:111) and is the durable off-device backup; IndexedDB is not the sole custody.
+- **Testable mitigation (AC-1):**
+  - _vitest:_ covered by F-129's persist-after-finalize-success ordering assertion (single test serves both findings); additionally assert that an exception thrown between finalize-success and the IndexedDB write does NOT leave a half-written privkey (write is atomic or rolled back).
+
+#### F-132 | I/T | Key material (identity privkey, recovery passphrase, plaintext committee data key) leaks into logs, errors, audit-meta, or persistent storage
+
+The ceremony handles three high-value secrets transiently in the browser: the identity privkey, the recovery passphrase, and the 32-byte committee data key. Any of these landing in `console.*`, a thrown error message, the structured-log path, an audit `meta` payload, the recovery-sheet beyond the intended JSON, or URL/sessionStorage/localStorage is a confidentiality break. The new `initCommitteeDataKeyViaProduction` introduces a NEW plaintext-buffer surface (the data key) that the existing passphrase-leak gate did not cover. **Ground-truth note:** the existing test-only `committee-key.ts:initCommitteeDataKey` (line 72–112) does NOT zeroize `dataKey` after the wrap — the production function MUST add the `dataKey.fill(0)` that the test path lacks (ADR-0026 Decision 2 step 5).
+
+- **Affected:** `initCommitteeDataKeyViaProduction` (new, production-flows.ts), `SetupCommitteeEncryptionCard.svelte` (new orchestrator), the reused `RecoveryPassphraseScreen`/`D6TypeBackVerify`/`recovery-blob-download` components, all error/toast/log surfaces touched by the ceremony.
+- **Severity:** HIGH (a leak of any of the three secrets defeats the entire E2EE model; ADR-0003 Invariants 1/5).
+- **Existing/required mitigation:** (1) identity privkey NEVER transmitted (F-129) and NEVER logged; (2) recovery passphrase NEVER leaves the device, NEVER in URL/sessionStorage/localStorage/audit-meta, regenerated (not persisted) on restart per ADR-0020 Option B (carry-forward F-108/F-110/F-111); (3) committee data key exists in plaintext ONLY in `initCommitteeDataKeyViaProduction`'s local scope, persisted to the server ONLY as a sealed-box wrap, and **zeroized via `dataKey.fill(0)` (or libsodium `memzero`) BEFORE the function returns**; (4) audit emission is server-owned (Amendment A) — the client cannot put key material into audit meta.
+- **Testable mitigation (AC-8 — extends the existing passphrase-leak CI gate, ADR-0026 P0a-6):**
+  - _vitest (full-ceremony leak sweep):_ instrument `console.*`, captured thrown-error `.message`/`.stack`, the structured-log emit surface (`apps/web/src/lib/log/`), and any audit `meta` the client constructs; run the entire Phase 0a ceremony (steps 1–3, happy path + each error branch); assert NONE of {the raw privkey bytes, the passphrase string, the 32 plaintext data-key bytes} appears in any captured surface.
+  - _vitest (zeroize):_ assert the 32-byte data key is zeroized before `initCommitteeDataKeyViaProduction` returns — hold a reference to the exact `Uint8Array` instance generated (spy `randombytes_buf` to capture it) and assert every byte is `0` after the function resolves. Also assert no copy of the plaintext key is retained anywhere reachable (the wrap is ciphertext; the wrap !== the plaintext).
+  - _vitest (no persistent passphrase):_ after a simulated mid-flow refresh, assert the passphrase is NOT readable from `sessionStorage`, `localStorage`, IndexedDB, or any URL fragment, and that a NEW passphrase is generated on restart (ADR-0020 Option B; carry-forward F-111).
+  - _CI grep (uniformity):_ extend the existing passphrase-leak grep to also flag any code path under the Phase 0a surface that passes the data-key buffer or the privkey into a log/toast/error constructor.
+
+#### F-133 | T | Recovery blob envelope tampered before server store or after download
+
+The recovery blob `[salt(16)][nonce(24)][ciphertext]` is the only off-IndexedDB backup of the identity privkey. Tampering in transit (mitigated by TLS) or to the downloaded JSON sheet (offline) would make a future restore fail-closed (good) but could also be a substitution attack if an attacker swaps in a blob they can open. This is the Phase 0a instance of F-105 (recovery-blob JSON download tampered before re-import).
+
+- **Affected:** `storeRecoveryBlobViaProduction` (production-flows.ts:105), the `recovery-blob-download` JSON helper, `restoreRecoveryBlobViaProduction` (production-flows.ts:153).
+- **Severity:** MEDIUM (Argon2id-sealed; an attacker cannot open the legitimate blob, and a substituted blob fails the post-restore identity self-test).
+- **Existing mitigation:** the blob is Argon2id-sealed client-side under the user's passphrase before `store_recovery` (F-08, Amendment G fail-closed); the server stores it opaque and cannot open it. On restore, the recovered keypair MUST pass an identity self-test against the server-held pubkey before use (carry-forward F-02/F-129) — a substituted/tampered blob that decrypts to the wrong key is rejected. Server-side recovery store is cap-of-1 (F-12); a second `store_recovery` requires an explicit reset (G-T07-8), so Phase 0a never silently overwrites an existing blob (ADR-0026 Decision 3 step 2 — re-print via RecoveryReissueCard, do not re-store).
+- **Testable mitigation:**
+  - _vitest:_ a tampered/truncated blob envelope causes `restoreRecoveryBlobViaProduction` to fail-closed (no privkey recovered, no partial state) — Argon2id open failure surfaces as a typed error, not a thrown raw exception leaking material (cross-ref F-132).
+  - _vitest:_ when a recovery blob already exists server-side (cap-of-1), the ceremony does NOT call `store_recovery` again — assert the orchestrator skips the store and routes to the re-print path (ADR-0026 Decision 3 step 2).
+
+### Repudiation (R)
+
+#### F-134 | R | Self-wrap / identity-creation audit rows could be forged or omitted by the client
+
+The audit rows for Phase 0a (`identity_keypair.created` on enroll, `committee_data_key.wrapped_for_member` with actor==target on self-wrap) are the attribution witnesses for the provisioning. If the client emitted them, a malicious client could forge or suppress them.
+
+- **Affected:** audit emission for `enrollment_challenge_finalize` and `wrap_member`.
+- **Severity:** LOW (mitigated by the server-owned emission discipline).
+- **Existing mitigation:** audit emission is SERVER-OWNED inside the SECURITY DEFINER SQL functions, atomically with the data write (ADR-0003 Amendment A single-emission-path; ADR-0026 Decision 5). The client does NOT and CANNOT emit or forge these rows. The self-wrap row is emitted by `wrap_committee_data_key_for_member` server-side — this DIFFERS from the test-only `committee-key.ts:initCommitteeDataKey` which emits via `store.recordKeyEvent` against the in-memory store; the production path delegates emission to SQL. Pseudonyms via `_hmac_pseudonym_key()` (key-parity gate, F-124–F-126).
+- **Testable mitigation:**
+  - _vitest:_ assert `initCommitteeDataKeyViaProduction` does NOT call any client-side audit-emit path — the only audit row for the self-wrap is the one the server emits inside `wrap_member` (assert no `recordKeyEvent`/client audit call in the production composition; this is the production-vs-test split named in ADR-0026 Decision 2).
+  - _pgTAP (carry-forward, live-stack):_ on a successful self-wrap, exactly one `committee_data_key.wrapped_for_member` row with actor==target is emitted server-side; covered by existing T07/T18 audit tests.
+
+### Information disclosure (I)
+
+#### F-135 | I | init_key returning {key_id, epoch} or error reasons leaks committee provisioning state to a non-member
+
+`init_key` mints `{key_id, epoch}` metadata; the `already_initialised` (P0001) reason and the `not_enrolled` branch reveal whether a committee key / identity already exists. A non-member probing the endpoint could infer provisioning state.
+
+- **Affected:** `init_key` response surface, `initCommitteeDataKeyViaProduction` discriminated-union return (`ok` / `already_initialised` / `not_enrolled` / `failed`).
+- **Severity:** LOW.
+- **Existing mitigation:** `init_committee_data_key`/`wrap_member` gate on `_t07_gate_active_member()` (active membership) AND `session_is_live()` — a non-member receives `rls_denied` (403) before any `{key_id, epoch}` or `already_initialised` reason is computed (F-01/F-116). Only an active member (the bootstrapped co-chair) reaches the metadata, which is non-secret (a `key_id`/`epoch` are not key material). No PI in the response.
+- **Testable mitigation:**
+  - _vitest:_ a non-active-member caller to the init/wrap path receives `rls_denied` (403) and NEVER an `already_initialised`/`key_id`/`epoch` payload (the gate precedes the metadata mint).
+  - _vitest:_ the `{key_id, epoch}` returned on the happy path contains no key material — assert it is metadata only (no byte of the data key, no wrap ciphertext).
+
+### Denial of service (D)
+
+#### F-136 | D | Repeated identity-key / data-key generation or Argon2id retries exhaust the device (WASM / CPU)
+
+Each ceremony restart regenerates an identity keypair attempt, a fresh passphrase, and (on Argon2id) a deliberately expensive KDF. A refresh-loop or rapid retry could exhaust the WASM heap / CPU on the co-chair's device (Phase 0a instance of F-12 + F-112).
+
+- **Affected:** `generateIdentityKeypair`, `generateDataKeyBytes` (randombytes_buf), `encryptRecoveryBlob` Argon2id, the card's resume loop.
+- **Severity:** LOW (self-inflicted, single-device; the co-chair is the only actor).
+- **Existing/required mitigation:** the card uses in-memory resume state (ADR-0020 Option B) and re-probes server-side durable state on restart — it does NOT re-run completed steps (F-138/F-139 state probe). Step 3 maps `already_initialised` to "done" so it is not re-attempted (AC-4). Argon2id runs once per passphrase ceremony, not in a tight loop. Carry-forward F-112 Argon2id-exhaustion mitigations apply.
+- **Testable mitigation (AC-3/AC-4):**
+  - _vitest:_ given a privkey already in `localIdentity`, the card skips step 1 — assert NO second `enrollment_challenge_init` is issued (AC-3); given `init_key` returning `already_initialised`, the card treats step 3 as done with NO error toast and NO repeated key generation (AC-4).
+
+### Elevation of privilege (E)
+
+#### F-137 | E | Self-wrap or second init by a non-member, or a duplicate init creating divergent committee keys
+
+`init_key`/`wrap_member` are NOT co-chair-specific in SQL (ADR-0026 Findings) — any active member passes. A second `init_committee_data_key()` while a live key exists must not mint a divergent committee key (which would split the committee into two un-cross-decryptable key epochs). A non-member must not self-wrap.
+
+- **Affected:** `init_committee_data_key()` (00000000000007_t07.sql:458–509), `wrap_committee_data_key_for_member()`.
+- **Severity:** MEDIUM.
+- **Existing mitigation:** (1) both RPCs gate on active membership (F-01) + `session_is_live()` (F-116); the first co-chair IS active (ADR-0025 bootstrap), a non-member gets `rls_denied`; (2) `init_committee_data_key()` raises `already_initialised` (P0001) if any row with `rotated_at IS NULL` exists — a second init CANNOT mint a divergent live key; (3) `initCommitteeDataKeyViaProduction` maps `already_initialised` to a success-equivalent status, not a re-mint (AC-4).
+- **Testable mitigation (AC-4):**
+  - _vitest:_ a second call to `initCommitteeDataKeyViaProduction` against an already-initialised committee returns `{ status: 'already_initialised' }` and does NOT generate a second 32-byte data key nor issue a second `init_key` write (assert `randombytes_buf` for the data key is NOT called on the already-initialised branch — no orphan key material generated).
+  - _pgTAP (carry-forward, live-stack):_ a non-active-member calling `init_committee_data_key()` / `wrap_committee_data_key_for_member()` is denied; a second `init_committee_data_key()` raises `already_initialised` (P0001).
+
+#### F-138 | E/I | HIGH-RISK EDGE A — init-succeeded-but-wrap-failed leaves a committee key with NO actor wrap (permanent data loss)
+
+If the process is killed (or the network drops) BETWEEN `init_key` (committee data key created server-side) and the self-`wrap_member` (the actor's wrap persisted), the committee data key exists with NO wrap for anyone → the co-chair can NEVER unwrap it → ALL committee data sealed under that key is permanently unrecoverable. A naive resume would re-enter `init_key`, receive `already_initialised`, skip the wrap, and leave the broken state forever. This is the architect's HIGH-risk edge A (ADR-0026 Decision 3 step 3; task P0a-5).
+
+- **Affected:** the two-RPC gap inside `initCommitteeDataKeyViaProduction` (between `init_key` and `wrap_member`); the card's resume logic; the state-probe helper (P0a-2).
+- **Severity:** HIGH (permanent, silent committee-data loss; the highest-impact Phase 0a failure).
+- **Required mitigation (repair/resume invariant — corrected per ADR-0026 Amendment A, edge-A repair ruling):** the original first-draft mitigation ("self-`wrap_member` against the EXISTING `key_id`, no second `init_key`, retry data-key generation only when no wrap exists for any member") is **REJECTED** and replaced. In the true edge-A (process dies AFTER `init_key` but BEFORE the first `wrap_member`) the 32-byte data key lived only in `initCommitteeDataKeyViaProduction`'s local scope and is irretrievably lost — there is nothing to wrap, and regenerating a fresh key under the SAME dead `key_id` is exactly the F-137 divergent-key hazard (two key materials bound to one epoch). The repair therefore **discriminates on WRAP COUNT of the live (`rotated_at IS NULL`) key, not on actor-wrap presence**:
+  - **Sub-case (a) — some member holds a wrap for the live key (actor does not).** The actor has no key material and CANNOT self-repair (it cannot compute `seal(dataKey, actor_pubkey)`). Correct action: route to an existing key-holder's `wrap_committee_data_key_for_member` ("onboard the actor to the existing key"), or to recovery-restore if the actor was previously a holder (that is edge-B / F-139). In **Phase 0a the first co-chair is the ONLY member, so sub-case (a) cannot arise during the first ceremony** → the card MUST surface an **explicit recoverable error** ("This committee key is held by another member; ask them to grant you access"), never a silent success and never an attempt to self-wrap material it does not hold. The path is specified so Phase 1 (multi-member inheritance) gets a correct ruling.
+  - **Sub-case (b) — ZERO wraps exist for ANY member (the true edge-A).** The key bytes are unrecoverable; ABANDON the dead `key_id` rather than wrap a new key under it. Repair sequence: (1) `rotate_committee_data_key('incident')` — retires the dead key (`rotated_at = now()`), mints a fresh `key_id` at epoch+1, returns `(rotation_id, new_key_id)`; (2) generate a fresh 32-byte data key client-side; (3) self-`wrap_committee_data_key_for_member` under the **NEW** `key_id`; (4) `finalize_committee_data_key_rotation(rotation_id, new_key_id, 1)`; (5) `.fill(0)`-zeroize the plaintext key and round-trip-verify via `unwrapForSession`. Both `rotate_committee_data_key` (migration 0007:555) and `finalize_committee_data_key_rotation` (0007:622) gate ONLY on `_t07_gate_active_member()` — callable by the first co-chair; no new migration is required for the happy repair (`'incident'` is the closest existing trigger value; a `'stillborn_init'` enum value is deferred and out of Phase 0a scope).
+  - **Load-bearing invariant (why abandonment loses nothing):** `init_committee_data_key` is the LAST write of step 3 and step 3 is the LAST step of the ceremony, so **no committee data is ever sealed under a zero-wrap key** — there is no data-write surface reachable between `init_key` and the first `wrap_member`. A zero-wrap key has, by construction, zero ciphertext under it; abandoning it forfeits nothing. (If any future change lets data be sealed under a not-yet-wrapped key, this ruling must be revisited.)
+  - The invariant the test pins: **the card NEVER reports "done" without a CONFIRMED working actor wrap under a NON-RETIRED (`rotated_at IS NULL`) `key_id`; the dead `key_id` is NEVER wrapped; any sub-case the probe cannot prove safe (or any rotate/finalize error) fails loud as an explicit recoverable error — never a silent dead key.**
+- **Testable mitigation (AC-5a/b/c/d — HIGH; ADR-0026 Amendment A, P0a-5; supersedes the single old AC-5):**
+  - _vitest (AC-5a — fresh init, happy, unchanged):_ from a clean state, `init_key` succeeds, the self-`wrap_member` succeeds, the actor ends with a working wrap, `unwrapForSession` round-trip-decrypts, and **no rotation is invoked**.
+  - _vitest (AC-5b — true edge-A, ZERO wraps → rotate-and-reinit):_ given a `committee_data_keys` row with `rotated_at IS NULL` and **zero `committee_key_wraps` rows for ANY user** (simulate by mocking `init_key` → success then the first `wrap_member` → fail, then re-run the ceremony), assert the card: (i) detects ZERO wraps via the probe (NOT merely "actor missing"); (ii) calls `rotate_committee_data_key('incident')` and uses the returned `new_key_id` — assert the OLD `key_id` is now `rotated_at`-set and is NEVER wrapped; (iii) generates a FRESH 32-byte key (a new `randombytes_buf`, distinct from any prior) and self-wraps under `new_key_id`; (iv) calls `finalize_committee_data_key_rotation(rotation_id, new_key_id, 1)`; (v) the actor's wrap, opened with the actor privkey, yields the fresh 32 bytes and `unwrapForSession` succeeds; (vi) **no `wrap_member` is ever issued against the dead `key_id`** (no divergent key under a stale id); (vii) the data key is `.fill(0)`-zeroized before return.
+  - _vitest (AC-5c — sub-case (a), foreign-held key):_ given ≥1 `committee_key_wraps` row for some OTHER user and none for the actor, assert the card does NOT call `init_key`, does NOT call `rotate_committee_data_key`, does NOT attempt a self-`wrap_member` (it has no key material), and surfaces an **explicit recoverable error** routing to "ask an existing key-holder to grant access" / recovery-restore — never a silent "done."
+  - _vitest (AC-5d — invariant guard, retained):_ on ANY `already_initialised` branch the card NEVER returns "done" without a CONFIRMED working actor wrap for the CURRENT (`rotated_at IS NULL`) key; a test stubs each sub-case (zero-wrap, foreign-held, actor-already-wrapped) and asserts no short-circuit to success.
+- **No new elevation-of-privilege surface:** the rotate-and-reinit path composes `rotate_committee_data_key` + `finalize_committee_data_key_rotation`, both gated on `_t07_gate_active_member()` and txn-advisory-locked (F-04) — the SAME authz + concurrency posture as `init_committee_data_key`. Neither RPC is co-chair-only (co-chair-gating is confined to `revoke_committee_member` / `issue_recovery_blob_reset`), so the first co-chair (active member, live session) can already call both. The repair adds NO new caller capability and NO ungated op (F-122 grep unaffected); the (E) facet of this finding is not widened.
+
+#### F-139 | E/I | HIGH-RISK EDGE B — server-has-pubkey / device-has-no-privkey must route to RECOVERY restore, never a second identity enroll
+
+If the ceremony resumes on a new device, or IndexedDB was cleared, the SERVER holds the co-chair's identity pubkey but the DEVICE holds no privkey. A naive resume would treat "no local privkey" as "not enrolled" and run `enrollment_challenge_init` again — minting a SECOND identity pubkey, which ORPHANS every prior committee-key wrap (all wraps were sealed to the FIRST pubkey, which the new privkey cannot open) → silent, permanent loss of decryptability for all committee data. This is the architect's HIGH-risk edge B (ADR-0026 Decision 3 step 1; task P0a-3 / AC-7).
+
+- **Affected:** the card's step-1 resume branch; the state-probe helper (P0a-2); `enrollIdentityViaProduction` vs `restoreRecoveryBlobViaProduction` routing.
+- **Severity:** HIGH (a second enroll silently orphans all prior wraps — irreversible).
+- **Required mitigation (restore-not-reenroll invariant):** the state probe MUST distinguish three identity states: (a) device has privkey → identity done, skip; (b) server has NO pubkey AND device has no privkey → genuinely not enrolled, run enroll; (c) **server HAS pubkey AND device has NO privkey → RECOVERY scenario** → surface "restore from recovery passphrase" (existing `restoreRecoveryBlobViaProduction`), NEVER `enrollment_challenge_init`. A `duplicate` reason from `enrollment_challenge_finalize` (the server already has this pubkey) MUST be treated as a signal to route to restore, never as a fresh enroll. The invariant the test pins: **the ceremony NEVER mints a second identity pubkey for a user who already has one server-side.**
+- **Testable mitigation (AC-7 — HIGH; ADR-0026 P0a-3):**
+  - _vitest:_ given the server holds an identity pubkey for the actor AND `localIdentity.getIdentityPrivateKey(user_id)` is empty (new device / cleared IndexedDB), assert the card routes to the recovery-restore path and does NOT call `enrollment_challenge_init` (no second identity minted).
+  - _vitest (duplicate-finalize guard):_ if `enrollment_challenge_finalize` returns `duplicate`, assert the card surfaces "restore from recovery passphrase," NOT a success-equivalent fresh enroll, and NOT a retry of init.
+  - _vitest (wrap-orphan guard):_ assert that after a restore (privkey recovered via passphrase), the recovered privkey opens the EXISTING committee-key wrap (proving no second pubkey was minted and no wrap was orphaned).
+
+### §6 — Phase 0a compliance / breach-notification verification (PIPEDA s.10.1)
+
+ADR-0026 introduces **no new PI processing**: no name/email/phone collected; identity pubkey + fingerprint are pseudonymous identifiers; the recovery blob is sealed/opaque; the committee-key wrap is ciphertext. No new field → constraints.md hard rule 6 (documented-purpose-per-new-field) is N/A. No new subprocessor (hard rule 3 N/A), no new region — all rows land in the existing ca-central-1 project (ADR-0001; hard rule 4 N/A). No new retention class (existing identity/recovery/committee-key enums + ADR-0016 cover it).
+
+**Breach-notification trigger assessment:** Phase 0a does NOT introduce a new "real risk of significant harm" surface. The three secrets it handles never cross B2 in plaintext (F-129/F-132/F-133), so a server-side / hosting-provider compromise (A5) sees only ciphertext + pseudonymous metadata — the same posture §5 already certifies for the E2EE boundary. **No new PIPEDA s.10.1 breach-notification trigger is introduced.** The ONLY new failure modes (edges A and B, F-138/F-139) are availability/data-loss-for-the-legitimate-user events, not confidentiality breaches — they do NOT expose PI to an unauthorized party and therefore do NOT meet the s.10.1 "real risk of significant harm" threshold. (They remain HIGH-priority for the user's own data-availability, hence the repair/restore invariants above; but they are not breach-notification events.) The 24-month breach-record-keeping obligation is unchanged. **No PHIPA trigger** (no health information). **No PCI trigger** (no payment data).
+
+### Top 5 prioritized risks (Phase 0a only; for the parent agent's summary)
+
+1. **F-138 (HIGH) — init-succeeded-wrap-failed (edge A):** committee key with no actor wrap → permanent data loss. Mitigation (ADR-0026 Amendment A): on `already_initialised`, probe the WRAP COUNT of the live (`rotated_at IS NULL`) key — if ZERO wraps (true edge-A), the lost key is unrecoverable so ABANDON it via `rotate_committee_data_key('incident')`, generate a fresh key, self-wrap under the NEW `key_id`, then `finalize_committee_data_key_rotation`; if a foreign member holds a wrap (Phase 0a: cannot arise), surface an explicit recoverable error — never wrap the dead `key_id`, never silently "done" (AC-5a/b/c/d).
+2. **F-139 (HIGH) — server-has-pubkey/device-has-no-privkey (edge B):** a second enroll orphans all prior wraps. Mitigation: state probe routes to recovery RESTORE, never re-enroll; `duplicate`-finalize → restore (AC-7).
+3. **F-132 (HIGH) — key-material leak:** privkey / passphrase / plaintext data key into logs/errors/audit-meta/storage. Mitigation: data key `.fill(0)` before return (the test path lacks this); full-ceremony leak-sweep CI gate (AC-8).
+4. **F-129 (HIGH) — spoofed identity pubkey:** enrolled pubkey the device can't prove possession of. Mitigation: F-02 sealed-box challenge; persist privkey only after finalize success (AC-1).
+5. **F-137 (MEDIUM) — duplicate/non-member init:** divergent committee key or non-member self-wrap. Mitigation: active-member gate + `already_initialised` (P0001) → success-equivalent map, no re-mint (AC-4).
+
+### Handoff packets
+
+- **To test-writer (priority order; each test RED against `main` before its implementer PR opens):**
+  1. **F-138 (HIGH, AC-5a/b/c/d — ADR-0026 Amendment A)** — init-succeeded-wrap-failed repair, branch on WRAP COUNT of the live key: **AC-5a** fresh-init happy (no rotation); **AC-5b** zero-wraps true edge-A → `rotate_committee_data_key('incident')` retires the dead key_id (assert old key_id `rotated_at`-set and NEVER wrapped) → fresh 32-byte key → self-wrap under the NEW key_id → `finalize_committee_data_key_rotation(rotation_id, new_key_id, 1)` → round-trip decrypt + `.fill(0)` zeroize; **AC-5c** foreign-held key (Phase 0a: cannot arise) → explicit recoverable error, no `init_key`/`rotate`/self-wrap; **AC-5d** invariant guard — never "done" without a confirmed actor wrap under a non-retired key_id. The four AC-5* IDs are specified verbatim in ADR-0026 Amendment A Ruling 4 (decisions.md).
+  2. **F-139 (HIGH, AC-7)** — restore-not-reenroll: server-pubkey/no-device-privkey routes to restore; `duplicate`-finalize → restore; recovered privkey opens the existing wrap (no orphan).
+  3. **F-132 (HIGH, AC-8)** — full-ceremony leak sweep (privkey/passphrase/data-key across console/errors/log/audit-meta); data-key `.fill(0)` zeroize assertion; no-persistent-passphrase across refresh. Extends the existing passphrase-leak CI gate (P0a-6).
+  4. **F-129 (HIGH, AC-1/AC-2)** — F-02 challenge rejects a substituted pubkey within one cycle + no privkey persisted on failure; privkey persisted only after finalize success; only public key + nonce cross B2; the persisted wrap opens to the same 32 bytes generated (AC-2).
+  5. **F-130 (MED, AC-6)** — 401 → sign-in-required + `onSessionRevoked` + no inconsistent partial local state; 403 (`rls_denied`) distinct, no JWT clear.
+  6. **F-137 (MED, AC-4) / F-136 (LOW, AC-3)** — `already_initialised` → success-equivalent, no re-mint, no error toast; existing-privkey → skip step 1, no second `enrollment_challenge_init`.
+  7. **F-133 / F-135 / F-134 (MED/LOW)** — tampered/duplicate recovery blob fail-closed + cap-of-1 no-overwrite; non-member init gets `rls_denied` before metadata; client emits no self-wrap audit row.
+  - Group as **"Phase 0a must-fail-first"**: F-138, F-139, F-132, F-129 are the blocking four; AC-5 and AC-7 are the architect's two flagged HIGH edges and must each be red first.
+- **To security-reviewer (required at the P0a-3 + P0a-5 PRs per HG-AUTH-PHASE0A):**
+  1. Verify the data key is zeroized (`fill(0)`/`memzero`) before `initCommitteeDataKeyViaProduction` returns, and that the production path adds the zeroize the test-only `committee-key.ts:initCommitteeDataKey` (line 72–112) lacks (F-132).
+  2. Verify the privkey is persisted to IndexedDB ONLY after `enrollment_challenge_finalize` success, and that only the PUBLIC key + unsealed nonce cross B2 (F-129/F-131).
+  3. Verify the edge-A repair (F-138, ADR-0026 Amendment A) branches on WRAP COUNT of the live key: zero-wraps → `rotate_committee_data_key('incident')` retires the dead `key_id` (NEVER wrapped) then self-wrap + `finalize` under the NEW `key_id`; foreign-held → explicit recoverable error; never short-circuits "done" without a confirmed actor wrap under a non-retired `key_id`. Confirm the rotate/finalize pair opens NO new elevation surface — both are `_t07_gate_active_member()`-gated + txn-locked (same posture as `init_key`, NOT co-chair-only) and add no new ungated op (F-122 grep unaffected).
+  4. Verify the edge-B routing (F-139) sends server-pubkey/no-device-privkey to RESTORE, never `enrollment_challenge_init`; `duplicate`-finalize → restore.
+  5. Verify the 401/403 split (F-130, AC-6) and that no Phase 0a path adds a new ungated op (F-122 grep unaffected).
+- **To privacy-reviewer (required at the P0a-3 PR):**
+  1. Confirm §6: Phase 0a introduces NO new PI field, NO new subprocessor, NO new region, NO new retention class → constraints.md hard rules 3/4/6 are N/A by construction (ratify the N/A).
+  2. Confirm NO new PIPEDA s.10.1 breach-notification trigger — the three secrets never cross B2 in plaintext; edges A/B are availability/data-loss events for the legitimate user, not confidentiality breaches (ratify the assessment).
+  3. Confirm the recovery-sheet JSON download contains the sealed blob only (no plaintext privkey, no passphrase) and that the passphrase is never persisted (F-132/F-133).
+- **To the user (required human-gate decisions):**
+  1. **HG-AUTH-PHASE0A** — security-reviewer + threat-modeler sign-off at the P0a-3 + P0a-5 PRs (identity-key / recovery / committee-key provisioning on a security-critical auth path). This is the standard authenticated-session review, NOT HG-AUTH-BOOTSTRAP (fired upstream in ADR-0025).
+  2. **Production deploy of the Settings card** touches auth/PI-adjacent crypto → never auto-merge (constraints.md Human Gates: "Production deploys of changes touching auth … or personal data").
+  - **No new cross-border transfer, no new subprocessor, no new credential surface** is introduced by Phase 0a — so NO HG-NEW-style credential/transfer gate fires (contrast §3.14 HG-NEW-1/2/3, which are M2-specific and out of scope here).
+
+### Re-pass triggers (Phase 0a)
+
+1. Any Phase 0a path that persists the identity privkey BEFORE `enrollment_challenge_finalize` success → re-open F-129/F-131.
+2. Any path that re-enrolls a NEW identity for a user who already has a server-side pubkey → re-open F-139 (edge B) NO-GO.
+3. Any `already_initialised` branch that returns "done" without a confirmed actor wrap under a non-retired (`rotated_at IS NULL`) `key_id`, OR any `wrap_member` issued against the dead zero-wrap `key_id` (a divergent key under a stale epoch), OR any repair that branches on actor-wrap presence instead of WRAP COUNT → re-open F-138 (edge A, per ADR-0026 Amendment A) NO-GO.
+4. Removal of the data-key `fill(0)` zeroize, or any new log/toast/error path that touches the privkey/passphrase/plaintext data key → re-open F-132.
+5. Any Phase 0a change that collects a new user-provided field, adds a subprocessor, or moves data off ca-central-1 → re-open §6 + escalate to privacy-reviewer (would invalidate the no-new-PI / no-breach-trigger finding).
+
+---

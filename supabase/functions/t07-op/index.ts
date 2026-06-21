@@ -23,6 +23,7 @@ import _sodium from 'npm:libsodium-wrappers-sumo@0.7.15';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
 import {
+  committeeKeyState,
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
   getRecoveryBlob,
@@ -61,6 +62,9 @@ type Op =
   | { op: 'record_viewed'; enrollment_session_id: string }
   | { op: 'issue_reset'; target_user_id: string }
   | { op: 'init_key' }
+  // ADR-0026 Phase 0a (P0a-2) — read-only resume probe. `actor_user_id` is
+  // forwarded for symmetry with the client probe shape; authz is auth.uid().
+  | { op: 'committee_key_state'; actor_user_id?: string }
   | {
       op: 'wrap_member';
       member_user_id: string;
@@ -230,6 +234,9 @@ serveWithCors(async (req) => {
       break;
     case 'init_key':
       result = await initCommitteeDataKey(rpc);
+      break;
+    case 'committee_key_state':
+      result = await committeeKeyState(rpc);
       break;
     case 'wrap_member':
       result = await wrapCommitteeDataKeyForMember(rpc, body);
