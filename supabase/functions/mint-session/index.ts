@@ -29,6 +29,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { verifyWebAuthnAssertion } from './assertion.ts';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
+import { corsHeaders } from '../_shared/cors.ts';
 import { mintSessionFromAssertion, type AssertionInput, type MintDeps } from './core.ts';
 import { signMintWriterToken, signSessionJwt } from './signing.ts';
 import { evaluateCounter } from './webauthn.ts';
@@ -207,7 +208,7 @@ async function handleAssert(
   );
 }
 
-Deno.serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   const requestId = req.headers.get('X-Request-ID') ?? undefined;
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
@@ -253,4 +254,17 @@ Deno.serve(async (req) => {
   }
 
   return json({ ok: false, error: 'bad_request' }, 400);
+}
+
+Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
+  // CORS preflight: the browser sends OPTIONS before the cross-origin POST.
+  // Answer it directly — no body, no key-parity work, no side effects.
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: cors });
+  }
+  // Add CORS headers to every real response so the browser can read it.
+  const res = await handle(req);
+  for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+  return res;
 });
