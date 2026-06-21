@@ -15,6 +15,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
 import { assertSessionLive, SessionNotLiveError } from '../_shared/session-live-precheck.ts';
+import { serveWithCors } from '../_shared/cors.ts';
 import {
   activateMembership,
   inviteMember,
@@ -58,7 +59,7 @@ async function dispatch(rpc: RpcPort, body: Op): Promise<OpResult<unknown>> {
   }
 }
 
-Deno.serve(async (req) => {
+serveWithCors(async (req) => {
   const requestId = req.headers.get('X-Request-ID');
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
