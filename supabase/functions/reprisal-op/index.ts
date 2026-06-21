@@ -17,6 +17,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
 import { assertSessionLive, SessionNotLiveError } from '../_shared/session-live-precheck.ts';
+import { serveWithCors } from '../_shared/cors.ts';
 import {
   approveForensic,
   approveStatus,
@@ -45,7 +46,7 @@ function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-Deno.serve(async (req) => {
+serveWithCors(async (req) => {
   const requestId = req.headers.get('X-Request-ID') ?? undefined;
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 

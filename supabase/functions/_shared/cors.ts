@@ -54,3 +54,26 @@ export function corsHeaders(req: Request): Record<string, string> {
   if (allowOrigin) headers['Access-Control-Allow-Origin'] = allowOrigin;
   return headers;
 }
+
+/**
+ * Drop-in replacement for `Deno.serve` that adds the CORS surface for the
+ * browser-facing ops: it answers the `OPTIONS` preflight directly (204, no
+ * side effects) and appends the CORS headers to every real response so the
+ * browser can read it. Call sites change only `Deno.serve(` → `serveWithCors(`;
+ * the wrapped handler keeps its existing body and trust decisions verbatim.
+ *
+ * (mint-session and bootstrap-first-co-chair use the equivalent inline form
+ * introduced in their own dispatchers; this helper is the shared form used by
+ * the JWT-bound feature ops.)
+ */
+export function serveWithCors(handler: (req: Request) => Promise<Response>): void {
+  Deno.serve(async (req) => {
+    const cors = corsHeaders(req);
+    if (req.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: cors });
+    }
+    const res = await handler(req);
+    for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+    return res;
+  });
+}

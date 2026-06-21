@@ -18,6 +18,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { assertSessionLive, SessionNotLiveError } from '../_shared/session-live-precheck.ts';
+import { serveWithCors } from '../_shared/cors.ts';
 import _sodium from 'npm:libsodium-wrappers-sumo@0.7.15';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
@@ -119,7 +120,7 @@ function sodiumReady(): Promise<typeof _sodium> {
   return _sodiumReady;
 }
 
-Deno.serve(async (req) => {
+serveWithCors(async (req) => {
   const requestId = req.headers.get('X-Request-ID') ?? undefined;
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
