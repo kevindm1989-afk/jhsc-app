@@ -19,6 +19,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
 import { assertSessionLive, SessionNotLiveError } from '../_shared/session-live-precheck.ts';
+import { serveWithCors } from '../_shared/cors.ts';
 import { handleAuthOp, type AuthOpInput } from './core.ts';
 import type { CredentialRow, SessionRow, UserRow } from './types.ts';
 
@@ -48,7 +49,7 @@ function callerClient(authorization: string | null) {
   });
 }
 
-Deno.serve(async (req) => {
+serveWithCors(async (req) => {
   if (req.method !== 'POST') {
     return json({ ok: false, reason: 'bad_request', status: 405 }, 405);
   }
