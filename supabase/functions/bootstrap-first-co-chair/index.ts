@@ -39,6 +39,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { log, withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity, KeyParityError } from '../_shared/key-parity-fetcher.ts';
+import { corsHeaders } from '../_shared/cors.ts';
 import { signMintWriterToken } from '../mint-session/signing.ts';
 import { verifyWebAuthnRegistration } from './registration.ts';
 
@@ -223,7 +224,7 @@ async function handleRegister(
   return json({ ok: true, user_id: String(data) }, 200);
 }
 
-Deno.serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   const requestId = req.headers.get('x-request-id') ?? undefined;
 
   if (req.method !== 'POST') {
@@ -264,4 +265,18 @@ Deno.serve(async (req) => {
   if (action === 'challenge') return handleChallenge(supabase, body, requestId);
   if (action === 'register') return handleRegister(supabase, body, requestId);
   return json({ ok: false, error: 'bad_request' }, 400);
+}
+
+Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
+  // CORS preflight: the browser sends OPTIONS before the cross-origin POST
+  // (custom apikey + content-type headers force a preflight). Answer it
+  // directly — no body, no side effects, no DB work.
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: cors });
+  }
+  // Add CORS headers to every real response so the browser can read it.
+  const res = await handle(req);
+  for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+  return res;
 });
