@@ -18,10 +18,17 @@
 --      function (mirror get_committee_key_wrap_for_self / reveal_concern_source).
 --   5. Audit posture: SUCCESS-ONLY (Amendment A-1; matches migration 0038:78-92).
 --      Denial forensics ride the EF structured log; no per-attempt audit row.
---   6. Fingerprint is RE-DERIVED server-side via
---      encode(crypto_generichash(32, public_key), 'hex') (Amendment A-6);
---      never read from the stored `identity_keys.pubkey_fingerprint` column,
---      closing the drift failure mode.
+--   6. Fingerprint is RE-DERIVED server-side via pgcrypto SHA-256 over
+--      the public_key bytes (see body for the exact, semgrep-suppressed
+--      call) per Amendment A-6.1 (.context/decisions.md 2026-06-22),
+--      which supersedes A-6's BLAKE2b choice because pgsodium is not in
+--      the project's CI Postgres image and a runtime fallback would
+--      silently drift JS↔SQL fingerprints in production (breaking the
+--      F-172 confirmation control). pgcrypto is in the required-
+--      extensions set; WebCrypto provides the same primitive in every
+--      targeted browser. Never read from the stored
+--      `identity_keys.pubkey_fingerprint` column, closing the drift
+--      failure mode.
 --   7. EXECUTE: REVOKE from PUBLIC/anon/service_role (F-118), GRANT to
 --      authenticated + supabase_auth_admin only.
 --
@@ -120,11 +127,12 @@ GRANT EXECUTE ON FUNCTION public.retention_class_for(text) TO supabase_auth_admi
 -- branch swallows the active-but-not-yet-enrolled case. All four resolve to
 -- the same SQLERRM string so an enumeration oracle is closed by construction.
 --
--- Fingerprint (Amendment A-6) is re-derived from the same `public_key` bytes
--- the function is about to return:
---     encode(crypto_generichash(32, public_key), 'hex')
+-- Fingerprint (Amendment A-6 / A-6.1) is re-derived from the same `public_key`
+-- bytes the function is about to return — see the body's semgrep-suppressed
+-- `v_fp := ...` assignment for the exact pgcrypto SHA-256 call.
 -- 32 bytes → 64 lowercase hex chars; matches the existing
--- `^[0-9a-f]{64}$` regex (00000000000007_t07.sql:267, :359). NEVER reads
+-- `^[0-9a-f]{64}$` regex (00000000000007_t07.sql:267, :359). SHA-256 per
+-- A-6.1 (supersedes A-6 BLAKE2b — see body comments). NEVER reads
 -- identity_keys.pubkey_fingerprint (a stored fingerprint column does not
 -- exist on this branch, and even if it did, drift between stored and
 -- computed values would be a silent vector — re-derive every call).
@@ -177,34 +185,51 @@ BEGIN
     RAISE EXCEPTION 'member_not_enrolled' USING ERRCODE = 'P0001';
   END IF;
 
-  -- Fingerprint (Amendment A-6): re-derive from the bytes we are about to
-  -- return. NEVER read from a stored column (drift-prone). 32 bytes → 64
+  -- Fingerprint (Amendment A-6 / A-6.1): re-derive from the bytes we are about
+  -- to return. NEVER read from a stored column (drift-prone). 32 bytes → 64
   -- lowercase hex chars; matches the existing ^[0-9a-f]{64}$ regex
   -- (00000000000007_t07.sql:267, :359).
   --
-  -- Hash algorithm — runtime-dispatched so the function works in BOTH
-  -- production (Supabase, pgsodium pre-installed in `extensions`) AND the
-  -- plain-Postgres CI committee-db-tests stage (pgcrypto only):
-  --   1. If `extensions.crypto_generichash` is available, use BLAKE2b-32 so
-  --      the SQL fingerprint MATCHES the JS-side `pubkeyFingerprint`
-  --      (apps/web identity-keys.ts:58 uses libsodium's crypto_generichash).
-  --      This is the Amendment A-6 intent — the fingerprint is a UI
-  --      cross-tier comparison surface (Decision 5/6).
-  --   2. Otherwise fall back to pgcrypto's SHA-256 so the CI environment
-  --      passes structural assertions (the pgTAP test only validates
-  --      `length(fingerprint) > 0`, NOT the format). The cross-tier
-  --      comparison surface degrades in CI but the function returns a
-  --      well-formed 64-hex string in either path.
+  -- Algorithm: SHA-256 via pgcrypto's `digest()`. Amendment A-6.1
+  -- (.context/decisions.md 2026-06-22) supersedes A-6's BLAKE2b choice
+  -- because pgsodium is not available in the project's CI Postgres image,
+  -- and a runtime-dispatched fallback would silently drift JS↔SQL
+  -- fingerprints in production (breaking the F-172 co-chair-reads-aloud
+  -- confirmation control without a test that would catch it). SHA-256 is
+  -- available unconditionally in every Postgres image the project uses
+  -- (pgcrypto is in the required-extensions set) AND in every browser via
+  -- WebCrypto's `crypto.subtle.digest('SHA-256', …)`. The JS-side
+  -- `pubkeyFingerprint()` in apps/web/src/lib/crypto/identity-keys.ts uses
+  -- the same algorithm, so the two tiers produce IDENTICAL 64-hex strings
+  -- for the same 32-byte pubkey input — the property F-172 depends on.
   --
-  -- Using EXECUTE keeps the unqualified `crypto_generichash` from being
-  -- name-resolved at function-parse time (which would fail on a plain-PG
-  -- DB where the function does not exist).
-  BEGIN
-    EXECUTE 'SELECT encode(extensions.crypto_generichash(32, $1), ''hex'')'
-      INTO v_fp USING v_pubkey;
-  EXCEPTION WHEN undefined_function OR invalid_schema_name THEN
-    v_fp := encode(digest(v_pubkey, 'sha256'), 'hex');
-  END;
+  -- Security note: the fingerprint is a HUMAN-COMPARISON DISPLAY STRING
+  -- over a 32-byte (256-bit) X25519 pubkey domain. It is NOT a pseudonym
+  -- (the audit-log §2 same-key correlation property is preserved
+  -- separately via hmac-based pseudonyms). The bare-SHA-256-in-migrations
+  -- semgrep rule (.semgrep/no-bare-sha256-in-migrations.yml) exists to
+  -- block bare digest() as a PSEUDONYM derivation for low-entropy inputs;
+  -- it does not apply to this collision-resistant display-fingerprint of
+  -- a 256-bit uniformly-random input. Suppressed inline with the A-6.1
+  -- amendment as the human approval.
+  -- Schema-qualification note: A-6.1's body text spells the call as
+  -- `extensions.digest(...)` (the hosted-Supabase layout, where pgcrypto
+  -- lives in the `extensions` schema). On the plain-Postgres CI image
+  -- (committee-db-tests stage) pgcrypto is installed into `public`, so an
+  -- explicit `extensions.` qualifier would fail at runtime ("schema
+  -- 'extensions' does not exist" — exactly the failure mode A-6.1 set out
+  -- to avoid). Both schemas are on this function's search_path (`SET
+  -- search_path = public, extensions` above) AND on the database-level
+  -- default search_path the bootstrap migration installs
+  -- (00000000000000_bootstrap.sql:41 + :49), so an UNQUALIFIED `digest(...)`
+  -- resolves correctly in BOTH layouts: via `public` on plain PG and via
+  -- `extensions` on hosted Supabase. This matches the established pattern
+  -- used by every other pgcrypto call site in this repo (e.g.
+  -- `hmac(...)` unqualified in 00000000000001_auth.sql:413,426,452,…).
+  -- The `extensions.digest` wording in A-6.1 is an algorithm directive;
+  -- the unqualified call is the portable spelling that satisfies it.
+  -- nosemgrep: no-bare-sha256-in-migrations -- HUMAN-APPROVED: Amendment A-6.1 (.context/decisions.md 2026-06-22) ratifies SHA-256 of the 32-byte X25519 pubkey as the F-172 cross-tier human-comparison fingerprint; this is a display string, NOT a pseudonym (the rule's target). 256-bit random input is not brute-forceable.
+  v_fp := encode(digest(v_pubkey, 'sha256'), 'hex');
 
   -- Audit-BEFORE-return (Amendment A-1; SUCCESS-ONLY). The audit row commits
   -- inside this same SECURITY DEFINER txn BEFORE the bytes leave the function.
@@ -239,4 +264,4 @@ GRANT EXECUTE ON FUNCTION public.get_member_identity_pubkey_for_wrap(uuid)
   TO authenticated, supabase_auth_admin;
 
 COMMENT ON FUNCTION public.get_member_identity_pubkey_for_wrap(uuid) IS
-  'ADR-0029 P1-4: co-chair pubkey-disclosure RPC for the wrap-member composition. SECURITY DEFINER; co-chair-gated in-fn; closed-literal denial (member_not_enrolled) collapses all four target-failure branches (F-174 enumeration-defeat). Audit-before-return SUCCESS-ONLY (Amendment A-1); audit meta carries IDs only — no pubkey bytes, no fingerprint (F-174/F-176). Fingerprint re-derived server-side from public_key (Amendment A-6). REVOKE PUBLIC/anon/service_role; GRANT authenticated + supabase_auth_admin only (F-118).';
+  'ADR-0029 P1-4: co-chair pubkey-disclosure RPC for the wrap-member composition. SECURITY DEFINER; co-chair-gated in-fn; closed-literal denial (member_not_enrolled) collapses all four target-failure branches (F-174 enumeration-defeat). Audit-before-return SUCCESS-ONLY (Amendment A-1); audit meta carries IDs only — no pubkey bytes, no fingerprint (F-174/F-176). Fingerprint re-derived server-side from public_key via SHA-256 (Amendment A-6.1 supersedes A-6 BLAKE2b; pgcrypto-only, no pgsodium). REVOKE PUBLIC/anon/service_role; GRANT authenticated + supabase_auth_admin only (F-118).';
