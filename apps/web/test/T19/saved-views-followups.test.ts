@@ -232,7 +232,8 @@ describe('T19 — register routes pass suggestedName from active filters', () =>
     'training',
     'work-refusal',
     's51-evidence',
-    'reprisal',
+    // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal no longer
+    // mounts SaveViewButton (no demo saved-views over the E2EE feed).
     'minutes',
     'inspections',
     'library',

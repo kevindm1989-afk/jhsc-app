@@ -50,7 +50,8 @@ describe('T19 — register routes pass active filter axes into csvFilename', () 
     'training',
     'work-refusal',
     's51-evidence',
-    'reprisal',
+    // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal has no demo
+    // CSV export.
     'minutes',
     'inspections',
     'library',

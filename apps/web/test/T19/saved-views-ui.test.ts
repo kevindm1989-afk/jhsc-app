@@ -205,7 +205,8 @@ describe('T19 — SaveViewButton + SavedViewsRail rollout across the 11 register
     'training',
     'work-refusal',
     's51-evidence',
-    'reprisal',
+    // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal no longer
+    // mounts SaveViewButton + SavedViewsRail.
     'minutes',
     'inspections',
     'library',

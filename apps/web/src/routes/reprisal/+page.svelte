@@ -1,213 +1,346 @@
 <script>
   /**
-   * /reprisal — JHSC C4-tier reprisal-log register viewer mount.
+   * /reprisal — JHSC C4 reprisal log (live, end-to-end).
    *
-   * Replaces the PR #136 coming-soon placeholder. Mounts ReprisalViewer
-   * with the demo provider so the register surface renders realistic
-   * content until T13.1 wires the production SupabaseReprisalClient.
+   * Phase 2b PR1 cutover (ADR-0028 Decisions 5 / 6; threat-model §3.17):
+   *   - The demo data-source helpers (the prior synthetic register provider)
+   *     are gone; the live path drives the surface end-to-end via the
+   *     production compositions below.
+   *   - State-probe guard FIRST (`getCommitteeKeyState`): if the actor has no
+   *     committee-key wrap (`actor_has_wrap === false`), render the "Complete
+   *     encryption setup in Settings" link (`data-testid="reprisal-needs-setup"`)
+   *     and STOP — the intake form is NOT mounted, no unwrap RPC is hit
+   *     (F-163). The feed itself is pseudonymized + ciphertext-free (F-166), so
+   *     `listReprisalFeedViaProduction` deliberately holds no key; the probe
+   *     here is the explicit no-wrap gate for the WRITE/READ affordances.
+   *   - When the actor has a wrap, mount the intake form behind a "Report a
+   *     reprisal" CTA (`data-testid="reprisal-log-cta"`), wired to
+   *     `submitReprisalViaProduction`.
+   *   - Feed rows render the F-166 projection: target id + class + event +
+   *     bucketed timestamp; NO raw actor_id, NO ciphertext (the
+   *     ReprisalFeedRow shape enforces the absence structurally).
+   *   - Per-row "read" affordance (`data-testid="reprisal-read-*"`) — passphrase
+   *     input → routes through `readReprisalViaProduction` → temporary plaintext
+   *     in a role=status region. The server emits `reprisal.read` BEFORE
+   *     returning ciphertext (F-165 audit-before-decrypt); a wrong/absent
+   *     passphrase or missing row collapses to a single `unavailable` (the wire
+   *     cannot tell them apart — never an invented invalid_passphrase).
    *
-   * Supports URL-driven filtering on `status` (one of filed /
-   * investigating / resolved / archived) via `?filter=<value>`, plus a
-   * macro `?filter=active` (status in {filed, investigating}) reachable
-   * from the home dashboard tile. The chip rail surfaces each individual
-   * status; the macro doesn't highlight a chip but still shows the
-   * FilterBanner.
+   * Live wiring mirrors the /concerns cutover (the canonical client-construction
+   * site): `createSupabaseT07Client` + `createSupabaseReprisalClient` over the
+   * shared fetch transport, `getJwt` + `clearJwt` from the session-jwt-store,
+   * `new BrowserLocalIdentityStore()` for device-local privkey access, and
+   * `getSessionCommitteeKeyHolder()` for the session-scoped key dwell.
    *
-   * Preserves the destructive-red 4px inline-start border the
-   * placeholder card established, so the C4 sensitivity reads at a
-   * glance even before the row list paints.
-   *
-   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13 — same posture as Settings.
    */
-  import { page } from '$app/stores';
+  import { onMount } from 'svelte';
+  import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
-  import ReprisalViewer from '$lib/reprisal/ReprisalViewer.svelte';
-  import { buildDemoReprisals, fetchDemoReprisalPage } from '$lib/reprisal/demo-reprisal';
-  import FilterBanner from '$lib/ui/FilterBanner.svelte';
-  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
-  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
-  import ActiveFiltersBar from '$lib/ui/ActiveFiltersBar.svelte';
-  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
-  import SaveViewButton from '$lib/ui/SaveViewButton.svelte';
-  import SavedViewsRail from '$lib/ui/SavedViewsRail.svelte';
-  import SortToggle from '$lib/ui/SortToggle.svelte';
-  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
-  import { buildHref } from '$lib/ui/url-state';
-  import { withinRange } from '$lib/ui/date-range';
-  import { csvFilename, toCsv, withMetadata } from '$lib/ui/csv';
+  import ReprisalIntakeForm from '$lib/reprisal/ReprisalIntakeForm.svelte';
+  import {
+    listReprisalFeedViaProduction,
+    readReprisalViaProduction,
+    submitReprisalViaProduction
+  } from '$lib/reprisal';
+  import { createSupabaseReprisalClient } from '$lib/server-client/reprisal-client-factory';
+  import { createSupabaseT07Client } from '$lib/server-client/t07-client-factory';
+  import { BrowserLocalIdentityStore } from '$lib/crypto/browser-local-identity-store';
+  import { getSessionCommitteeKeyHolder } from '$lib/crypto/committee-key-holder';
+  import { clearJwt, getJwt } from '$lib/auth/session-jwt-store';
+  import { isSignedIn } from '$lib/auth/session-jwt-svelte';
+  import { getCurrentUserId } from '$lib/auth/jwt-claims';
 
-  const DEMO_ROWS = buildDemoReprisals(50);
+  const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
+  const localIdentity = new BrowserLocalIdentityStore();
+  const t07Client = createSupabaseT07Client({
+    baseUrl,
+    getJwt,
+    onSessionRevoked: clearJwt,
+    localIdentity
+  });
+  const reprisalClient = createSupabaseReprisalClient({
+    baseUrl,
+    getJwt,
+    onSessionRevoked: clearJwt
+  });
+  const keyHolder = getSessionCommitteeKeyHolder();
 
-  const CSV_FIELDS = /** @type {const} */ ([
-    'id',
-    'filed_at',
-    'title',
-    'status',
-    'per_entry_passphrase_required',
-    'source_revealed',
-    'days_since_filed',
-    'actor_pseudonym'
-  ]);
+  // Worker-without-Phase-0a guard state (Decision 6 / F-163). `needsSetup`
+  // flips true when the probe reports no wrap; the page then renders the
+  // setup-link surface and never mounts the form / reaches the disclosure RPC.
+  let needsSetup = false;
+  /** @type {Array<import('$lib/reprisal').ReprisalFeedRow>} */
+  let items = [];
+  let listLoading = true;
+  let listError = '';
+  let listSessionExpired = false;
 
-  /** Canonical status values supported by `?filter=`. */
-  const STATUS_VALUES = /** @type {const} */ (['filed', 'investigating', 'resolved', 'archived']);
+  // "Report a reprisal" CTA toggles the form mount. Per ADR-0007 amendment the
+  // consent surface re-renders on EVERY intake; toggling the mount makes each
+  // open a fresh component (no stale consent / passphrase lingering).
+  let formOpen = false;
 
-  $: filterParam = $page.url.searchParams.get('filter');
-  $: activeValue =
-    filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
-  $: filterLabel = filterParam === 'active' ? t('common.filterBanner.label.reprisal_active') : null;
+  // Per-row read state. Keyed by reprisal id so multiple read affordances on
+  // the page don't collide.
+  /** @type {Record<string, { open: boolean; passphrase: string; title: string; body: string; error: string; loading: boolean }>} */
+  let readStates = {};
 
-  $: chips = [
-    { href: '/reprisal', label: t('common.filterChips.all'), value: null },
-    {
-      href: '/reprisal?filter=filed',
-      label: t('reprisal.viewer.status.filed'),
-      value: 'filed'
-    },
-    {
-      href: '/reprisal?filter=investigating',
-      label: t('reprisal.viewer.status.investigating'),
-      value: 'investigating'
-    },
-    {
-      href: '/reprisal?filter=resolved',
-      label: t('reprisal.viewer.status.resolved'),
-      value: 'resolved'
-    },
-    {
-      href: '/reprisal?filter=archived',
-      label: t('reprisal.viewer.status.archived'),
-      value: 'archived'
+  /** @param {string} id */
+  function ensureReadState(id) {
+    if (!readStates[id]) {
+      readStates[id] = {
+        open: false,
+        passphrase: '',
+        title: '',
+        body: '',
+        error: '',
+        loading: false
+      };
     }
-  ];
+    return readStates[id];
+  }
 
-  $: activeFilterLabel = (() => {
-    if (activeValue) {
-      const chip = chips.find((c) => c.value === activeValue);
-      if (chip?.label) return chip.label;
+  onMount(() => {
+    void refresh();
+  });
+
+  async function refresh() {
+    listLoading = true;
+    listError = '';
+    listSessionExpired = false;
+    const user_id = getCurrentUserId();
+    if (!user_id) {
+      // Not signed in — the isSignedIn branch below renders the empty state.
+      listLoading = false;
+      return;
     }
-    if (filterLabel) return filterLabel;
-    return null;
-  })();
-  $: pageTitle = activeFilterLabel ?? t('common.reprisalPage.title');
 
-  // ActiveFiltersBar descriptors — one entry per active axis.
-  $: activeFilters = (() => {
-    /** @type {Array<{ key: string, label: string, removeHref: string }>} */
-    const list = [];
-    if (activeValue) {
-      list.push({
-        key: 'filter',
-        label: `${t('common.activeFilters.axis.status')}: ${t(`reprisal.viewer.status.${activeValue}`)}`,
-        removeHref: buildHref('/reprisal', { sort: sortParam, from: fromParam, to: toParam })
-      });
+    // Probe-first guard (F-163). The feed itself needs no key, but the no-wrap
+    // actor must be steered to setup BEFORE the write/read affordances appear.
+    const probe = await t07Client.getCommitteeKeyState({ actor_user_id: user_id });
+    if (probe.ok && probe.data && probe.data.actor_has_wrap === false) {
+      needsSetup = true;
+      listLoading = false;
+      return;
     }
-    if (filterParam === 'active') {
-      list.push({
-        key: 'filter',
-        label: t('common.filterBanner.label.reprisal_active'),
-        removeHref: buildHref('/reprisal', { sort: sortParam, from: fromParam, to: toParam })
-      });
+    if (!probe.ok && probe.status === 401) {
+      listSessionExpired = true;
+      listLoading = false;
+      return;
     }
-    if (fromParam || toParam) {
-      list.push({
-        key: 'date',
-        label: `${t('common.activeFilters.axis.date_range')}: ${fromParam ?? '…'} → ${toParam ?? '…'}`,
-        removeHref: buildHref('/reprisal', { filter: filterParam, sort: sortParam })
-      });
+
+    const r = await listReprisalFeedViaProduction({
+      reprisalClient,
+      t07Client,
+      keyHolder,
+      localIdentity,
+      user_id
+    });
+    listLoading = false;
+    if (r.status === 'session_expiry') {
+      listSessionExpired = true;
+      return;
     }
-    if (sortParam === 'oldest') {
-      list.push({
-        key: 'sort',
-        label: `${t('common.activeFilters.axis.sort')}: ${t('common.sortToggle.oldest')}`,
-        removeHref: buildHref('/reprisal', { filter: filterParam, from: fromParam, to: toParam })
-      });
+    if (r.status !== 'ok') {
+      listError = t('reprisal.viewer.error.load_failed');
+      return;
     }
-    return list;
-  })();
+    items = r.items;
+    needsSetup = false;
+  }
 
-  $: fromParam = $page.url.searchParams.get('from');
-  $: toParam = $page.url.searchParams.get('to');
+  /** @param {import('$lib/reprisal/types').ReprisalIntake} intake */
+  async function onSubmit(intake) {
+    const user_id = getCurrentUserId();
+    if (!user_id) return { status: 'session_expiry' };
+    const r = await submitReprisalViaProduction({
+      reprisalClient,
+      t07Client,
+      keyHolder,
+      localIdentity,
+      user_id,
+      intake
+    });
+    if (r.status === 'ok') {
+      void refresh();
+    } else if (r.status === 'needs_setup') {
+      needsSetup = true;
+    }
+    return r;
+  }
 
-  $: predicate = (() => {
-    const statusPred = activeValue
-      ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
-          r.status === activeValue
-      : filterParam === 'active'
-        ? /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) =>
-            r.status === 'filed' || r.status === 'investigating'
-        : null;
-    const hasRange = fromParam || toParam;
-    if (!statusPred && !hasRange) return undefined;
-    return /** @param {import('$lib/reprisal/demo-reprisal').DemoReprisalRow} r */ (r) => {
-      if (statusPred && !statusPred(r)) return false;
-      if (hasRange && !withinRange(r.filed_at, fromParam, toParam)) return false;
-      return true;
-    };
-  })();
-  $: sortParam = $page.url.searchParams.get('sort');
-  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
+  /** @param {string} id */
+  async function onRead(id) {
+    const state = ensureReadState(id);
+    state.error = '';
+    state.loading = true;
+    state.title = '';
+    state.body = '';
+    readStates = { ...readStates };
+    const user_id = getCurrentUserId();
+    if (!user_id) {
+      state.loading = false;
+      state.error = t('reprisal.intake.errors.session_expiry');
+      readStates = { ...readStates };
+      return;
+    }
+    const r = await readReprisalViaProduction({
+      reprisalClient,
+      t07Client,
+      keyHolder,
+      localIdentity,
+      user_id,
+      id,
+      passphrase: state.passphrase.length > 0 ? state.passphrase : null
+    });
+    state.loading = false;
+    if (r.status === 'ok') {
+      state.title = r.title;
+      state.body = r.body;
+    } else if (r.status === 'unavailable') {
+      state.error = t('reprisal.page.read.unavailable');
+    } else if (r.status === 'session_expiry') {
+      state.error = t('reprisal.intake.errors.session_expiry');
+    } else if (r.status === 'needs_setup') {
+      needsSetup = true;
+      state.error = t('reprisal.intake.errors.needs_setup');
+    } else if (r.status === 'rls_denied') {
+      state.error = t('reprisal.intake.errors.rls_denied');
+    } else {
+      state.error = t('reprisal.page.read.error');
+    }
+    readStates = { ...readStates };
+  }
 
-  $: fetchPage =
-    /**
-     * @param {number} p
-     * @param {number} ps
-     */
-    (p, ps) => fetchDemoReprisalPage(p, ps, sortedRows, predicate);
+  /** @param {string} id */
+  function toggleRead(id) {
+    const state = ensureReadState(id);
+    state.open = !state.open;
+    if (!state.open) {
+      // Closing the affordance clears the temporary plaintext from the DOM.
+      state.title = '';
+      state.body = '';
+      state.passphrase = '';
+      state.error = '';
+    }
+    readStates = { ...readStates };
+  }
 
-  function buildDownload() {
-    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
-    return {
-      csv: withMetadata(
-        { route: '/reprisal', filters: activeFilters.map((f) => f.label).join(' · ') },
-        toCsv(rows, CSV_FIELDS)
-      ),
-      filename: csvFilename(
-        'reprisal',
-        new Date(),
-        activeFilters.map((f) => f.key + '-' + f.label)
-      )
-    };
+  function toggleForm() {
+    formOpen = !formOpen;
   }
 </script>
 
 <svelte:head>
-  <title>{pageTitle} — {t('common.app_name')}</title>
+  <title>{t('common.reprisalPage.title')} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
 <section class="card reprisal-card" data-testid="reprisal-page">
-  <ActiveFiltersBar baseHref="/reprisal" filters={activeFilters} />
-  <SavedViewsRail route="/reprisal" />
-  <FilterChipsRail {chips} {activeValue} />
-  <DateRangeChips
-    baseHref="/reprisal"
-    {fromParam}
-    {toParam}
-    preservedParams={{ filter: filterParam, sort: sortParam }}
-  />
-  <SortToggle
-    baseHref="/reprisal"
-    activeSort={sortParam}
-    preservedParams={{ filter: filterParam, from: fromParam, to: toParam }}
-  />
-  {#if filterLabel}
-    <FilterBanner label={filterLabel} clearHref="/reprisal" />
+  <h1>{t('reprisal.viewer.heading')}</h1>
+
+  {#if !$isSignedIn}
+    <p role="status" data-testid="reprisal-signed-out">
+      <a href="/sign-in">{t('common.errors.session_expired')}</a>
+    </p>
+  {:else if needsSetup}
+    <p data-testid="reprisal-needs-setup" role="status" class="rep-needs-setup">
+      <a href="/settings">{t('reprisal.page.needs_setup')}</a>
+    </p>
+  {:else}
+    <div class="rep-toolbar">
+      <button type="button" class="primary" on:click={toggleForm} data-testid="reprisal-log-cta">
+        {formOpen ? t('common.actions.cancel') : t('reprisal.page.log_button')}
+      </button>
+    </div>
+
+    {#if formOpen}
+      {#key formOpen}
+        <ReprisalIntakeForm
+          submit={onSubmit}
+          onSubmitted={() => {
+            formOpen = false;
+          }}
+        />
+      {/key}
+    {/if}
+
+    {#if listSessionExpired}
+      <p role="alert" data-testid="reprisal-session-expired">
+        {t('reprisal.intake.errors.session_expiry')}
+      </p>
+    {:else if listError}
+      <p role="alert" data-testid="reprisal-list-error">{listError}</p>
+    {:else if listLoading}
+      <p role="status" data-testid="reprisal-loading">{t('reprisal.viewer.loading')}</p>
+    {:else if items.length === 0}
+      <p role="status" data-testid="reprisal-empty">{t('reprisal.viewer.empty')}</p>
+    {:else}
+      <ul class="rep-list" data-testid="reprisal-list">
+        {#each items as item (item.id)}
+          {@const rs = ensureReadState(String(item.id))}
+          <li class="rep-row">
+            <p class="rep-meta">
+              <span data-testid="reprisal-row-event">{item.event_type}</span>
+              ·
+              <span>{item.target_class}</span>
+              ·
+              <span>{item.target_id}</span>
+            </p>
+            <div class="rep-read">
+              <button
+                type="button"
+                class="btn-outline"
+                data-testid={`reprisal-read-${item.id}`}
+                on:click={() => toggleRead(String(item.id))}
+              >
+                {rs.open
+                  ? t('reprisal.page.read.close_button')
+                  : t('reprisal.page.read.open_button')}
+              </button>
+              {#if rs.open}
+                <label for={`reprisal-read-passphrase-${item.id}`}>
+                  {t('reprisal.page.read.passphrase_label')}
+                </label>
+                <input
+                  id={`reprisal-read-passphrase-${item.id}`}
+                  type="password"
+                  autocomplete="off"
+                  bind:value={rs.passphrase}
+                  data-testid={`reprisal-read-passphrase-${item.id}`}
+                />
+                <button
+                  type="button"
+                  class="primary"
+                  on:click={() => onRead(String(item.id))}
+                  disabled={rs.loading}
+                >
+                  {rs.loading
+                    ? t('reprisal.create.actions.saving')
+                    : t('reprisal.page.read.reveal_button')}
+                </button>
+                {#if rs.error}
+                  <p role="alert" class="rep-read-error">{rs.error}</p>
+                {/if}
+                {#if rs.title || rs.body}
+                  <div
+                    role="status"
+                    class="rep-read-plaintext"
+                    data-testid={`reprisal-read-region-${item.id}`}
+                  >
+                    <p class="rep-read-title">{rs.title}</p>
+                    <p class="rep-read-body">{rs.body}</p>
+                  </div>
+                {/if}
+              {/if}
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
-  <CsvDownloadButton onClick={buildDownload} />
-  <ShareUrlButton />
-  <SaveViewButton suggestedName={activeFilters.map((f) => f.label).join(' · ')} />
-  {#key `${filterParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`}
-    <ReprisalViewer
-      {fetchPage}
-      filterActive={filterParam !== null || !!fromParam || !!toParam}
-      filterLabel={activeFilterLabel}
-      clearHref="/reprisal"
-    />
-  {/key}
-  <p class="rep-demo-note muted" data-testid="rep-demo-note">
-    {t('reprisal.viewer.demo_note')}
-  </p>
+
   <p class="rep-footer" data-print="hide">
     <a href="/" data-testid="reprisal-back-to-home">
       {t('common.reprisalPage.back_to_home_cta')}
@@ -217,21 +350,68 @@
 
 <style>
   /*
-   * Preserves the destructive-red 4px inline-start border the
-   * placeholder card established for the C4 sensitivity tier.
+   * Preserves the destructive-red 4px inline-start border the placeholder
+   * card established for the C4 sensitivity tier.
    */
   .reprisal-card {
     margin-block-start: 1rem;
-    border-inline-start: 4px solid var(--color-destructive);
+    border-inline-start-style: solid;
+    border-inline-start-width: var(--border-width-c4-stripe);
+    border-inline-start-color: var(--color-destructive);
   }
-  .rep-demo-note {
-    margin-block: 1rem 0;
-    padding: 0.625rem 0.875rem;
-    border: 1px solid var(--color-tint-amber-border);
+  .rep-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-block-end: 1rem;
+  }
+  .rep-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem;
+  }
+  .rep-row {
+    padding: 0.75rem 1rem;
+    border: var(--border-width-hairline) solid var(--color-border-strong);
     border-radius: var(--radius-md);
-    background: var(--color-tint-amber-bg);
+    background-color: var(--color-bg-elevated);
+  }
+  .rep-meta {
+    margin-block: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+  }
+  .rep-read {
+    display: grid;
+    gap: 0.5rem;
+    margin-block-start: 0.5rem;
+  }
+  .rep-read-error {
+    color: var(--color-destructive);
+    margin: 0;
+  }
+  .rep-read-plaintext {
+    border: var(--border-width-hairline) solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+    background-color: var(--color-bg);
+  }
+  .rep-read-title {
+    margin: 0;
+    font-weight: 600;
+  }
+  .rep-read-body {
+    margin-block: 0.25rem 0;
+    white-space: pre-wrap;
+  }
+  .rep-needs-setup {
+    padding-block: 0.75rem;
+    padding-inline: 0.875rem;
+    border-radius: var(--radius-md);
+    background-color: var(--color-tint-amber-bg);
     color: var(--color-tint-amber-fg);
-    font-size: 0.8125rem;
+    border: var(--border-width-hairline) solid var(--color-tint-amber-border);
   }
   .rep-footer {
     margin-block-start: 0.75rem;

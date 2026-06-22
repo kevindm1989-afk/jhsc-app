@@ -31,7 +31,8 @@ const ROUTES = [
   'training',
   'work-refusal',
   's51-evidence',
-  'reprisal',
+  // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal no longer
+  // mounts a viewer with the `filterActive` prop.
   'minutes',
   'inspections',
   'library'

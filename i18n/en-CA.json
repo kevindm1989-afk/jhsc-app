@@ -711,6 +711,27 @@
         "saving": "Encrypting and saving…"
       }
     },
+    "intake": {
+      "errors": {
+        "rate_limited": "Too many submissions just now. Wait a moment and try again.",
+        "session_expiry": "Your session has ended. Sign in again to save this entry.",
+        "needs_setup": "Committee encryption isn't set up on this device. Open Settings to finish setup.",
+        "rls_denied": "You don't have permission to save this entry. Contact your worker co-chair.",
+        "needs_recovery": "This device can't decrypt the committee key. Restore your identity from your recovery sheet."
+      }
+    },
+    "page": {
+      "log_button": "Report a reprisal",
+      "needs_setup": "Committee encryption isn't set up on this device. Open Settings to finish setup.",
+      "read": {
+        "open_button": "View entry",
+        "close_button": "Hide entry",
+        "passphrase_label": "Passphrase for this entry",
+        "reveal_button": "View",
+        "unavailable": "This entry can't be shown. The passphrase may be wrong, or the entry no longer exists.",
+        "error": "Couldn't open this entry. Try again."
+      }
+    },
     "passphrase": {
       "heading": "Enter the passphrase for this entry",
       "label": "Passphrase",

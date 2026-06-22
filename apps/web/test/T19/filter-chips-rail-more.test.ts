@@ -68,24 +68,11 @@ describe('T19.1 — /s51-evidence wires the FilterChipsRail', () => {
   });
 });
 
-describe('T19.1 — /reprisal wires the FilterChipsRail (with `active` macro preserved)', () => {
-  const src = pageSrc('reprisal');
-  it('imports + mounts FilterChipsRail', () => {
-    expect(src).toMatch(
-      /import\s+FilterChipsRail\s+from\s+['"]\$lib\/ui\/FilterChipsRail\.svelte['"]/
-    );
-    expect(src).toMatch(/<FilterChipsRail\s+\{chips\}\s+\{activeValue\}/);
-  });
-  it('declares the four canonical status values', () => {
-    for (const v of ['filed', 'investigating', 'resolved', 'archived']) {
-      expect(src).toContain(`'${v}'`);
-    }
-  });
-  it('still recognizes the legacy `active` macro', () => {
-    expect(src).toContain("filterParam === 'active'");
-    expect(src).toContain('reprisal_active');
-  });
-});
+// '/reprisal wires the FilterChipsRail' RETIRED — ADR-0028 Phase 2b PR1: the
+// live /reprisal page cut over to the E2EE feed and no longer mounts the demo
+// FilterChipsRail / status-filter macro. Its post-cutover surface (probe-first
+// no-wrap guard, live feed, per-row read affordance) is pinned by
+// apps/web/test/T13b/phase2b-reprisal-page-cutover.test.ts.
 
 describe('T19.1 — /minutes wires the FilterChipsRail', () => {
   const src = pageSrc('minutes');

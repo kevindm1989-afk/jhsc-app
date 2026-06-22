@@ -1,10 +1,15 @@
 /**
  * T19.1 — /reprisal route mount.
  *
- * Replaces the PR #136 coming-soon placeholder pins with structural
- * pins for the real ReprisalViewer mount + demo provider. Preserves
- * the 4px destructive-red inline-start border the placeholder card
- * established for the C4 sensitivity tier.
+ * ADR-0028 Phase 2b PR1 cutover: the demo-provider pins (ReprisalViewer mount,
+ * buildDemoReprisals/fetchDemoReprisalPage import, demo-note callout) have been
+ * RETIRED — the live /reprisal page cut over to the E2EE feed and no longer
+ * mounts the demo register. The post-cutover surface (probe-first no-wrap
+ * guard, live feed, "Report a reprisal" CTA, per-row read affordance) is pinned
+ * by apps/web/test/T13b/phase2b-reprisal-page-cutover.test.ts. The still-valid
+ * shell invariants below (route/loader existence, prerender + ssr=false, the
+ * reprisal-page testid, the back-to-home link, the noindex meta, and the C4
+ * destructive-red inline-start accent — now token-driven) are retained.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -38,26 +43,13 @@ describe('T19.1 — /reprisal route mount (real viewer + demo provider)', () => 
     expect(src).toMatch(/data-testid=["']reprisal-page["']/);
   });
 
-  it('mounts <ReprisalViewer> with a fetchPage prop wired through', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(
-      /import\s+ReprisalViewer\s+from\s+['"]\$lib\/reprisal\/ReprisalViewer\.svelte['"]/
-    );
-    expect(src).toMatch(/<ReprisalViewer\s+\{fetchPage\}/);
-  });
-
-  it('imports the demo provider (buildDemoReprisals + fetchDemoReprisalPage)', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(
-      /import\s*\{[\s\S]*buildDemoReprisals[\s\S]*fetchDemoReprisalPage[\s\S]*\}\s+from\s+['"]\$lib\/reprisal\/demo-reprisal['"]/
-    );
-  });
-
-  it('renders the demo-note callout', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/data-testid=["']rep-demo-note["']/);
-    expect(src).toMatch(/t\(['"]reprisal\.viewer\.demo_note['"]\)/);
-  });
+  // RETIRED (ADR-0028 Phase 2b PR1) — the demo-provider mount + demo-note pins:
+  //   - 'mounts <ReprisalViewer> with a fetchPage prop wired through'
+  //   - 'imports the demo provider (buildDemoReprisals + fetchDemoReprisalPage)'
+  //   - 'renders the demo-note callout'
+  // The live page mounts ReprisalIntakeForm behind the "Report a reprisal" CTA
+  // and renders the pseudonymized live feed instead. See
+  // apps/web/test/T13b/phase2b-reprisal-page-cutover.test.ts.
 
   it('renders a back-to-home link', () => {
     const src = readFileSync(PAGE_PATH, 'utf8');
@@ -70,8 +62,12 @@ describe('T19.1 — /reprisal route mount (real viewer + demo provider)', () => 
     expect(src).toMatch(/name=["']robots["']\s+content=["']noindex/);
   });
 
-  it('preserves the destructive-red inline-start border on the reprisal card (C4 accent)', () => {
+  it('preserves the destructive-red inline-start accent on the reprisal card (C4 accent)', () => {
+    // ADR-0028 Phase 2b PR1 — the C4 accent is preserved but tokenized: the raw
+    // `4px` shorthand became token-driven longhand (the C4-stripe width token +
+    // the destructive colour token), keeping verify-tokens clean.
     const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(/border-inline-start:\s*4px\s+solid\s+var\(--color-destructive\)/);
+    expect(src).toMatch(/border-inline-start-color:\s*var\(--color-destructive\)/);
+    expect(src).toMatch(/border-inline-start-width:\s*var\(--border-width-c4-stripe\)/);
   });
 });

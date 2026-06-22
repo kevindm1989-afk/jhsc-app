@@ -43,7 +43,9 @@ const ROUTES = {
   training: '/training',
   'work-refusal': '/work-refusal',
   's51-evidence': '/s51-evidence',
-  reprisal: '/reprisal',
+  // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: the live /reprisal page no
+  // longer mounts a viewer with a clearHref prop. Its post-cutover surface is
+  // asserted by apps/web/test/T13b/phase2b-reprisal-page-cutover.test.ts.
   minutes: '/minutes',
   inspections: '/inspections',
   library: '/library',

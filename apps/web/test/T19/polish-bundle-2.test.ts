@@ -30,7 +30,8 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ['training', 'trn'],
   ['work-refusal', 'wr'],
   ['s51-evidence', 's51'],
-  ['reprisal', 'rep'],
+  // ['reprisal', 'rep'] RETIRED — ADR-0028 Phase 2b PR1: live /reprisal no
+  // longer composes a reactive pageTitle from a filter-axis chip rail.
   ['minutes', 'min'],
   ['inspections', 'ins'],
   ['library', 'lib'],
