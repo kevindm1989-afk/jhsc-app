@@ -54,7 +54,10 @@ export async function deriveQueueHmacKey(opts: {
     throw new Error('deriveQueueHmacKey: identity_privkey must be 32 bytes');
   }
   // message = personalisation_bytes || user_id_bytes
-  const salt = new Uint8Array(Buffer.from(HMAC_QUEUE_SALT_V1, 'utf8'));
+  // Browser-native UTF-8 encode; `Buffer` is undefined in the Vite browser
+  // bundle. The `new Uint8Array(...)` re-wrap keeps the libsodium wasm
+  // bridge's cross-realm typeof check happy under jsdom.
+  const salt = new Uint8Array(new TextEncoder().encode(HMAC_QUEUE_SALT_V1));
   const msg = new Uint8Array(salt.length + opts.user_id.length);
   msg.set(salt, 0);
   msg.set(opts.user_id, salt.length);

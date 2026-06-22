@@ -13,8 +13,14 @@
  *   - `sealUtf8(plaintext, key)` → `[nonce(24)][crypto_secretbox_easy ct]`.
  *     Each call uses a FRESH random nonce; two seals of the same plaintext
  *     under the same key produce different ciphertexts. The plaintext is
- *     UTF-8 encoded via `Buffer.from(plaintext, 'utf8')` (the jsdom-bridge
- *     workaround documented in concern-core:60-62).
+ *     UTF-8 encoded via `new Uint8Array(new TextEncoder().encode(plaintext))`.
+ *     The outer `new Uint8Array(...)` re-wrap is load-bearing: it normalises
+ *     the encoder output into the runtime's own Uint8Array constructor so the
+ *     libsodium wasm bridge's strict cross-realm typeof check accepts it under
+ *     jsdom (the workaround formerly documented in concern-core:60-62).
+ *     TextEncoder is browser-native (a global in browsers, Node 11+, jsdom,
+ *     and Deno); `Buffer` is NOT defined in the Vite browser bundle, so the
+ *     prior `Buffer.from(...)` form threw a ReferenceError in-browser.
  *   - `openUtf8(ciphertext, key)` → UTF-8 plaintext. AEAD verification
  *     failures (wrong key / tampered ct / too-short input) THROW a libsodium
  *     error — never a silent mis-decrypt (F-147 carry-forward). Callers in
@@ -40,9 +46,13 @@ const SECRETBOX_MAC_LEN = 16;
 export async function sealUtf8(plaintext: string, key: Uint8Array): Promise<Uint8Array> {
   const s = await ready();
   const nonce = s.randombytes_buf(s.crypto_secretbox_NONCEBYTES);
-  // jsdom's TextEncoder output sometimes fails the wasm bridge's strict
-  // typeof check; Buffer is a Uint8Array subclass that bridges cleanly.
-  const ptBytes = new Uint8Array(Buffer.from(plaintext, 'utf8'));
+  // Re-wrap the encoder output in a fresh `new Uint8Array(...)`: jsdom's
+  // TextEncoder output sometimes fails the wasm bridge's strict cross-realm
+  // typeof check, and the re-wrap normalises it into the runtime's own
+  // Uint8Array constructor so the bridge accepts it. (Browser-native:
+  // TextEncoder is a global in browsers, Node 11+, jsdom, and Deno —
+  // unlike `Buffer`, which is undefined in the Vite browser bundle.)
+  const ptBytes = new Uint8Array(new TextEncoder().encode(plaintext));
   const ct = s.crypto_secretbox_easy(ptBytes, nonce, key);
   const out = new Uint8Array(nonce.length + ct.length);
   out.set(nonce, 0);
@@ -59,5 +69,5 @@ export async function openUtf8(ciphertext: Uint8Array, key: Uint8Array): Promise
   const nonce = ciphertext.slice(0, nonceLen);
   const ct = ciphertext.slice(nonceLen);
   const pt = s.crypto_secretbox_open_easy(ct, nonce, key);
-  return Buffer.from(pt).toString('utf8');
+  return new TextDecoder().decode(pt);
 }

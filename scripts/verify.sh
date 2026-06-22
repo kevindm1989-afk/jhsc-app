@@ -149,6 +149,12 @@ run_gate_shell "recovery-surface exfil-channel lint" "bash scripts/check-recover
 # variant (Argon2id / F-08 floor); accidental revert to the non-sumo build
 # would make recovery-blob writes fail at runtime.
 run_gate_shell "libsodium-wrappers-sumo lockfile-lint" "bash scripts/check-libsodium-sumo-locked.sh"
+# Browser-bundle hygiene — no bare `Buffer.` on a browser-reachable crypto /
+# seal / queue path. `Buffer` is undefined in the Vite browser bundle, so a
+# bare `Buffer.from(...)` throws ReferenceError at runtime even though the
+# Node vitest suite (Buffer always present) stays green. Regression proof:
+# apps/web/test/T08/browser-no-buffer-seal.test.ts.
+run_gate_shell "no bare Buffer in browser crypto paths" "bash scripts/verify-no-browser-buffer.sh"
 # G-T19-6 — onboarding no-passphrase-leak static lint. Scans the
 # D4RecoveryPassphrase / D6TypeBackVerify / lib/onboarding/recovery
 # surfaces for the closed-allowlist of forbidden affordances
