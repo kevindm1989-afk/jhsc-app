@@ -279,7 +279,13 @@
     {:else}
       <ul class="rep-list" data-testid="reprisal-list">
         {#each items as item (item.id)}
-          {@const rs = ensureReadState(String(item.id))}
+          <!-- The per-row read affordance is keyed off `target_id` (the
+               reprisal_log.id) — NOT `item.id` (the audit_log.id). The
+               reprisal_read RPC looks up the reprisal row by reprisal_log.id
+               or it returns null → "unavailable". The audit feed's row id is
+               unrelated to that lookup. -->
+          {@const rowId = String(item.target_id)}
+          {@const rs = ensureReadState(rowId)}
           <li class="rep-row">
             <p class="rep-meta">
               <span data-testid="reprisal-row-event">{item.event_type}</span>
@@ -292,45 +298,45 @@
               <button
                 type="button"
                 class="btn-outline"
-                data-testid={`reprisal-read-${item.id}`}
-                on:click={() => toggleRead(String(item.id))}
+                data-testid={`reprisal-read-${rowId}`}
+                on:click={() => toggleRead(rowId)}
               >
-                {rs.open
+                {readStates[rowId]?.open
                   ? t('reprisal.page.read.close_button')
                   : t('reprisal.page.read.open_button')}
               </button>
-              {#if rs.open}
-                <label for={`reprisal-read-passphrase-${item.id}`}>
+              {#if readStates[rowId]?.open}
+                <label for={`reprisal-read-passphrase-${rowId}`}>
                   {t('reprisal.page.read.passphrase_label')}
                 </label>
                 <input
-                  id={`reprisal-read-passphrase-${item.id}`}
+                  id={`reprisal-read-passphrase-${rowId}`}
                   type="password"
                   autocomplete="off"
                   bind:value={rs.passphrase}
-                  data-testid={`reprisal-read-passphrase-${item.id}`}
+                  data-testid={`reprisal-read-passphrase-${rowId}`}
                 />
                 <button
                   type="button"
                   class="primary"
-                  on:click={() => onRead(String(item.id))}
-                  disabled={rs.loading}
+                  on:click={() => onRead(rowId)}
+                  disabled={readStates[rowId]?.loading}
                 >
-                  {rs.loading
+                  {readStates[rowId]?.loading
                     ? t('reprisal.create.actions.saving')
                     : t('reprisal.page.read.reveal_button')}
                 </button>
-                {#if rs.error}
-                  <p role="alert" class="rep-read-error">{rs.error}</p>
+                {#if readStates[rowId]?.error}
+                  <p role="alert" class="rep-read-error">{readStates[rowId]?.error}</p>
                 {/if}
-                {#if rs.title || rs.body}
+                {#if readStates[rowId]?.title || readStates[rowId]?.body}
                   <div
                     role="status"
                     class="rep-read-plaintext"
-                    data-testid={`reprisal-read-region-${item.id}`}
+                    data-testid={`reprisal-read-region-${rowId}`}
                   >
-                    <p class="rep-read-title">{rs.title}</p>
-                    <p class="rep-read-body">{rs.body}</p>
+                    <p class="rep-read-title">{readStates[rowId]?.title}</p>
+                    <p class="rep-read-body">{readStates[rowId]?.body}</p>
                   </div>
                 {/if}
               {/if}
