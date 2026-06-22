@@ -185,8 +185,12 @@ describe('T19.1 — CsvDownloadButton', () => {
 });
 
 describe('T19.1 — every register route wires the CSV download button', () => {
+  // 'concerns' RETIRED from this list by ADR-0027 Phase 2a PR2: the live
+  // /concerns surface no longer carries CSV export (Decision 8 — pagination/
+  // filtering deferred; CSV-over-decrypted-rows is a future ADR). The
+  // post-cutover /concerns contract is pinned by
+  // apps/web/test/T08/phase2a-concerns-page-cutover.test.ts.
   const ROUTES = [
-    'concerns',
     'recommendations',
     'training',
     'work-refusal',

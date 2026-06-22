@@ -115,7 +115,22 @@ export class CommitteeKeyHolder {
     this.wipe();
   }
 
-  /** Trigger 4 — mint-session JWT expiry; the next op re-unwraps. */
+  /**
+   * Trigger 4 — mint-session JWT expiry; the next op re-unwraps.
+   *
+   * C1 design pin (threat-modeler PR1 carry-forward): trigger 4 collapses
+   * into trigger 2 (401 → clearJwt → onSessionRevoked → wipe) within
+   * F-116's ≤5 s budget. The mint-session JWT carries an expiry; once it
+   * passes, the next Edge Function call returns HTTP 401 and the existing
+   * `onSessionRevoked` path wipes the holder + clears the JWT. We deliberately
+   * do NOT schedule an exp-timer in Phase 2a (one less moving piece, one
+   * fewer cross-tab race surface to reason about); this method exists as a
+   * defensive no-additional-state wipe so a future caller (a real exp-driven
+   * timer, a server-pushed "your session is about to expire" hint, a test
+   * that wants to force the path) can fire it without adding state. The
+   * collapse-into-401 path is what the threat-modeler signed off on; an
+   * additive exp-timer can land later without changing this contract.
+   */
   onSessionExpiry(): void {
     this.wipe();
   }

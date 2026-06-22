@@ -24,7 +24,8 @@ const ROUTES = [
   'inspections',
   'library',
   'recommendations',
-  'concerns',
+  // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: live /concerns has no
+  // multi-axis URL filtering to share, so no ShareUrlButton.
   'audit',
   'sensitive-feed',
   'report'

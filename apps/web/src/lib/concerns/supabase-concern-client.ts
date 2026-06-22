@@ -173,19 +173,25 @@ export class SupabaseConcernClient {
   async revealConcernSource(input: {
     id: string;
     passphrase?: string | null;
-  }): Promise<ConcernOpResult<{ source_name_ct: Uint8Array | null }>> {
-    const r = await invoke<{ source_name_ct: string | null }>(this.opts.transport, {
-      op: 'reveal',
-      id: input.id,
-      passphrase: input.passphrase ?? null
-    });
-    if (!r.ok) return r;
-    return {
-      ok: true,
-      data: {
-        source_name_ct: r.data.source_name_ct ? pgHexToBytes(r.data.source_name_ct) : null
+  }): Promise<ConcernOpResult<{ source_name_ct: Uint8Array | null; key_id?: string }>> {
+    const r = await invoke<{ source_name_ct: string | null; key_id?: string }>(
+      this.opts.transport,
+      {
+        op: 'reveal',
+        id: input.id,
+        passphrase: input.passphrase ?? null
       }
+    );
+    if (!r.ok) return r;
+    const data: { source_name_ct: Uint8Array | null; key_id?: string } = {
+      source_name_ct: r.data.source_name_ct ? pgHexToBytes(r.data.source_name_ct) : null
     };
+    // ADR-0027 PR2 / C2 — pass through any server-observed key_id so the
+    // production composition can route it through holder.onKeyRotationObserved.
+    if (typeof r.data.key_id === 'string' && r.data.key_id.length > 0) {
+      data.key_id = r.data.key_id;
+    }
+    return { ok: true, data };
   }
 
   /**

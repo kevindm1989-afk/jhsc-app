@@ -19,7 +19,8 @@ afterEach(() => {
 });
 
 const ROUTES = [
-  'concerns',
+  // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: live /concerns no longer
+  // exposes a viewer-side activeFilterLabel chain.
   'recommendations',
   'training',
   'work-refusal',

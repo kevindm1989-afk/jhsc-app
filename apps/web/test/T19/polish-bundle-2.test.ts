@@ -24,7 +24,8 @@ function read(rel: string): string {
 }
 
 const ROUTES: ReadonlyArray<readonly [string, string]> = [
-  ['concerns', 'con'],
+  // ['concerns', 'con'] RETIRED — ADR-0027 Phase 2a PR2: live /concerns no
+  // longer composes a reactive pageTitle from a filter-axis chip rail.
   ['recommendations', 'recs'],
   ['training', 'trn'],
   ['work-refusal', 'wr'],

@@ -210,7 +210,8 @@ describe('T19 — SaveViewButton + SavedViewsRail rollout across the 11 register
     'inspections',
     'library',
     'recommendations',
-    'concerns',
+    // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: live /concerns no longer
+    // mounts SaveViewButton + SavedViewsRail (Decision 8 future scope).
     'audit',
     'sensitive-feed'
   ] as const;
