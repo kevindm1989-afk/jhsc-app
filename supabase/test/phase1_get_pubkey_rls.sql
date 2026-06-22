@@ -104,7 +104,7 @@ INSERT INTO public.users (id, active) VALUES
   ('00000000-0000-0000-0000-0000000000b2', true),  -- B2: worker_member (target/caller)
   ('00000000-0000-0000-0000-0000000000c3', true),  -- C3: pending invitee
   ('00000000-0000-0000-0000-0000000000d4', true),  -- D4: active-but-no-identity
-  ('00000000-0000-0000-0000-0000000000y9', true);  -- Y9: non-member user
+  ('00000000-0000-0000-0000-0000000000f9', true);  -- F9: non-member user
 
 INSERT INTO public.committee_membership (user_id, role, active, activated_at) VALUES
   ('00000000-0000-0000-0000-0000000000f1', ARRAY['worker_member','worker_co_chair'], true,  now()),
@@ -340,7 +340,7 @@ BEGIN
   END;
   -- (c) public.users row exists but NOT a committee member
   BEGIN
-    PERFORM * FROM public.get_member_identity_pubkey_for_wrap('00000000-0000-0000-0000-0000000000y9'::uuid);
+    PERFORM * FROM public.get_member_identity_pubkey_for_wrap('00000000-0000-0000-0000-0000000000f9'::uuid);
     v_nonmember := '<no exception raised>';
   EXCEPTION WHEN OTHERS THEN
     v_nonmember := SQLERRM;
@@ -382,31 +382,26 @@ SELECT ok(
          current_setting('test.err_pending')));
 
 -- ---------------------------------------------------------------------------
--- (16) F-174 — even a denied call STILL emits an audit row (the disclosure
--- attempt is itself a security-relevant event; the threat-modeler's
--- "audit-before-return on every path" is the F-174 mitigation set). The
--- denial audit row distinguishes "successful disclosure" from "attempted
--- disclosure" via a meta field but carries NO pubkey bytes either.
---
--- This is a "denial audit" check. ADR-0029 Decision 4 says "AUDIT-BEFORE-
--- RETURNS … emits … BEFORE returning the bytes" — strict reading is
--- success-path only; F-174's "per-disclosure audit row" mitigation reads
--- naturally as "every attempt is audited" (a co-chair probing 12 uids leaves
--- 12 audit rows, attributable). We pin the stricter reading; if ADR-0029
--- ratifies success-only, this assertion is the closest miss and the
--- implementer flags it back to the orchestrator (do NOT silently relax —
--- ask).
+-- (16) F-174 — success-only audit (Amendment A-1, ratified). The disclosure
+-- RPC mirrors the existing get_committee_key_wrap_for_self pattern
+-- (00000000000038:78-92) which audits success-only — no other SECURITY
+-- DEFINER disclosure RPC in the project audits denials. Denial forensics
+-- ride the EF structured log (functions/t07-op/index.ts). A denied call
+-- to a pending/unenrolled target therefore writes NO audit row; the only
+-- audit rows for identity_pubkey.disclosed_for_wrap come from (15)'s
+-- successful disclosure of B2's pubkey, NOT from the denied attempts in
+-- (13)/(14) against C3/D4.
 -- ---------------------------------------------------------------------------
 SELECT ok(
-  EXISTS(
+  NOT EXISTS(
     SELECT 1 FROM public.audit_log
      WHERE event_type = 'identity_pubkey.disclosed_for_wrap'
        AND target_id IN (
-         '00000000-0000-0000-0000-0000000000c3',  -- pending
-         '00000000-0000-0000-0000-0000000000d4'   -- unenrolled
+         '00000000-0000-0000-0000-0000000000c3',  -- pending (denied)
+         '00000000-0000-0000-0000-0000000000d4'   -- unenrolled (denied)
        )
   ),
-  'F-174 ATTEMPT AUDIT (ambiguity flagged — ADR-0029 may relax): every disclosure ATTEMPT (success or denied) leaves an audit row');
+  'F-174 / Amendment A-1: a DENIED disclosure does NOT emit an audit row (denial forensics ride the EF structured log)');
 
 -- ---------------------------------------------------------------------------
 -- (17) F-174 — no bulk-enumeration variant. The function takes ONE uid;
@@ -562,7 +557,7 @@ SELECT throws_like(
   'F-172: wrap for a PENDING (active=false) target is DENIED (rls_denied) — re-assert of :502-503');
 SELECT throws_like(
   format($$SELECT public.wrap_committee_data_key_for_member(
-    '00000000-0000-0000-0000-0000000000y9'::uuid, %L::uuid, '\xAA'::bytea, NULL)$$,
+    '00000000-0000-0000-0000-0000000000f9'::uuid, %L::uuid, '\xAA'::bytea, NULL)$$,
     (SELECT key_id FROM _wrap_k)),
   '%rls_denied%',
   'F-172: wrap for a NON-MEMBER (no committee_membership row) target is DENIED (rls_denied)');
@@ -584,13 +579,16 @@ SELECT lives_ok(
     '00000000-0000-0000-0000-0000000000b2'::uuid, %L::uuid, '\xBADBADBA'::bytea, NULL)$$,
     (SELECT key_id FROM _wrap_k)),
   'F-172: a SECOND wrap for the same (target,key) does NOT raise (ON CONFLICT DO NOTHING)');
+RESET ROLE;
+-- The wrap-row preservation check reads committee_key_wraps, which is
+-- REVOKE'd from `authenticated` by design (F-142 — migration 0007:184).
+-- Drop back to superuser (the pgTAP default) before the SELECT, then assert.
 SELECT is(
   (SELECT wrapped_ciphertext FROM public.committee_key_wraps
     WHERE user_id = '00000000-0000-0000-0000-0000000000b2'
       AND key_id = (SELECT key_id FROM _wrap_k)),
   '\xCAFEBABE'::bytea,
   'F-172: the FIRST wrap bytes are PRESERVED on re-grant (ON CONFLICT DO NOTHING — re-grant requires explicit removal first)');
-RESET ROLE;
 
 SELECT * FROM finish();
 ROLLBACK;
