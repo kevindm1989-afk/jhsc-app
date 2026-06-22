@@ -1244,8 +1244,13 @@
         "body": "Your identity key, recovery sheet, and the committee data key are all in place. You can now read and write encrypted committee records on this device."
       },
       "restore_required": {
-        "heading": "Restore from your recovery sheet",
-        "body": "Your account already has an identity on the server, but this device doesn't hold the matching key. Restore from your recovery sheet instead of starting over — starting over would lock you out of existing records.",
+        "heading": "Restore your identity on this device",
+        "body": "Your account already has an identity on the server, but this device doesn't hold the matching key. Type the recovery passphrase you saved when you first set up committee encryption — it decrypts the server-stored backup and writes the key onto this device. Do not start over; that would lock you out of existing records.",
+        "passphrase_label": "Recovery passphrase",
+        "restore_button": "Restore identity",
+        "restoring": "Restoring…",
+        "wrong_passphrase": "That passphrase didn't match. Check the words you saved (no extra spaces) and try again.",
+        "not_found": "No recovery backup found on the server for your account. Set up committee encryption fresh on this device, or contact your co-chair if you believe this is an error.",
         "cta": "Go to recovery restore"
       },
       "foreign_held": {
