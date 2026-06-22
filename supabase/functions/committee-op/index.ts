@@ -19,6 +19,7 @@ import { serveWithCors } from '../_shared/cors.ts';
 import {
   activateMembership,
   inviteMember,
+  issueInvite,
   reactivateMember,
   removeMember,
   setRoles,
@@ -33,7 +34,11 @@ type Op =
   | { op: 'activate'; invite_id: string; enrolling_uid: string }
   | { op: 'set_roles'; target_user_id: string; roles: string[]; second_approver_id?: string | null }
   | { op: 'remove'; target_user_id: string; second_approver_id?: string | null }
-  | { op: 'reactivate'; target_user_id: string };
+  | { op: 'reactivate'; target_user_id: string }
+  // ADR-0029 P1-3 — new co-chair-side issuance arm. The raw 6-digit `code`
+  // rides this body only; it is forwarded into `issue_member_invite` and
+  // NEVER touches any log line / outcome attribute (F-176 / Decision 8).
+  | { op: 'issue_invite'; roles: string[]; code: string; ttl_minutes: number };
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -54,6 +59,8 @@ async function dispatch(rpc: RpcPort, body: Op): Promise<OpResult<unknown>> {
       return removeMember(rpc, body);
     case 'reactivate':
       return reactivateMember(rpc, body);
+    case 'issue_invite':
+      return issueInvite(rpc, body);
     default:
       return { ok: false, reason: 'unknown', status: 400 };
   }
