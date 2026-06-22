@@ -278,11 +278,11 @@
                   data-testid="concerns-reveal-source"
                   on:click={() => toggleReveal(item.id)}
                 >
-                  {rs.open
+                  {revealStates[item.id]?.open
                     ? t('concern.viewer.source.protected')
                     : t('concern.list.row_named_label')}
                 </button>
-                {#if rs.open}
+                {#if revealStates[item.id]?.open}
                   <label for={`concern-reveal-passphrase-${item.id}`}>
                     {t('concern.intake.reveal.passphrase_label')}
                   </label>
@@ -297,22 +297,22 @@
                     type="button"
                     class="primary"
                     on:click={() => onRevealSource(item.id)}
-                    disabled={rs.loading}
+                    disabled={revealStates[item.id]?.loading}
                   >
-                    {rs.loading
+                    {revealStates[item.id]?.loading
                       ? t('concern.intake.actions.saving')
                       : t('concern.intake.reveal.reveal_button')}
                   </button>
-                  {#if rs.error}
-                    <p role="alert" class="con-reveal-error">{rs.error}</p>
+                  {#if revealStates[item.id]?.error}
+                    <p role="alert" class="con-reveal-error">{revealStates[item.id]?.error}</p>
                   {/if}
-                  {#if rs.sourceName}
+                  {#if revealStates[item.id]?.sourceName}
                     <p
                       role="status"
                       class="con-reveal-name"
                       data-testid={`concerns-reveal-source-name-${item.id}`}
                     >
-                      {rs.sourceName}
+                      {revealStates[item.id]?.sourceName}
                     </p>
                   {/if}
                 {/if}
