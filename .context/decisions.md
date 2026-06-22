@@ -9262,3 +9262,222 @@ The single old AC-5 is replaced by AC-5a/AC-5b/AC-5c. The card's `already_initia
 - [x] Edge-A is an availability/data-loss event for the legitimate user, NOT a confidentiality breach — no PIPEDA s.10.1 trigger introduced (consistent with threat-model.md §6).
 - [x] No edit to `.context/constraints.md`.
 - [ ] **HG-AUTH-PHASE0A** unchanged — security-reviewer + threat-modeler sign-off at the P0a-5 PR (now covering the rotate-and-reinit repair).
+
+---
+
+# ADR-0027 (2026-06-21) — Phase 2a: the live, end-to-end, E2EE "file a concern + see live concerns + reveal source" workflow
+
+**Status:** Proposed (design only — no feature code in this entry). **Human gate: HG-CONCERNS-PHASE2A** — touches a NEW key-material-disclosure surface (the committee-key-wrap read RPC) AND a PI projection change (the concerns list view) on the E2EE trust boundary → **security-reviewer + threat-modeler sign-off required at each PR** (constraints.md Human Gates: "Production deploys of changes touching … personal data"; hard rule 5: "Treat authentication, authorization, and session management as security-critical … extra review, not autonomous merge"). This gate is separate from HG-AUTH-PHASE0A (ADR-0026, the co-chair provisioning ceremony) and HG-AUTH-BOOTSTRAP (ADR-0025).
+
+**Decider(s):** architect. Branch: `claude/affectionate-carson-nqB03`. Cross-references ADR-0026 + Amendment A (Phase 0a provisioning — the precondition: a co-chair with a working committee-key wrap), ADR-0003 + Amendments A/B (E2EE key model, audit-before-side-effect, single-emission-path, six-mirror enum dance), ADR-0004 (RLS-on-every-table; reveal-source audit-before-return at concerns.sql:317-330 is the pattern this ADR mirrors), ADR-0001 (ca-central-1 residency), ADR-0024 (key-parity gate on the EF), ADR-0016 (audit retention schedule). Trigger: the crypto/wire/SQL stack for concerns is production-ready, but (A) there is NO server path for a client to read back its own committee-key wrap ciphertext, so it cannot obtain the plaintext data key needed to seal/open concerns; (B) the production seal/open compositions do not exist; (C) the /concerns UI is still wired to the demo viewer and the intake form is inert.
+
+## Findings established from the code (ground truth — verified this pass)
+
+- **Gap A — committee-key retrieval has no read path.** `committee_key_wraps` revokes all direct SELECT from authenticated/anon (`00000000000007_t07.sql:184`). `committee_key_state_for_self()` (migration `00000000000037_t07_committee_key_state.sql:40-61`) returns ONLY metadata `{key_id, epoch, wrap_count, actor_has_wrap}` — NO `wrapped_ciphertext`, by explicit design note (:23-26). `record_committee_data_key_unwrap(p_key_id)` (`00000000000007_t07.sql:529-547`) is AUDIT-ONLY: it gates on `_t07_gate_active_member()`, asserts the actor has a wrap (:538-540), emits `committee_data_key.unwrap` (:542-546), and returns `void` — it never returns bytes. The library `unwrapForSession` (`apps/web/src/lib/crypto/committee-key.ts:189-211`) reads `store.getCurrentCommitteeKeyWrap` — a `KeyStore` method that exists only against the test store; `SupabaseT07Client` has `getCommitteeKeyState` (metadata, `supabase-t07-client.ts:292`) and `wrapCommitteeDataKeyForMember` (write, :314-322) but NO method returning the actor's own `wrapped_ciphertext`. **There is no production path from device-privkey to plaintext committee data key.** This gap is SHARED by every Phase 2 E2EE read feature (2b/2c/2d).
+- **Gap B — production seal/open compositions do not exist.** `concern-core.ts` holds the seal/open primitives (`sealUtf8` :56-68, `openUtf8` :79-89, both FILE-PRIVATE) plus four ops against the test `ConcernStore`. `supabase-concern-client.ts` is the transport: `submitConcern` (:120-141) accepts PRE-SEALED `Uint8Array` ciphertext, `revealConcernSource` (:173-189) returns ciphertext, `listConcerns` (:196-198) returns `ConcernListRow[]`. It does NOT seal/open and never sees the key (docstring :29-32). There is no `submitConcernViaProduction` / `listConcernsViaProduction` / `revealConcernSourceViaProduction` composing unwrap → seal/open → wire call.
+- **Gap C — UI is inert.** `ConcernIntakeForm.svelte` submit handler (:151-162) validates then flips `state = 'submitting'` and stops; no client/key props, no transport call. `/concerns/+page.svelte` mounts only `ConcernsViewer` with `buildDemoConcerns(50)` (:37, :295) — no "Log a concern" CTA, no form mount. `ConcernsViewer.svelte` renders the `DemoConcernRow` shape (plaintext title, status, days_since_filed, actor_pseudonym, source_protected).
+- **View ↔ client shape mismatch.** `concerns_default_view` (`00000000000004_concerns.sql:270-279`) returns `{id, actor_id (raw uuid), title_ct, body_ct, hazard_class, severity, location_id, created_at, updated_at, has_named_source}`. The client `ConcernListRow` (`supabase-concern-client.ts:96-106`) expects `actor_pseudonym` + `anonymous_default_kept` and has NEITHER `actor_id` nor `status` nor `days_since_filed`. The view exposes raw `actor_id` to every active member — a PI exposure — and lacks the pseudonym + anonymity flag the client needs. `status` / `days_since_filed` are demo inventions: there is no `status` column on `concerns`; `days_since_filed` is derivable from `created_at`.
+- **`_committee_pseudonym(uuid)` is a real, reusable helper** (used at `00000000000004_concerns.sql:189,253`, `00000000000007_t07.sql:277,513`, etc.) — the same HMAC pseudonym, key-parity-gated per ADR-0024, used by the audit feed.
+- **Precedents to mirror exactly:** `reveal_concern_source` audit-BEFORE-return inside one SECURITY DEFINER txn (`00000000000004_concerns.sql:317-330`); `committee_key_state_for_self` gating/grant shape (SECURITY DEFINER, `_t07_gate_active_member()`, REVOKE PUBLIC/anon/service_role, GRANT authenticated + supabase_auth_admin — `00000000000037:42-66`); the t07-op dispatcher case-per-op pattern (`functions/t07-op/index.ts:183-262`).
+
+## Decision 1 — committee-key dwell policy: **session-scoped in-memory cache with explicit wipe triggers** (NOT per-operation unwrap)
+
+**Chosen:** Unwrap the committee data key ONCE per signed-in session into a single in-process holder, reuse it for all seal/open operations in that session, and wipe it on every session-end trigger. NOT a fresh unwrap+zeroize per operation.
+
+**The exact lifecycle (binding):**
+- **Where it is held:** a single module-scoped `CommitteeKeyHolder` in the web app's client runtime (e.g. `apps/web/src/lib/crypto/committee-key-holder.ts`), holding `{ data_key: Uint8Array, key_id: string, epoch: number } | null`. It is NEVER written to IndexedDB, localStorage, sessionStorage, a Svelte store that serializes, a URL, or the audit meta. It lives only in the JS heap.
+- **Populated by:** `unwrapCommitteeDataKeyViaProduction(client, localIdentity, user_id)` (Decision 2), lazily on the first seal/open of the session. The first populate emits exactly one `committee_data_key.unwrap` audit row (via `record_unwrap`, folded into the read RPC per Decision 2). Subsequent operations in the same session reuse the cached bytes and emit NO further unwrap rows.
+- **Every wipe trigger (all mandatory — each calls `holder.wipe()` which `.fill(0)`s the buffer then nulls the reference):**
+  1. **Sign-out / `clearJwt`** — the existing JWT-clear path MUST also wipe the holder. Same hook `onSessionRevoked` uses.
+  2. **Session revocation / HTTP 401** — `onSessionRevoked` (already wired on the t07 + concern clients) wipes the holder in the same handler that clears the JWT.
+  3. **Panic-wipe (`BrowserWipeStore`)** — the panic-wipe path (ADR-0020 / the `panic_wipe.invoked` flow) MUST wipe the holder BEFORE it clears IndexedDB identity material. Add the holder to the panic-wipe target set.
+  4. **Session expiry** — when the mint-session JWT's expiry passes (the client already tracks this for refresh), the holder is wiped; the next operation re-unwraps (and re-emits one `committee_data_key.unwrap`).
+  5. **Tab/window close / page unload** — best-effort `beforeunload`/`pagehide` wipe. (Not a security guarantee — heap is torn down anyway — but reduces dwell on bfcache restore.)
+  6. **Key rotation observed** — if a seal/open op or the list probe observes a `key_id` newer than the cached one (epoch advanced), the holder is wiped and re-unwrapped against the new key (Phase 2a does not rotate, but a co-chair on another device might; the guard prevents sealing under a stale key — the F-137 hazard).
+- **Zeroization points:** every `wipe()` call `.fill(0)`s the `data_key` buffer (libsodium `memzero` if exposed by the `ready()` surface; else `.fill(0)`), then sets the holder to `null`. The plaintext data key returned transiently by `unwrapCommitteeDataKeyViaProduction` is handed to the holder by reference (NOT copied) so there is exactly one buffer to wipe.
+
+**Audit consequence:** one `committee_data_key.unwrap` row per session (per re-unwrap after a wipe), NOT one per operation. This is the SAME event already emitted by `record_committee_data_key_unwrap` (`00000000000007_t07.sql:542`) and already in the audit retention schedule (no new enum value, no six-mirror dance). The per-operation alternative would emit one unwrap row per concern submit/open/reveal — noisy at 24-month retention (ADR-0016) and operationally useless (the forensically interesting events are `concern.created` / `concern.source_revealed`, which are emitted per-op regardless). Session-scoped is the right granularity: "this member unwrapped the committee key at session start" is the meaningful audit fact.
+
+**Rejected (a) per-operation unwrap+zeroize.** Cleanest dwell story (key never lives between ops) but: (i) an unwrap audit row per op floods the 24-month-retained log with no forensic value; (ii) a server round-trip + `crypto_box_seal_open` per op on every keystroke-driven list refresh is wasteful; (iii) it does not actually improve confidentiality meaningfully — within a single op the plaintext key is in the heap anyway, and an attacker with heap access at op-time has it either way. The marginal dwell reduction is not worth the audit noise.
+
+**Rejected (b) cache with idle-timeout (hybrid).** A 5–15min idle timer wiping the holder. Adds real complexity (timer lifecycle, reset-on-activity, interaction with the existing session-expiry timer) for a marginal dwell reduction over the wipe-trigger set above. Phase 2a does NOT adopt it; the wipe-trigger set (sign-out / 401 / panic / expiry / unload / rotation) already covers every state-transition that matters. An idle timeout can be added later as an **easy** additive change if the threat-modeler asks for it — flagged as a future option, not built now.
+
+**Reversibility:** medium. The holder is a single module; switching to per-op (Rejected a) is deleting the cache and calling unwrap inline — a focused change. Switching to add an idle timer (Rejected b) is additive. The wipe-trigger contract is the load-bearing part and is the same under any policy.
+
+## Decision 2 — the committee-key unwrap infrastructure (Gap A): a new key-material-disclosure RPC + op + client method + composition
+
+This is the biggest piece and is SHARED by Phase 2b/2c/2d. It is a NEW key-material-disclosure surface at the trust boundary — explicitly flagged for the threat-modeler (Decision 9).
+
+**New SECURITY DEFINER RPC `get_committee_key_wrap_for_self()`** (new migration, next number, e.g. `00000000000038_t07_get_committee_key_wrap.sql`):
+- Returns `TABLE(key_id uuid, epoch integer, wrapped_ciphertext bytea)` for the caller's OWN wrap row on the live (`rotated_at IS NULL`) key. Returns no rows when the actor has no wrap (client maps to `no_wrap` → routes to Phase 0a setup, Decision 7).
+- Gating/grant EXACTLY mirrors `committee_key_state_for_self` (migration 0037): `SECURITY DEFINER`, `SET search_path=public, extensions`, gates on `_t07_gate_active_member()` (= `is_active_member(auth.uid())`), `REVOKE EXECUTE FROM PUBLIC, anon, service_role`, `GRANT EXECUTE TO authenticated, supabase_auth_admin`. It reads ONLY `WHERE user_id = auth.uid() AND <live key>` — it can never return another member's wrap (the actor is `auth.uid()`, never a parameter).
+- **AUDIT-BEFORE-RETURN invariant (mirror `reveal_concern_source` at `00000000000004_concerns.sql:317-330`):** the function emits the `committee_data_key.unwrap` audit row (folding in the existing `record_committee_data_key_unwrap` body — the gate check at :538-540 and the `audit_emit` at :542-546) INSIDE the same SECURITY DEFINER transaction, BEFORE the `RETURN QUERY` of the ciphertext. The audit row commits before the bytes leave the function. This collapses the current two-call dance (read-wrap-somehow + `record_unwrap`) into one atomic audited read. `record_committee_data_key_unwrap` remains for back-compat but the production path uses the new fused RPC.
+- **NO new audit enum value** — it emits the existing `committee_data_key.unwrap`, already on the closed allowlist and in the ADR-0016 schedule. No six-mirror dance.
+
+**New t07-op op `get_key_wrap`** (dispatch case in `functions/t07-op/index.ts`, sibling to `committee_key_state` at :238): calls `get_committee_key_wrap_for_self` under the caller's `auth.uid()`, returns `{ key_id, epoch, wrapped_ciphertext_hex }`. Same `serveWithCors` + `assertKeyParity()` + `session_is_live()` posture as every other t07-op op.
+
+**New client method `SupabaseT07Client.getCommitteeKeyWrapForSelf()`** → `T07OpResult<{ key_id: string; epoch: number; wrapped_ciphertext: Uint8Array } | null>` (hex→bytes via `pgHexToBytes`, mirroring `getCommitteeKeyState`).
+
+**New composition `unwrapCommitteeDataKeyViaProduction(client, localIdentity, user_id)`** in `production-flows.ts` (mirroring the test-only `unwrapForSession` at `committee-key.ts:189-211`):
+1. `const wrap = await client.getCommitteeKeyWrapForSelf()` → on `null` return `{ status: 'no_wrap' }`; on `!ok` map to `{ status: 'failed', reason, http }` (401 → session-expiry path, Decision 4).
+2. `const priv = await localIdentity.getIdentityPrivateKey(user_id)` → if absent return `{ status: 'needs_recovery' }` (device has no privkey — restore-from-recovery, mirroring ADR-0026 AC-7; the wrap exists server-side but cannot be opened here).
+3. Derive the actor pubkey for `crypto_box_seal_open` — the seal is anonymous-sender so it needs both halves; obtain the pubkey from `localIdentity` if stored alongside, else derive from the privkey via `s.crypto_scalarmult_base` / the libsodium box-keypair-from-secret path used elsewhere. (Implementation detail for the implementer; the privkey is sufficient.)
+4. `const data_key = s.crypto_box_seal_open(wrap.wrapped_ciphertext, pub, priv)` → on failure return `{ status: 'failed', reason: 'decrypt_failed' }`.
+5. Return `{ status: 'ok', data_key, key_id: wrap.key_id, epoch: wrap.epoch }`. The caller (the holder, Decision 1) takes ownership of `data_key` by reference. **No `.fill(0)` here** — the holder owns the lifecycle; zeroizing here would defeat the cache. (Contrast `initCommitteeDataKeyViaProduction` in ADR-0026, which DOES zeroize because it generates a throwaway buffer.)
+
+## Decision 3 — production concern compositions (Gap B): seal/open extracted, three new functions
+
+**Extract the seal/open primitives** out of file-private scope. Move `sealUtf8` / `openUtf8` (`concern-core.ts:56-89`) to a new `apps/web/src/lib/concerns/seal.ts` and export them (rule-of-three: test core + production compositions are the 2nd and 3rd consumers). `concern-core.ts` imports them; behavior unchanged.
+
+**Three new compositions** in `production-flows.ts` (or a sibling `concern-flows.ts`), each takes the committee key from the holder (Decision 1), never re-unwraps inline:
+- `submitConcernViaProduction({ client, concernClient, holder, user_id, intake })`: ensure holder populated (unwrap if null) → `sealUtf8(intake.title)`, `sealUtf8(intake.body)`, and `sealUtf8(intake.source_name_plaintext)` ONLY if `intake.anonymous === false` (mirror the anonymous-default-lock at `concern-core.ts:133-144`) → `concernClient.submitConcern({ title_ct, body_ct, source_name_ct, anonymous, source_passphrase, ... })`. Returns the discriminated-union result (id / rate_limited 429 / rls_denied 403 / no_committee_key / session_expiry 401).
+- `listConcernsViaProduction({ client, concernClient, holder, user_id })`: ensure holder populated → `concernClient.listConcerns()` → for each row `openUtf8(title_ct, dataKey)` and `openUtf8(body_ct, dataKey)` client-side → return rows with decrypted `title` + `body` + the passthrough `{ hazard_class, severity, location_id, created_at, actor_pseudonym, anonymous_default_kept, has_named_source }`. The plaintext title/body exist only transiently in the render scope; they are NEVER persisted or logged.
+- `revealConcernSourceViaProduction({ client, concernClient, holder, user_id, id, passphrase })`: ensure holder populated → `concernClient.revealConcernSource({ id, passphrase })` (the SERVER emits `concern.source_revealed` BEFORE returning ciphertext per `00000000000004_concerns.sql:317-330`) → on `source_name_ct === null` return `{ status: 'anonymous' }` → else `openUtf8(source_name_ct, dataKey)` client-side → return `{ status: 'ok', source_name }`. The audit-before-return invariant is enforced SERVER-SIDE; the client merely consumes it.
+
+Each composition: libsodium-only, discriminated-union return, NEVER logs key material or plaintext (Decision 8).
+
+## Decision 4 — the ordered ceremonies (load-bearing; audit-before-return called out)
+
+**Submit ceremony:**
+1. Guard: actor is an active member with a committee-key wrap (probe via `getCommitteeKeyState`, Decision 7). If no wrap → route to Phase 0a setup, do NOT proceed.
+2. Populate holder if null: `unwrapCommitteeDataKeyViaProduction` → server emits `committee_data_key.unwrap` (audit-before-return, Decision 2) → holder caches the data key.
+3. `sealUtf8(title)`, `sealUtf8(body)`, `sealUtf8(source_name)` iff named (anonymous-default-lock).
+4. `concernClient.submitConcern(...)` → server `concern_submit` gates session_is_live + active-member, enforces rate budget (F-20), writes the row, emits `concern.created` carrying the submitter pseudonym (`00000000000004_concerns.sql:187-199`) — all in ONE txn. The audit `target_id` references the new row id (audit AFTER insert, per the SQL contract — distinct from the reveal/unwrap audit-BEFORE-return, because submit's audit needs the id).
+5. On 429 → "you're submitting too fast" (no PI body); on 403 → generic-forbidden; on 401 → session-expiry (wipe holder + clear JWT, Decision 1).
+
+**List+decrypt ceremony:**
+1–2. Guard + populate holder (as submit).
+3. `concernClient.listConcerns()` → server reads `concerns_default_view` (widened per Decision 5) → returns `{ id, title_ct, body_ct, hazard_class, severity, location_id, created_at, actor_pseudonym, anonymous_default_kept, has_named_source }`.
+4. Client-side per row: `openUtf8(title_ct)`, `openUtf8(body_ct)`. Derive `days_since_filed` from `created_at` (Decision 6). Derive the source-protected chip from `has_named_source`.
+5. Render. No `status` (Decision 6). No raw `actor_id` ever reaches the client (Decision 5).
+
+**Reveal ceremony (audit-before-return is SERVER-enforced):**
+1–2. Guard + populate holder.
+3. `concernClient.revealConcernSource({ id, passphrase })` → server `reveal_concern_source`: verifies the per-record passphrase if set (`:311-315`), emits `concern.source_revealed` (C4, audit-BEFORE-return at `:317-330`), THEN returns `source_name_ct`. The audit row commits even if the response is dropped on the wire — this is the load-bearing invariant.
+4. `null` ciphertext → "logged anonymously, no source." Else `openUtf8(source_name_ct)` client-side under the committee key → display.
+
+## Decision 5 — list-view ↔ client shape reconciliation: **widen the view to pseudonym, DROP raw actor_id** (PI change — privacy-reviewer + threat-modeler)
+
+**Chosen:** A small migration widening `concerns_default_view` (`00000000000004_concerns.sql:270-279`) to:
+- ADD `public._committee_pseudonym(c.actor_id) AS actor_pseudonym` (mirrors the audit pseudonym at `:189` — same HMAC, key-parity-gated per ADR-0024).
+- ADD a computed `anonymous_default_kept` — the view does not currently store this. **Source it from `has_named_source`:** `(c.source_name_ct IS NULL) AS anonymous_default_kept` (a concern with no source ciphertext WAS filed anonymously-by-default; a named one was not). This reuses the existing `source_name_ct IS NULL` test already at `:274` and needs no new column.
+- **DROP the raw `actor_id` column from the projection.** This is the PI fix: today the view leaks the raw submitter uuid to every active member (`:272`), which is a re-identification vector (cross-reference with `committee_membership`). After the change the client receives ONLY the pseudonym — consistent with the audit feed's posture.
+
+**Why this over alternatives:** (a) keeping raw `actor_id` and pseudonymizing client-side is wrong — the raw PI still crosses the boundary; (b) adding an `actor_pseudonym` column to the base `concerns` table is heavier and denormalizes a derivable value. The view is the right layer; `_committee_pseudonym` is the established helper.
+
+**Reversibility:** medium — a view redefinition is a one-statement migration, but DROPPING `actor_id` from the projection is a contract change any consumer relying on it would break (only the demo path does, and it is being replaced). The privacy improvement makes this directional, not reversible-by-default.
+
+**PI implication (flag for privacy-reviewer + threat-modeler):** this REDUCES PI exposure (raw uuid → pseudonym) — a privacy improvement, not a regression. But it is a change to what PI crosses the trust boundary, so it is a flagged PI-projection change. No new field is COLLECTED (constraints.md hard rule 6 N/A); a derived projection changes.
+
+## Decision 6 — status / days_since_filed: **ship with NO status; derive days_since_filed client-side** (minimal)
+
+**Chosen:** Phase 2a ships with NO `status` concept. There is no `status` column on `concerns` (confirmed — it is a demo invention). All live rows render unlabeled / as the implicit "open" state. The status filter chips in `/concerns/+page.svelte` (`:51`, `:118-129`) are demo-only and are removed or hidden on the live path (severity + hazard + date-range chips remain — those map to real columns). `days_since_filed` is derived CLIENT-SIDE from `created_at` (`now - created_at`), exactly as the demo derives it, with no server change.
+
+**Rejected:** adding a `status` column + state-machine + migration. That is a real feature (triage workflow) with its own audit events and UX — out of Phase 2a scope. Deferred to a future ADR. Keeping Phase 2a minimal is the right call: live concerns that are visible end-to-end is the deliverable; triage status is the next deliverable.
+
+**Reversibility:** easy — adding `status` later is an additive column + migration; nothing in Phase 2a forecloses it.
+
+## Decision 7 — worker-without-Phase-0a guard (no committee-key wrap): detect via probe, route to Settings setup
+
+**Chosen:** Before any seal/open op on `/concerns`, the client calls `getCommitteeKeyState({ actor_user_id })` (the metadata probe, `00000000000037`). If it returns no live key OR `actor_has_wrap === false`, the page does NOT attempt to unwrap (which would 403/return-null) and instead renders a guard state routing to the Phase 0a "Set up committee encryption" Settings surface (ADR-0026): "Your committee encryption isn't set up yet — finish setup in Settings." A co-chair sees the setup card; a non-co-chair member without a wrap sees "ask a co-chair to grant you access" (the Phase 1 onboarding-to-existing-key path, ADR-0026 Amendment A Ruling 2 sub-case (a)).
+
+**The guard sequence (binding):** state-probe FIRST (cheap, metadata-only, no key material) → only if `actor_has_wrap` proceed to `unwrapCommitteeDataKeyViaProduction` (the key-material read). This avoids hitting the new disclosure RPC at all for a member who has no wrap, and gives a clean routable state instead of an error.
+
+## Decision 8 — pagination/filtering: **acceptable-for-now is client-side over the full view; NO paged RPC in Phase 2a**
+
+**Chosen:** Phase 2a keeps the current client-side filter/sort behavior over the full `concerns_default_view` result. The view returns all rows the active member may see; the client decrypts and filters/sorts in memory (severity, hazard, date-range — the real-column axes). This matches the demo behavior and is correct for the expected scale (a single committee's concern register — tens to low-hundreds of rows, not thousands). The capacity cliff: a paged/filtered RPC (server-side `LIMIT/OFFSET` or keyset over `created_at`) becomes worth building when a committee's register exceeds ~500–1000 rows or the decrypt-all-on-load latency exceeds the interactive budget. That is a future ADR, not Phase 2a.
+
+**Why now:** E2EE forces client-side decryption, so server-side filtering on the SEALED title/body is impossible anyway (the server cannot filter on plaintext it cannot read). Pagination on the metadata columns (severity/hazard/created_at) IS possible server-side but is premature at committee scale. No premature optimization.
+
+**Reversibility:** easy — a paged `list_concerns_page(p_cursor, p_limit)` RPC is additive; the client swaps the transport call.
+
+## Decision 9 — PR breakdown: **TWO PRs** — committee-key-unwrap infra first (shared), then concerns
+
+**Chosen:**
+- **PR 1 — Committee-key unwrap infrastructure (Gap A only).** The new `get_committee_key_wrap_for_self` migration + the `get_key_wrap` t07-op op + `SupabaseT07Client.getCommitteeKeyWrapForSelf` + `unwrapCommitteeDataKeyViaProduction` + the `CommitteeKeyHolder` (Decision 1) with all wipe triggers. Shippable + reviewable on its own: it adds a tested key-material read path with the audit-before-return invariant and the holder lifecycle, with no UI change. It is the SHARED foundation for Phase 2b/2c/2d. Its security-reviewer + threat-modeler pass focuses entirely on the new disclosure surface — a clean, bounded review.
+- **PR 2 — Concerns end-to-end (Gap B + Gap C + the view-widening migration).** Depends on PR 1. The seal/open extraction, the three production compositions, the view widening (Decision 5), and the UI cutover (form wiring + page mount + guard). Its review focuses on the PI-projection change and the UI flow.
+
+**Why two, not one:** (i) the unwrap infra is shared by three future features — landing it alone lets 2b/2c/2d build on a reviewed foundation without re-litigating the disclosure surface; (ii) the two PRs have DIFFERENT primary review concerns (key-material disclosure vs PI projection + UI), so splitting keeps each review focused; (iii) PR 1 is independently testable (round-trip unwrap) with no UI; (iv) a combined PR would be large and mix two human-gate concerns into one review. Each PR is independently shippable and revertible.
+
+**Why not three (infra / compositions / UI):** the compositions (Gap B) are thin and meaningless without the UI to exercise them; splitting them from the UI would ship dead code. Gap B + Gap C belong together.
+
+## Decision 10 — acceptance criteria (test-writer turns these into FAILING tests first)
+
+Hermetic: mock t07-op + concern-op transports + real `BrowserLocalIdentityStore` + real libsodium, mirroring the existing `production-flows` test surface.
+
+**Happy paths:**
+- **AC-1 (submit round-trips):** from a provisioned co-chair, `submitConcernViaProduction` seals title/body under the committee key and the persisted ciphertext, opened with the same key, yields the original plaintext. A `concern.created` audit row carries the submitter pseudonym (not raw id).
+- **AC-2 (list decrypts):** `listConcernsViaProduction` returns rows whose `title`/`body` decrypt to the submitted plaintext; each row carries `actor_pseudonym` (NOT `actor_id`), `anonymous_default_kept`, `has_named_source`, and a client-derived `days_since_filed`; NO `status` field is present.
+- **AC-3 (reveal round-trips, audit-before-return):** `revealConcernSourceViaProduction` on a named concern returns the source plaintext; a `concern.source_revealed` (C4) audit row is committed BEFORE the ciphertext is returned (assert audit-spy fires before the resolve, mirroring the `reveal_concern_source` contract test).
+
+**Anonymous vs named source:**
+- **AC-4 (anonymous):** a concern submitted with `anonymous === true` seals NO source_name (`source_name_ct` null); `revealConcernSourceViaProduction` returns `{ status: 'anonymous' }`; the list row shows `has_named_source === false` and `anonymous_default_kept === true`.
+- **AC-5 (named):** `anonymous === false` with a non-empty name seals the source; reveal returns it; `has_named_source === true`, `anonymous_default_kept === false`. A named selection with an EMPTY name is rejected pre-submit AND defended at the library (mirror `concern-core.ts:139-142`).
+
+**Failure / edge:**
+- **AC-6 (rate-limit 429):** `submit` returning HTTP 429 surfaces a rate-limited state with NO PI in the body; no ciphertext is persisted; the holder is NOT wiped (rate-limit is not a session event).
+- **AC-7 (no committee key):** with `actor_has_wrap === false` from the state probe, the page renders the Phase 0a-setup guard and NEVER calls `getCommitteeKeyWrapForSelf` (assert the disclosure RPC is not hit); `unwrapCommitteeDataKeyViaProduction` against a no-wrap actor returns `{ status: 'no_wrap' }`.
+- **AC-8 (session-expiry 401):** any RPC returning HTTP 401 wipes the `CommitteeKeyHolder` (assert the buffer is zeroized and the reference nulled) AND fires `onSessionRevoked` (clears JWT) AND surfaces sign-in-required. 403 (rls_denied) is distinct: generic-forbidden, holder NOT wiped, JWT NOT cleared.
+- **AC-9 (key material never logged):** across submit + list + reveal, assert no plaintext committee data key, no identity privkey, no concern plaintext (title/body/source_name) appears in `console.*`, thrown error messages, the structured-log path, or any audit `meta`. Extends the existing key-material-leak CI gate.
+- **AC-10 (audit-before-return for the unwrap RPC):** `get_committee_key_wrap_for_self` (pgTAP) commits the `committee_data_key.unwrap` audit row BEFORE returning the ciphertext, in ONE txn — assert via a pgTAP that an injected failure AFTER the audit emit but the row is already present, mirroring the `reveal_concern_source` pgTAP pattern. Grants exclude PUBLIC/anon/service_role; a non-member call raises the gate exception; the function returns ONLY the caller's own wrap, never another member's.
+- **AC-11 (holder reuse, single unwrap audit):** two sequential seal/open ops in one session emit exactly ONE `committee_data_key.unwrap` row (the holder is reused), then a sign-out wipes the holder and a subsequent op emits a second unwrap row.
+
+## Decision 11 — security / privacy considerations (handed to the threat-modeler — MANDATED handoff)
+
+- **NEW key-material-disclosure surface (the load-bearing new risk):** `get_committee_key_wrap_for_self` is the FIRST production RPC that returns committee key material (a sealed wrap) across the browser ↔ t07-op trust boundary. Although the wrap is itself sealed-box ciphertext (useless without the device privkey), it is a new disclosure endpoint. Mitigations baked in: gated on `_t07_gate_active_member()`; returns ONLY `auth.uid()`'s own wrap (actor is never a parameter — no IDOR); REVOKE PUBLIC/anon/service_role; audit-before-return (`committee_data_key.unwrap` commits before bytes leave); key-parity gate on the EF (ADR-0024). The threat-modeler MUST assess: replay/exfil of the wrap (mitigated — needs the device privkey to open), audit-bypass (mitigated — fused txn), and whether session-scoped dwell (Decision 1) is acceptable vs per-op.
+- **In-memory dwell of the plaintext data key (Decision 1):** the plaintext committee data key now lives in the JS heap for the session duration. Threat-modeler MUST validate the wipe-trigger set (sign-out / 401 / panic-wipe / expiry / unload / rotation) is exhaustive and that panic-wipe wipes the holder BEFORE IndexedDB. This is a dwell-policy choice ADR-0003 Invariant 1 permits but the threat model had no explicit policy for — Decision 1 establishes it.
+- **PI-projection change (Decision 5):** `concerns_default_view` stops exposing raw `actor_id` and exposes `_committee_pseudonym(actor_id)` instead — a PI REDUCTION, but a change to what PI crosses the boundary. Route to privacy-reviewer AND threat-modeler. The pseudonym's re-identifiability (HMAC under the parity-gated key) is the same posture as the audit feed — no new re-identification vector introduced; the raw-uuid leak is CLOSED.
+- **Plaintext concern title/body/source in render scope:** list-decrypt and reveal put plaintext PI transiently in the browser render scope. Mitigations: never persisted, never logged (AC-9), exists only for the lifetime of the rendered view. Standard E2EE-client posture.
+- **Trust boundary:** browser ↔ t07-op (key wrap) and browser ↔ concern-op (ciphertext) Edge Functions — both `serveWithCors` + `assertKeyParity` + `session_is_live()` gated, both bearing the mint-session JWT. Data crossing: sealed key wrap (t07-op), sealed concern ciphertext (concern-op), pseudonyms + metadata (list view). No plaintext key, no plaintext concern, no raw actor_id crosses.
+- **Residency / subprocessor:** all rows land in the existing ca-central-1 project (ADR-0001). No new region, no new subprocessor, no new third party. No new data field COLLECTED (constraints.md hard rule 6 N/A). No new audit enum value (reuses `committee_data_key.unwrap`, `concern.created`, `concern.source_revealed` — all on the closed allowlist + ADR-0016 schedule). No new retention class.
+
+## Decision 12 — ordered task breakdown
+
+**PR 1 — Committee-key unwrap infrastructure (shared foundation):**
+- **P2a-1 — Migration: `get_committee_key_wrap_for_self` SECURITY DEFINER RPC** (audit-before-return, folds `record_committee_data_key_unwrap` body; gate `_t07_gate_active_member`; REVOKE PUBLIC/anon/service_role; GRANT authenticated + supabase_auth_admin). Dep: none. AC: AC-10 (pgTAP). Owner: migration-handler. Risk: HIGH. Est: M. *security-reviewer + threat-modeler.*
+- **P2a-2 — t07-op `get_key_wrap` op + `SupabaseT07Client.getCommitteeKeyWrapForSelf`.** Dep: P2a-1. AC: returns the actor's wrap as bytes; 401/403 mapped distinctly; never another member's wrap. Owner: implementer. Risk: med. Est: S. *security-reviewer.*
+- **P2a-3 — `unwrapCommitteeDataKeyViaProduction` composition** (no_wrap / needs_recovery / ok / failed). Dep: P2a-2. AC: round-trip unwrap yields the same 32 bytes the wrap was sealed from; no_wrap + needs_recovery branches. Owner: implementer. Risk: med. Est: S. *security-reviewer.*
+- **P2a-4 — `CommitteeKeyHolder` + all wipe triggers** (sign-out / 401 / panic-wipe / expiry / unload / rotation; `.fill(0)` on wipe). Dep: P2a-3. AC: AC-8, AC-11; panic-wipe wipes holder before IndexedDB. Owner: implementer. Risk: HIGH. Est: M. *security-reviewer + threat-modeler.*
+
+**PR 2 — Concerns end-to-end (depends on PR 1):**
+- **P2a-5 — Extract `sealUtf8`/`openUtf8` to `concerns/seal.ts` + export; `concern-core.ts` imports them.** Dep: none (parallel to PR 1). AC: existing concern-core tests unchanged + green. Owner: implementer. Risk: low. Est: S.
+- **P2a-6 — Migration: widen `concerns_default_view` (add `actor_pseudonym`, add `anonymous_default_kept`, DROP raw `actor_id`).** Dep: none (parallel). AC: view returns pseudonym + anonymity flag, NO raw actor_id; pgTAP asserts actor_id absent + pseudonym matches `_committee_pseudonym`. Owner: migration-handler. Risk: med (PI projection). Est: S. *privacy-reviewer + threat-modeler.*
+- **P2a-7 — Three production compositions** (`submitConcernViaProduction` / `listConcernsViaProduction` / `revealConcernSourceViaProduction`) over the holder. Dep: P2a-4, P2a-5, P2a-6. AC: AC-1..AC-6, AC-9. Owner: implementer. Risk: HIGH. Est: M. *security-reviewer + threat-modeler.*
+- **P2a-8 — State-probe guard on `/concerns`** (getCommitteeKeyState first; route no-wrap to Phase 0a setup / co-chair-grant). Dep: P2a-7. AC: AC-7. Owner: implementer. Risk: med. Est: S.
+- **P2a-9 — UI cutover:** wire `ConcernIntakeForm` submit handler to `submitConcernViaProduction` (client + holder props); mount the form behind a "Log a concern" CTA on `/concerns`; swap `ConcernsViewer` data source from demo to `listConcernsViaProduction`; remove demo-only `status` chips; derive `days_since_filed` client-side. Dep: P2a-8. AC: end-to-end submit→list→reveal in a hermetic browser test; AODA/WCAG AA preserved on the live form. Owner: implementer + designer. Risk: HIGH. Est: L. *security-reviewer + threat-modeler; accessibility check.*
+- **P2a-10 — key-material-never-logged CI assertion** extended to cover the data key + concern plaintext across submit/list/reveal. Dep: P2a-7. AC: AC-9 as a CI gate. Owner: implementer + observability-setup. Risk: low. Est: S.
+
+**Human-gate items (loud):** P2a-1 + P2a-4 (the new key-material-disclosure surface + the in-memory dwell policy — security-reviewer + threat-modeler, HG-CONCERNS-PHASE2A); P2a-6 (PI-projection change — privacy-reviewer + threat-modeler); P2a-7 + P2a-9 (the end-to-end E2EE flow + UI — security-reviewer + threat-modeler); production deploy of either PR (PI path — never auto-merge per preferences.md risk posture).
+
+## Reversibility
+
+- `get_committee_key_wrap_for_self` RPC: **medium** — additive migration, but once Phase 2b/2c/2d depend on it, it is load-bearing; its CONTRACT (own-wrap-only, audit-before-return) is the durable part.
+- `CommitteeKeyHolder` session-scoped dwell (Decision 1): **medium** — swappable to per-op or idle-timeout; the wipe-trigger contract is the load-bearing part.
+- View widening / DROP actor_id (Decision 5): **medium** — one-statement migration, but dropping a column from a projection is a directional privacy improvement.
+- No-status / client-derived days_since_filed (Decision 6): **easy** — adding status later is additive.
+- Client-side pagination (Decision 8): **easy** — a paged RPC is additive.
+- Two-PR split (Decision 9): **easy** — an organizational choice, not an architectural lock-in.
+- No NEW hard-to-reverse choice: no new subprocessor, no new region, no new audit enum value, no new retention class, no new data field collected.
+
+## Compliance check
+
+- [x] ca-central-1 only; no new subprocessor; no new region (ADR-0001).
+- [x] ADR-0003 Invariants 1/5/6 honoured — committee key unwrapped client-side from a sealed wrap; plaintext key + concern plaintext never leave the device; the key is zeroized on every session-end (Decision 1); no plaintext crosses the boundary.
+- [x] Audit-before-return preserved — the new unwrap RPC mirrors `reveal_concern_source` (`00000000000004_concerns.sql:317-330`); `concern.source_revealed` already server-enforced.
+- [x] No new audit enum value → no six-mirror dance (reuses `committee_data_key.unwrap` / `concern.created` / `concern.source_revealed`).
+- [x] No new data field collected → no new purpose entry (constraints.md hard rule 6 N/A). Decision 5 REDUCES PI exposure (raw actor_id → pseudonym).
+- [x] No PII in logs/URLs/errors — Decision 8 (no-PI bodies on 429/403) + AC-9 enforce.
+- [x] No edit to `.context/constraints.md`.
+- [ ] **HG-CONCERNS-PHASE2A** — security-reviewer + threat-modeler sign-off at each PR (new key-material-disclosure surface P2a-1/P2a-4; PI-projection P2a-6; end-to-end E2EE P2a-7/P2a-9); privacy-reviewer on P2a-6.
+
+## Threat-modeler handoff (MANDATED)
+
+This ADR MUST route to the **threat-modeler** before any P2a task ships — and BEFORE PR 1 in particular, because PR 1 introduces the new key-material-disclosure surface that Phase 2b/2c/2d will inherit. Required inputs, all in this ADR:
+
+- **Trust boundaries:** browser ↔ t07-op (the NEW `get_committee_key_wrap_for_self` disclosure surface — Decision 2/11); browser ↔ concern-op (concern ciphertext — Decision 3).
+- **Data flows per ceremony:** submit / list+decrypt / reveal (Decision 4), with the audit-before-return invariant on the unwrap RPC and the reveal RPC.
+- **PI / secret touchpoints:** the plaintext committee data key (now session-resident in the heap — Decision 1, the dwell policy the threat model had none for); the identity privkey (device-custody, unchanged); plaintext concern title/body/source (transient render scope); the PI-projection change from raw actor_id → pseudonym (Decision 5).
+- **The two HIGH-risk new surfaces:** (1) the key-material-disclosure RPC `get_committee_key_wrap_for_self` (P2a-1) — assess IDOR (mitigated: own-wrap-only), replay/exfil (mitigated: sealed, needs device privkey), audit-bypass (mitigated: fused txn); (2) the in-memory dwell policy + wipe-trigger exhaustiveness (P2a-4) — validate the wipe set and the panic-wipe-before-IndexedDB ordering.
+- **The PI-projection change (P2a-6):** also route to **privacy-reviewer** — confirm the pseudonym carries the same re-identifiability posture as the audit feed and that dropping raw actor_id is net-positive.
+
+The orchestrator routes from here.

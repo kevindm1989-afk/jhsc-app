@@ -308,6 +308,43 @@ export class SupabaseT07Client {
     });
   }
 
+  /**
+   * Phase 2a PR1 / ADR-0027 Decision 2 (P2a-2) — read the caller's OWN
+   * committee-key wrap ciphertext. The FIRST production client method that
+   * returns committee key material across the t07-op trust boundary. The wrap
+   * is SEALED ciphertext (opaque without the device-local identity privkey);
+   * the composition `unwrapCommitteeDataKeyViaProduction` opens it with
+   * `crypto_box_seal_open`.
+   *
+   * F-142 own-wrap-only: the `get_key_wrap` op carries NO id/target/member
+   * parameter — the server resolves the wrap against `auth.uid()` only, so
+   * there is no IDOR surface. Backed by `get_committee_key_wrap_for_self`
+   * (migration 0038), which emits `committee_data_key.unwrap` audit-before-
+   * return inside one txn (F-151). `null` when the actor holds no live-key
+   * wrap (client maps to no_wrap → Phase 0a setup, Decision 7).
+   *
+   * hex→bytes via `pgHexToBytes`, mirroring `getRecoveryBlob`.
+   */
+  async getCommitteeKeyWrapForSelf(): Promise<
+    T07OpResult<{ key_id: string; epoch: number; wrapped_ciphertext: Uint8Array } | null>
+  > {
+    const r = await invoke<{
+      key_id: string;
+      epoch: number;
+      wrapped_ciphertext_hex: string;
+    } | null>(this.opts.transport, { op: 'get_key_wrap' });
+    if (!r.ok) return r;
+    if (!r.data) return { ok: true, data: null };
+    return {
+      ok: true,
+      data: {
+        key_id: r.data.key_id,
+        epoch: r.data.epoch,
+        wrapped_ciphertext: pgHexToBytes(r.data.wrapped_ciphertext_hex)
+      }
+    };
+  }
+
   wrapCommitteeDataKeyForMember(input: {
     member_user_id: string;
     key_id: string;

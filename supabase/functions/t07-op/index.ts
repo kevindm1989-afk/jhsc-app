@@ -26,6 +26,7 @@ import {
   committeeKeyState,
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
+  getCommitteeKeyWrapForSelf,
   getRecoveryBlob,
   initCommitteeDataKey,
   issueEnrollmentChallenge,
@@ -65,6 +66,11 @@ type Op =
   // ADR-0026 Phase 0a (P0a-2) — read-only resume probe. `actor_user_id` is
   // forwarded for symmetry with the client probe shape; authz is auth.uid().
   | { op: 'committee_key_state'; actor_user_id?: string }
+  // ADR-0027 Decision 2 (P2a-2) — read the caller's OWN committee-key wrap
+  // ciphertext. Read-shaped; same gate stack. No id parameter (own-wrap-only
+  // is structural; F-142). The SQL fn emits the unwrap audit row
+  // audit-before-return (F-151).
+  | { op: 'get_key_wrap' }
   | {
       op: 'wrap_member';
       member_user_id: string;
@@ -237,6 +243,9 @@ serveWithCors(async (req) => {
       break;
     case 'committee_key_state':
       result = await committeeKeyState(rpc);
+      break;
+    case 'get_key_wrap':
+      result = await getCommitteeKeyWrapForSelf(rpc);
       break;
     case 'wrap_member':
       result = await wrapCommitteeDataKeyForMember(rpc, body);

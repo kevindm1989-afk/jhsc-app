@@ -428,6 +428,102 @@ async function repairZeroWrapKey(opts: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Committee data key — unwrap (ADR-0027 Decision 2 / PR1 / threat-model §3.16
+// F-142 / F-144 / F-148 / F-151)
+// ---------------------------------------------------------------------------
+
+export type UnwrapCommitteeDataKeyResult =
+  // The 32-byte plaintext committee data key, recovered by opening the actor's
+  // own sealed wrap with the device-local identity privkey. The caller (the
+  // CommitteeKeyHolder, Decision 1) takes ownership of `data_key` BY REFERENCE
+  // and owns its zeroization lifecycle — this composition does NOT `.fill(0)`
+  // here (a premature wipe would defeat the session cache; Decision 2 step 5).
+  | { status: 'ok'; data_key: Uint8Array; key_id: string; epoch: number }
+  // The metadata probe says the actor holds no wrap (or the disclosure RPC
+  // found no live-key row in a race). Route to Phase 0a setup (Decision 7);
+  // the disclosure RPC is NOT hit when the probe already says no (F-144).
+  | { status: 'no_wrap' }
+  // A server-side wrap exists but the device has no identity privkey to open
+  // it. Route to restore-from-recovery (never re-enroll); ADR-0026 AC-7.
+  | { status: 'needs_recovery' }
+  // A typed failure surface — NEVER a thrown raw exception (which could carry
+  // buffer bytes in its message/stack, F-148). `decrypt_failed` is the
+  // wrong-privkey / tampered-ciphertext case (AEAD fails open-verify, F-142);
+  // 401/403 are surfaced verbatim so the caller can split session-expiry from
+  // generic-forbidden (AC-8 / F-130).
+  | { status: 'failed'; reason: T07OpReason | 'decrypt_failed'; http: number };
+
+/**
+ * Compose the committee-key unwrap (Decision 2). Probe-FIRST (Decision 7 /
+ * F-144): read the cheap metadata `getCommitteeKeyState` before any key-material
+ * disclosure — a no-wrap actor is routed to setup WITHOUT ever hitting the
+ * disclosure RPC. Only when the probe confirms a wrap do we fetch the sealed
+ * wrap via `getCommitteeKeyWrapForSelf` (the server emits the
+ * `committee_data_key.unwrap` audit row audit-before-return; this composition
+ * emits NO client-side audit, F-151), open it with the device-local identity
+ * privkey via `crypto_box_seal_open`, and hand the plaintext data key back by
+ * reference.
+ *
+ * libsodium-only (ADR-0003 Invariant 4). NEVER logs key material (F-148): no
+ * `console.*`, no thrown exception carrying bytes — every failure is a typed
+ * union value.
+ */
+export async function unwrapCommitteeDataKeyViaProduction(opts: {
+  client: SupabaseT07Client;
+  localIdentity: LocalIdentityStore;
+  user_id: string;
+}): Promise<UnwrapCommitteeDataKeyResult> {
+  // 1. Probe-FIRST (Decision 7 / F-144): metadata only, no key material. A
+  //    no-wrap actor never reaches the disclosure RPC.
+  const probe = await opts.client.getCommitteeKeyState({ actor_user_id: opts.user_id });
+  if (!probe.ok) return { status: 'failed', reason: probe.reason, http: probe.status };
+  if (!probe.data || !probe.data.actor_has_wrap) {
+    return { status: 'no_wrap' };
+  }
+
+  // 2. Fetch the actor's OWN sealed wrap (the disclosure RPC; F-142). The
+  //    server emits committee_data_key.unwrap audit-before-return (F-151).
+  const wrap = await opts.client.getCommitteeKeyWrapForSelf();
+  if (!wrap.ok) return { status: 'failed', reason: wrap.reason, http: wrap.status };
+  if (!wrap.data) {
+    // Probe said yes but the disclosure RPC found no row (a race against a
+    // concurrent rotation/revoke). Treat as no_wrap → route to setup.
+    return { status: 'no_wrap' };
+  }
+
+  // 3. Read the device-local identity privkey. Absent → needs_recovery (the
+  //    wrap exists server-side but cannot be opened on this device; route to
+  //    restore-from-recovery, ADR-0026 AC-7). `getIdentityPrivateKey` throws
+  //    when no key is stored — catch and map, never propagate (F-148).
+  let priv: Uint8Array;
+  try {
+    priv = await opts.localIdentity.getIdentityPrivateKey(opts.user_id);
+  } catch {
+    return { status: 'needs_recovery' };
+  }
+
+  // 4. Open the anonymous sealed-box wrap. `crypto_box_seal` is sender-
+  //    anonymous, so opening needs BOTH halves of the recipient keypair; the
+  //    public half is derived from the privkey via crypto_scalarmult_base
+  //    (X25519 base-point mult — the libsodium box-keypair-from-secret path).
+  //    A wrong privkey / tampered ciphertext fails AEAD verification and
+  //    throws — caught and mapped to a typed decrypt_failed, never propagated
+  //    (F-142 sealed-scope / F-148 no-leak).
+  const s = await ready();
+  let dataKey: Uint8Array;
+  try {
+    const pub = s.crypto_scalarmult_base(priv);
+    dataKey = s.crypto_box_seal_open(wrap.data.wrapped_ciphertext, pub, priv);
+  } catch {
+    return { status: 'failed', reason: 'decrypt_failed', http: 200 };
+  }
+
+  // 5. Hand back the LIVE plaintext key by reference — the holder owns the
+  //    zeroization lifecycle (Decision 2 step 5). No .fill(0) here.
+  return { status: 'ok', data_key: dataKey, key_id: wrap.data.key_id, epoch: wrap.data.epoch };
+}
+
 // Re-export the KDF_PARAMS so callers can label persisted blobs without
 // importing from `./recovery-blob` directly.
 export { KDF_PARAMS };
