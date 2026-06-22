@@ -222,14 +222,18 @@ RESET ROLE;
 -- as the returned bytes (a path that returned bytes without first emitting
 -- would leave the assertion failing).
 -- ---------------------------------------------------------------------------
-SET request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000f1","session_id":"11111111-1111-1111-1111-1111111111f1","role":"authenticated"}';
-SET LOCAL ROLE authenticated;
-
 -- Pre-call baseline: how many disclosed_for_wrap rows for target B2 right now?
+-- Role 'authenticated' has no SELECT on audit_log by design (migration 0001:118
+-- + 0019 — audit is service-role-readable only), so the baseline count runs
+-- under the pgTAP superuser role and the role is set ONLY when calling the
+-- function under test.
 CREATE TEMP TABLE _disclose_base AS
   SELECT count(*)::int AS n FROM public.audit_log
    WHERE event_type = 'identity_pubkey.disclosed_for_wrap'
      AND target_id = '00000000-0000-0000-0000-0000000000b2';
+
+SET request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000f1","session_id":"11111111-1111-1111-1111-1111111111f1","role":"authenticated"}';
+SET LOCAL ROLE authenticated;
 
 -- Drain the function and read the row.
 SELECT is(
@@ -239,10 +243,10 @@ SELECT is(
   'F-174 happy: co-chair F1 receives B2''s EXACT enrolled pubkey bytes (32B)');
 
 -- The fingerprint companion field exists (Decision 4 contract: returns
--- {public_key, fingerprint}). The exact format is the JS layer's BLAKE2b-32
--- hex (64 chars), but we accept any non-empty text — the contract is
--- "fingerprint is returned alongside the pubkey for UI confirmation,
--- Decision 5/6".
+-- {public_key, fingerprint}). Per Amendment A-6.1 the algorithm is SHA-256
+-- of the pubkey bytes, hex-encoded (64 chars) — same algorithm both layers,
+-- no pgsodium dependency. We accept any non-empty text here; the byte-for-
+-- byte JS↔SQL parity property is asserted in the vitest composition test.
 SELECT ok(
   (SELECT length(fingerprint) > 0 FROM public.get_member_identity_pubkey_for_wrap(
      '00000000-0000-0000-0000-0000000000b2'::uuid) LIMIT 1),
