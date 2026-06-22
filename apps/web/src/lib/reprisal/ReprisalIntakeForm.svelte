@@ -32,6 +32,31 @@
   import { t } from '../i18n';
   import { tokens } from '../tokens';
 
+  /**
+   * Phase 2b PR1 / P2b-3 — submit prop wiring (ADR-0028 Decision 5).
+   *
+   * The form is driven by an injected `submit` closure the route (or a test)
+   * supplies — the wired-in `submitReprisalViaProduction` closure. It mirrors
+   * that composition's discriminated-union return; the form pattern-matches on
+   * `status` and surfaces user-visible errors WITHOUT exposing PI / the
+   * submitted title/body/passphrase / window-tripped hints (F-161 / AC-7). On
+   * `ok` the form fires `onSubmitted(id)` so the route can refresh.
+   *
+   * Both props are optional so the existing reprisal-intake guard unit tests
+   * (consent gate + passphrase-confirm gate) keep working unchanged: an absent
+   * `submit` leaves the form at `state = 'submitting'` (the prior inert
+   * behaviour). The Phase 2b wiring tests pass `submit` explicitly.
+   */
+  // G-T07-13 — Svelte 5's esrap printer cannot emit TS type annotations on
+  // function-typed `export let` bindings; drop the annotations and rely on the
+  // JSDoc + the call-site contract.
+  /**
+   * @type {((intake: import('./types').ReprisalIntake) => Promise<{ status: string; id?: string }>) | undefined}
+   */
+  export let submit = undefined;
+  /** @type {((id: string) => void) | undefined} */
+  export let onSubmitted = undefined;
+
   // ADR-0007 amendment — every fresh mount starts the consent UNGIVEN.
   // There is NO module-level persistence of the "last value"; that would
   // defeat the structural per-intake re-render the privacy-review §2.4
@@ -124,7 +149,7 @@
   </div>
 
   <form
-    on:submit|preventDefault={() => {
+    on:submit|preventDefault={async () => {
       // Structural gate — short-circuit when consent missing OR fields
       // empty. The aria-disabled posture on the button is a hint to the
       // user; the handler is the actual gate.
@@ -140,6 +165,53 @@
         return;
       }
       state = 'submitting';
+      // No injected submit handler → the form stops at 'submitting' (the
+      // prior inert behaviour preserved for the legacy guard unit tests).
+      if (!submit) return;
+
+      // Reprisal has NO anonymous mode (F-17): the author is always recorded
+      // server-side. The intake carries title + body + the per-record
+      // passphrase friction gate (F-164) only.
+      const intake = /** @type {import('./types').ReprisalIntake} */ ({
+        title,
+        body,
+        passphrase
+      });
+      let result;
+      try {
+        result = await submit(intake);
+      } catch {
+        // Library failures are typed unions; an actual throw is unexpected
+        // and gets the generic-error surface (no PI, no stack-trace leak).
+        state = 'error';
+        errorMessage = t('common.errors.generic');
+        return;
+      }
+      const status = (result && result.status) || 'failed';
+      if (status === 'ok') {
+        state = 'submitted';
+        if (onSubmitted && typeof result.id === 'string') {
+          onSubmitted(result.id);
+        }
+        return;
+      }
+      // AC-7 / F-161 / Decision 5 — typed denials surface as role=alert errors
+      // with NON-PI copy. No window-tripped hints, no submitted-canary echo of
+      // the title/body/passphrase.
+      state = 'error';
+      if (status === 'rate_limited') {
+        errorMessage = t('reprisal.intake.errors.rate_limited');
+      } else if (status === 'session_expiry') {
+        errorMessage = t('reprisal.intake.errors.session_expiry');
+      } else if (status === 'needs_setup') {
+        errorMessage = t('reprisal.intake.errors.needs_setup');
+      } else if (status === 'rls_denied') {
+        errorMessage = t('reprisal.intake.errors.rls_denied');
+      } else if (status === 'needs_recovery') {
+        errorMessage = t('reprisal.intake.errors.needs_recovery');
+      } else {
+        errorMessage = t('common.errors.generic');
+      }
     }}
     novalidate
   >

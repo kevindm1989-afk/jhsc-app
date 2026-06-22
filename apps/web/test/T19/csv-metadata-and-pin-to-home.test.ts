@@ -89,7 +89,8 @@ describe('T19 — register routes wire withMetadata into their CSV pipeline', ()
     'training',
     'work-refusal',
     's51-evidence',
-    'reprisal',
+    // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal has no demo
+    // CSV pipeline.
     'minutes',
     'inspections',
     'library',

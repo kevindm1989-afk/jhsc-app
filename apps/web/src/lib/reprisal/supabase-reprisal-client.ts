@@ -139,21 +139,32 @@ export class SupabaseReprisalClient {
   async readReprisal(input: {
     id: string;
     passphrase?: string | null;
-  }): Promise<ReprisalOpResult<{ title_ct: Uint8Array; body_ct: Uint8Array } | null>> {
-    const r = await invoke<{ title_ct: string; body_ct: string } | null>(this.opts.transport, {
-      op: 'read',
-      id: input.id,
-      passphrase: input.passphrase ?? null
-    });
+  }): Promise<
+    ReprisalOpResult<{ title_ct: Uint8Array; body_ct: Uint8Array; key_id?: string } | null>
+  > {
+    const r = await invoke<{ title_ct: string; body_ct: string; key_id?: string } | null>(
+      this.opts.transport,
+      {
+        op: 'read',
+        id: input.id,
+        passphrase: input.passphrase ?? null
+      }
+    );
     if (!r.ok) return r;
     if (!r.data) return { ok: true, data: null };
-    return {
-      ok: true,
-      data: {
-        title_ct: pgHexToBytes(r.data.title_ct),
-        body_ct: pgHexToBytes(r.data.body_ct)
-      }
+    const data: { title_ct: Uint8Array; body_ct: Uint8Array; key_id?: string } = {
+      title_ct: pgHexToBytes(r.data.title_ct),
+      body_ct: pgHexToBytes(r.data.body_ct)
     };
+    // ADR-0028 Decision 1 / F-162 option-(b) seam — pass through any
+    // server-observed key_id so the production composition can route it to
+    // holder.onKeyRotationObserved. INERT today: the option-(a) reprisal_read
+    // RETURNS TABLE(title_ct, body_ct) only (migration 0005), so this field is
+    // never present. Mirrors revealConcernSource's key_id passthrough.
+    if (typeof r.data.key_id === 'string' && r.data.key_id.length > 0) {
+      data.key_id = r.data.key_id;
+    }
+    return { ok: true, data };
   }
 
   /**

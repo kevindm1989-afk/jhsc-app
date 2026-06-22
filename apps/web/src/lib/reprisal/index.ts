@@ -54,3 +54,33 @@ export type {
   SubmitReprisalOk,
   SubmitReprisalResult
 } from './reprisal-core';
+
+// Phase 2b PR1 (ADR-0028 Decision 3) — production E2EE compositions for the
+// live /reprisal route. The composition layer over SupabaseReprisalClient +
+// SupabaseT07Client + CommitteeKeyHolder.
+export {
+  submitReprisalViaProduction,
+  readReprisalViaProduction,
+  updateReprisalViaProduction,
+  listReprisalFeedViaProduction
+} from './production-flows';
+export type {
+  SubmitReprisalViaProductionArgs,
+  SubmitReprisalViaProductionResult,
+  ReadReprisalViaProductionArgs,
+  ReadReprisalViaProductionResult,
+  UpdateReprisalViaProductionArgs,
+  UpdateReprisalViaProductionResult,
+  ListReprisalFeedViaProductionArgs,
+  ListReprisalFeedViaProductionResult
+} from './production-flows';
+
+// Production client + feed-row shape (consumed by the route + the
+// compositions; surfaced here so the route imports from one place).
+export { SupabaseReprisalClient } from './supabase-reprisal-client';
+export type {
+  ReprisalFeedRow,
+  ReprisalOpReason,
+  ReprisalOpResult,
+  ReprisalOpTransport
+} from './supabase-reprisal-client';

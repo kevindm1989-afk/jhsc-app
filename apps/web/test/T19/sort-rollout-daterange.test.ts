@@ -23,7 +23,8 @@ describe('T19.1 — SortToggle is mounted on the remaining 9 routes', () => {
     'training',
     'work-refusal',
     's51-evidence',
-    'reprisal',
+    // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal has no demo
+    // SortToggle (the E2EE feed is server-ordered).
     'minutes',
     'inspections',
     'library',
@@ -220,7 +221,8 @@ describe('T19.1 — DateRangeChips rollout across the 8 register routes', () => 
     { route: 'training', field: 'completed_at' },
     { route: 'work-refusal', field: 'filed_at' },
     { route: 's51-evidence', field: 'opened_at' },
-    { route: 'reprisal', field: 'filed_at' },
+    // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal has no demo
+    // DateRangeChips multi-axis predicate.
     { route: 'minutes', field: 'meeting_date' },
     { route: 'inspections', field: 'conducted_at' },
     { route: 'library', field: 'updated_at' },

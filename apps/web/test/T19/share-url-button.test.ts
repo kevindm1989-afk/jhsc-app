@@ -19,7 +19,8 @@ const ROUTES = [
   'training',
   'work-refusal',
   's51-evidence',
-  'reprisal',
+  // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal has no
+  // multi-axis URL filtering to share, so no ShareUrlButton.
   'minutes',
   'inspections',
   'library',

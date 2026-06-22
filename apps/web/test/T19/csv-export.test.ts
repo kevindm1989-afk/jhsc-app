@@ -195,7 +195,8 @@ describe('T19.1 — every register route wires the CSV download button', () => {
     'training',
     'work-refusal',
     's51-evidence',
-    'reprisal',
+    // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal cut over to
+    // the E2EE feed; it no longer ships the demo CSV export pipeline.
     'minutes',
     'inspections',
     'library',

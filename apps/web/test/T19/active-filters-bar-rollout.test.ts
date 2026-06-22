@@ -19,7 +19,8 @@ const SINGLE_AXIS_ROUTES = [
   'training',
   'work-refusal',
   's51-evidence',
-  'reprisal',
+  // 'reprisal' RETIRED — ADR-0028 Phase 2b PR1: live /reprisal has no demo
+  // ActiveFiltersBar (no client-side filter axes over the E2EE feed).
   'minutes',
   'inspections',
   'library',
