@@ -149,3 +149,38 @@ export function reactivateMember(
 ): Promise<OpResult<null>> {
   return call(rpc, 'committee_reactivate_member', { p_target_user_id: opts.target_user_id });
 }
+
+/**
+ * ADR-0029 P1-3 — co-chair-side invite issuance via the SQL keystone
+ * `issue_member_invite(p_roles text[], p_totp_code text, p_ttl_minutes int)`
+ * (migration 0041). The keystone:
+ *   - validates the co-chair gate + role array,
+ *   - creates the invitee `public.users` row,
+ *   - creates an `auth_totp_bootstraps` row (15-min TTL, secret_hash = HMAC(code)),
+ *   - delegates to `committee_invite_member` with the named bootstrap_id/ttl,
+ *   - returns ONE row `{invite_id, invitee_user_id, bootstrap_id}` which
+ *     supabase-js delivers as a single object on `data` (matching how
+ *     `inviteMember` reads its scalar result).
+ *
+ * F-176: the raw 6-digit `code` is forwarded to the RPC as `p_totp_code` and
+ * then never touched here again — no log, no error body, no carrying field
+ * on the OpResult. The RPC stores only `HMAC(code)` at rest.
+ *
+ * Note (back-compat / Decision 3): the existing `inviteMember` arm is
+ * untouched and continues to call `committee_invite_member` directly for the
+ * "user row already exists" reactivation path.
+ */
+export function issueInvite(
+  rpc: RpcPort,
+  opts: { roles: string[]; code: string; ttl_minutes: number }
+): Promise<
+  OpResult<{ invite_id: string; invitee_user_id: string; bootstrap_id: string }>
+> {
+  // Field names match the keystone signature byte-for-byte
+  // (migration 0041:54-58): p_roles / p_totp_code / p_ttl_minutes.
+  return call(rpc, 'issue_member_invite', {
+    p_roles: opts.roles,
+    p_totp_code: opts.code,
+    p_ttl_minutes: opts.ttl_minutes
+  });
+}
