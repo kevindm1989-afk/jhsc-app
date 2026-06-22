@@ -64,9 +64,23 @@ EXEMPT_DURING_ROLLOUT=(
 # session to assert. Its compensating control is the SQL one-shot guard
 # (advisory-lock + count=0, mint_writer-only) — strictly stronger than a
 # session check, since it can succeed at most once for the project's lifetime.
+#
+# redeem-invite (ADR-0029 §3.18 / F-168) is exempt for the same structural
+# reason: the INVITEE has no JWT (no session yet — the redeem is how they get
+# one), so a session_is_live() precheck is tautological, exactly as for
+# mint-session and bootstrap-first-co-chair. This entry is the threat-model
+# re-pass the F-122/F-123 allowlist-expansion rule mandates: §3.18 IS that
+# re-pass (F-168). The redeem path is UNAUTHENTICATED-by-necessity but its SQL
+# terminal redeem_invite_complete is mint_writer-ONLY (REVOKE PUBLIC/anon/
+# authenticated/service_role — pinned in phase1_redeem_invite_rls.sql), so it
+# cannot be reached by a direct anon/authenticated RPC. Unlike bootstrap it is
+# NOT one-shot (no EXISTS(users) guard, no BOOTSTRAP_ENABLED); its compensating
+# controls are the single-use invite + 15-min TOTP + 5-attempt lock + origin
+# pin + key-parity + verified-attestation (§3.18 F-168/F-169/F-170).
 PERMANENT_ALLOWLIST=(
   "mint-session"
   "bootstrap-first-co-chair"
+  "redeem-invite"
 )
 
 # --- 1) Closed-set invariant on the allowlist constant ---
