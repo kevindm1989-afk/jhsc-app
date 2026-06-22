@@ -74,14 +74,16 @@ export {
   storeRecoveryBlobViaProduction,
   restoreRecoveryBlobViaProduction,
   initCommitteeDataKeyViaProduction,
-  unwrapCommitteeDataKeyViaProduction
+  unwrapCommitteeDataKeyViaProduction,
+  wrapMemberInViaProduction
 } from './production-flows';
 export type {
   EnrollProductionResult,
   StoreRecoveryProductionResult,
   RestoreRecoveryProductionResult,
   InitCommitteeKeyProductionResult,
-  UnwrapCommitteeDataKeyResult
+  UnwrapCommitteeDataKeyResult,
+  WrapMemberInResult
 } from './production-flows';
 export {
   CommitteeKeyHolder,

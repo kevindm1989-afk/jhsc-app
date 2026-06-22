@@ -27,6 +27,7 @@ import {
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
   getCommitteeKeyWrapForSelf,
+  getMemberPubkey,
   getRecoveryBlob,
   initCommitteeDataKey,
   issueEnrollmentChallenge,
@@ -71,6 +72,11 @@ type Op =
   // is structural; F-142). The SQL fn emits the unwrap audit row
   // audit-before-return (F-151).
   | { op: 'get_key_wrap' }
+  // ADR-0029 P1-4 / P1-5 — disclosure of a TARGET member's enrolled identity
+  // pubkey for the co-chair-side wrap composition. The op accepts ONLY
+  // target_user_id (F-172: NO caller-supplied pubkey field — the server is the
+  // sole source of pubkey bytes for the seal). Co-chair-gated in the SQL fn.
+  | { op: 'get_member_pubkey'; target_user_id: string }
   | {
       op: 'wrap_member';
       member_user_id: string;
@@ -246,6 +252,11 @@ serveWithCors(async (req) => {
       break;
     case 'get_key_wrap':
       result = await getCommitteeKeyWrapForSelf(rpc);
+      break;
+    case 'get_member_pubkey':
+      // F-172: forward ONLY target_user_id. Any caller-smuggled pubkey field
+      // is dropped by destructuring; the core fn forwards only p_target_user_id.
+      result = await getMemberPubkey(rpc, { target_user_id: body.target_user_id });
       break;
     case 'wrap_member':
       result = await wrapCommitteeDataKeyForMember(rpc, body);

@@ -40,6 +40,7 @@ import { decryptRecoveryBlob, encryptRecoveryBlob, KDF_PARAMS } from './recovery
 import { generateIdentityKeypair, pubkeyFingerprint, selfTestKeypair } from './identity-keys';
 import { ready } from './sodium';
 import { SupabaseT07Client, type T07OpReason } from './supabase-t07-client';
+import { CommitteeKeyHolder } from './committee-key-holder';
 import type { LocalIdentityStore } from './key-store';
 import type { KdfParams } from './types';
 
@@ -526,6 +527,245 @@ export async function unwrapCommitteeDataKeyViaProduction(opts: {
   // 5. Hand back the LIVE plaintext key by reference — the holder owns the
   //    zeroization lifecycle (Decision 2 step 5). No .fill(0) here.
   return { status: 'ok', data_key: dataKey, key_id: wrap.data.key_id, epoch: wrap.data.epoch };
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0029 P1-5 — grant committee-key access to a member (the co-chair-side
+// composition; threat-model §3.18 F-172 / F-174 / F-176).
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminated-union return for `wrapMemberInViaProduction`.
+ *
+ *   ok                          — the wrap landed server-side (Decision 5
+ *                                 step 4 succeeded; the target now holds a
+ *                                 wrap under the live committee key).
+ *   member_not_enrolled         — the disclosure RPC reported the target has
+ *                                 no enrolled identity (F-174 closed denial
+ *                                 collapses pending / unenrolled / non-member /
+ *                                 non-existent). UI surfaces "this member
+ *                                 isn't ready yet."
+ *   failed/pubkey_disclosure_denied — the disclosure RPC denied the caller
+ *                                 (non-co-chair / dead session). Distinct
+ *                                 from member_not_enrolled — DIFFERENT UI
+ *                                 message.
+ *   failed/actor_has_no_wrap    — the co-chair holds no live-key wrap and
+ *                                 the holder is empty. We do NOT hit the
+ *                                 disclosure RPC in this case (F-174
+ *                                 information-hiding: no audit row for an
+ *                                 aborted grant).
+ *   failed/data_key_unwrap_failed — the actor's wrap exists server-side but
+ *                                 the device cannot unwrap it (needs_recovery
+ *                                 / wrong privkey / decrypt failure).
+ *   failed/wrap_post_failed     — wrap_member RPC failed (e.g. F-172 active-
+ *                                 member re-assert at 00000000000007:502-503
+ *                                 fires because the target deactivated
+ *                                 mid-flow).
+ *   failed/decrypt_failed       — defensive bridge to UnwrapCommitteeDataKeyResult
+ *                                 (the wrap was readable but bytes failed AEAD).
+ *   failed/invalid_pubkey       — the server returned a non-32-byte pubkey
+ *                                 (a structural defense — crypto_box_seal
+ *                                 would throw anyway, but we typed-fail
+ *                                 before throwing into libsodium).
+ *   failed/unknown              — every other transport / crypto exception
+ *                                 (F-148 carry-forward: NEVER propagate a
+ *                                 raw thrown error which could carry buffer
+ *                                 bytes in its .message / .stack).
+ */
+export type WrapMemberInResult =
+  | { status: 'ok' }
+  | { status: 'member_not_enrolled' }
+  | {
+      status: 'failed';
+      reason:
+        | 'pubkey_disclosure_denied'
+        | 'actor_has_no_wrap'
+        | 'data_key_unwrap_failed'
+        | 'wrap_post_failed'
+        | 'decrypt_failed'
+        | 'invalid_pubkey'
+        | 'unknown';
+      http?: number;
+    };
+
+/**
+ * Compose the co-chair-side "grant committee-key access to a member" path
+ * (ADR-0029 Decision 5; threat-model §3.18 F-172 / F-174 / F-176).
+ *
+ * Step 1 — Ensure the actor's `CommitteeKeyHolder` is populated. If empty,
+ *          run `unwrapCommitteeDataKeyViaProduction` (probe + unwrap). A
+ *          no-wrap actor short-circuits to `actor_has_no_wrap` BEFORE the
+ *          disclosure RPC fires (F-174 information-hiding: no disclosure
+ *          audit row for an aborted grant).
+ * Step 2 — Read the target member's enrolled pubkey via
+ *          `client.getMemberPubkey({target_user_id})` — the FIRST production
+ *          read of another member's identity pubkey (F-172 server-bound:
+ *          the server is the SOLE source of the seal target).
+ * Step 3 — Seal `holder.data_key` to the server-disclosed pubkey via
+ *          libsodium `crypto_box_seal` (sender-anonymous; sealed-box, not
+ *          secretbox — Decision 5 step 3).
+ * Step 4 — POST `client.wrapCommitteeDataKeyForMember(...)` with the sealed
+ *          bytes. `rotation_id` is null (non-rotation grant).
+ * Step 5 — The composition does NOT zeroize `holder.data_key` (Decision 5
+ *          step 5: the co-chair still needs key access; the holder owns its
+ *          own lifecycle).
+ *
+ * F-148 / F-176: every crypto / transport exception is caught and mapped to
+ * a typed failure. The plaintext data key, the target pubkey/privkey, the
+ * actor privkey, the sealed ciphertext, the target uid, the actor uid, and
+ * the fingerprint NEVER appear in any logger / sessionStorage / localStorage
+ * / URL. No `console.*` calls in this composition.
+ *
+ * F-172 attempted-bypass: a caller-supplied `target_public_key` (or any
+ * pubkey field) in the opts object is structurally IGNORED — the function
+ * destructures only `{client, holder, localIdentity, user_id, target_user_id}`,
+ * so smuggled fields cannot influence the seal target.
+ */
+export async function wrapMemberInViaProduction(opts: {
+  client: SupabaseT07Client;
+  holder: CommitteeKeyHolder;
+  localIdentity: LocalIdentityStore;
+  user_id: string;
+  target_user_id: string;
+}): Promise<WrapMemberInResult> {
+  // Defensive: only the five named fields cross into the composition. Any
+  // smuggled `target_public_key` / `public_key` / `pubkey` field in opts is
+  // dropped here (F-172 attempted-bypass mitigation: the seal target is
+  // always the server-disclosed pubkey, never a caller hint).
+  const { client, holder, localIdentity, user_id, target_user_id } = opts;
+
+  // Step 1 — ensure the holder is populated. The unwrap composition is the
+  // single source of truth for the probe + disclosure + AEAD-open sequence
+  // (Decision 5 step 1; Decision 2 step 5 hands back live bytes by reference,
+  // so re-populating via .set() is safe — the buffer is the same one).
+  if (!holder.isPopulated()) {
+    let unwrapped: UnwrapCommitteeDataKeyResult;
+    try {
+      unwrapped = await unwrapCommitteeDataKeyViaProduction({
+        client,
+        localIdentity,
+        user_id
+      });
+    } catch {
+      // F-148 carry-forward: the unwrap composition should NEVER throw, but
+      // a hostile transport could surface a synchronous throw before that
+      // function's own catch. Map to data_key_unwrap_failed; never propagate.
+      return { status: 'failed', reason: 'data_key_unwrap_failed' };
+    }
+    switch (unwrapped.status) {
+      case 'ok':
+        holder.set({
+          data_key: unwrapped.data_key,
+          key_id: unwrapped.key_id,
+          epoch: unwrapped.epoch
+        });
+        break;
+      case 'no_wrap':
+        // F-174 information-hiding: do NOT hit the disclosure RPC if the
+        // co-chair cannot proceed anyway. No audit row for an aborted grant.
+        return { status: 'failed', reason: 'actor_has_no_wrap' };
+      case 'needs_recovery':
+        return { status: 'failed', reason: 'data_key_unwrap_failed' };
+      case 'failed':
+        if (unwrapped.reason === 'decrypt_failed') {
+          return { status: 'failed', reason: 'decrypt_failed', http: unwrapped.http };
+        }
+        return { status: 'failed', reason: 'data_key_unwrap_failed', http: unwrapped.http };
+    }
+  }
+
+  // After Step 1 the holder MUST be populated.
+  const dataKey = holder.getDataKey();
+  const keyId = holder.getKeyId();
+  if (!dataKey || !keyId) {
+    return { status: 'failed', reason: 'actor_has_no_wrap' };
+  }
+
+  // Step 2 — read the target member's pubkey from the server (F-172). This is
+  // the FIRST production non-self identity-pubkey read. The server-side
+  // keystone (migration 0042) emits identity_pubkey.disclosed_for_wrap
+  // audit-before-return SUCCESS-ONLY (Amendment A-1) and collapses all four
+  // target-failure branches to `member_not_enrolled` (Amendment A-2).
+  let disclosure: Awaited<ReturnType<typeof client.getMemberPubkey>>;
+  try {
+    disclosure = await client.getMemberPubkey({ target_user_id });
+  } catch {
+    // F-148: the transport could throw on a network blow-up. Map to a
+    // typed failure; never propagate a raw Error whose .message / .stack
+    // could carry buffer bytes.
+    return { status: 'failed', reason: 'pubkey_disclosure_denied' };
+  }
+  if (!disclosure.ok) {
+    if (disclosure.reason === 'member_not_enrolled' || disclosure.reason === 'not_found') {
+      // F-174 closed-denial collapse — the UI's terminal "this member isn't
+      // ready yet" state. No wrap is POSTed; the composition exits clean.
+      return { status: 'member_not_enrolled' };
+    }
+    if (disclosure.reason === 'invalid_input') {
+      // The alternative SQL literal (Amendment A admits either) — same
+      // terminal state.
+      return { status: 'member_not_enrolled' };
+    }
+    // rls_denied / wrong_nonce / unknown — the caller-side denial set.
+    // DISTINCT from member_not_enrolled (different UI message). F-148
+    // safe: only the closed-set reason crosses the boundary.
+    return {
+      status: 'failed',
+      reason: 'pubkey_disclosure_denied',
+      http: disclosure.status
+    };
+  }
+
+  // Defensive structural check (F-172 mitigation #5): a 32-byte pubkey is
+  // what crypto_box_seal expects. A server returning the wrong length is a
+  // regression; map to a typed failure before throwing into libsodium.
+  const targetPubkey = disclosure.data.public_key;
+  if (targetPubkey.length !== 32) {
+    return { status: 'failed', reason: 'invalid_pubkey' };
+  }
+
+  // Step 3 — seal the data key to the target's pubkey (libsodium-only;
+  // ADR-0003 Invariant 4). crypto_box_seal is sender-anonymous; the result
+  // is `plaintext.length + crypto_box_SEALBYTES` bytes of opaque ciphertext
+  // (NOT a secretbox — Decision 5 step 3).
+  let sealed: Uint8Array;
+  try {
+    const s = await ready();
+    sealed = s.crypto_box_seal(dataKey, targetPubkey);
+  } catch {
+    // libsodium throws on invalid input (e.g. pubkey wrong length, even
+    // though we guarded above). F-148 / F-176: NEVER propagate the raw
+    // exception (its .message / .stack could carry buffer bytes); map to
+    // a typed failure.
+    return { status: 'failed', reason: 'invalid_pubkey' };
+  }
+
+  // Step 4 — POST the wrap. `rotation_id` is null (non-rotation grant);
+  // the existing wrap_committee_data_key_for_member RPC re-asserts active-
+  // member on the target (F-172 mitigation #2; the :502-503 contract).
+  let wrap: Awaited<ReturnType<typeof client.wrapCommitteeDataKeyForMember>>;
+  try {
+    wrap = await client.wrapCommitteeDataKeyForMember({
+      member_user_id: target_user_id,
+      key_id: keyId,
+      wrapped_ciphertext: sealed,
+      rotation_id: null
+    });
+  } catch {
+    // F-148 / F-176: a transport throw (network blow-up). NEVER propagate
+    // the raw Error; map to wrap_post_failed.
+    return { status: 'failed', reason: 'wrap_post_failed' };
+  }
+  if (!wrap.ok) {
+    return { status: 'failed', reason: 'wrap_post_failed', http: wrap.status };
+  }
+
+  // Step 5 — Decision 5 step 5: the holder retains the live data key. We do
+  // NOT call holder.wipe() / dataKey.fill(0) here; the co-chair still needs
+  // key access for subsequent reads/writes. The holder's own six wipe
+  // triggers (sign-out / 401 / panic / expiry / unload / rotation) own the
+  // lifecycle.
+  return { status: 'ok' };
 }
 
 // Re-export the KDF_PARAMS so callers can label persisted blobs without

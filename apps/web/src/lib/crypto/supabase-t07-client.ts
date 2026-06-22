@@ -55,6 +55,10 @@ export type T07OpReason =
   | 'cap_reached'
   | 'already_initialised'
   | 'no_active_members'
+  // ADR-0029 P1-4 (F-174) — the closed-literal denial the disclosure RPC
+  // raises when the target is not enrolled (any of: pending / unenrolled /
+  // non-member / non-existent — Amendment A-2 collapse).
+  | 'member_not_enrolled'
   | 'rotation_in_progress'
   | 'rotation_not_started'
   | 'challenge_expired'
@@ -341,6 +345,38 @@ export class SupabaseT07Client {
         key_id: r.data.key_id,
         epoch: r.data.epoch,
         wrapped_ciphertext: pgHexToBytes(r.data.wrapped_ciphertext_hex)
+      }
+    };
+  }
+
+  /**
+   * ADR-0029 P1-4 / P1-5 — read the TARGET member's enrolled identity public
+   * key for the co-chair-side wrap composition. The FIRST production client
+   * method that returns ANOTHER member's identity public_key across the
+   * t07-op trust boundary. The wire ships PostgREST hex (`\x...`); this
+   * method converts to `Uint8Array` via `pgHexToBytes`, mirroring
+   * `getCommitteeKeyWrapForSelf`.
+   *
+   * F-172: the EF op `get_member_pubkey` accepts ONLY `target_user_id`. The
+   * server is the SOLE source of pubkey bytes for the seal — the composition
+   * cannot be tricked into sealing to a caller-supplied attacker pubkey.
+   * F-174: the server-side keystone is co-chair-gated and collapses all four
+   * target-failure branches to `member_not_enrolled`.
+   * F-176: this method never logs the target uid / returned pubkey / fingerprint.
+   */
+  async getMemberPubkey(input: { target_user_id: string }): Promise<
+    T07OpResult<{ public_key: Uint8Array; fingerprint: string }>
+  > {
+    const r = await invoke<{ public_key_hex: string; fingerprint: string }>(
+      this.opts.transport,
+      { op: 'get_member_pubkey', target_user_id: input.target_user_id }
+    );
+    if (!r.ok) return r;
+    return {
+      ok: true,
+      data: {
+        public_key: pgHexToBytes(r.data.public_key_hex),
+        fingerprint: r.data.fingerprint
       }
     };
   }

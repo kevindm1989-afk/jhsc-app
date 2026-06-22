@@ -80,6 +80,7 @@ EXPECTED_ENUM=(
   audit.chain_anchor.weekly
   backup.manifest_written
   backup.hard_deleted
+  identity_pubkey.disclosed_for_wrap
 )
 
 # (1) Documentation present.
