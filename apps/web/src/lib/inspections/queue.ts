@@ -175,13 +175,16 @@ async function encryptPayload(
   payload: { checklist: unknown; notes_plaintext: string }
 ): Promise<Uint8Array> {
   const s = await ready();
+  // Browser-native UTF-8 encode (TextEncoder is a global in browsers, Node
+  // 11+, jsdom, and Deno; `Buffer` is undefined in the Vite browser bundle).
+  // The `new Uint8Array(...)` re-wrap normalises the encoder output into the
+  // runtime's own Uint8Array constructor for the libsodium wasm bridge.
   const plaintext = new Uint8Array(
-    Buffer.from(
+    new TextEncoder().encode(
       JSON.stringify({
         checklist: payload.checklist,
         notes: payload.notes_plaintext
-      }),
-      'utf8'
+      })
     )
   );
   const nonce = s.randombytes_buf(s.crypto_secretbox_NONCEBYTES);

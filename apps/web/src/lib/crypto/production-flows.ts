@@ -188,9 +188,13 @@ export async function restoreRecoveryBlobViaProduction(opts: {
   await opts.localIdentity.storeIdentityPrivateKey(opts.user_id, recovered.private_key);
 
   const s = await ready();
+  // Browser-native UTF-8 encode (TextEncoder is a global in browsers, Node
+  // 11+, jsdom, and Deno; `Buffer` is undefined in the Vite browser bundle).
+  // The `new Uint8Array(...)` re-wrap normalises the encoder output into the
+  // runtime's own Uint8Array constructor for the libsodium wasm bridge.
   const fpBytes = s.crypto_generichash(
     32,
-    new Uint8Array(Buffer.from(opts.device_fingerprint_raw, 'utf8'))
+    new Uint8Array(new TextEncoder().encode(opts.device_fingerprint_raw))
   );
   const fpHex = s.to_hex(fpBytes);
 

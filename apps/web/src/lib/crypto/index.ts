@@ -326,10 +326,12 @@ export async function restoreFromRecoveryBlob(
 
 async function hashFingerprint(raw: string): Promise<string> {
   const s = await ready();
-  // Use Buffer.from(utf8) → Uint8Array; libsodium's WASM bridge in jsdom
-  // rejects plain TextEncoder output under some builds. Buffer is a
-  // Uint8Array subclass so the bridge accepts it.
-  const enc = new Uint8Array(Buffer.from(raw, 'utf8'));
+  // Browser-native UTF-8 encode (TextEncoder is a global in browsers, Node
+  // 11+, jsdom, and Deno; `Buffer` is undefined in the Vite browser bundle).
+  // The `new Uint8Array(...)` re-wrap normalises the encoder output into the
+  // runtime's own Uint8Array constructor so libsodium's WASM bridge accepts
+  // it under jsdom's stricter cross-realm typeof check.
+  const enc = new Uint8Array(new TextEncoder().encode(raw));
   // BLAKE2b 32 bytes → hex (>=32 hex chars per the test regex).
   return s.to_hex(s.crypto_generichash(32, enc));
 }

@@ -127,7 +127,10 @@ async function deriveKey(
       // substitutes BLAKE2b-keyed-hash for round-trip-correctness only.
       const passBytes =
         typeof passphrase === 'string'
-          ? new Uint8Array(Buffer.from(passphrase, 'utf8'))
+          ? // Browser-native UTF-8 encode; `Buffer` is undefined in the Vite
+            // browser bundle. The `new Uint8Array(...)` re-wrap keeps the
+            // libsodium wasm bridge's cross-realm typeof check happy.
+            new Uint8Array(new TextEncoder().encode(passphrase))
           : passphrase;
       const seedInput = new Uint8Array(passBytes.length + salt.length);
       seedInput.set(passBytes, 0);
