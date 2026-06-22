@@ -7,9 +7,12 @@
  * is_active_member() gate inside each), dispatches by op, and returns the
  * {ok,reason,status} contract as JSON.
  *
- * Ops: submit | update | reveal | list. `list` reads concerns_default_view
- * (F-18 — no source_name_ct). All ciphertext is sealed client-side (E2EE); the
- * wire carries bytea as PostgREST hex (`\x…`).
+ * Ops: submit | update | reveal | list. `list` calls the SECURITY DEFINER RPC
+ * `concern_list_default` (migration 0040 — supersedes the direct
+ * `concerns_default_view` read so the authenticated PostgREST role does not hit
+ * the PG view-invoker EXECUTE check on the REVOKE'd `_committee_pseudonym`; same
+ * F-18 no-source_name_ct rows + shape). All ciphertext is sealed client-side
+ * (E2EE); the wire carries bytea as PostgREST hex (`\x…`).
  *
  * Verified end-to-end by the live `supabase start` CI stage; the dispatch +
  * error-mapping logic is unit-tested in test/core.test.ts.
@@ -94,9 +97,17 @@ serveWithCors(async (req) => {
     return json({ error: 'bad_request' }, 400);
   }
 
-  // `list` is a view read (F-18), not an RPC — handle it directly.
+  // `list` reads via the SECURITY DEFINER RPC `concern_list_default` (migration
+  // 0040), NOT a direct `concerns_default_view` SELECT. PostgreSQL requires the
+  // view INVOKER to hold EXECUTE on `_committee_pseudonym` (which the widened
+  // view at migration 0039 calls), but that helper is REVOKE'd from the
+  // `authenticated` role (deanonymization lock-down, 0002:205) — so the direct
+  // view read raises permission-denied for the authenticated PostgREST caller.
+  // The RPC derives the pseudonym under the definer's rights and keeps the same
+  // F-18 (no source_name_ct) / F-149 (no raw actor_id) rows + shape the view
+  // returned. The session_is_live()/is_active_member() gate stays per-caller.
   if (body.op === 'list') {
-    const { data, error } = await supabase.from('concerns_default_view').select('*');
+    const { data, error } = await supabase.rpc('concern_list_default');
     if (error) {
       log.warn({ event: 'concern.op', attributes: { route: 'list', outcome: 'rls_denied' }, request_id: requestId });
       return json({ ok: false, error: 'rls_denied' }, 403);
