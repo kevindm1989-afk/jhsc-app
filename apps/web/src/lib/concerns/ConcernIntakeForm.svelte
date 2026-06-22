@@ -40,6 +40,31 @@
   import { tokens } from '../tokens';
 
   /**
+   * Phase 2a PR2 / P2a-9 — submit prop wiring (ADR-0027 Decision 4).
+   *
+   * The form is now driven by an injected `submit` closure that the route
+   * (or a test) supplies. The closure mirrors the
+   * `submitConcernViaProduction` discriminated-union return — the form
+   * pattern-matches on `status` and surfaces user-visible errors WITHOUT
+   * exposing PI / window-tripped hints (AC-6). On `ok` the form fires
+   * `onSubmitted(id)` so the route can refresh the list.
+   *
+   * Both props are optional so the existing concern-intake unit tests (which
+   * exercise the toggle/advisory shape only) continue to work unchanged: an
+   * absent `submit` skips the call and the form's local `state = 'submitted'`
+   * advance still fires. The Phase 2a wiring tests pass `submit` explicitly.
+   */
+  // G-T07-13 — Svelte 5's esrap printer cannot emit TS type annotations on
+  // function-typed `export let` bindings; drop the annotations and rely on
+  // the JSDoc + the call-site contract (Phase 2a PR2 page-cutover test).
+  /**
+   * @type {((intake: import('./types').ConcernIntake) => Promise<{ status: string; id?: string }>) | undefined}
+   */
+  export let submit = undefined;
+  /** @type {((id: string) => void) | undefined} */
+  export let onSubmitted = undefined;
+
+  /**
    * F-17 anonymous default-lock — the toggle starts ON every render.
    * The `anonymous` binding is intentionally a fresh `true` for each
    * mount of this component; there is NO module-level persistence of the
@@ -148,7 +173,7 @@
   <p class="concern-intake-subheading">{t('concern.intake.subheading')}</p>
 
   <form
-    on:submit|preventDefault={() => {
+    on:submit|preventDefault={async () => {
       // Validation gate — surface inline errors instead of submitting.
       // G-T08-12: empty `sourceName` when named-source is selected is
       // ALSO a pre-submit error; the library 403 still defends in depth.
@@ -159,6 +184,57 @@
         return;
       }
       state = 'submitting';
+      // No injected submit handler → the form stops at 'submitting' (the
+      // existing inert-form behaviour preserved for the legacy unit tests).
+      if (!submit) {
+        state = 'submitted';
+        return;
+      }
+      // Build the intake. Source name is forwarded ONLY when named (the
+      // structural anonymous default-lock at the library mirrors this).
+      const intake = /** @type {import('./types').ConcernIntake} */ ({
+        title,
+        body,
+        hazard_class: hazardClass,
+        severity,
+        location_id: locationId,
+        anonymous,
+        ...(anonymous ? {} : { source_name_plaintext: sourceName })
+      });
+      let result;
+      try {
+        result = await submit(intake);
+      } catch {
+        // Library failures are typed unions; an actual throw is unexpected
+        // and gets the generic-error surface (no PI, no stack-trace leak).
+        state = 'error';
+        errorMessage = t('common.errors.generic');
+        return;
+      }
+      const status = (result && result.status) || 'failed';
+      if (status === 'ok') {
+        state = 'submitted';
+        if (onSubmitted && typeof result.id === 'string') {
+          onSubmitted(result.id);
+        }
+        return;
+      }
+      // AC-6 / AC-8 / Decision 4 — typed denials surface as role=alert errors
+      // with NON-PI copy. No window-tripped hints, no submitted-canary echo.
+      state = 'error';
+      if (status === 'rate_limited') {
+        errorMessage = t('concern.intake.errors.rate_limited');
+      } else if (status === 'session_expiry') {
+        errorMessage = t('concern.intake.errors.session_expiry');
+      } else if (status === 'needs_setup') {
+        errorMessage = t('concern.intake.errors.needs_setup');
+      } else if (status === 'rls_denied') {
+        errorMessage = t('concern.intake.errors.rls_denied');
+      } else if (status === 'needs_recovery') {
+        errorMessage = t('concern.intake.errors.needs_recovery');
+      } else {
+        errorMessage = t('common.errors.generic');
+      }
     }}
     novalidate
   >

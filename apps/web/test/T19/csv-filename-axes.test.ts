@@ -55,7 +55,8 @@ describe('T19 — register routes pass active filter axes into csvFilename', () 
     'inspections',
     'library',
     'recommendations',
-    'concerns',
+    // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: the live /concerns surface
+    // does not ship CSV export in Phase 2a (Decision 8 future scope).
     'audit',
     'sensitive-feed'
   ] as const;

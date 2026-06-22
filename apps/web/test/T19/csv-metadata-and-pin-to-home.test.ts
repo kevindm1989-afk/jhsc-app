@@ -94,7 +94,7 @@ describe('T19 — register routes wire withMetadata into their CSV pipeline', ()
     'inspections',
     'library',
     'recommendations',
-    'concerns',
+    // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: live /concerns has no CSV export.
     'audit',
     'sensitive-feed'
   ] as const;

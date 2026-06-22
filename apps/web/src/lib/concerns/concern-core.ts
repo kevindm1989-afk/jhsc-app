@@ -15,8 +15,8 @@
  * + design-system §4 Surface B.
  */
 
-import { ready } from '../crypto/sodium';
 import { sha256Hex } from '../crypto/hash';
+import { openUtf8, sealUtf8 } from './seal';
 import type { ConcernStore } from './concern-store';
 import type { ConcernIntake, ConcernListItem, ConcernSourceReveal, ConcernUpdate } from './types';
 
@@ -50,43 +50,9 @@ export interface SubmitConcernDenied {
 export type SubmitConcernResult = SubmitConcernOk | SubmitConcernDenied;
 
 // ---------------------------------------------------------------------------
-// Internal helpers (libsodium-wrappers secretbox sealing).
+// Seal/open primitives now live in ./seal.ts (ADR-0027 Decision 3 / P2a-5
+// extraction). Imported above; behaviour unchanged.
 // ---------------------------------------------------------------------------
-
-async function sealUtf8(plaintext: string, key: Uint8Array): Promise<Uint8Array> {
-  const s = await ready();
-  const nonce = s.randombytes_buf(s.crypto_secretbox_NONCEBYTES);
-  // jsdom's TextEncoder output sometimes fails the wasm bridge's strict
-  // typeof check; Buffer is a Uint8Array subclass that bridges cleanly.
-  // (Same pattern as `supabase-test.ts` insertConcern.)
-  const ptBytes = new Uint8Array(Buffer.from(plaintext, 'utf8'));
-  const ct = s.crypto_secretbox_easy(ptBytes, nonce, key);
-  const out = new Uint8Array(nonce.length + ct.length);
-  out.set(nonce, 0);
-  out.set(ct, nonce.length);
-  return out;
-}
-
-/**
- * libsodium secretbox MAC overhead — 16 bytes. The constant is part of the
- * NaCl/libsodium spec (`crypto_secretbox_MACBYTES === 16`) and is fixed for
- * the lifetime of the library. Hardcoded here because the project's
- * `libsodium-wrappers.d.ts` does not currently expose the constant; the
- * sanity check below would type-check as `unknown` against the field.
- */
-const SECRETBOX_MAC_LEN = 16;
-
-async function openUtf8(ciphertext: Uint8Array, key: Uint8Array): Promise<string> {
-  const s = await ready();
-  const nonceLen = s.crypto_secretbox_NONCEBYTES;
-  if (ciphertext.length < nonceLen + SECRETBOX_MAC_LEN) {
-    throw new Error('concern-core: ciphertext too short to contain nonce + MAC');
-  }
-  const nonce = ciphertext.slice(0, nonceLen);
-  const ct = ciphertext.slice(nonceLen);
-  const pt = s.crypto_secretbox_open_easy(ct, nonce, key);
-  return Buffer.from(pt).toString('utf8');
-}
 
 // ---------------------------------------------------------------------------
 // Public operations

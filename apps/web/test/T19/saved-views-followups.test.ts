@@ -237,7 +237,9 @@ describe('T19 — register routes pass suggestedName from active filters', () =>
     'inspections',
     'library',
     'recommendations',
-    'concerns',
+    // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: live /concerns no longer
+    // mounts SaveViewButton; saved-views over the live, decrypted register
+    // is deferred (Decision 8 future scope).
     'audit',
     'sensitive-feed'
   ] as const;

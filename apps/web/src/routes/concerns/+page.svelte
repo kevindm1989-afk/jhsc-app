@@ -1,307 +1,331 @@
 <script>
   /**
-   * /concerns — JHSC concerns register viewer mount.
+   * /concerns — JHSC concerns register (live, end-to-end).
    *
-   * Replaces the PR #136 coming-soon placeholder. Mounts ConcernsViewer
-   * with the demo provider so the register surface renders realistic
-   * content until T08.1 wires the production SupabaseConcernsClient.
+   * Phase 2a PR2 cutover (ADR-0027 Decisions 4 / 6 / 7; P2a-8 + P2a-9):
+   *   - The demo data-source helpers are gone; the live path drives the
+   *     surface end-to-end via the production compositions below.
+   *   - State-probe guard FIRST (`getCommitteeKeyState`): if the actor has
+   *     no committee-key wrap, render the "Complete encryption setup in
+   *     Settings" link (`data-testid="concerns-needs-setup"`) and STOP — no
+   *     unwrap RPC is hit, no list is fetched (F-144).
+   *   - When the actor has a wrap, mount the intake form behind a "Log a
+   *     concern" CTA (`data-testid="concerns-log-cta"`), wired to
+   *     `submitConcernViaProduction`.
+   *   - List rows render the F-149 / F-150 projection: pseudonym + hazard +
+   *     severity + days-since-filed; NO raw actor_id, NO status (Decision 6
+   *     — status is out of Phase 2a; no status filter chip rail).
+   *   - Per-row reveal-source affordance (`data-testid="concerns-reveal-source"`)
+   *     for `has_named_source` rows — passphrase input → routes through
+   *     `revealConcernSourceViaProduction` → temporary plaintext display in
+   *     a role=status region. The server emits `concern.source_revealed`
+   *     BEFORE returning the ciphertext (F-150 audit-before-decrypt).
    *
-   * Multi-axis URL filtering: status + severity + hazard, plus a sort
-   * direction. Each axis chip rail composes URL state via buildHref
-   * so the other axes survive a chip click.
+   * Live wiring mirrors the Settings page (the canonical client-construction
+   * site): `createSupabaseT07Client` + `createSupabaseConcernClient` over the
+   * shared fetch transport, `getJwt` + `clearJwt` from the session-jwt-store,
+   * `new BrowserLocalIdentityStore()` for device-local privkey access, and
+   * `getSessionCommitteeKeyHolder()` for the session-scoped key dwell.
    *
-   *   ?filter=<status>      open / triaged / resolved / archived
-   *   ?severity=<value>     low / medium / high / critical
-   *   ?hazard=<value>       physical / chemical / biological / ergonomic / psychosocial
-   *   ?sort=oldest          flips newest-first to oldest-first
-   *
-   * `<script>` (no lang="ts") + JSDoc per G-T07-13.
+   * `<script>` (no lang="ts") + JSDoc per G-T07-13 — same posture as Settings.
    */
-  import { page } from '$app/stores';
+  import { onMount } from 'svelte';
+  import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
-  import ConcernsViewer from '$lib/concerns/ConcernsViewer.svelte';
-  import { buildDemoConcerns, fetchDemoConcernsPage } from '$lib/concerns/demo-concerns';
-  import FilterBanner from '$lib/ui/FilterBanner.svelte';
-  import FilterChipsRail from '$lib/ui/FilterChipsRail.svelte';
-  import CsvDownloadButton from '$lib/ui/CsvDownloadButton.svelte';
-  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
-  import SaveViewButton from '$lib/ui/SaveViewButton.svelte';
-  import SavedViewsRail from '$lib/ui/SavedViewsRail.svelte';
-  import SortToggle from '$lib/ui/SortToggle.svelte';
-  import DateRangeChips from '$lib/ui/DateRangeChips.svelte';
-  import ActiveFiltersBar from '$lib/ui/ActiveFiltersBar.svelte';
-  import { buildHref } from '$lib/ui/url-state';
-  import { withinRange } from '$lib/ui/date-range';
-  import { csvFilename, toCsv, withMetadata } from '$lib/ui/csv';
+  import ConcernIntakeForm from '$lib/concerns/ConcernIntakeForm.svelte';
+  import {
+    listConcernsViaProduction,
+    revealConcernSourceViaProduction,
+    submitConcernViaProduction
+  } from '$lib/concerns';
+  import { createSupabaseConcernClient } from '$lib/server-client/concern-client-factory';
+  import { createSupabaseT07Client } from '$lib/server-client/t07-client-factory';
+  import { BrowserLocalIdentityStore } from '$lib/crypto/browser-local-identity-store';
+  import { getSessionCommitteeKeyHolder } from '$lib/crypto/committee-key-holder';
+  import { clearJwt, getJwt } from '$lib/auth/session-jwt-store';
+  import { isSignedIn } from '$lib/auth/session-jwt-svelte';
+  import { getCurrentUserId } from '$lib/auth/jwt-claims';
 
-  const DEMO_ROWS = buildDemoConcerns(50);
+  const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
+  const localIdentity = new BrowserLocalIdentityStore();
+  const t07Client = createSupabaseT07Client({
+    baseUrl,
+    getJwt,
+    onSessionRevoked: clearJwt,
+    localIdentity
+  });
+  const concernClient = createSupabaseConcernClient({
+    baseUrl,
+    getJwt,
+    onSessionRevoked: clearJwt
+  });
+  const keyHolder = getSessionCommitteeKeyHolder();
 
-  const CSV_FIELDS = /** @type {const} */ ([
-    'id',
-    'filed_at',
-    'title',
-    'status',
-    'severity',
-    'hazard_class',
-    'source_protected',
-    'days_since_filed',
-    'actor_pseudonym'
-  ]);
+  // Worker-without-Phase-0a guard state (Decision 7 / AC-7). `needsSetup`
+  // flips true when the probe reports no wrap; the page then renders the
+  // setup-link surface and never reaches the disclosure RPC.
+  let needsSetup = false;
+  /** @type {Array<import('$lib/concerns/production-flows').ListedConcern>} */
+  let items = [];
+  let listLoading = true;
+  let listError = '';
+  let listSessionExpired = false;
 
-  const STATUS_VALUES = /** @type {const} */ (['open', 'triaged', 'resolved', 'archived']);
-  const SEVERITY_VALUES = /** @type {const} */ (['low', 'medium', 'high', 'critical']);
-  const HAZARD_VALUES = /** @type {const} */ ([
-    'physical',
-    'chemical',
-    'biological',
-    'ergonomic',
-    'psychosocial'
-  ]);
+  // "Log a concern" CTA toggles the form mount. Per ADR-0007 Amendment, the
+  // form re-renders on EVERY intake (anonymous default-lock); we honour that
+  // by toggling the mount, so each "Log a concern" click is a fresh component.
+  let formOpen = false;
 
-  $: filterParam = $page.url.searchParams.get('filter');
-  $: severityParam = $page.url.searchParams.get('severity');
-  $: hazardParam = $page.url.searchParams.get('hazard');
-  $: sortParam = $page.url.searchParams.get('sort');
-  $: fromParam = $page.url.searchParams.get('from');
-  $: toParam = $page.url.searchParams.get('to');
+  // Source-reveal per-row state. Keyed by concern id so multiple reveal
+  // affordances on the page don't collide.
+  /** @type {Record<string, { open: boolean; passphrase: string; sourceName: string; error: string; loading: boolean }>} */
+  let revealStates = {};
 
-  $: activeStatus =
-    filterParam && STATUS_VALUES.includes(/** @type {any} */ (filterParam)) ? filterParam : null;
-  $: activeSeverity =
-    severityParam && SEVERITY_VALUES.includes(/** @type {any} */ (severityParam))
-      ? severityParam
-      : null;
-  $: activeHazard =
-    hazardParam && HAZARD_VALUES.includes(/** @type {any} */ (hazardParam)) ? hazardParam : null;
-
-  $: anyAxisActive = !!(activeStatus || activeSeverity || activeHazard || fromParam || toParam);
-
-  $: filterLabel = activeStatus === 'open' ? t('common.filterBanner.label.concerns_open') : null;
-
-  // Preserved-param sets for each chip rail's hrefs. Each rail's chips
-  // change THEIR axis; the other axes survive verbatim.
-  $: preservedForStatus = {
-    severity: activeSeverity,
-    hazard: activeHazard,
-    sort: sortParam,
-    from: fromParam,
-    to: toParam
-  };
-  $: preservedForSeverity = {
-    filter: activeStatus,
-    hazard: activeHazard,
-    sort: sortParam,
-    from: fromParam,
-    to: toParam
-  };
-  $: preservedForHazard = {
-    filter: activeStatus,
-    severity: activeSeverity,
-    sort: sortParam,
-    from: fromParam,
-    to: toParam
-  };
-  $: preservedForSort = {
-    filter: activeStatus,
-    severity: activeSeverity,
-    hazard: activeHazard,
-    from: fromParam,
-    to: toParam
-  };
-  $: preservedForDateRange = {
-    filter: activeStatus,
-    severity: activeSeverity,
-    hazard: activeHazard,
-    sort: sortParam
-  };
-
-  $: statusChips = [
-    {
-      href: buildHref('/concerns', preservedForStatus, { filter: null }),
-      label: t('common.filterChips.all'),
-      value: null
-    },
-    ...STATUS_VALUES.map((v) => ({
-      href: buildHref('/concerns', preservedForStatus, { filter: v }),
-      label: t(`concern.viewer.status.${v}`),
-      value: v
-    }))
-  ];
-
-  $: severityChips = [
-    {
-      href: buildHref('/concerns', preservedForSeverity, { severity: null }),
-      label: t('common.filterChips.all'),
-      value: null
-    },
-    ...SEVERITY_VALUES.map((v) => ({
-      href: buildHref('/concerns', preservedForSeverity, { severity: v }),
-      label: t(`concern.viewer.severity.${v}`),
-      value: v
-    }))
-  ];
-
-  $: hazardChips = [
-    {
-      href: buildHref('/concerns', preservedForHazard, { hazard: null }),
-      label: t('common.filterChips.all'),
-      value: null
-    },
-    ...HAZARD_VALUES.map((v) => ({
-      href: buildHref('/concerns', preservedForHazard, { hazard: v }),
-      label: t(`concern.viewer.hazard.${v}`),
-      value: v
-    }))
-  ];
-
-  $: activeFilterLabel = (() => {
-    if (activeStatus) {
-      const chip = statusChips.find((c) => c.value === activeStatus);
-      if (chip?.label) return chip.label;
+  /** @param {string} id */
+  function ensureRevealState(id) {
+    if (!revealStates[id]) {
+      revealStates[id] = { open: false, passphrase: '', sourceName: '', error: '', loading: false };
     }
-    if (filterLabel) return filterLabel;
-    return null;
-  })();
-  $: pageTitle = activeFilterLabel ?? t('common.concernsPage.title');
-
-  // ActiveFiltersBar descriptors. One entry per currently-active axis,
-  // each with a removeHref that returns the URL minus that one axis.
-  $: activeFilters = (() => {
-    /** @type {Array<{ key: string, label: string, removeHref: string }>} */
-    const list = [];
-    if (activeStatus) {
-      list.push({
-        key: 'status',
-        label: `${t('common.activeFilters.axis.status')}: ${t(`concern.viewer.status.${activeStatus}`)}`,
-        removeHref: buildHref('/concerns', preservedForStatus, { filter: null })
-      });
-    }
-    if (activeSeverity) {
-      list.push({
-        key: 'severity',
-        label: `${t('common.activeFilters.axis.severity')}: ${t(`concern.viewer.severity.${activeSeverity}`)}`,
-        removeHref: buildHref('/concerns', preservedForSeverity, { severity: null })
-      });
-    }
-    if (activeHazard) {
-      list.push({
-        key: 'hazard',
-        label: `${t('common.activeFilters.axis.hazard')}: ${t(`concern.viewer.hazard.${activeHazard}`)}`,
-        removeHref: buildHref('/concerns', preservedForHazard, { hazard: null })
-      });
-    }
-    if (fromParam || toParam) {
-      list.push({
-        key: 'date',
-        label: `${t('common.activeFilters.axis.date_range')}: ${fromParam ?? '…'} → ${toParam ?? '…'}`,
-        removeHref: buildHref(
-          '/concerns',
-          { filter: activeStatus, severity: activeSeverity, hazard: activeHazard, sort: sortParam },
-          { from: null, to: null }
-        )
-      });
-    }
-    if (sortParam === 'oldest') {
-      list.push({
-        key: 'sort',
-        label: `${t('common.activeFilters.axis.sort')}: ${t('common.sortToggle.oldest')}`,
-        removeHref: buildHref('/concerns', {
-          filter: activeStatus,
-          severity: activeSeverity,
-          hazard: activeHazard,
-          from: fromParam,
-          to: toParam
-        })
-      });
-    }
-    return list;
-  })();
-
-  /** Composed multi-axis predicate (status, severity, hazard, date range). */
-  $: predicate = anyAxisActive
-    ? /** @param {import('$lib/concerns/demo-concerns').DemoConcernRow} r */ (r) => {
-        if (activeStatus && r.status !== activeStatus) return false;
-        if (activeSeverity && r.severity !== activeSeverity) return false;
-        if (activeHazard && r.hazard_class !== activeHazard) return false;
-        if ((fromParam || toParam) && !withinRange(r.filed_at, fromParam, toParam)) return false;
-        return true;
-      }
-    : undefined;
-
-  // Sort: default is newest-first (the demo provider returns rows in
-  // that order). `?sort=oldest` reverses before pagination.
-  $: sortedRows = sortParam === 'oldest' ? [...DEMO_ROWS].reverse() : DEMO_ROWS;
-
-  $: fetchPage =
-    /**
-     * @param {number} p
-     * @param {number} ps
-     */
-    (p, ps) => fetchDemoConcernsPage(p, ps, sortedRows, predicate);
-
-  function buildDownload() {
-    const rows = predicate ? sortedRows.filter(predicate) : sortedRows;
-    return {
-      csv: withMetadata(
-        { route: '/concerns', filters: activeFilters.map((f) => f.label).join(' · ') },
-        toCsv(rows, CSV_FIELDS)
-      ),
-      filename: csvFilename(
-        'concerns',
-        new Date(),
-        activeFilters.map((f) => f.key + '-' + f.label)
-      )
-    };
+    return revealStates[id];
   }
 
-  // The {#key} block remounts the viewer when ANY axis or the sort
-  // changes — resets the page indicator to page 1.
-  $: viewerKey = `${filterParam ?? ''}|${severityParam ?? ''}|${hazardParam ?? ''}|${sortParam ?? ''}|${fromParam ?? ''}|${toParam ?? ''}`;
+  onMount(() => {
+    void refresh();
+  });
+
+  async function refresh() {
+    listLoading = true;
+    listError = '';
+    listSessionExpired = false;
+    const user_id = getCurrentUserId();
+    if (!user_id) {
+      // Not signed in — show empty state via the isSignedIn branch below.
+      listLoading = false;
+      return;
+    }
+    const r = await listConcernsViaProduction({
+      client: t07Client,
+      concernClient,
+      keyHolder,
+      localIdentity,
+      user_id
+    });
+    listLoading = false;
+    if (r.status === 'needs_setup') {
+      needsSetup = true;
+      return;
+    }
+    if (r.status === 'session_expiry') {
+      listSessionExpired = true;
+      return;
+    }
+    if (r.status !== 'ok') {
+      listError = t('concern.viewer.error.load_failed');
+      return;
+    }
+    items = r.items;
+    needsSetup = false;
+  }
+
+  /** @param {import('$lib/concerns/types').ConcernIntake} intake */
+  async function onSubmit(intake) {
+    const user_id = getCurrentUserId();
+    if (!user_id) return { status: 'session_expiry' };
+    const r = await submitConcernViaProduction({
+      client: t07Client,
+      concernClient,
+      keyHolder,
+      localIdentity,
+      user_id,
+      intake
+    });
+    if (r.status === 'ok') {
+      // Successful submit — refresh the list so the new row appears.
+      void refresh();
+    } else if (r.status === 'needs_setup') {
+      needsSetup = true;
+    }
+    return r;
+  }
+
+  /** @param {string} id */
+  async function onRevealSource(id) {
+    const state = ensureRevealState(id);
+    state.error = '';
+    state.loading = true;
+    state.sourceName = '';
+    revealStates = { ...revealStates };
+    const user_id = getCurrentUserId();
+    if (!user_id) {
+      state.loading = false;
+      state.error = t('concern.intake.errors.session_expiry');
+      revealStates = { ...revealStates };
+      return;
+    }
+    const r = await revealConcernSourceViaProduction({
+      client: t07Client,
+      concernClient,
+      keyHolder,
+      localIdentity,
+      user_id,
+      id,
+      passphrase: state.passphrase.length > 0 ? state.passphrase : null
+    });
+    state.loading = false;
+    if (r.status === 'ok') {
+      state.sourceName = r.source_name;
+    } else if (r.status === 'anonymous') {
+      state.sourceName = '';
+      state.error = t('concern.viewer.source.anonymous');
+    } else if (r.status === 'invalid_passphrase') {
+      state.error = t('concern.intake.errors.rls_denied');
+    } else if (r.status === 'session_expiry') {
+      state.error = t('concern.intake.errors.session_expiry');
+    } else if (r.status === 'needs_setup') {
+      needsSetup = true;
+      state.error = t('concern.intake.errors.needs_setup');
+    } else if (r.status === 'rls_denied') {
+      state.error = t('concern.intake.errors.rls_denied');
+    } else {
+      state.error = t('concern.viewer.error.load_failed');
+    }
+    revealStates = { ...revealStates };
+  }
+
+  /** @param {string} id */
+  function toggleReveal(id) {
+    const state = ensureRevealState(id);
+    state.open = !state.open;
+    if (!state.open) {
+      // Closing the affordance clears any temporary plaintext from the DOM.
+      state.sourceName = '';
+      state.passphrase = '';
+      state.error = '';
+    }
+    revealStates = { ...revealStates };
+  }
+
+  function toggleForm() {
+    formOpen = !formOpen;
+  }
 </script>
 
 <svelte:head>
-  <title>{pageTitle} — {t('common.app_name')}</title>
+  <title>{t('concern.page.title')} — {t('common.app_name')}</title>
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
 <section class="card con-card" data-testid="concerns-page">
-  <ActiveFiltersBar baseHref="/concerns" filters={activeFilters} />
-  <SavedViewsRail route="/concerns" />
-  <FilterChipsRail chips={statusChips} activeValue={activeStatus} />
-  <FilterChipsRail
-    chips={severityChips}
-    activeValue={activeSeverity}
-    ariaLabelKey="common.filterChips.severity_aria_label"
-  />
-  <FilterChipsRail
-    chips={hazardChips}
-    activeValue={activeHazard}
-    ariaLabelKey="common.filterChips.hazard_aria_label"
-  />
-  <DateRangeChips
-    baseHref="/concerns"
-    {fromParam}
-    {toParam}
-    preservedParams={preservedForDateRange}
-  />
-  <SortToggle baseHref="/concerns" activeSort={sortParam} preservedParams={preservedForSort} />
-  {#if filterLabel}
-    <FilterBanner label={filterLabel} clearHref="/concerns" />
+  <h1>{t('concern.viewer.heading')}</h1>
+
+  {#if !$isSignedIn}
+    <p role="status" data-testid="concerns-signed-out">
+      <a href="/sign-in">{t('common.errors.session_expired')}</a>
+    </p>
+  {:else if needsSetup}
+    <p data-testid="concerns-needs-setup" role="status" class="con-needs-setup">
+      <a href="/settings">{t('concern.intake.errors.needs_setup')}</a>
+    </p>
+  {:else}
+    <div class="con-toolbar">
+      <button type="button" class="primary" on:click={toggleForm} data-testid="concerns-log-cta">
+        {formOpen ? t('common.actions.cancel') : t('concern.page.log_button')}
+      </button>
+    </div>
+
+    {#if formOpen}
+      {#key formOpen}
+        <ConcernIntakeForm
+          submit={onSubmit}
+          onSubmitted={() => {
+            formOpen = false;
+          }}
+        />
+      {/key}
+    {/if}
+
+    {#if listSessionExpired}
+      <p role="alert" data-testid="concerns-session-expired">
+        {t('concern.intake.errors.session_expiry')}
+      </p>
+    {:else if listError}
+      <p role="alert" data-testid="concerns-list-error">{listError}</p>
+    {:else if listLoading}
+      <p role="status" data-testid="concerns-loading">{t('concern.viewer.loading')}</p>
+    {:else if items.length === 0}
+      <p role="status" data-testid="concerns-empty">{t('concern.viewer.empty')}</p>
+    {:else}
+      <ul class="con-list" data-testid="concerns-list">
+        {#each items as item (item.id)}
+          {@const rs = ensureRevealState(item.id)}
+          <li class="con-row">
+            <h2 class="con-title">{item.title}</h2>
+            <p class="con-meta">
+              <span data-testid="concerns-row-pseudonym">{item.actor_pseudonym}</span>
+              ·
+              <span>{t(`concern.viewer.hazard.${item.hazard_class}`)}</span>
+              ·
+              <span>{t(`concern.viewer.severity.${item.severity}`)}</span>
+              ·
+              <span>{item.days_since_filed} {t('concern.viewer.days_label')}</span>
+            </p>
+            <p class="con-body">{item.body}</p>
+            {#if item.has_named_source}
+              <div class="con-reveal">
+                <button
+                  type="button"
+                  class="btn-outline"
+                  data-testid="concerns-reveal-source"
+                  on:click={() => toggleReveal(item.id)}
+                >
+                  {rs.open
+                    ? t('concern.viewer.source.protected')
+                    : t('concern.list.row_named_label')}
+                </button>
+                {#if rs.open}
+                  <label for={`concern-reveal-passphrase-${item.id}`}>
+                    {t('concern.intake.reveal.passphrase_label')}
+                  </label>
+                  <input
+                    id={`concern-reveal-passphrase-${item.id}`}
+                    type="password"
+                    autocomplete="off"
+                    bind:value={rs.passphrase}
+                    data-testid={`concerns-reveal-passphrase-${item.id}`}
+                  />
+                  <button
+                    type="button"
+                    class="primary"
+                    on:click={() => onRevealSource(item.id)}
+                    disabled={rs.loading}
+                  >
+                    {rs.loading
+                      ? t('concern.intake.actions.saving')
+                      : t('concern.intake.reveal.reveal_button')}
+                  </button>
+                  {#if rs.error}
+                    <p role="alert" class="con-reveal-error">{rs.error}</p>
+                  {/if}
+                  {#if rs.sourceName}
+                    <p
+                      role="status"
+                      class="con-reveal-name"
+                      data-testid={`concerns-reveal-source-name-${item.id}`}
+                    >
+                      {rs.sourceName}
+                    </p>
+                  {/if}
+                {/if}
+              </div>
+            {:else}
+              <p class="con-anon-note">{t('concern.list.row_anon_label')}</p>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
-  <CsvDownloadButton onClick={buildDownload} />
-  <ShareUrlButton />
-  <SaveViewButton suggestedName={activeFilters.map((f) => f.label).join(' · ')} />
-  {#key viewerKey}
-    <ConcernsViewer
-      {fetchPage}
-      filterActive={anyAxisActive}
-      filterLabel={activeFilterLabel}
-      clearHref="/concerns"
-    />
-  {/key}
-  <p class="con-demo-note muted" data-testid="con-demo-note">
-    {t('concern.viewer.demo_note')}
-  </p>
+
   <p class="con-footer" data-print="hide">
     <a href="/" data-testid="concerns-back-to-home">
       {t('common.concernsPage.back_to_home_cta')}
@@ -313,16 +337,64 @@
   .con-card {
     margin-block-start: 1rem;
   }
-  .con-demo-note {
-    margin-block: 1rem 0;
-    padding: 0.625rem 0.875rem;
-    border: 1px solid var(--color-tint-amber-border);
+  .con-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-block-end: 1rem;
+  }
+  .con-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem;
+  }
+  .con-row {
+    padding: 0.75rem 1rem;
+    border: var(--border-width-hairline) solid var(--color-border-strong);
     border-radius: var(--radius-md);
-    background: var(--color-tint-amber-bg);
-    color: var(--color-tint-amber-fg);
+    background-color: var(--color-bg-elevated);
+  }
+  .con-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .con-meta {
+    margin-block: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+  }
+  .con-body {
+    margin-block: 0.5rem 0;
+    white-space: pre-wrap;
+  }
+  .con-reveal {
+    display: grid;
+    gap: 0.5rem;
+    margin-block-start: 0.5rem;
+  }
+  .con-reveal-error {
+    color: var(--color-destructive);
+    margin: 0;
+  }
+  .con-reveal-name {
+    font-weight: 600;
+  }
+  .con-anon-note {
+    margin-block-start: 0.5rem;
+    color: var(--color-fg-muted);
     font-size: 0.8125rem;
   }
+  .con-needs-setup {
+    padding-block: 0.75rem;
+    padding-inline: 0.875rem;
+    border-radius: var(--radius-md);
+    background-color: var(--color-tint-amber-bg);
+    color: var(--color-tint-amber-fg);
+    border: var(--border-width-hairline) solid var(--color-tint-amber-border);
+  }
   .con-footer {
-    margin-block-start: 0.75rem;
+    margin-block-start: 1rem;
   }
 </style>

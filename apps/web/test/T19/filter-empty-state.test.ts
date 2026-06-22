@@ -25,7 +25,8 @@ afterEach(() => {
 });
 
 const ROUTES = [
-  'concerns',
+  // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: live /concerns no longer
+  // mounts a viewer with the `filterActive` prop.
   'recommendations',
   'training',
   'work-refusal',

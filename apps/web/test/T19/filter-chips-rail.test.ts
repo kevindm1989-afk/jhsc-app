@@ -64,26 +64,10 @@ describe('T19.1 — FilterChipsRail', () => {
   });
 });
 
-describe('T19.1 — /concerns route wires the FilterChipsRail with all four status chips', () => {
-  const PAGE_PATH = resolve(__dirname, '../../src/routes/concerns/+page.svelte');
-
-  it('imports FilterChipsRail and mounts it (multi-axis: status + severity + hazard)', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    expect(src).toMatch(
-      /import\s+FilterChipsRail\s+from\s+['"]\$lib\/ui\/FilterChipsRail\.svelte['"]/
-    );
-    // Multi-axis: status, severity, hazard each get a chip rail.
-    const mounts = (src.match(/<FilterChipsRail/g) ?? []).length;
-    expect(mounts).toBeGreaterThanOrEqual(3);
-  });
-
-  it('declares the four canonical status values', () => {
-    const src = readFileSync(PAGE_PATH, 'utf8');
-    for (const value of ['open', 'triaged', 'resolved', 'archived']) {
-      expect(src).toContain(`'${value}'`);
-    }
-  });
-});
+// T19.1 — /concerns route wires the FilterChipsRail — RETIRED by ADR-0027
+// Phase 2a PR2: live /concerns has no status filter rail (Decision 6 — status
+// is out of Phase 2a). The post-cutover contract is pinned by the PR2 page-
+// cutover test. The component-level tests above are unaffected.
 
 describe('T19.1 — /recommendations route wires the FilterChipsRail with all four status chips', () => {
   const PAGE_PATH = resolve(__dirname, '../../src/routes/recommendations/+page.svelte');

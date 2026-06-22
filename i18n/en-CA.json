@@ -590,6 +590,20 @@
         "hazard_required": "Pick a hazard class.",
         "severity_required": "Pick a severity.",
         "location_required": "Pick a location."
+      },
+      "errors": {
+        "rate_limited": "Too many submissions just now. Wait a moment and try again.",
+        "session_expiry": "Your session has ended. Sign in again to save this concern.",
+        "needs_setup": "Committee encryption isn't set up on this device. Open Settings to finish setup.",
+        "rls_denied": "You don't have permission to save this concern. Contact your worker co-chair.",
+        "needs_recovery": "This device can't decrypt the committee key. Restore your identity from your recovery sheet."
+      },
+      "reveal": {
+        "passphrase_label": "Per-record passphrase (if set at submit)",
+        "passphrase_helper": "Leave blank when no passphrase was set.",
+        "reveal_button": "Reveal source name",
+        "anonymous_note": "This concern was filed anonymously.",
+        "hide_button": "Hide source"
       }
     },
     "saved": {
@@ -648,7 +662,8 @@
       "filed_by": "Filed by",
       "source": {
         "protected": "Source protected",
-        "revealed": "Source revealed with consent"
+        "revealed": "Source revealed with consent",
+        "anonymous": "This concern was filed anonymously — there is no source to reveal."
       },
       "error": {
         "load_failed": "Couldn't load the concerns register. Try again."

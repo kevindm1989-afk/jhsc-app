@@ -104,40 +104,14 @@ describe('T19.1 — SortToggle', () => {
   });
 });
 
-describe('T19.1 — /concerns multi-axis filter wiring', () => {
-  const src = readFileSync(
-    resolve(__dirname, '../../src/routes/concerns/+page.svelte'),
-    'utf8'
-  );
+// T19.1 — /concerns multi-axis filter wiring — RETIRED by ADR-0027 Phase 2a
+// PR2: live /concerns no longer ships URL-state multi-axis filtering (Decision
+// 8 future scope; the live decrypted-row register is paged + filtered client-
+// side over a simpler list provider). Post-cutover contract is pinned by
+// apps/web/test/T08/phase2a-concerns-page-cutover.test.ts.
 
-  it('declares severity + hazard value arrays', () => {
-    expect(src).toContain('SEVERITY_VALUES');
-    expect(src).toContain('HAZARD_VALUES');
-    for (const v of ['low', 'medium', 'high', 'critical']) expect(src).toContain(`'${v}'`);
-    for (const v of ['physical', 'chemical', 'biological', 'ergonomic', 'psychosocial']) {
-      expect(src).toContain(`'${v}'`);
-    }
-  });
-
-  it('mounts three FilterChipsRails — status, severity, hazard', () => {
-    // Each chip rail has its own activeValue prop; count the mounts.
-    const matches = src.match(/<FilterChipsRail/g) ?? [];
-    expect(matches.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it('composes the predicate across all three axes', () => {
-    expect(src).toContain('activeStatus');
-    expect(src).toContain('activeSeverity');
-    expect(src).toContain('activeHazard');
-    // The predicate AND-chains: returns false on any axis mismatch.
-    expect(src).toMatch(/if\s*\(activeStatus\s*&&\s*r\.status\s*!==\s*activeStatus\)/);
-    expect(src).toMatch(/if\s*\(activeSeverity\s*&&\s*r\.severity\s*!==\s*activeSeverity\)/);
-    expect(src).toMatch(/if\s*\(activeHazard\s*&&\s*r\.hazard_class\s*!==\s*activeHazard\)/);
-  });
-});
-
-describe('T19.1 — SortToggle mounted on /concerns and /recommendations', () => {
-  for (const route of ['concerns', 'recommendations']) {
+describe('T19.1 — SortToggle mounted on /recommendations (concerns retired)', () => {
+  for (const route of ['recommendations']) {
     it(`/${route} imports + mounts SortToggle with preservedParams`, () => {
       const src = readFileSync(
         resolve(__dirname, `../../src/routes/${route}/+page.svelte`),

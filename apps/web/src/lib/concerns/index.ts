@@ -31,3 +31,25 @@ export type {
   SubmitConcernOk,
   SubmitConcernResult
 } from './concern-core';
+
+// Phase 2a PR2 (ADR-0027 / P2a-5) — public seal/open surface re-export so the
+// production compositions and any other consumer can import from
+// `$lib/concerns` (the rule-of-three extraction note).
+export { openUtf8, sealUtf8 } from './seal';
+
+// Phase 2a PR2 (ADR-0027 / P2a-7) — production compositions over the
+// CommitteeKeyHolder dwell (Decision 1) + the unwrap composition (PR1).
+export {
+  listConcernsViaProduction,
+  revealConcernSourceViaProduction,
+  submitConcernViaProduction
+} from './production-flows';
+export type {
+  ListConcernsViaProductionArgs,
+  ListConcernsViaProductionResult,
+  ListedConcern,
+  RevealConcernSourceViaProductionArgs,
+  RevealConcernSourceViaProductionResult,
+  SubmitConcernViaProductionArgs,
+  SubmitConcernViaProductionResult
+} from './production-flows';

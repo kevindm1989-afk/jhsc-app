@@ -48,7 +48,9 @@ const ROUTES = {
   inspections: '/inspections',
   library: '/library',
   recommendations: '/recommendations',
-  concerns: '/concerns',
+  // 'concerns' RETIRED — ADR-0027 Phase 2a PR2: the live /concerns page no
+  // longer mounts a viewer with a clearHref prop. Its post-cutover empty
+  // state is asserted by the PR2 page-cutover test.
   audit: '/audit',
   'sensitive-feed': '/sensitive-feed'
 } as const;

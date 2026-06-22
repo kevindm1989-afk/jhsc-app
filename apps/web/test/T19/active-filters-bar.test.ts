@@ -74,30 +74,13 @@ describe('T19 — ActiveFiltersBar', () => {
   });
 });
 
-describe('T19 — /concerns route wires ActiveFiltersBar', () => {
-  const src = readFileSync(
-    resolve(__dirname, '../../src/routes/concerns/+page.svelte'),
-    'utf8'
-  );
-
-  it('imports + mounts ActiveFiltersBar', () => {
-    expect(src).toMatch(
-      /import\s+ActiveFiltersBar\s+from\s+['"]\$lib\/ui\/ActiveFiltersBar\.svelte['"]/
-    );
-    expect(src).toMatch(/<ActiveFiltersBar/);
-  });
-
-  it('computes an activeFilters array reactively from the current axes', () => {
-    expect(src).toMatch(/\$:\s*activeFilters\s*=/);
-  });
-
-  it('exposes a removeHref entry per active axis (status, severity, hazard, date, sort)', () => {
-    // The descriptor objects carry a `key` matching each axis name.
-    for (const k of ['status', 'severity', 'hazard', 'date', 'sort']) {
-      expect(src).toContain(`key: '${k}'`);
-    }
-  });
-});
+// T19 — /concerns route wires ActiveFiltersBar — RETIRED by ADR-0027 Phase 2a
+// PR2: the /concerns route's demo-mount + multi-axis filter rail are replaced
+// by the live `listConcernsViaProduction` path. The page-level structural pins
+// (CTA, no-wrap guard, no status, reveal-source affordance, etc.) are now
+// asserted by apps/web/test/T08/phase2a-concerns-page-cutover.test.ts. The
+// ActiveFiltersBar COMPONENT tests above are unaffected; only the route
+// wiring expectations against /concerns are obsolete.
 
 describe('T19 — common.activeFilters.* i18n keys', () => {
   it('catalog has label + region_aria + clear_all + remove_aria', () => {
