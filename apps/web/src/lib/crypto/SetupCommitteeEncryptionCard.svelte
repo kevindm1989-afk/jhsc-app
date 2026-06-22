@@ -48,7 +48,8 @@
   import {
     enrollIdentityViaProduction,
     storeRecoveryBlobViaProduction,
-    initCommitteeDataKeyViaProduction
+    initCommitteeDataKeyViaProduction,
+    restoreRecoveryBlobViaProduction
   } from '$lib/crypto/production-flows';
   import D4RecoveryPassphrase from '$lib/onboarding/steps/D4RecoveryPassphrase.svelte';
   import D6TypeBackVerify from '$lib/onboarding/steps/D6TypeBackVerify.svelte';
@@ -88,6 +89,16 @@
   let typedBack = '';
   let passphraseRegenerated = false;
   let mismatch = false;
+
+  // Restore (edge-B) state. The card runs this in-place when the server
+  // reports actor_has_wrap=true but this device has no privkey — the user
+  // already provisioned on another device and is restoring here using the
+  // recovery passphrase they saved (the JSON sheet is a separate paper
+  // backup; the server holds the canonical encrypted blob).
+  let restorePassphrase = '';
+  /** @type {'idle' | 'restoring' | 'wrong_passphrase' | 'not_found' | 'failed'} */
+  let restoreState = 'idle';
+  let restoreErrorKey = 'settings.setupCommitteeEncryption.error.unknown';
 
   /**
    * Constant-time-ish string compare for the type-back gate (M-104d — no
@@ -154,14 +165,25 @@
       return;
     }
 
-    if (state && state.actor_has_wrap) {
-      // Fully provisioned for this actor → self-hide (idempotent).
+    if (state && state.actor_has_wrap && hasDevicePrivkey) {
+      // Fully provisioned for this actor AND the device holds the privkey →
+      // self-hide (idempotent).
       phase = 'hidden';
+      return;
+    }
+    if (state && state.actor_has_wrap && !hasDevicePrivkey) {
+      // Edge-B (F-139): the server holds a wrap for this actor (provisioned
+      // earlier, likely on another device) but THIS device has no privkey to
+      // unwrap it. The recovery passphrase + server-stored encrypted blob
+      // recover the privkey onto this device. NEVER re-enroll (would orphan
+      // every prior wrap).
+      phase = 'restore_required';
       return;
     }
     if (state && state.wrap_count > 0 && !hasDevicePrivkey) {
       // A committee key exists, held by others, and this device has no key
-      // material → foreign-held recoverable error (AC-5c).
+      // material AND this actor has no wrap on it → foreign-held recoverable
+      // error (AC-5c).
       phase = 'foreign_held';
       return;
     }
@@ -351,6 +373,56 @@
     phase = 'probing';
     void probeState();
   }
+
+  /**
+   * Edge-B restore (F-139). The user typed their recovery passphrase; we
+   * fetch the server-stored encrypted blob, decrypt under the passphrase,
+   * and write the recovered privkey to this device's local identity store.
+   * The recovery primitive emits the restore audit row server-side.
+   *
+   * On success, re-probe → the card self-hides (provisioned + privkey).
+   * Typed failures map to inline copy without leaking which path was wrong.
+   */
+  async function runRestore() {
+    if (restoreState === 'restoring') return;
+    if (restorePassphrase.length === 0) return;
+    if (!userId) {
+      restoreState = 'failed';
+      restoreErrorKey = 'settings.setupCommitteeEncryption.error.signed_out';
+      return;
+    }
+    restoreState = 'restoring';
+    try {
+      const result = await restoreRecoveryBlobViaProduction({
+        client,
+        localIdentity,
+        user_id: userId,
+        passphrase: restorePassphrase,
+        device_fingerprint_raw: typeof navigator !== 'undefined' ? navigator.userAgent : ''
+      });
+      if (result.status === 'wrong_passphrase') {
+        restoreState = 'wrong_passphrase';
+        return;
+      }
+      if (result.status === 'not_found') {
+        restoreState = 'not_found';
+        return;
+      }
+      if (result.status === 'failed') {
+        restoreState = 'failed';
+        restoreErrorKey = failureKeyFor(result.http);
+        return;
+      }
+      // Success — privkey now in IndexedDB. Clear the field, re-probe.
+      restorePassphrase = '';
+      restoreState = 'idle';
+      phase = 'probing';
+      void probeState();
+    } catch {
+      restoreState = 'failed';
+      restoreErrorKey = 'settings.setupCommitteeEncryption.error.unknown';
+    }
+  }
 </script>
 
 {#if phase !== 'hidden' && phase !== 'probing'}
@@ -438,9 +510,47 @@
         <strong>{t('settings.setupCommitteeEncryption.restore_required.heading')}</strong>
         <p>{t('settings.setupCommitteeEncryption.restore_required.body')}</p>
       </div>
-      <a class="setup-committee-cta" href={restoreHref} data-testid="setup-committee-restore-cta">
-        {t('settings.setupCommitteeEncryption.restore_required.cta')}
-      </a>
+      <label class="setup-committee-restore-label" for="setup-committee-restore-passphrase">
+        {t('settings.setupCommitteeEncryption.restore_required.passphrase_label')}
+      </label>
+      <input
+        id="setup-committee-restore-passphrase"
+        class="setup-committee-restore-input"
+        type="password"
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        bind:value={restorePassphrase}
+        disabled={restoreState === 'restoring'}
+        data-testid="setup-committee-restore-passphrase"
+      />
+      <button
+        type="button"
+        class="setup-committee-primary"
+        on:click={runRestore}
+        disabled={restoreState === 'restoring' || restorePassphrase.length === 0}
+        data-testid="setup-committee-restore-button"
+      >
+        {restoreState === 'restoring'
+          ? t('settings.setupCommitteeEncryption.restore_required.restoring')
+          : t('settings.setupCommitteeEncryption.restore_required.restore_button')}
+      </button>
+      {#if restoreState === 'wrong_passphrase'}
+        <p class="setup-committee-error" role="alert" data-testid="setup-committee-restore-error">
+          {t('settings.setupCommitteeEncryption.restore_required.wrong_passphrase')}
+        </p>
+      {/if}
+      {#if restoreState === 'not_found'}
+        <p class="setup-committee-error" role="alert" data-testid="setup-committee-restore-error">
+          {t('settings.setupCommitteeEncryption.restore_required.not_found')}
+        </p>
+      {/if}
+      {#if restoreState === 'failed'}
+        <p class="setup-committee-error" role="alert" data-testid="setup-committee-restore-error">
+          {t(restoreErrorKey)}
+        </p>
+      {/if}
     {/if}
 
     {#if phase === 'foreign_held'}
@@ -553,5 +663,31 @@
     outline: 2px solid var(--color-focus-inner);
     outline-offset: 1px;
     box-shadow: 0 0 0 4px var(--color-focus-outer);
+  }
+  .setup-committee-restore-label {
+    display: block;
+    margin-block-start: 0.75rem;
+    font-weight: 500;
+  }
+  .setup-committee-restore-input {
+    display: block;
+    inline-size: 100%;
+    margin-block-start: 0.25rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font: inherit;
+  }
+  .setup-committee-restore-input:focus-visible {
+    outline: 2px solid var(--color-focus-inner);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px var(--color-focus-outer);
+  }
+  .setup-committee-error {
+    margin-block-start: 0.5rem;
+    color: var(--color-tint-red-fg);
+    font-size: 0.875rem;
   }
 </style>
