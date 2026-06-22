@@ -48,13 +48,17 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { withFunctionName } from '../_shared/log.ts';
 import { assertKeyParity } from '../_shared/key-parity-fetcher.ts';
 import { serveWithCors } from '../_shared/cors.ts';
+import { extractClientIp } from '../_shared/client-ip.ts';
+import { FixedWindowRateLimiter } from '../_shared/rate-limit.ts';
 import { signMintWriterToken } from '../mint-session/signing.ts';
 import { verifyWebAuthnRegistration } from '../bootstrap-first-co-chair/registration.ts';
 import {
   dispatch,
+  type RedeemAction,
   type RedeemDeps,
   type RpcError,
   type RegistrationVerdict,
+  type ThrottleDecision,
 } from './core.ts';
 
 withFunctionName('redeem-invite');
@@ -82,6 +86,36 @@ function originAllowed(origin: string): boolean {
   return allow.length === 0 ? true : allow.includes(origin);
 }
 
+// F-175: per-IP throttle. The caps are intentionally generous for a ~12-person
+// committee but bound the unauthenticated flood surface well below what
+// `redeem_invite_complete` could service. Two distinct buckets so a `register`
+// flood cannot starve the cheap `challenge` action (which a legitimate caller
+// uses on every page load) and vice versa. The buckets are PER EF INSTANCE +
+// PER MINUTE — a multi-instance flood is bounded by the SQL terminal's own
+// gates (single-use invite + 15-min TOTP + 5-attempt lock).
+//
+// Choice of caps:
+//   - challenge: 10 / IP / min. The action does no expensive work and is
+//     called on every page load + every retry. 10/min is ~one every 6s — a
+//     real user never hits it.
+//   - register:   5 / IP / min. The action triggers a DB round-trip + a
+//     WebAuthn verify. 5/min is below the per-invite 5-attempt lock, so a
+//     flood cannot consume the lock counter faster than the throttle allows.
+const CHALLENGE_LIMIT = new FixedWindowRateLimiter({ capacity: 10, windowMs: 60_000 });
+const REGISTER_LIMIT = new FixedWindowRateLimiter({ capacity: 5, windowMs: 60_000 });
+
+function makeThrottle(req: Request): (action: RedeemAction) => ThrottleDecision {
+  // The IP is extracted ONCE per request and stays in this closure. F-176: the
+  // IP is the keyspace seed only — never logged with its value. The structured
+  // log emits the bucket-class label via `rate_limit_key_class` (in core.ts).
+  const ip = extractClientIp(req);
+  return (action) => {
+    const limiter = action === 'register' ? REGISTER_LIMIT : CHALLENGE_LIMIT;
+    const decision = limiter.consume(ip);
+    return { allowed: decision.allowed };
+  };
+}
+
 async function handle(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ ok: false, error: 'bad_request' }, 405);
@@ -107,6 +141,7 @@ async function handle(req: Request): Promise<Response> {
   const deps: RedeemDeps = {
     assertKeyParity,
     originAllowed,
+    throttle: makeThrottle(req),
     mintWriterToken: () => signMintWriterToken(Date.now()),
     issueChallenge: async (rpId, origin) => {
       const sb = await client();

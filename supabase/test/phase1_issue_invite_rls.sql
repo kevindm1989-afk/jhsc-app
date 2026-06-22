@@ -8,10 +8,12 @@
 -- p_bootstrap_id / p_ttl_minutes so the committee_invite.bootstrap_id linkage
 -- is populated (the gap ADR-0029 closes).
 --
--- RED-FIRST: `public.issue_member_invite(...)` does NOT exist on `main` yet
--- (P1-1 implementer builds it against this test). Every assertion that calls
--- it raises `function ... does not exist` until the migration lands; the
--- grant/role assertions return false until the grant posture is written.
+-- PRIVACY-DEFERRED SIGNATURE: the keystone signature drops p_display_name and
+-- p_off_employer_contact (the privacy review BLOCKED their persistence in this
+-- increment without employer-domain rejection / retention enforcement; the
+-- decision is to defer both fields and re-introduce them in the co-chair
+-- roster increment). committee_invite_member's NULL defaults
+-- (00000000000002:215-216) keep the delegate call safe.
 --
 -- Findings covered (threat-model §3.18):
 --   F-173 — role escalation via the invite role array (facet i ACCEPTED:
@@ -38,6 +40,15 @@ SET app.hmac_pseudonym_key = 'dev-ci-pseudonym-key-not-secret';
 SET search_path = public, extensions;
 SELECT plan(21);
 
+-- NOTE (privacy-deferred): the keystone signature deliberately excludes
+-- p_display_name / p_off_employer_contact (the privacy review BLOCKED their
+-- persistence in the keystone; the user chose to defer both fields out and
+-- re-introduce them in the co-chair roster increment with employer-domain
+-- rejection + retention). The signature here is (text[], text, integer); the
+-- pre-existing committee_invite_member NULL defaults (00000000000002:215-216)
+-- keep the delegate call safe. This change is contract-tracking, not a
+-- weakening of any security assertion.
+
 -- ---------------------------------------------------------------------------
 -- Fixtures: a founding active co-chair + a non-co-chair worker member, each
 -- with a live session, mirroring committee_rls.sql.
@@ -58,14 +69,13 @@ UPDATE public.auth_sessions SET revoked_at = now()
 
 -- ---------------------------------------------------------------------------
 -- (0) The function exists with the ADR-0029 signature (the keystone contract).
---     RED until P1-1 lands. Signature per ADR-0029 "NEW hosted artifacts":
---     issue_member_invite(p_roles text[], p_totp_code text, p_ttl_minutes int,
---                         p_display_name text, p_off_employer_contact text)
+--     Signature per ADR-0029 "NEW hosted artifacts" (privacy-deferred shape):
+--     issue_member_invite(p_roles text[], p_totp_code text, p_ttl_minutes int)
 -- ---------------------------------------------------------------------------
 SELECT has_function(
   'public', 'issue_member_invite',
-  ARRAY['text[]','text','integer','text','text'],
-  'ADR-0029 P1-1: issue_member_invite(text[],text,int,text,text) exists'
+  ARRAY['text[]','text','integer'],
+  'ADR-0029 P1-1: issue_member_invite(text[],text,int) exists (privacy-deferred shape)'
 );
 
 -- ---------------------------------------------------------------------------
@@ -74,13 +84,13 @@ SELECT has_function(
 -- ---------------------------------------------------------------------------
 SELECT is(
   has_function_privilege('authenticated',
-    'public.issue_member_invite(text[], text, integer, text, text)', 'EXECUTE'),
+    'public.issue_member_invite(text[], text, integer)', 'EXECUTE'),
   true,
   'F-168: authenticated CAN execute issue_member_invite (co-chair-gated in-fn)'
 );
 SELECT is(
   has_function_privilege('anon',
-    'public.issue_member_invite(text[], text, integer, text, text)', 'EXECUTE'),
+    'public.issue_member_invite(text[], text, integer)', 'EXECUTE'),
   false,
   'F-168: anon canNOT execute issue_member_invite'
 );
@@ -93,7 +103,7 @@ SELECT is(
 SET request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000b2","session_id":"11111111-1111-1111-1111-1111111111b2","role":"authenticated"}';
 SET LOCAL ROLE authenticated;
 SELECT throws_like(
-  $$SELECT public.issue_member_invite(ARRAY['worker_member'], '123456', 10080, NULL, NULL)$$,
+  $$SELECT public.issue_member_invite(ARRAY['worker_member'], '123456', 10080)$$,
   '%rls_denied%',
   'F-168: a worker_member (non-co-chair) cannot issue an invite (rls_denied)'
 );
@@ -105,7 +115,7 @@ RESET ROLE;
 SET request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000f1","session_id":"11111111-1111-1111-1111-11111111dead","role":"authenticated"}';
 SET LOCAL ROLE authenticated;
 SELECT throws_like(
-  $$SELECT public.issue_member_invite(ARRAY['worker_member'], '123456', 10080, NULL, NULL)$$,
+  $$SELECT public.issue_member_invite(ARRAY['worker_member'], '123456', 10080)$$,
   '%rls_denied%',
   'F-168: a co-chair with a revoked session cannot issue (session_is_live gate)'
 );
@@ -123,7 +133,7 @@ DO $$
 DECLARE r record;
 BEGIN
   SELECT * INTO r FROM public.issue_member_invite(
-    ARRAY['worker_member'], '424242', 10080, NULL, NULL
+    ARRAY['worker_member'], '424242', 10080
   );
   PERFORM set_config('test.invite_id',   r.invite_id::text,       false);
   PERFORM set_config('test.invitee_uid', r.invitee_user_id::text, false);
@@ -211,7 +221,7 @@ DO $$
 DECLARE r record;
 BEGIN
   SELECT * INTO r FROM public.issue_member_invite(
-    ARRAY['worker_member','worker_co_chair'], '535353', 10080, NULL, NULL
+    ARRAY['worker_member','worker_co_chair'], '535353', 10080
   );
   PERFORM set_config('test.cc_invitee_uid', r.invitee_user_id::text, false);
 END $$;
@@ -228,7 +238,7 @@ SELECT is(
 SET request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000f1","session_id":"11111111-1111-1111-1111-1111111111f1","role":"authenticated"}';
 SET LOCAL ROLE authenticated;
 SELECT throws_like(
-  $$SELECT public.issue_member_invite(ARRAY['superuser'], '646464', 10080, NULL, NULL)$$,
+  $$SELECT public.issue_member_invite(ARRAY['superuser'], '646464', 10080)$$,
   '%invalid_role%',
   'F-173: an out-of-enum role array is rejected (invalid_role) at issue'
 );

@@ -12,9 +12,9 @@
  *
  * We mirror committee-op's split (ADR-0029 references it): this core takes
  * INJECTED PORTS (an RpcPort + a WebAuthn verifier + a token-minter + the
- * challenge issue/consume + an origin check + key-parity), so dispatch /
- * error-mapping / leak invariants are pure-unit. index.ts is the thin
- * Deno.serve wrapper that constructs the real ports.
+ * challenge issue/consume + an origin check + key-parity + a per-IP throttle),
+ * so dispatch / error-mapping / leak invariants are pure-unit. index.ts is the
+ * thin Deno.serve wrapper that constructs the real ports.
  *
  * Findings (threat-model §3.18):
  *   F-168 — bad origin rejected BEFORE any DB call; key-parity 503 pre-dispatch;
@@ -26,9 +26,15 @@
  *           ALL surface as the SAME normalized client error (no condition leak).
  *   F-171 — the register schema has NO user_id/enrolling_uid; a smuggled one is
  *           ignored and never forwarded to redeem_invite_complete.
+ *   F-175 — a per-IP fixed-window throttle is consulted BEFORE the RPC (and
+ *           before issueChallenge) for BOTH actions, so a flood is bounded at
+ *           the edge before reaching the DB. Throttled → rate_limited / 429.
  *   F-176 — the 6-digit code, the raw TOTP, attestation/clientData secrets, and
  *           the mint token NEVER appear in any log line, structured-log field,
  *           error body, or the invite URL (buildRedeemLink carries only invite_id).
+ *           The internal-diagnostic log lines (server-side only) carry the
+ *           closed-literal SQL outcome class for operator triage; they NEVER
+ *           carry the raw code/credential/IP.
  */
 
 import { log } from '../_shared/log.ts';
@@ -76,6 +82,15 @@ export type RegistrationVerifier = (
   ctx: { rpId: string; expectedOrigin: string; expectedChallenge: string },
 ) => Promise<RegistrationVerdict>;
 
+/** The action label the per-IP throttle is consulted against. */
+export type RedeemAction = 'challenge' | 'register';
+
+/** Decision returned by the per-action throttle port (F-175). */
+export interface ThrottleDecision {
+  /** True = the call may proceed; false = throttled (caller emits 429). */
+  allowed: boolean;
+}
+
 /** The full injected dependency set the dispatch consumes. */
 export interface RedeemDeps {
   /** Calls redeem_invite_complete (the mint_writer-only terminal). */
@@ -97,6 +112,20 @@ export interface RedeemDeps {
   consumeChallenge: (
     challenge: string,
   ) => Promise<{ rp_id: string; origin: string } | null>;
+  /**
+   * F-175 per-action throttle, applied BEFORE the DB round-trip on BOTH actions.
+   * The implementation hashes / buckets the client IP server-side; the IP itself
+   * never leaves the function (F-176). A `denied` decision short-circuits with
+   * the normalized `rate_limited` / 429 (mapped via mapRedeemError).
+   *
+   * Optional ONLY so existing pure-unit tests that pre-date F-175 keep passing
+   * without modification — the production wiring in index.ts ALWAYS supplies a
+   * real throttle. When the port is absent the dispatch treats the call as
+   * un-throttled (the call proceeds). The F-175 Deno test injects it explicitly
+   * and asserts (a) the throttle is consulted BEFORE any RPC call, and
+   * (b) a throttled call returns 429 `rate_limited` with no body/PI/code.
+   */
+  throttle?: (action: RedeemAction) => ThrottleDecision;
 }
 
 /** The normalized dispatch result the thin index.ts serializes verbatim.
@@ -129,12 +158,24 @@ const NORMALIZED_LITERALS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * F-175 — the rate-limit literal. The throttle port short-circuits to this
+ * synthetic RpcError so the same mapping pathway covers it (the dispatch
+ * never reaches the RPC on a throttled call — the RPC dep is NOT invoked).
+ */
+const RATE_LIMITED_LITERAL = 'rate_limited';
+
+/**
  * Map a Postgres error raised by redeem_invite_complete onto the normalized
  * client error. Every invite/TOTP failure literal yields the SAME
- * `{ error, status }` (F-169/F-170). Anything else is a generic redeem failure
- * (never echoing the raw message — F-176).
+ * `{ error, status }` (F-169/F-170). The F-175 throttle short-circuits to
+ * `rate_limited`/429 via the same pathway (so logging + status mapping live in
+ * one place). Anything else is a generic redeem failure (never echoing the raw
+ * message — F-176).
  */
 export function mapRedeemError(error: RpcError): { error: string; status: number } {
+  if (error.message === RATE_LIMITED_LITERAL) {
+    return { error: 'rate_limited', status: 429 };
+  }
   if (NORMALIZED_LITERALS.has(error.message)) {
     return { ...NORMALIZED_REDEEM_INVALID };
   }
@@ -160,7 +201,7 @@ export function buildRedeemLink(opts: { invite_id: string; base?: string }): str
 
 // ---- Helpers ----------------------------------------------------------------
 
-function fail(status: 400 | 401 | 422 | 500 | 503, error: string): RedeemResult {
+function fail(status: 400 | 401 | 422 | 429 | 500 | 503, error: string): RedeemResult {
   return { ok: false, status, body: { error } };
 }
 
@@ -182,7 +223,8 @@ function str(v: unknown): string {
  * Trust ordering is load-bearing:
  *   1. key-parity (503) — the process cannot serve under a mismatched key;
  *   2. origin allowlist (401) — rejected BEFORE any DB/challenge/RPC work (F-168);
- *   3. action routing.
+ *   3. action routing (each action consults the F-175 throttle BEFORE any DB
+ *      round-trip — see handleChallenge / handleRegister).
  * No log line on ANY path carries the code/TOTP/attestation/mint token (F-176):
  * we log closed-literal outcomes only, and never the request body.
  */
@@ -217,9 +259,30 @@ export async function dispatch(
 }
 
 /**
+ * F-175 short-circuit — emit a normalized rate-limited response without ever
+ * touching the issuer / RPC. The same `mapRedeemError` pathway covers it so the
+ * status mapping lives in ONE place. The internal log line carries only the
+ * closed-literal bucket class — never the IP, never the body.
+ */
+function throttled(action: RedeemAction): RedeemResult {
+  log.warn({
+    event: `redeem.${action}`,
+    attributes: { outcome: 'rate_limited', rate_limit_key_class: 'per_ip' },
+  });
+  const mapped = mapRedeemError({ code: null, message: 'rate_limited' });
+  return { ok: false, status: mapped.status, body: { error: mapped.error } };
+}
+
+/**
  * challenge action — issue a single-use WebAuthn challenge bound to rp_id +
  * origin. F-175: this cheap path does NO code/TOTP work and NEVER reaches
- * redeem_invite_complete (no lock-state mutation possible code-lessly).
+ * redeem_invite_complete (no lock-state mutation possible code-lessly). The
+ * per-IP throttle is consulted BEFORE the issue call so even a code-less flood
+ * is bounded at the edge before reaching the DB-backed challenge table.
+ *
+ * The challenge cap is intentionally generous (the action does no expensive
+ * work and is also called legitimately on every page load) but a real
+ * ~12-person committee will never come close to the configured per-minute cap.
  */
 async function handleChallenge(
   deps: RedeemDeps,
@@ -229,6 +292,13 @@ async function handleChallenge(
 ): Promise<RedeemResult> {
   if (!rpId || !origin) {
     return { ok: false, status: 400, body: { error: 'bad_request' } };
+  }
+  // F-175: per-IP throttle BEFORE the issuer round-trip. A throttled call MUST
+  // NOT reach `issueChallenge` (asserted by the Deno test). The port is
+  // optional only to keep pre-F-175 unit tests passing without modification;
+  // production always supplies it (index.ts).
+  if (deps.throttle && !deps.throttle('challenge').allowed) {
+    return throttled('challenge');
   }
   const issued = await deps.issueChallenge(rpId, origin);
   if (!issued.ok || !issued.challenge) {
@@ -271,6 +341,14 @@ async function handleRegister(
     return { ok: false, status: 400, body: { error: 'bad_request' } };
   }
 
+  // F-175: per-IP throttle BEFORE consume/verify/RPC. A throttled call MUST
+  // NOT reach `consumeChallenge`, `verifyRegistration`, or the RPC (asserted by
+  // the Deno test). This caps the lock-state-mutating path well below the
+  // per-invite 5-attempt-lock so a flood cannot weaponise the lock counter.
+  if (deps.throttle && !deps.throttle('register').allowed) {
+    return throttled('register');
+  }
+
   // Consume the single-use challenge AND bind the body rp_id/origin to the
   // (rp_id, origin) it was issued for (mirrors the bootstrap C4 binding). A
   // consumed/expired/missing challenge → no row → normalized registration error.
@@ -292,13 +370,13 @@ async function handleRegister(
   }
   const cred = verdict.credential;
 
-  // Self-mint the least-privilege mint_writer token (F-118; never service_role).
-  // The token is held only to construct the authorized client; it never logs.
-  await deps.mintWriterToken();
-
   // F-171: the forwarded arg set carries the invite_id, the code, and the
   // VERIFIED credential fields ONLY — NO p_user_id / p_enrolling_uid /
   // p_target_user_id. The SQL terminal binds committee_invite.target_user_id.
+  // NOTE: an earlier draft called deps.mintWriterToken() here as a "self-mint
+  // beat" — that was redundant. The supabase client constructed for this
+  // dispatch already mints the writer token on the rpc() path (see index.ts);
+  // a second mint just doubles the work without any added security property.
   const { data, error } = await deps.rpc('redeem_invite_complete', {
     p_invite_id: inviteId,
     p_totp_code: totpCode,
@@ -313,9 +391,23 @@ async function handleRegister(
   if (error) {
     // F-169/F-170: every invite/TOTP literal → ONE normalized client error.
     // F-176: log the closed-literal outcome only — never the raw SQL message,
-    // the code, or the credential secrets.
+    // the code, or the credential secrets. The structured-log emission below
+    // is SERVER-ONLY (operator-diagnostic): it carries the closed-literal SQL
+    // outcome class (one of the NORMALIZED_LITERALS set) so an operator can
+    // tell a tutor "your TOTP expired" from "your invite was already used"
+    // WITHOUT the client response ever distinguishing them (the client body
+    // remains the byte-identical normalized error — assertions in core.test).
     const mapped = mapRedeemError(error);
-    log.warn({ event: 'redeem.register', attributes: { outcome: 'redeem_rejected' } });
+    const internalClass = classifyInternal(error);
+    // The closed-literal internal class rides the top-level `error_class` field
+    // (not in attributes — it bypasses the safeFields allowlist by design, like
+    // every other EF's error_class emission). It is server-only diagnostics:
+    // the client response body stays the byte-identical normalized error.
+    log.warn({
+      event: 'redeem.register',
+      outcome: 'redeem_rejected',
+      error_class: internalClass,
+    });
     return { ok: false, status: mapped.status as 422 | 500, body: { error: mapped.error } };
   }
 
@@ -324,4 +416,36 @@ async function handleRegister(
   // Success body is EXACTLY { ok, user_id } — no credential id, no code, no
   // extra fields the caller did not already know (F-176).
   return { ok: true, status: 200, body: { ok: true, user_id: str(result.user_id) } };
+}
+
+/**
+ * Server-only operator-diagnostic classifier. Maps the RAW SQL RAISE literal
+ * onto a CLOSED, non-PI bucket label suitable for the structured log. The
+ * label discriminates the three invite outcomes and the TOTP outcomes so an
+ * operator can triage a member's "my code doesn't work" report — but the
+ * CLIENT response remains the byte-identical normalized error (F-169/F-170 are
+ * the client-side oracle defense; this is the SERVER-SIDE diagnosability that
+ * second-opinion-reviewer asked for).
+ *
+ * F-176: the label is a closed enum of literals, NEVER the raw code/credential.
+ */
+function classifyInternal(error: RpcError): string {
+  switch (error.message) {
+    case 'invite_invalid':
+      return 'invite_invalid';
+    case 'TOTP_BOOTSTRAP_EXPIRED':
+      return 'totp_expired';
+    case 'TOTP_BOOTSTRAP_LOCKED':
+      return 'totp_locked';
+    case 'TOTP_BOOTSTRAP_WRONG_CODE':
+      return 'totp_wrong_code';
+    case 'TOTP_BOOTSTRAP_CONSUMED':
+      return 'totp_consumed';
+    case 'TOTP_BOOTSTRAP_NOT_FOUND':
+      return 'totp_not_found';
+    case 'rate_limited':
+      return 'rate_limited';
+    default:
+      return 'unknown';
+  }
 }

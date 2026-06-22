@@ -38,17 +38,23 @@
 -- ===========================================================================
 -- issue_member_invite — co-chair-side producer (F-168/F-173/F-176/F-177).
 --
--- Signature per ADR-0029 "NEW hosted artifacts":
---   issue_member_invite(p_roles text[], p_totp_code text, p_ttl_minutes int,
---                       p_display_name text, p_off_employer_contact text)
+-- Signature per ADR-0029 "NEW hosted artifacts" (privacy-deferred shape):
+--   issue_member_invite(p_roles text[], p_totp_code text, p_ttl_minutes int)
 --     → TABLE(invite_id uuid, invitee_user_id uuid, bootstrap_id uuid)
+--
+-- NOTE: p_display_name / p_off_employer_contact are DELIBERATELY NOT collected
+-- by the keystone. The privacy review BLOCKED their persistence here (no
+-- validation, no retention enforcement); the user decided to DEFER both fields
+-- out of the keystone entirely. They will be re-introduced (with employer-domain
+-- rejection on the contact field + an explicit retention class) in the co-chair
+-- roster increment that adds the member-management UI. The two-arg defaults on
+-- committee_invite_member (NULL/NULL, 00000000000002:215-216) keep that delegate
+-- call safe without forwarding any PI from this layer.
 -- ===========================================================================
 CREATE OR REPLACE FUNCTION public.issue_member_invite(
   p_roles                text[],
   p_totp_code            text,
-  p_ttl_minutes          integer,
-  p_display_name         text DEFAULT NULL,
-  p_off_employer_contact text DEFAULT NULL
+  p_ttl_minutes          integer
 ) RETURNS TABLE(invite_id uuid, invitee_user_id uuid, bootstrap_id uuid)
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -86,8 +92,10 @@ BEGIN
   --    role=NULL — the role is bound only on ACTIVATION (F-173), mirroring how
   --    committee_activate_membership sets users.role (00000000000002:290).
   --    NO public.users row is created at redeem time; this is the only producer.
-  INSERT INTO public.users (id, active, role, display_name, off_employer_contact)
-    VALUES (v_new_uid, true, NULL, p_display_name, p_off_employer_contact);
+  --    display_name / off_employer_contact are NOT written (privacy-deferred —
+  --    see header note; both columns are nullable, the row stays NULL on both).
+  INSERT INTO public.users (id, active, role)
+    VALUES (v_new_uid, true, NULL);
 
   -- 2. The TOTP bootstrap. F-176: secret_hash = HMAC(code) at rest — the raw
   --    6-digit code is NEVER persisted (identical to enroll_first_passkey:413
@@ -108,11 +116,11 @@ BEGIN
   --    gate + role validation (idempotent here) and inserts the pending
   --    committee_membership(active=false) + the committee_invite row. This is
   --    ONE SECURITY DEFINER frame (F-177): all-or-nothing.
+  --    p_display_name / p_off_employer_contact are DELIBERATELY NOT forwarded;
+  --    committee_invite_member's NULL defaults (00000000000002:215-216) apply.
   v_invite := public.committee_invite_member(
     p_target_user_id       => v_new_uid,
     p_roles                => v_roles,
-    p_display_name         => p_display_name,
-    p_off_employer_contact => p_off_employer_contact,
     p_bootstrap_id         => v_bootstrap,
     p_ttl_minutes          => p_ttl_minutes
   );
@@ -129,13 +137,13 @@ $$;
 
 -- F-168: co-chair-gated in-fn, REST-reachable by the co-chair's authenticated
 -- JWT (NOT anon). Mirrors committee_invite_member's grant posture exactly.
-REVOKE EXECUTE ON FUNCTION public.issue_member_invite(text[], text, integer, text, text)
+REVOKE EXECUTE ON FUNCTION public.issue_member_invite(text[], text, integer)
   FROM public;
-GRANT EXECUTE ON FUNCTION public.issue_member_invite(text[], text, integer, text, text)
+GRANT EXECUTE ON FUNCTION public.issue_member_invite(text[], text, integer)
   TO authenticated, supabase_auth_admin;
 
-COMMENT ON FUNCTION public.issue_member_invite(text[], text, integer, text, text) IS
-  'ADR-0029 P1-1: co-chair-side invite producer. Creates the invitee users row + auth_totp_bootstraps (15-min, HMAC at rest) + delegates to committee_invite_member with the named bootstrap_id/ttl. Co-chair-gated in-fn; GRANT authenticated. F-168/F-173/F-176/F-177.';
+COMMENT ON FUNCTION public.issue_member_invite(text[], text, integer) IS
+  'ADR-0029 P1-1: co-chair-side invite producer. Creates the invitee users row + auth_totp_bootstraps (15-min, HMAC at rest) + delegates to committee_invite_member with the named bootstrap_id/ttl. Co-chair-gated in-fn; GRANT authenticated. display_name/off_employer_contact deliberately NOT collected here (privacy-deferred to the co-chair roster increment with employer-domain rejection + retention). F-168/F-173/F-176/F-177.';
 
 -- ===========================================================================
 -- redeem_invite_complete — invitee-side terminal (mint_writer-ONLY).
@@ -226,9 +234,16 @@ BEGIN
   -- (iii) Consume the TOTP: write the single-use consumed-log row (F-38 reuse
   --       detection without keeping the row) + DELETE the bootstrap (mirrors
   --       00000000000001:425-428). A re-presented valid code finds no bootstrap.
+  --       Then stamp users.totp_destroyed_at for forensic parity with
+  --       enroll_first_passkey (00000000000001:430-433) — the moment the
+  --       bootstrap stops being a path is the same row-of-truth in both flows.
   INSERT INTO public.auth_totp_consumed_log (user_id, totp_code_hash)
     VALUES (v_target, hmac(p_totp_code::bytea, private._hmac_pseudonym_key()::bytea, 'sha256'));
   DELETE FROM public.auth_totp_bootstraps WHERE id = v_bootstrap.id;
+  UPDATE public.users
+     SET totp_destroyed_at = now(),
+         updated_at        = now()
+   WHERE id = v_target;
 
   -- (iv) Bind the first passkey to the invite's OWN target (F-171). Only the
   --      verified credential fields the EF forwards reach this point.

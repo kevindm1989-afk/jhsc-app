@@ -72,8 +72,10 @@ EXEMPT_DURING_ROLLOUT=(
 # re-pass the F-122/F-123 allowlist-expansion rule mandates: §3.18 IS that
 # re-pass (F-168). The redeem path is UNAUTHENTICATED-by-necessity but its SQL
 # terminal redeem_invite_complete is mint_writer-ONLY (REVOKE PUBLIC/anon/
-# authenticated/service_role — pinned in phase1_redeem_invite_rls.sql), so it
-# cannot be reached by a direct anon/authenticated RPC. Unlike bootstrap it is
+# authenticated/service_role — ENFORCED by the REVOKE/GRANT in
+# 00000000000041_adr0029_phase1_keystone.sql; pinned by the pgTAP test
+# phase1_redeem_invite_rls.sql), so it cannot be reached by a direct
+# anon/authenticated RPC. Unlike bootstrap it is
 # NOT one-shot (no EXISTS(users) guard, no BOOTSTRAP_ENABLED); its compensating
 # controls are the single-use invite + 15-min TOTP + 5-attempt lock + origin
 # pin + key-parity + verified-attestation (§3.18 F-168/F-169/F-170).
