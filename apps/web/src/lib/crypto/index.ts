@@ -73,14 +73,22 @@ export {
   enrollIdentityViaProduction,
   storeRecoveryBlobViaProduction,
   restoreRecoveryBlobViaProduction,
-  initCommitteeDataKeyViaProduction
+  initCommitteeDataKeyViaProduction,
+  unwrapCommitteeDataKeyViaProduction
 } from './production-flows';
 export type {
   EnrollProductionResult,
   StoreRecoveryProductionResult,
   RestoreRecoveryProductionResult,
-  InitCommitteeKeyProductionResult
+  InitCommitteeKeyProductionResult,
+  UnwrapCommitteeDataKeyResult
 } from './production-flows';
+export {
+  CommitteeKeyHolder,
+  panicWipeWithCommitteeKeyHolder,
+  getSessionCommitteeKeyHolder
+} from './committee-key-holder';
+export type { CommitteeKeyEntry } from './committee-key-holder';
 export { ARGON2_OPS, ARGON2_MEM_BYTES, KDF_PARAMS } from './recovery-blob';
 export { generateIdentityKeypair, selfTestKeypair, pubkeyFingerprint } from './identity-keys';
 export {

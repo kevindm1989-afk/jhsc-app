@@ -368,6 +368,38 @@ export function committeeKeyState(
   });
 }
 
+/**
+ * Phase 2a PR1 / ADR-0027 Decision 2 — read the caller's OWN committee-key
+ * wrap ciphertext (the FIRST production RPC that returns committee key material
+ * across the trust boundary). Backed by the self-only
+ * `get_committee_key_wrap_for_self` SECURITY DEFINER fn (migration 0038) which
+ * emits `committee_data_key.unwrap` audit-BEFORE-return inside one txn (F-151)
+ * and reads ONLY `WHERE user_id = auth.uid()` on the live key (F-142:
+ * own-wrap-only, no IDOR — the fn takes NO parameter). `null` when the actor
+ * holds no live-key wrap (client maps to no_wrap → Phase 0a setup). The wrap is
+ * SEALED ciphertext (useless without the device-local identity privkey); the
+ * bytea crosses the wire as PostgREST hex (`\x…`).
+ */
+export function getCommitteeKeyWrapForSelf(
+  rpc: RpcPort
+): Promise<
+  OpResult<{ key_id: string; epoch: number; wrapped_ciphertext_hex: string } | null>
+> {
+  return call<Array<{ key_id: string; epoch: number; wrapped_ciphertext: string }>>(
+    rpc,
+    'get_committee_key_wrap_for_self',
+    {}
+  ).then((r) => {
+    if (!r.ok) return r;
+    const row = r.data?.[0];
+    if (!row) return { ok: true, data: null };
+    return {
+      ok: true,
+      data: { key_id: row.key_id, epoch: row.epoch, wrapped_ciphertext_hex: row.wrapped_ciphertext }
+    };
+  });
+}
+
 export function wrapCommitteeDataKeyForMember(
   rpc: RpcPort,
   input: {

@@ -25,12 +25,13 @@ import { env } from '$env/dynamic/public';
 import { beforeSend, beforeBreadcrumb } from '$lib/observability/sentry-scrub';
 import { log } from '$lib/log';
 import { assertArgon2idAvailable } from '$lib/crypto/recovery-blob';
-import { clearJwt, getJwt } from '$lib/auth/session-jwt-store';
+import { clearJwt, getJwt, subscribeToJwt } from '$lib/auth/session-jwt-store';
 import {
   createPanicWipeAuditEmitter,
   createSupabaseT07Client
 } from '$lib/server-client/t07-client-factory';
 import { setDefaultStoreAuditEmitter, setPostWipeCleanup } from '$lib/lock/panic-wipe';
+import { getSessionCommitteeKeyHolder } from '$lib/crypto';
 
 // Read at runtime (not build time) so the build works without a .env present.
 const PUBLIC_SENTRY_DSN = env.PUBLIC_SENTRY_DSN;
@@ -104,6 +105,34 @@ setDefaultStoreAuditEmitter(createPanicWipeAuditEmitter(__defaultPanicWipeClient
 // lockstep with the rest of the local state. Mirrors the
 // tearDownSessionCookie posture for the in-memory side.
 setPostWipeCleanup(clearJwt);
+
+// ADR-0027 Decision 1 / F-145 triggers 1 + 2 + 3 — sign-out (clearJwt),
+// session revocation (HTTP 401 → onSessionRevoked → clearJwt), AND the
+// default-store panic-wipe (its post-wipe cleanup is `clearJwt`, above) all
+// clear the in-memory JWT. Subscribe to JWT changes: when the JWT transitions
+// to null, wipe the session committee-key holder (.fill(0) the plaintext data
+// key + null the reference). This single subscription covers all three JWT-
+// clearing triggers — the holder zeroizes the moment the session ends. 403
+// (rls_denied / rate-limit) is NOT a session event and does NOT clear the JWT,
+// so it does NOT wipe the holder (AC-8). A non-null transition (sign-in /
+// refresh) is a no-op for the holder. The ORDERING-guaranteed
+// (holder-before-IndexedDB) panic-wipe seam is `panicWipeWithCommitteeKeyHolder`
+// for surfaces that adopt it; this subscription is the default-path coverage.
+subscribeToJwt((jwt) => {
+  if (jwt === null) getSessionCommitteeKeyHolder().onSessionRevoked();
+});
+
+// ADR-0027 Decision 1 / F-145 trigger 5 — tab/window close. Best-effort wipe
+// on `beforeunload` + `pagehide` to reduce dwell on a bfcache restore (the
+// heap is torn down anyway; this is not a security guarantee, but it shortens
+// the window during which the plaintext key sits in a frozen page). `pagehide`
+// is the bfcache-correct event; `beforeunload` covers the hard-navigation
+// case. Both route to the same idempotent wipe.
+if (typeof window !== 'undefined') {
+  const wipeHolderOnUnload = () => getSessionCommitteeKeyHolder().onPageUnload();
+  window.addEventListener('beforeunload', wipeHolderOnUnload);
+  window.addEventListener('pagehide', wipeHolderOnUnload);
+}
 
 if (PUBLIC_SENTRY_DSN) {
   Sentry.init({

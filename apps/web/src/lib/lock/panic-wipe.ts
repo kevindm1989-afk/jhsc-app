@@ -31,6 +31,7 @@ import {
   type WipeClass,
   type WipeStore
 } from './wipe-store';
+import { getSessionCommitteeKeyHolder } from '../crypto/committee-key-holder';
 
 // ----- Closed-allowlist of IDB databases the wipe should clear -----
 //
@@ -207,6 +208,22 @@ export async function panicWipe(opts?: {
     }
   } catch {
     cacheNames = [];
+  }
+
+  // F-145 ordering invariant (ADR-0027 Decision 1 / AC-8; threat-model NO-GO
+  // #2): zeroize the session committee-key holder — the most sensitive
+  // in-memory secret — as the FIRST destructive step, strictly BEFORE the
+  // WipeStore clears IndexedDB. An interrupted wipe after the holder wipe but
+  // before IndexedDB still leaves the live key at zero. Best-effort: a panic
+  // MUST always proceed to destroy device state, so any error here is
+  // swallowed and never blocks the clear* sequence. This is in addition to the
+  // clearJwt -> onSessionRevoked side-effect (defense-in-depth for sign-out /
+  // 401); this call guarantees the holder-before-IndexedDB ordering on the
+  // panic path itself. No key material is logged.
+  try {
+    getSessionCommitteeKeyHolder().onPanicWipe();
+  } catch {
+    // Best-effort: never let a holder-wipe failure abort the panic.
   }
 
   // Drive each clear*; collect per-class failures.
