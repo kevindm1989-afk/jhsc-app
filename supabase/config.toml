@@ -85,5 +85,16 @@ verify_jwt = false
 [functions.bootstrap-first-co-chair]
 verify_jwt = false
 
+# The redeem-invite function (ADR-0029 §3.18 / F-168) is the REPEATABLE,
+# unauthenticated invitee-onboarding path: the invitee has no session yet (the
+# redeem is how they get one), so GoTrue must NOT require a bearer token. Unlike
+# bootstrap it is NOT one-shot — its gate is the single-use invite + 15-min TOTP,
+# NOT BOOTSTRAP_ENABLED and NOT an EXISTS(users) guard. Its SQL terminal
+# redeem_invite_complete is mint_writer-ONLY, so a direct anon/authenticated RPC
+# cannot reach it. Authority comes from the verified attestation + invite + TOTP
+# inside the function, never from a JWT on the request.
+[functions.redeem-invite]
+verify_jwt = false
+
 [analytics]
 enabled = false
