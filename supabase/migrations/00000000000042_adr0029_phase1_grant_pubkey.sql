@@ -170,10 +170,10 @@ BEGIN
   -- the four failure cases. Read the candidate pubkey ONLY when the target is
   -- an active member AND has an enrolled identity_keys row that has not been
   -- revoked. is_active_member returns false for missing users / missing
-  -- committee_membership / inactive committee_membership; the LEFT JOIN below
-  -- yields NULL pubkey for the "no identity_keys row" case (and for the
-  -- revoked-key case via the WHERE clause). The single guard fires on either
-  -- failure path.
+  -- committee_membership / inactive committee_membership; the single-table
+  -- SELECT yields NULL into v_pubkey when no identity_keys row exists (and
+  -- for the revoked-key case via the WHERE clause). The single guard fires
+  -- on either failure path.
   SELECT ik.public_key
     INTO v_pubkey
     FROM public.identity_keys ik
@@ -181,7 +181,11 @@ BEGIN
      AND ik.revoked_at IS NULL
    LIMIT 1;
 
-  IF v_pubkey IS NULL OR NOT public.is_active_member(p_target_user_id) THEN
+  -- Side-channel mitigation (not just style): evaluate the membership check
+  -- FIRST so the IF short-circuit cannot make the "no identity row" path
+  -- measurably faster than the "has identity row but inactive membership"
+  -- path. is_active_member always runs regardless of v_pubkey's value.
+  IF NOT public.is_active_member(p_target_user_id) OR v_pubkey IS NULL THEN
     RAISE EXCEPTION 'member_not_enrolled' USING ERRCODE = 'P0001';
   END IF;
 

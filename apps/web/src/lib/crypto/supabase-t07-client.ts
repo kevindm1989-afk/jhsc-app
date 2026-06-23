@@ -138,8 +138,8 @@ export class SupabaseT07Client {
    *
    * Callers supply:
    *  - `public_key` + `pubkey_fingerprint` — the locally-generated keypair's
-   *    public half + the BLAKE2b fingerprint the JS lib's `pubkeyFingerprint`
-   *    already computed.
+   *    public half + the SHA-256 fingerprint the JS lib's `pubkeyFingerprint`
+   *    already computed (Amendment A-6.1 supersedes A-6's BLAKE2b choice).
    *  - `private_key` — the locally-generated keypair's secret. Persisted to
    *    LocalIdentityStore ONLY after the challenge succeeds (so a malformed
    *    or hostile challenge cannot get the privkey stored device-side).
@@ -364,13 +364,13 @@ export class SupabaseT07Client {
    * target-failure branches to `member_not_enrolled`.
    * F-176: this method never logs the target uid / returned pubkey / fingerprint.
    */
-  async getMemberPubkey(input: { target_user_id: string }): Promise<
-    T07OpResult<{ public_key: Uint8Array; fingerprint: string }>
-  > {
-    const r = await invoke<{ public_key_hex: string; fingerprint: string }>(
-      this.opts.transport,
-      { op: 'get_member_pubkey', target_user_id: input.target_user_id }
-    );
+  async getMemberPubkey(input: {
+    target_user_id: string;
+  }): Promise<T07OpResult<{ public_key: Uint8Array; fingerprint: string }>> {
+    const r = await invoke<{ public_key_hex: string; fingerprint: string }>(this.opts.transport, {
+      op: 'get_member_pubkey',
+      target_user_id: input.target_user_id
+    });
     if (!r.ok) return r;
     return {
       ok: true,

@@ -426,8 +426,8 @@ export function getCommitteeKeyWrapForSelf(
  * Wire shape: `{ public_key_hex, fingerprint }`. The bytea crosses the wire as
  * PostgREST hex (`\x...`); the apps/web `SupabaseT07Client` converts to
  * `Uint8Array` via `pgHexToBytes` the same way `getCommitteeKeyWrapForSelf`
- * does. The fingerprint is the server-side re-derived BLAKE2b-32 hex
- * (Amendment A-6); the EF forwards verbatim.
+ * does. The fingerprint is the server-side re-derived SHA-256 hex
+ * (Amendment A-6.1 supersedes A-6's BLAKE2b choice); the EF forwards verbatim.
  *
  * F-172: only `target_user_id` is forwarded — no caller-supplied pubkey field.
  * F-176: the returned hex / fingerprint / target uid NEVER reach a log line;

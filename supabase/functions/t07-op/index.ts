@@ -256,6 +256,13 @@ serveWithCors(async (req) => {
     case 'get_member_pubkey':
       // F-172: forward ONLY target_user_id. Any caller-smuggled pubkey field
       // is dropped by destructuring; the core fn forwards only p_target_user_id.
+      // Shape-check target_user_id BEFORE dispatch so a missing/non-string
+      // field surfaces as a clean 400 bad_request rather than falling through
+      // to a Postgres 22P02 → unmapped unknown/400. Mirrors the early shape
+      // guard in `enrollment_challenge_init` above.
+      if (typeof body.target_user_id !== 'string') {
+        return json({ ok: false, error: 'bad_request' }, 400);
+      }
       result = await getMemberPubkey(rpc, { target_user_id: body.target_user_id });
       break;
     case 'wrap_member':
