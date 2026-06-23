@@ -21,6 +21,7 @@ import {
   inviteMember,
   issueInvite,
   reactivateMember,
+  reissueTotp,
   removeMember,
   setRoles,
   type OpResult,
@@ -38,7 +39,13 @@ type Op =
   // ADR-0029 P1-3 — new co-chair-side issuance arm. The raw 6-digit `code`
   // rides this body only; it is forwarded into `issue_member_invite` and
   // NEVER touches any log line / outcome attribute (F-176 / Decision 8).
-  | { op: 'issue_invite'; roles: string[]; code: string; ttl_minutes: number };
+  | { op: 'issue_invite'; roles: string[]; code: string; ttl_minutes: number }
+  // ADR-0029 P1-6 — co-chair-side "re-send code" arm. Re-arms a fresh 15-min
+  // TOTP against an EXISTING invite; carries NO ttl_minutes / roles (re-send
+  // does not re-issue the invite). The raw 6-digit `code` rides this body only;
+  // it is forwarded into `reissue_member_totp` and NEVER touches any log line /
+  // outcome attribute (F-176 / Decision 8).
+  | { op: 'reissue_totp'; invite_id: string; code: string };
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -61,6 +68,8 @@ async function dispatch(rpc: RpcPort, body: Op): Promise<OpResult<unknown>> {
       return reactivateMember(rpc, body);
     case 'issue_invite':
       return issueInvite(rpc, body);
+    case 'reissue_totp':
+      return reissueTotp(rpc, body);
     default:
       return { ok: false, reason: 'unknown', status: 400 };
   }

@@ -672,8 +672,16 @@
   },
   "reprisal": {
     "page": {
-      "title": "Reprisal log",
-      "list_heading": "Reprisal entries"
+      "log_button": "Report a reprisal",
+      "needs_setup": "Committee encryption isn't set up on this device. Open Settings to finish setup.",
+      "read": {
+        "open_button": "View entry",
+        "close_button": "Hide entry",
+        "passphrase_label": "Passphrase for this entry",
+        "reveal_button": "View",
+        "unavailable": "This entry can't be shown. The passphrase may be wrong, or the entry no longer exists.",
+        "error": "Couldn't open this entry. Try again."
+      }
     },
     "empty": {
       "heading": "No reprisal entries logged",
@@ -718,18 +726,6 @@
         "needs_setup": "Committee encryption isn't set up on this device. Open Settings to finish setup.",
         "rls_denied": "You don't have permission to save this entry. Contact your worker co-chair.",
         "needs_recovery": "This device can't decrypt the committee key. Restore your identity from your recovery sheet."
-      }
-    },
-    "page": {
-      "log_button": "Report a reprisal",
-      "needs_setup": "Committee encryption isn't set up on this device. Open Settings to finish setup.",
-      "read": {
-        "open_button": "View entry",
-        "close_button": "Hide entry",
-        "passphrase_label": "Passphrase for this entry",
-        "reveal_button": "View",
-        "unavailable": "This entry can't be shown. The passphrase may be wrong, or the entry no longer exists.",
-        "error": "Couldn't open this entry. Try again."
       }
     },
     "passphrase": {
@@ -984,6 +980,46 @@
     "success": "Session established (session {sessionId}).",
     "already_signed_in": "You're already signed in on this device.",
     "go_to_settings_cta": "Go to settings"
+  },
+  "redeem": {
+    "title": "Join your committee",
+    "intro": "Enter the one-time code your co-chair gave you, then create a passkey on this device to finish joining.",
+    "code_label": "One-time code",
+    "code_helper": "The 6-digit code your co-chair sent you out-of-band.",
+    "button": {
+      "idle": "Create my passkey",
+      "requesting": "Starting…",
+      "verifying": "Setting up your account…"
+    },
+    "waiting": "Follow your device's prompt to create your passkey…",
+    "success": {
+      "heading": "You're in — passkey created",
+      "body": "Your passkey is saved on this device. Next, sign in. You'll then set up a recovery passphrase and wait for a co-chair to grant you access to the committee's encrypted data.",
+      "cta": "Sign in now"
+    },
+    "error": {
+      "invalid": {
+        "heading": "That code didn't work",
+        "body": "Please check the code and try again. If it still doesn't work, ask your co-chair to send you a new code."
+      },
+      "rate_limited": {
+        "heading": "Too many tries",
+        "body": "Wait a few minutes and try again. If this keeps happening, ask your co-chair to send a new code."
+      },
+      "unsupported": {
+        "heading": "This device can't create a passkey",
+        "body": "Use a different personal device, or ask your co-chair for help."
+      },
+      "system": {
+        "heading": "Something went wrong",
+        "body": "This is on our side, not you. Try again in a moment. If it keeps happening, contact your co-chair."
+      }
+    },
+    "cancelled": "Set-up cancelled. Press Create my passkey when you're ready.",
+    "incomplete_link": {
+      "heading": "This link is incomplete",
+      "body": "Open the full redeem link your co-chair sent you, or ask them to send it again."
+    }
   },
   "landing": {
     "subtitle": "Health and safety, for the people doing the work.",
@@ -1526,6 +1562,10 @@
     "sensitive_feed": {
       "new_event": "New sensitive activity: {description}",
       "muted": "Sensitive-activity pop-ups paused. The feed still updates."
+    },
+    "redeem": {
+      "requesting": "Starting your set-up…",
+      "verifying": "Setting up your account…"
     }
   },
   "library": {
