@@ -40,6 +40,7 @@ export type T07Reason =
   | 'cap_reached'
   | 'already_initialised'
   | 'no_active_members'
+  | 'member_not_enrolled'
   | 'rotation_in_progress'
   | 'rotation_not_started'
   | 'challenge_expired'
@@ -58,6 +59,7 @@ const MESSAGE_LITERALS: ReadonlySet<string> = new Set([
   'cap_reached',
   'already_initialised',
   'no_active_members',
+  'member_not_enrolled',
   'rotation_in_progress',
   'rotation_not_started',
   'challenge_expired',
@@ -74,6 +76,7 @@ const MESSAGE_LITERALS: ReadonlySet<string> = new Set([
   'invalid_new_key',
   'invalid_nonce',
   'invalid_ttl',
+  'target_not_member',
   '4eyes_required'
 ]);
 
@@ -85,6 +88,8 @@ const STATUS: Record<T07Reason, OpStatus> = {
   cap_reached: 409,
   already_initialised: 409,
   no_active_members: 422,
+  // ADR-0029 P1-4 / Amendment A-5: precondition-failed (mirrors no_active_members:422).
+  member_not_enrolled: 422,
   rotation_in_progress: 423,
   rotation_not_started: 422,
   challenge_expired: 410,
@@ -131,6 +136,14 @@ export function mapRpcError(error: RpcError): { reason: T07Reason; status: OpSta
         break;
       case 'no_active_members':
         reason = 'no_active_members';
+        break;
+      // ADR-0029 P1-4 (F-174) — the closed-literal denial the SQL keystone
+      // raises when the target is not enrolled OR not an active member.
+      // `target_not_member` is the alternative literal the test admits;
+      // both fold to the same client-mappable reason (status 422).
+      case 'member_not_enrolled':
+      case 'target_not_member':
+        reason = 'member_not_enrolled';
         break;
       case 'rotation_in_progress':
         reason = 'rotation_in_progress';
@@ -396,6 +409,53 @@ export function getCommitteeKeyWrapForSelf(
     return {
       ok: true,
       data: { key_id: row.key_id, epoch: row.epoch, wrapped_ciphertext_hex: row.wrapped_ciphertext }
+    };
+  });
+}
+
+/**
+ * ADR-0029 P1-4 / P1-5 — read the TARGET member's enrolled identity public key
+ * for the co-chair-side wrap composition. The FIRST production EF surface that
+ * returns ANOTHER member's pubkey across the trust boundary. Backed server-side
+ * by `get_member_identity_pubkey_for_wrap` (SQL migration 0042) which is
+ * co-chair-gated in-fn, emits `identity_pubkey.disclosed_for_wrap`
+ * audit-before-return SUCCESS-ONLY (Amendment A-1), and collapses all four
+ * target-failure branches to the closed literal `member_not_enrolled`
+ * (Amendment A-2, F-174 enumeration-defeat).
+ *
+ * Wire shape: `{ public_key_hex, fingerprint }`. The bytea crosses the wire as
+ * PostgREST hex (`\x...`); the apps/web `SupabaseT07Client` converts to
+ * `Uint8Array` via `pgHexToBytes` the same way `getCommitteeKeyWrapForSelf`
+ * does. The fingerprint is the server-side re-derived SHA-256 hex
+ * (Amendment A-6.1 supersedes A-6's BLAKE2b choice); the EF forwards verbatim.
+ *
+ * F-172: only `target_user_id` is forwarded — no caller-supplied pubkey field.
+ * F-176: the returned hex / fingerprint / target uid NEVER reach a log line;
+ * the dispatcher's reason-only logging posture is the structural mitigation.
+ */
+export function getMemberPubkey(
+  rpc: RpcPort,
+  input: { target_user_id: string }
+): Promise<OpResult<{ public_key_hex: string; fingerprint: string }>> {
+  // ONLY p_target_user_id is forwarded (F-172). Any caller-smuggled
+  // pubkey/sealed/cipher/wrap field is dropped here by destructuring.
+  return call<Array<{ public_key: string; fingerprint: string }>>(
+    rpc,
+    'get_member_identity_pubkey_for_wrap',
+    { p_target_user_id: input.target_user_id }
+  ).then((r) => {
+    if (!r.ok) return r;
+    const row = r.data?.[0];
+    if (!row) {
+      // The SQL keystone returns NO ROWS only when it RAISEs an exception
+      // (success path always returns one row). A null row here would mean a
+      // server-side regression; collapse to the closed denial literal so the
+      // composition cannot proceed to seal-to-nothing.
+      return { ok: false, reason: 'member_not_enrolled', status: 422 };
+    }
+    return {
+      ok: true,
+      data: { public_key_hex: row.public_key, fingerprint: row.fingerprint }
     };
   });
 }
