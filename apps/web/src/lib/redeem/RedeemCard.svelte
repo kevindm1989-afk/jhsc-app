@@ -334,11 +334,24 @@
         </form>
       {/if}
 
-      {#if state === 'awaiting_ceremony' || state === 'verifying'}
-        <!-- Polite: the member is mid-ceremony; do not interrupt. Rendered
-             BEFORE create() opens the OS dialog (Surface J §3.1 / a11y test). -->
+      {#if state === 'awaiting_ceremony'}
+        <!-- Polite: the OS dialog is up; do not interrupt. Rendered BEFORE
+             create() opens the dialog (Surface J §3.1 / a11y test). -->
         <p class="waiting" role="status" aria-live="polite" data-testid="redeem-waiting">
           {t('redeem.waiting')}
+        </p>
+      {/if}
+
+      {#if state === 'requesting_challenge' || state === 'verifying'}
+        <!-- WCAG 4.1.3 (a11y review Finding 1): the pre-dialog (requesting) and
+             post-dialog (verifying) phases each get a phase-specific polite
+             announcement, mutually exclusive with the visible "follow your
+             device prompt" note above (no double-announce). SR-only — the
+             button label + aria-busy carry the visible signal. -->
+        <p class="sr-only" role="status" aria-live="polite" data-testid="redeem-progress">
+          {state === 'requesting_challenge'
+            ? t('a11y.redeem.requesting')
+            : t('a11y.redeem.verifying')}
         </p>
       {/if}
     </div>
@@ -579,6 +592,19 @@
   .waiting {
     margin-block-start: 0.75rem;
     color: var(--color-fg-muted);
+  }
+
+  /* Visually-hidden polite live region (mirrors D5SessionRevocationPrimer). */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
   }
 
   .redeem-cta {

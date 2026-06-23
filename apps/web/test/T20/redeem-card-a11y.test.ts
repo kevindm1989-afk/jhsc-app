@@ -206,6 +206,35 @@ describe('P1-7 [a11y] ceremony container — aria-busy toggling', () => {
     release();
   });
 
+  it('the requesting-challenge phase announces a phase-specific polite progress note (a11y review Finding 1 / WCAG 4.1.3)', async () => {
+    // Hold the challenge open so the component stays in requesting_challenge —
+    // the pre-OS-dialog phase that previously had NO live region at all.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const transport = async (body: Record<string, unknown>) => {
+      void body;
+      await gate;
+      return { status: 200, body: { ok: true, challenge: SERVER_CHALLENGE } };
+    };
+    render(RedeemCard, {
+      props: {
+        inviteId: INVITE_ID,
+        transport: transport as never,
+        credentials: stubCredentials() as never,
+        navigate: (() => {}) as never
+      }
+    });
+    await enterCodeAndSubmit();
+    // A polite status region is present BEFORE the OS dialog phase, so a SR user
+    // is told set-up has started (wires the previously-dead a11y.redeem.requesting
+    // key). Assert role/politeness + non-empty text, not the exact copy.
+    const progress = await screen.findByTestId('redeem-progress');
+    expect(progress.getAttribute('role')).toBe('status');
+    expect(progress.getAttribute('aria-live')).toBe('polite');
+    expect(progress.textContent?.trim()).not.toBe('');
+    release();
+  });
+
   it('aria-busy returns to "false" once an error terminal state is reached', async () => {
     renderCard({ responses: [CHALLENGE_OK, { status: 422, body: { error: 'redeem_invalid' } }] });
     await enterCodeAndSubmit();
