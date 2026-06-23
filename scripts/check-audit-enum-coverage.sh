@@ -71,6 +71,7 @@ EXPECTED_ENUM=(
   member.added
   member.removed
   member.role_changed
+  member.totp_reissued
   committee.key_rotated
   client.cache_policy_violation
   client.identity_selftest_fail

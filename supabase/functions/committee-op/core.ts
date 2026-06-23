@@ -184,3 +184,39 @@ export function issueInvite(
     p_ttl_minutes: opts.ttl_minutes
   });
 }
+
+/**
+ * ADR-0029 P1-6 — co-chair-side "re-send code" via the SQL fn
+ * `reissue_member_totp(p_invite_id uuid, p_totp_code text)` (migration 0043).
+ *
+ * Re-send re-arms a FRESH 15-min TOTP against an EXISTING, still-unconsumed
+ * invite (the 15-min TOTP expires long before the 7-day invite TTL). The SQL fn:
+ *   - validates the co-chair gate (rls_denied otherwise),
+ *   - normalizes a consumed/expired/non-existent invite to `invite_invalid`
+ *     (Amendment A-7.2 — the SAME closed oracle the keystone uses),
+ *   - swaps ONLY the auth_totp_bootstraps row (delete-then-insert under the
+ *     UNIQUE(user_id) cap-of-1; the OLD code dies) + re-points the invite's
+ *     bootstrap_id, leaving the user/invite/membership untouched,
+ *   - emits the success-only `member.totp_reissued` audit event (A-7.1),
+ *   - returns ONE row `{invite_id, bootstrap_id}` (A-7.3).
+ *
+ * Re-send is a SIBLING of `issueInvite`, not a re-issuance of the invite: it
+ * carries NO `ttl_minutes` and NO `roles` (those are server-bound at issue and
+ * untouched by re-send). Mapping it through the SAME mapRpcError keeps the
+ * existing CommitteeReason set (rls_denied→403, invite_invalid→422, else→400).
+ *
+ * F-176: the raw 6-digit `code` is forwarded to the RPC as `p_totp_code` and
+ * then never touched here again — no log, no error body, no carrying field on
+ * the OpResult. The RPC stores only `HMAC(code)` at rest.
+ */
+export function reissueTotp(
+  rpc: RpcPort,
+  opts: { invite_id: string; code: string }
+): Promise<OpResult<{ invite_id: string; bootstrap_id: string }>> {
+  // Field names match the SQL signature byte-for-byte
+  // (migration 0043 / ADR-0029:9805): p_invite_id / p_totp_code.
+  return call(rpc, 'reissue_member_totp', {
+    p_invite_id: opts.invite_id,
+    p_totp_code: opts.code
+  });
+}
