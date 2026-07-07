@@ -160,7 +160,7 @@ serveWithCors(async (req) => {
   log.info({
     event: 'committee.op',
     attributes: { route: body?.op ?? 'unknown', outcome: result.ok ? 'ok' : result.reason },
-    requestId: requestId ?? undefined
+    request_id: requestId ?? undefined
   });
 
   if (result.ok) return json({ ok: true, data: result.data }, 200);
