@@ -75,7 +75,10 @@ const STATUS: Record<CommitteeReason, 400 | 403 | 404 | 409 | 422> = {
  * 'rls_denied'`), so message-matching is authoritative; SQLSTATE is the
  * fallback (42501 → rls_denied, 23514 check-violation → invalid_role).
  */
-export function mapRpcError(error: RpcError): { reason: CommitteeReason; status: 400 | 403 | 404 | 409 | 422 } {
+export function mapRpcError(error: RpcError): {
+  reason: CommitteeReason;
+  status: 400 | 403 | 404 | 409 | 422;
+} {
   let reason: CommitteeReason = 'unknown';
   if (KNOWN_REASONS.has(error.message)) {
     reason = error.message as CommitteeReason;
@@ -87,7 +90,11 @@ export function mapRpcError(error: RpcError): { reason: CommitteeReason; status:
   return { reason, status: STATUS[reason] };
 }
 
-async function call<T>(rpc: RpcPort, fn: string, args: Record<string, unknown>): Promise<OpResult<T>> {
+async function call<T>(
+  rpc: RpcPort,
+  fn: string,
+  args: Record<string, unknown>
+): Promise<OpResult<T>> {
   const { data, error } = await rpc(fn, args);
   if (error) return { ok: false, ...mapRpcError(error) };
   return { ok: true, data: data as T };
@@ -173,9 +180,7 @@ export function reactivateMember(
 export function issueInvite(
   rpc: RpcPort,
   opts: { roles: string[]; code: string; ttl_minutes: number }
-): Promise<
-  OpResult<{ invite_id: string; invitee_user_id: string; bootstrap_id: string }>
-> {
+): Promise<OpResult<{ invite_id: string; invitee_user_id: string; bootstrap_id: string }>> {
   // Field names match the keystone signature byte-for-byte
   // (migration 0041:54-58): p_roles / p_totp_code / p_ttl_minutes.
   return call(rpc, 'issue_member_invite', {
@@ -219,4 +224,69 @@ export function reissueTotp(
     p_invite_id: opts.invite_id,
     p_totp_code: opts.code
   });
+}
+
+/**
+ * ADR-0029 P1-8a — the co-chair roster read (Amendment A-8.1 / A-8.3).
+ *
+ * One row per committee_membership: the member's PI (display_name /
+ * off_employer_contact) + the two grant-state BADGE booleans (has_identity_key
+ * / has_live_wrap). Mirrors the SQL RETURNS TABLE column-for-column; the
+ * pending-grant badge (`has_identity_key AND NOT has_live_wrap`) is derived by
+ * the UI, not carried here.
+ */
+export interface RosterRow {
+  user_id: string;
+  roles: string[];
+  active: boolean;
+  invited_at: string;
+  activated_at: string | null;
+  deactivated_at: string | null;
+  grace_until: string | null;
+  display_name: string | null;
+  off_employer_contact: string | null;
+  has_identity_key: boolean;
+  has_live_wrap: boolean;
+}
+
+/**
+ * ADR-0029 P1-8a — the co-chair pending-invite read (Amendment A-8.2 / A-8.3).
+ *
+ * 🔒 The 6 pinned columns ONLY — NO bootstrap_id / secret material (the SQL
+ * function excludes the invite's TOTP-bootstrap FK by construction and reads no
+ * TOTP-secret store, F-178). `expires_at` is the INVITE TTL, not a TOTP window.
+ */
+export interface PendingInvite {
+  invite_id: string;
+  target_user_id: string;
+  display_name: string | null;
+  roles: string[];
+  issued_at: string;
+  expires_at: string;
+}
+
+/**
+ * ADR-0029 P1-8a — B1 roster read arm (A-8.3). Forwards the SETOF RPC
+ * `committee_roster_list` with NO args (the co-chair identity is the JWT-bound
+ * auth.uid(), not a parameter) and passes the array through on `data` WITHOUT
+ * reshaping. The SQL RAISE `rls_denied` (42501) maps to {rls_denied, 403} via
+ * the shared mapRpcError — NO new CommitteeReason. A genuinely-empty committee
+ * is an empty array on the SUCCESS path, distinct from the non-co-chair RAISE.
+ *
+ * F-176: no member PI / raw uid is ever logged or echoed here — the core only
+ * returns the {ok,data}|{ok,reason,status} contract; the handler (index.ts)
+ * logs route + outcome ONLY.
+ */
+export function listRoster(rpc: RpcPort): Promise<OpResult<RosterRow[]>> {
+  return call(rpc, 'committee_roster_list', {});
+}
+
+/**
+ * ADR-0029 P1-8a — B2 pending-invite read arm (A-8.3). SIBLING of listRoster:
+ * forwards the SETOF RPC `committee_invite_list_pending` with NO args and
+ * passes the array through on `data`. Same rls_denied→403 / unknown→400
+ * mapping; same F-176 PI-free posture.
+ */
+export function listPendingInvites(rpc: RpcPort): Promise<OpResult<PendingInvite[]>> {
+  return call(rpc, 'committee_invite_list_pending', {});
 }
