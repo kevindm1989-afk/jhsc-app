@@ -184,6 +184,12 @@
     <p class="muted">{t('common.morePage.group_account_blurb')}</p>
     <ul class="more-links">
       <li>
+        <a href="/committee" class="more-link" data-testid="more-link-committee">
+          <strong>{t('committee.nav.label')}</strong>
+          <span>{t('committee.nav.blurb')}</span>
+        </a>
+      </li>
+      <li>
         <a href="/settings" class="more-link" data-testid="more-link-settings">
           <strong>{t('common.morePage.link_settings_label')}</strong>
           <span>{t('common.morePage.link_settings_blurb')}</span>
