@@ -1,2 +1,10 @@
 packages:
   - 'apps/*'
+
+# Supply-chain hardening — pnpm >= 10.26 (packageManager pins 10.33.0).
+# Flagged by semgrep's pnpm ruleset; adopted (not waived) since this is a
+# security-critical whistleblower/reprisal-defence app. Safe for frozen-lockfile
+# CI installs (no new resolution) and for the existing registry-only deps.
+blockExoticSubdeps: true    # block transitive deps from git/tarball/untrusted sources
+minimumReleaseAge: 10080    # 7-day quarantine on newly-published versions (override per-package when a fresh release is genuinely needed)
+trustPolicy: no-downgrade   # reject dependency updates that downgrade security settings
