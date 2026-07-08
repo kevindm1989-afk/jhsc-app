@@ -1034,7 +1034,7 @@
       "not_co_chair": {
         "heading": "This area is for co-chairs",
         "body": "The committee roster and member management are available to worker co-chairs. If you think you should have access, ask your co-chair.",
-        "back": "Back to more"
+        "back": "Back to More"
       },
       "session_expired": "Your session ended. Sign in again to view the roster.",
       "error": {
@@ -1082,7 +1082,7 @@
           "sr": "Status: Removed from the committee"
         }
       },
-      "back_to_more": "Back to more"
+      "back_to_more": "Back to More"
     }
   },
   "landing": {

@@ -31,7 +31,7 @@
    *     the full user_id is never rendered.
    *   - the raw `reason` enum / HTTP status is never echoed to the user.
    */
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { t } from '$lib/i18n';
   import { isSignedIn } from '$lib/auth/session-jwt-svelte';
   import type { RosterRow, CommitteeOpResult } from './supabase-committee-client';
@@ -53,13 +53,32 @@
   let phase: Phase = 'loading';
   let rows: RosterRow[] = [];
 
+  // The persistent page heading (F1 / WCAG 2.4.3 focus target). It lives OUTSIDE
+  // the {#if} state branches, so it survives every phase transition — including
+  // the Retry reload that unmounts the error banner + its button.
+  let headingEl: HTMLHeadingElement | null = null;
+
   // aria-busy is true only while a read is genuinely in flight for a signed-in
   // co-chair — never in the signed-out short-circuit.
   $: busy = $isSignedIn && phase === 'loading';
 
+  // F2 (WCAG 4.1.3): a SINGLE persistent polite live region (mounted from the
+  // first render, mutated in place) announces the loaded member count. NVDA and
+  // some VoiceOver/browser combos DROP a live region that arrives already
+  // populated, so the count is written as a MUTATION of an already-present node,
+  // never an insertion. The visible role="status" loading line already owns the
+  // loading announcement, so this region stays empty until the list resolves —
+  // duplicating the loading text here would double-announce it.
+  $: liveMessage =
+    $isSignedIn && phase === 'list'
+      ? t('a11y.committee.roster.loaded', { count: rows.length })
+      : '';
+
   onMount(() => {
     // Signed-out gate — short-circuit BEFORE any listRoster() read (F-178).
     if (!$isSignedIn) return;
+    // Initial mount does NOT move focus (mirrors RedeemCard scoping the focus
+    // moves to explicit user actions, never the mount).
     void load();
   });
 
@@ -81,6 +100,20 @@
       // error. The raw reason enum is mapped away, never rendered (F-176).
       phase = 'error';
     }
+  }
+
+  /**
+   * F1 (WCAG 2.4.3): re-run the read from the error state, then move focus to
+   * the persistent page <h1>. Activating Retry unmounts the alert banner + its
+   * button, so without this the focus would fall to <body> and a keyboard/SR
+   * user would lose their place. Mirrors RedeemCard's
+   * focusErrorHeading()/focusSuccessHeading() — scoped to this explicit user
+   * action only, never the initial mount.
+   */
+  async function retry(): Promise<void> {
+    await load();
+    await tick();
+    headingEl?.focus();
   }
 
   type BadgeKind = 'active' | 'pending_grant' | 'awaiting_identity' | 'pending_invite' | 'inactive';
@@ -119,7 +152,18 @@
   data-testid="committee-page"
   aria-busy={busy ? 'true' : 'false'}
 >
-  <h1>{t('committee.roster.title')}</h1>
+  <h1 tabindex="-1" bind:this={headingEl}>{t('committee.roster.title')}</h1>
+
+  <!--
+    F2 (WCAG 4.1.3): the single persistent polite live region. Present from the
+    first render across every phase; its text is MUTATED in place (empty →
+    "Committee roster loaded. N members.") so the count is reliably announced
+    rather than dropped as an already-populated insertion. Carries the
+    `committee-roster-loaded` testid the a11y suite resolves after load.
+  -->
+  <p class="sr-only" role="status" aria-live="polite" data-testid="committee-roster-loaded">
+    {liveMessage}
+  </p>
 
   {#if !$isSignedIn}
     <p role="status" data-testid="committee-signed-out">
@@ -181,7 +225,7 @@
       <div>
         <h2 class="committee-banner-heading">{t('committee.roster.error.heading')}</h2>
         <p class="committee-banner-body">{t('committee.roster.error.body')}</p>
-        <button type="button" class="btn committee-retry" on:click={() => load()}>
+        <button type="button" class="btn committee-retry" on:click={retry}>
           {t('committee.roster.error.retry')}
         </button>
       </div>
@@ -211,9 +255,6 @@
       <p class="committee-empty-body">{t('committee.roster.empty.body')}</p>
     </div>
   {:else if phase === 'list'}
-    <p role="status" class="sr-only" data-testid="committee-roster-loaded">
-      {t('a11y.committee.roster.loaded', { count: rows.length })}
-    </p>
     <ul
       class="committee-list"
       data-testid="committee-roster-list"
