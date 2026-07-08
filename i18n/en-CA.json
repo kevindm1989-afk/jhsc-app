@@ -1021,6 +1021,70 @@
       "body": "Open the full redeem link your co-chair sent you, or ask them to send it again."
     }
   },
+  "committee": {
+    "nav": {
+      "label": "Committee",
+      "blurb": "Manage members, invites, and committee-key access. Co-chairs only."
+    },
+    "roster": {
+      "title": "Committee roster",
+      "signed_out": "Sign in to view the committee roster.",
+      "loading": "Loading the committee roster…",
+      "list_aria": "Committee members",
+      "not_co_chair": {
+        "heading": "This area is for co-chairs",
+        "body": "The committee roster and member management are available to worker co-chairs. If you think you should have access, ask your co-chair.",
+        "back": "Back to more"
+      },
+      "session_expired": "Your session ended. Sign in again to view the roster.",
+      "error": {
+        "heading": "Couldn't load the roster",
+        "body": "Something went wrong on our side. Try again in a moment.",
+        "retry": "Try again"
+      },
+      "empty": {
+        "heading": "No members yet",
+        "body": "Once members are invited and join, they'll appear here."
+      },
+      "row": {
+        "unnamed": "Member — no name on file",
+        "contact_label": "Off-employer contact",
+        "date_invited": "Invited {date}",
+        "date_joined": "Joined {date}",
+        "date_member_since": "Member since {date}",
+        "date_removed": "Removed {date}",
+        "date_grace_until": "Access ends {date}"
+      },
+      "role": {
+        "worker_co_chair": "Worker co-chair",
+        "worker_member": "Worker member",
+        "certified_member": "Certified member"
+      },
+      "badge": {
+        "active": {
+          "text": "Active",
+          "sr": "Status: Active member with committee-key access"
+        },
+        "pending_grant": {
+          "text": "Waiting for key access",
+          "sr": "Status: Waiting for you to grant committee-key access"
+        },
+        "awaiting_identity": {
+          "text": "Setting up encryption",
+          "sr": "Status: Member is still setting up their encryption; nothing for you to do yet"
+        },
+        "pending_invite": {
+          "text": "Invited — not joined yet",
+          "sr": "Status: Invited but has not joined yet"
+        },
+        "inactive": {
+          "text": "Removed",
+          "sr": "Status: Removed from the committee"
+        }
+      },
+      "back_to_more": "Back to more"
+    }
+  },
   "landing": {
     "subtitle": "Health and safety, for the people doing the work.",
     "new_device": {
@@ -1566,6 +1630,11 @@
     "redeem": {
       "requesting": "Starting your set-up…",
       "verifying": "Setting up your account…"
+    },
+    "committee": {
+      "roster": {
+        "loaded": "Committee roster loaded. {count} members."
+      }
     }
   },
   "library": {
