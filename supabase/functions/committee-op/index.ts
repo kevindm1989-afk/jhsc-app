@@ -20,6 +20,8 @@ import {
   activateMembership,
   inviteMember,
   issueInvite,
+  listPendingInvites,
+  listRoster,
   reactivateMember,
   reissueTotp,
   removeMember,
@@ -31,7 +33,13 @@ import {
 withFunctionName('committee-op');
 
 type Op =
-  | { op: 'invite'; target_user_id: string; roles: string[]; display_name?: string | null; off_employer_contact?: string | null }
+  | {
+      op: 'invite';
+      target_user_id: string;
+      roles: string[];
+      display_name?: string | null;
+      off_employer_contact?: string | null;
+    }
   | { op: 'activate'; invite_id: string; enrolling_uid: string }
   | { op: 'set_roles'; target_user_id: string; roles: string[]; second_approver_id?: string | null }
   | { op: 'remove'; target_user_id: string; second_approver_id?: string | null }
@@ -45,7 +53,14 @@ type Op =
   // does not re-issue the invite). The raw 6-digit `code` rides this body only;
   // it is forwarded into `reissue_member_totp` and NEVER touches any log line /
   // outcome attribute (F-176 / Decision 8).
-  | { op: 'reissue_totp'; invite_id: string; code: string };
+  | { op: 'reissue_totp'; invite_id: string; code: string }
+  // ADR-0029 P1-8a — the TWO co-chair-gated READ arms (Amendment A-8.3). Both
+  // are PARAMETERLESS (the co-chair identity is the JWT-bound auth.uid(), the
+  // roster/pending-invite list is whole-committee) and forward a SETOF RPC
+  // co-chair-gated SQL-side (F-178). NO new EF-level gate — the existing
+  // method / key-parity / session-live prechecks cover them.
+  | { op: 'list_roster' }
+  | { op: 'list_pending_invites' };
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -70,6 +85,10 @@ async function dispatch(rpc: RpcPort, body: Op): Promise<OpResult<unknown>> {
       return issueInvite(rpc, body);
     case 'reissue_totp':
       return reissueTotp(rpc, body);
+    case 'list_roster':
+      return listRoster(rpc);
+    case 'list_pending_invites':
+      return listPendingInvites(rpc);
     default:
       return { ok: false, reason: 'unknown', status: 400 };
   }
@@ -123,7 +142,9 @@ serveWithCors(async (req) => {
     const { data, error } = await supabase.rpc(fn, args);
     return {
       data,
-      error: error ? { code: (error as { code?: string }).code ?? null, message: error.message } : null
+      error: error
+        ? { code: (error as { code?: string }).code ?? null, message: error.message }
+        : null
     };
   };
 
@@ -139,7 +160,7 @@ serveWithCors(async (req) => {
   log.info({
     event: 'committee.op',
     attributes: { route: body?.op ?? 'unknown', outcome: result.ok ? 'ok' : result.reason },
-    requestId: requestId ?? undefined
+    request_id: requestId ?? undefined
   });
 
   if (result.ok) return json({ ok: true, data: result.data }, 200);

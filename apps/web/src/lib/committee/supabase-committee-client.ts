@@ -109,6 +109,45 @@ export interface ReissueTotpData {
   bootstrap_id: string;
 }
 
+/**
+ * ADR-0029 P1-8a — one roster row (Amendment A-8.1 / A-8.3). The 11 pinned
+ * columns of `committee_roster_list`, column-for-column: the member's PI
+ * (display_name / off_employer_contact, NULL when the member has no users PI)
+ * + the two grant-state BADGE booleans. The UI derives the badges — `active`,
+ * `pending-invite`, `pending-grant` (`has_identity_key && !has_live_wrap`),
+ * `awaiting-identity` (invited but `!has_identity_key`) — from these fields.
+ */
+export interface RosterRow {
+  user_id: string;
+  roles: string[];
+  active: boolean;
+  invited_at: string;
+  activated_at: string | null;
+  deactivated_at: string | null;
+  grace_until: string | null;
+  display_name: string | null;
+  off_employer_contact: string | null;
+  has_identity_key: boolean;
+  has_live_wrap: boolean;
+}
+
+/**
+ * ADR-0029 P1-8a — one pending-invite row (Amendment A-8.2 / A-8.3). The 6
+ * pinned columns of `committee_invite_list_pending`. 🔒 NO `bootstrap_id` /
+ * secret material (the SQL fn excludes the invite's TOTP-bootstrap FK by
+ * construction and reads no TOTP-secret store, F-178). `expires_at` is the
+ * INVITE TTL (7 days), never a TOTP window; `display_name` is the target's PI
+ * (NULL when absent).
+ */
+export interface PendingInvite {
+  invite_id: string;
+  target_user_id: string;
+  display_name: string | null;
+  roles: string[];
+  issued_at: string;
+  expires_at: string;
+}
+
 export class SupabaseCommitteeClient {
   constructor(private opts: SupabaseCommitteeClientOptions) {}
 
@@ -162,5 +201,30 @@ export class SupabaseCommitteeClient {
       invite_id: input.invite_id,
       code: input.code
     });
+  }
+
+  /**
+   * ADR-0029 P1-8a — the co-chair roster read (Amendment A-8.1 / A-8.3). POSTs
+   * a PARAMETERLESS `{ op: 'list_roster' }` to committee-op (the co-chair
+   * identity is the JWT-bound `auth.uid()`, the roster is whole-committee — no
+   * target uid / filter is threaded). The underlying RPC is SETOF, so the
+   * result unwraps to a `RosterRow[]` on `data`. The server co-chair gate
+   * (F-178) RAISEs `rls_denied` (403) for a non-co-chair — the /committee route
+   * treats that as "not authorized" (A-8.4). F-176: this client MUST NOT log or
+   * persist any returned member PI / raw uid.
+   */
+  listRoster(): Promise<CommitteeOpResult<RosterRow[]>> {
+    return invoke<RosterRow[]>(this.opts.transport, { op: 'list_roster' });
+  }
+
+  /**
+   * ADR-0029 P1-8a — the co-chair pending-invite read (Amendment A-8.2 /
+   * A-8.3). SIBLING of `listRoster`: POSTs a parameterless
+   * `{ op: 'list_pending_invites' }` and unwraps the SETOF result to a
+   * `PendingInvite[]`. 🔒 The rows carry the 6 pinned columns ONLY — never
+   * `bootstrap_id` / secret material (F-178). Same F-176 PI-free posture.
+   */
+  listPendingInvites(): Promise<CommitteeOpResult<PendingInvite[]>> {
+    return invoke<PendingInvite[]>(this.opts.transport, { op: 'list_pending_invites' });
   }
 }
