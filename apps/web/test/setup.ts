@@ -20,8 +20,45 @@
  *     affects globalThis inside the test runner process.
  */
 
-import { afterEach, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import { cleanup } from '@testing-library/svelte';
+
+// Minimal `toBeInTheDocument` matcher (jest-dom-compatible semantics).
+//
+// The project does NOT depend on `@testing-library/jest-dom`; every existing
+// test asserts DOM presence via testing-library queries (`getByTestId` throws
+// when absent) plus plain vitest/chai matchers. A single read-only P1-9 test
+// (test/T07/phase0a-waiting-fingerprint.test.ts) calls `.toBeInTheDocument()`,
+// which Vitest reports as an "Invalid Chai property" because the matcher is not
+// registered anywhere. Rather than pull in the full jest-dom package (a new
+// dependency) we register just this one matcher here, with faithful semantics:
+// the element must be connected to its owning document. This does not weaken the
+// assertion — it makes it evaluable — and touches no test file.
+//
+// Faithfulness to jest-dom matters for the `.not` path: jest-dom THROWS when the
+// received value is neither a Node nor `null`, so `expect(undefined).not
+// .toBeInTheDocument()` errors rather than silently passing. Scoring a non-Node
+// as `pass:false` would make that `.not` a false green for a future test whose
+// query helper returns `undefined`. We mirror jest-dom: reject non-Node/non-null
+// input, and only then decide connectedness.
+expect.extend({
+  toBeInTheDocument(received: unknown) {
+    if (received !== null && !(received instanceof Node)) {
+      throw new TypeError(
+        `toBeInTheDocument: received value must be an HTMLElement or null, got ${typeof received}`
+      );
+    }
+    const el = received as Node | null;
+    const pass = el !== null && !!el.ownerDocument?.documentElement?.contains(el);
+    return {
+      pass,
+      message: () =>
+        pass
+          ? 'expected element not to be in the document'
+          : 'expected element to be in the document'
+    };
+  }
+});
 
 // Belt-and-suspenders DOM cleanup + timer reset. Three guarantees:
 //
