@@ -377,6 +377,7 @@ describe('P1-8c screen 2 [F-170] custody split — copy the LINK only, the code 
   });
 
   it('[F-170] there is EXACTLY ONE copy affordance and its accessible name is "Copy link" (not "copy code")', async () => {
+    renderInvite({ issue: [OK_ISSUE()] });
     const card = await inviteToCodeShown();
     const copies = copyControls(card);
     expect(copies.length, 'exactly one clipboard affordance in the custody card').toBe(1);
@@ -387,6 +388,7 @@ describe('P1-8c screen 2 [F-170] custody split — copy the LINK only, the code 
   });
 
   it('[F-170] the code element is selectable static text with NO copy/share affordance of its own', async () => {
+    renderInvite({ issue: [OK_ISSUE()] });
     await inviteToCodeShown();
     const codeEl = screen.getByTestId('committee-invite-code-value');
     // Never an <input> (paste-history / autocomplete leak), never a button.
@@ -431,6 +433,7 @@ describe('P1-8c screen 2 [F-170] custody split — copy the LINK only, the code 
   });
 
   it('[F-170] the custody-split guidance ("send the code and the link separately") is present', async () => {
+    renderInvite({ issue: [OK_ISSUE()] });
     const card = await inviteToCodeShown();
     expect(card.textContent ?? '').toContain(t('committee.invite.custody.heading'));
     expect(card.textContent ?? '').toContain(t('committee.invite.custody.body'));

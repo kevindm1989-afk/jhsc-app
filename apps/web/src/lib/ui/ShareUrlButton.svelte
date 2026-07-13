@@ -26,6 +26,36 @@
    */
   import { t } from '$lib/i18n';
 
+  /**
+   * Optional explicit string to copy. When null (the default) the button copies
+   * the canonical current URL (`window.location.href`) — the original register-
+   * surface "share this view" behaviour. The committee invite/re-send custody
+   * card (ADR-0029 P1-8c / F-170) passes the redeem LINK here so the ONE
+   * clipboard affordance copies the link ONLY, never the one-time code.
+   * @type {string | null}
+   */
+  export let url = null;
+
+  /**
+   * Catalog keys for the button/live-region copy. Defaults reproduce the
+   * original "Copy share URL" wording verbatim, so existing call sites
+   * (`<ShareUrlButton />`) are unchanged. The committee card overrides them
+   * with the LINK-labelled "Copy link" / "Link copied" strings.
+   */
+  export let labelKey = 'common.shareUrl.button';
+  export let copiedKey = 'common.shareUrl.copied';
+  export let errorKey = 'common.shareUrl.error';
+  export let copiedAnnounceKey = 'common.shareUrl.copied_announce';
+  export let errorAnnounceKey = 'common.shareUrl.error_announce';
+
+  /**
+   * When true, the control meets the general-app 44px touch target
+   * (`touch_target.min`) instead of the compact register-chrome size — used by
+   * the committee custody card per Surface K's touch-target requirement.
+   * @type {boolean}
+   */
+  export let fullTarget = false;
+
   /** ms to keep the "Copied" state visible before reverting. */
   const COPIED_MS = 1500;
 
@@ -45,7 +75,7 @@
   async function handleClick() {
     if (status === 'copied') return;
     try {
-      const href = typeof window !== 'undefined' ? window.location.href : '';
+      const href = url != null ? url : typeof window !== 'undefined' ? window.location.href : '';
       await copyToClipboard(href);
       status = 'copied';
     } catch {
@@ -64,17 +94,18 @@
   class="btn-outline share-url-btn"
   class:is-copied={status === 'copied'}
   class:is-error={status === 'error'}
+  class:full-target={fullTarget}
   data-testid="share-url-btn"
   data-state={status}
   data-print="hide"
   on:click={handleClick}
 >
   {#if status === 'copied'}
-    {t('common.shareUrl.copied')}
+    {t(copiedKey)}
   {:else if status === 'error'}
-    {t('common.shareUrl.error')}
+    {t(errorKey)}
   {:else}
-    {t('common.shareUrl.button')}
+    {t(labelKey)}
   {/if}
 </button>
 
@@ -82,9 +113,9 @@
      stealing focus. -->
 <span class="visually-hidden" aria-live="polite" data-testid="share-url-live">
   {#if status === 'copied'}
-    {t('common.shareUrl.copied_announce')}
+    {t(copiedAnnounceKey)}
   {:else if status === 'error'}
-    {t('common.shareUrl.error_announce')}
+    {t(errorAnnounceKey)}
   {/if}
 </span>
 
@@ -95,6 +126,12 @@
     font-size: 0.8125rem;
     margin-block-end: 0.75rem;
     margin-inline-start: 0.25rem;
+  }
+  /* Committee custody card: honour the general-app 44px touch target. */
+  .share-url-btn.full-target {
+    min-height: 2.75rem;
+    font-size: 0.875rem;
+    margin-inline-start: 0;
   }
   .share-url-btn.is-copied {
     background: var(--color-tint-green-bg);
