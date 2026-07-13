@@ -34,7 +34,9 @@
   import { onMount, tick } from 'svelte';
   import { t } from '$lib/i18n';
   import { isSignedIn } from '$lib/auth/session-jwt-svelte';
+  import CommitteeGrantCard from './CommitteeGrantCard.svelte';
   import type { RosterRow, CommitteeOpResult } from './supabase-committee-client';
+  import type { SupabaseT07Client, CommitteeKeyHolder, LocalIdentityStore } from '$lib/crypto';
 
   type CommitteeClient = {
     listRoster: () => Promise<CommitteeOpResult<RosterRow[]>>;
@@ -46,6 +48,20 @@
     // state rather than throwing when a caller forgets to wire the real one.
     listRoster: async () => ({ ok: false, reason: 'unknown', status: 0 })
   };
+
+  // ── Screen 3 grant deps (ADR-0029 P1-8d) ──────────────────────────────────
+  // The grant ceremony's three dependencies, threaded from the /committee route.
+  // When ALL are wired, a `pending_grant` row reveals its per-row
+  // CommitteeGrantCard (the first interactive per-row affordance). When they are
+  // absent (the P1-8b read-only composition — the roster suite renders the
+  // roster with `client` ONLY), the roster stays read-only signage: no grant
+  // control mounts on any row.
+  /** Production t07 client (the single `getMemberPubkey` disclosure owner). */
+  export let grantClient: SupabaseT07Client | null = null;
+  /** The actor's session committee-key holder. */
+  export let grantHolder: CommitteeKeyHolder | null = null;
+  /** The device-local identity store. */
+  export let grantLocalIdentity: LocalIdentityStore | null = null;
 
   // Surface-K state machine (signed-out is derived from $isSignedIn, ahead of
   // these phases). 'loading' is the initial phase for a signed-in mount.
@@ -410,6 +426,20 @@
                   {t('committee.roster.row.date_grace_until', { date: isoDate(row.grace_until) })}
                 </p>
               {/if}
+            {/if}
+
+            <!-- Screen 3 (P1-8d): the single per-row control, ONLY on a
+                 pending-grant row AND ONLY when the grant ceremony deps are
+                 wired (the /committee route threads them). It sits inside the
+                 row's role="group" so the SR reads it as part of this member's
+                 unit. The card owns the disclose → confirm → seal state machine. -->
+            {#if kind === 'pending_grant' && grantClient && grantHolder && grantLocalIdentity}
+              <CommitteeGrantCard
+                member={{ user_id: row.user_id, display_name: row.display_name }}
+                client={grantClient}
+                holder={grantHolder}
+                localIdentity={grantLocalIdentity}
+              />
             {/if}
           </div>
         </li>

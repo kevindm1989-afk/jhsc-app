@@ -4,6 +4,7 @@
 > T11, T12, T13, T14, T16 each emit specific events listed below.
 >
 > Sources:
+>
 > - `.context/decisions.md` ADR-0003 Amendment A (Invariant 8 — HG-2)
 > - `.context/decisions.md` ADR-0003 Amendment B (Invariant 7 strengthened — HG-6)
 > - `.context/decisions.md` RA-1 (export feed surface — HG-1)
@@ -29,79 +30,79 @@ column).
 
 The first eight rows are exactly the values from the ADR. `identity_privkey.recovery_blob.viewed` is added by Amendment F. `recovery_reset.issued` is added by T07.1 (G-T07-8 — server-emitted from `issue_recovery_blob_reset`). `panic_wipe.invoked` is reserved by T19 (ADR-0020 Decision 5) and emitted client-side from `WipeStore.emitAudit`.
 
-| Enum value | When emitted | Required `meta` fields |
-|---|---|---|
-| `identity_keypair.created` | First-login enrollment generates user's identity keypair | `ident_pubkey_fingerprint` (hex) |
-| `identity_privkey.recovery_blob.written` | Recovery-passphrase enrollment completes (F-08) | `kdf_params_version`, `reset_consumed` |
-| `identity_privkey.recovery_blob.restored` | Passphrase-based recovery on a new device | `device_fingerprint` (hashed; no raw UA) |
-| `identity_privkey.recovery_blob.viewed` | Amendment F "show passphrase again" reveal (hold-to-reveal + cap-of-3 per enrollment session, server-enforced per G-T07-7) | `enrollment_session_id`, `reveal_count_in_session` |
-| `recovery_reset.issued` | Co-chair-issued recovery-blob reset (F-12 / G-T07-8) — allows the next `store_recovery_blob` to succeed | `target_user_id`, `reset_id` |
-| `panic_wipe.invoked` | Local-only panic wipe — written BEFORE IndexedDB is cleared (F-53 audit-before-side-effect) | `surface` ∈ {`settings`,`lock_screen`}, `wipe_scope` ∈ {`local_only`}, `completed` (boolean), `partial_failure_classes[]` |
-| `committee_data_key.wrapped_for_member` | Existing member wraps committee privkey for a (new or re-added) member | `target_member_id`, `committee_key_id`, `rotation_id?` |
-| `committee_data_key.unwrap` | A member opens own wrap to recover committee privkey | `committee_key_id` |
-| `identity_pubkey.disclosed_for_wrap` | ADR-0029 P1-4 — a co-chair reads ANOTHER member's enrolled identity pubkey via the disclosure RPC `get_member_identity_pubkey_for_wrap` for the wrap-member composition. Audit-before-return SUCCESS-ONLY (Amendment A-1); meta carries IDs only — never pubkey bytes / fingerprint (F-174 / F-176) | `actor_id`, `target_user_id` |
-| `committee_data_key.rotation.started` | First step of rotation — advisory lock acquired, new keypair generated | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `trigger` ∈ {`member_removal`,`scheduled`,`incident`} |
-| `committee_data_key.rotation.completed` | Final step of rotation — new wraps for all remaining members, previous in `committee_key_history` | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `members_rewrapped_count` |
-| `committee_data_key.member_revoked` | Removed member's wrap row is deleted (paired by `rotation_id` with the surrounding rotation per Invariant 6) | `removed_member_id`, `committee_key_id`, `rotation_id` |
+| Enum value                                | When emitted                                                                                                                                                                                                                                                                                        | Required `meta` fields                                                                                                    |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `identity_keypair.created`                | First-login enrollment generates user's identity keypair                                                                                                                                                                                                                                            | `ident_pubkey_fingerprint` (hex)                                                                                          |
+| `identity_privkey.recovery_blob.written`  | Recovery-passphrase enrollment completes (F-08)                                                                                                                                                                                                                                                     | `kdf_params_version`, `reset_consumed`                                                                                    |
+| `identity_privkey.recovery_blob.restored` | Passphrase-based recovery on a new device                                                                                                                                                                                                                                                           | `device_fingerprint` (hashed; no raw UA)                                                                                  |
+| `identity_privkey.recovery_blob.viewed`   | Amendment F "show passphrase again" reveal (hold-to-reveal + cap-of-3 per enrollment session, server-enforced per G-T07-7)                                                                                                                                                                          | `enrollment_session_id`, `reveal_count_in_session`                                                                        |
+| `recovery_reset.issued`                   | Co-chair-issued recovery-blob reset (F-12 / G-T07-8) — allows the next `store_recovery_blob` to succeed                                                                                                                                                                                             | `target_user_id`, `reset_id`                                                                                              |
+| `panic_wipe.invoked`                      | Local-only panic wipe — written BEFORE IndexedDB is cleared (F-53 audit-before-side-effect)                                                                                                                                                                                                         | `surface` ∈ {`settings`,`lock_screen`}, `wipe_scope` ∈ {`local_only`}, `completed` (boolean), `partial_failure_classes[]` |
+| `committee_data_key.wrapped_for_member`   | Existing member wraps committee privkey for a (new or re-added) member                                                                                                                                                                                                                              | `target_member_id`, `committee_key_id`, `rotation_id?`                                                                    |
+| `committee_data_key.unwrap`               | A member opens own wrap to recover committee privkey                                                                                                                                                                                                                                                | `committee_key_id`                                                                                                        |
+| `identity_pubkey.disclosed_for_wrap`      | ADR-0029 P1-4 — a co-chair reads ANOTHER member's enrolled identity pubkey via the disclosure RPC `get_member_identity_pubkey_for_wrap` for the wrap-member composition. Audit-before-return SUCCESS-ONLY (Amendment A-1); meta carries IDs only — never pubkey bytes / fingerprint (F-174 / F-176) | `actor_id`, `target_user_id`                                                                                              |
+| `committee_data_key.rotation.started`     | First step of rotation — advisory lock acquired, new keypair generated                                                                                                                                                                                                                              | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `trigger` ∈ {`member_removal`,`scheduled`,`incident`}    |
+| `committee_data_key.rotation.completed`   | Final step of rotation — new wraps for all remaining members, previous in `committee_key_history`                                                                                                                                                                                                   | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `members_rewrapped_count`                                |
+| `committee_data_key.member_revoked`       | Removed member's wrap row is deleted (paired by `rotation_id` with the surrounding rotation per Invariant 6)                                                                                                                                                                                        | `removed_member_id`, `committee_key_id`, `rotation_id`                                                                    |
 
 ### Auth + session (T05)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `auth.passkey.enrolled` | First passkey bound on an account (TOTP destroyed in same txn) | `cred_id_pseudonym` (HMAC of WebAuthn credential id) |
-| `auth.passkey.enroll_failed` | WebAuthn registration ceremony rejected (forged attestation, expired/replayed challenge, origin/rpId mismatch, alg downgrade) — bootstrap EF or future enrollment paths emit this BEFORE any user/credential write | `outcome` ∈ closed set, `rp_id`, `origin`, optional `cred_id_pseudonym` |
-| `auth.passkey.revoked` | User or co-chair revokes a passkey | `cred_id_pseudonym`, `revoked_by_actor_pseudonym` |
-| `session.revoked` | Session token explicitly revoked (user "Revoke all sessions" or co-chair removal) | `session_id_pseudonym`, `revoked_by_actor_pseudonym`, `reason` ∈ {`user_action`,`co_chair_remove`,`policy_panic`} |
+| Enum value                   | When emitted                                                                                                                                                                                                       | Required `meta`                                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `auth.passkey.enrolled`      | First passkey bound on an account (TOTP destroyed in same txn)                                                                                                                                                     | `cred_id_pseudonym` (HMAC of WebAuthn credential id)                                                              |
+| `auth.passkey.enroll_failed` | WebAuthn registration ceremony rejected (forged attestation, expired/replayed challenge, origin/rpId mismatch, alg downgrade) — bootstrap EF or future enrollment paths emit this BEFORE any user/credential write | `outcome` ∈ closed set, `rp_id`, `origin`, optional `cred_id_pseudonym`                                           |
+| `auth.passkey.revoked`       | User or co-chair revokes a passkey                                                                                                                                                                                 | `cred_id_pseudonym`, `revoked_by_actor_pseudonym`                                                                 |
+| `session.revoked`            | Session token explicitly revoked (user "Revoke all sessions" or co-chair removal)                                                                                                                                  | `session_id_pseudonym`, `revoked_by_actor_pseudonym`, `reason` ∈ {`user_action`,`co_chair_remove`,`policy_panic`} |
 
 ### Concern intake (T08)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `concern.created` | A worker rep submits a concern (anonymous or not — `actor_id` is always the submitter) | `anonymous_default_kept` (boolean), `hazard_class`, `severity`, `location_id` |
-| `concern.updated` | A concern's mutable text/classification columns are edited (F-16) | `prev_field_hashes` (object `{title_ct?, body_ct?}` — SHA-256 hex of each prior ciphertext column, server-computed) |
-| `concern.source_revealed` | "Reveal source" action invoked, per-record passphrase entered + audit-log row written BEFORE plaintext returns to client | `concern_id`, `per_record_unlock_ts` |
+| Enum value                | When emitted                                                                                                             | Required `meta`                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `concern.created`         | A worker rep submits a concern (anonymous or not — `actor_id` is always the submitter)                                   | `anonymous_default_kept` (boolean), `hazard_class`, `severity`, `location_id`                                       |
+| `concern.updated`         | A concern's mutable text/classification columns are edited (F-16)                                                        | `prev_field_hashes` (object `{title_ct?, body_ct?}` — SHA-256 hex of each prior ciphertext column, server-computed) |
+| `concern.source_revealed` | "Reveal source" action invoked, per-record passphrase entered + audit-log row written BEFORE plaintext returns to client | `concern_id`, `per_record_unlock_ts`                                                                                |
 
 ### Inspections (T10)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `inspection.synced` | A queued inspection drains successfully (HMAC verified) | `inspection_id`, `queue_seq` |
-| `inspection.synced.hmac_fail` | HMAC mismatch on drain — entry quarantined, no POST | `queue_seq`, `failure_reason` ∈ {`tag_mismatch`, `user_id_mismatch`, `salt_version_mismatch`} |
+| Enum value                    | When emitted                                            | Required `meta`                                                                               |
+| ----------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `inspection.synced`           | A queued inspection drains successfully (HMAC verified) | `inspection_id`, `queue_seq`                                                                  |
+| `inspection.synced.hmac_fail` | HMAC mismatch on drain — entry quarantined, no POST     | `queue_seq`, `failure_reason` ∈ {`tag_mismatch`, `user_id_mismatch`, `salt_version_mismatch`} |
 
 ### Recommendations (T12)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `recommendation.created` | Draft recommendation row created | `recommendation_id` |
+| Enum value                                | When emitted                                      | Required `meta`                             |
+| ----------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
+| `recommendation.created`                  | Draft recommendation row created                  | `recommendation_id`                         |
 | `recommendation.employer_response_logged` | Co-chair (or rep) records the employer's response | `recommendation_id`, `response_received_ts` |
 
 ### Reprisal log (T13)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `reprisal.created` | A reprisal entry is created | `reprisal_id` |
-| `reprisal.read` | **Server-emitted from the `SECURITY DEFINER` view** (HG-6) — atomic with SELECT. NOT client-cooperative. | `reprisal_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`} |
-| `reprisal.status_changed.4eyes_pending` | A status-flip proposal is filed in `pending_destructive_ops` | `reprisal_id`, `target_status`, `proposer_actor_pseudonym` |
-| `reprisal.status_changed.4eyes_completed` | A second active member approves; status flip executes | `reprisal_id`, `target_status`, `proposer_actor_pseudonym`, `approver_actor_pseudonym` |
-| `reprisal.update` | A reprisal entry's text columns are edited (F-31) | `prev_field_hashes` (object `{title_ct?, body_ct?}` — SHA-256 hex of each prior ciphertext, server-computed) |
-| `sensitive.access_attempt` | A C4 read attempted with a wrong per-record passphrase (G-T13-6) — emitted, no plaintext returned | `reason` |
-| `audit.forensic_reveal.4eyes_pending` | A forensic-reveal proposal is filed (Amendment E) | `reveal_reason`, `audit_log_id`, `pending_id` |
-| `audit.forensic_reveal.4eyes_completed` | A second member (co-chair + co-chair / co-chair + certified) approves; the target audit row's actor pseudonym is revealed for ≤24h | `reveal_reason`, `proposer_actor_pseudonym`, `approver_actor_pseudonym` |
+| Enum value                                | When emitted                                                                                                                       | Required `meta`                                                                                              |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `reprisal.created`                        | A reprisal entry is created                                                                                                        | `reprisal_id`                                                                                                |
+| `reprisal.read`                           | **Server-emitted from the `SECURITY DEFINER` view** (HG-6) — atomic with SELECT. NOT client-cooperative.                           | `reprisal_id`, `read_via` ∈ {`security_definer_view`,`edge_fn_indirection`}                                  |
+| `reprisal.status_changed.4eyes_pending`   | A status-flip proposal is filed in `pending_destructive_ops`                                                                       | `reprisal_id`, `target_status`, `proposer_actor_pseudonym`                                                   |
+| `reprisal.status_changed.4eyes_completed` | A second active member approves; status flip executes                                                                              | `reprisal_id`, `target_status`, `proposer_actor_pseudonym`, `approver_actor_pseudonym`                       |
+| `reprisal.update`                         | A reprisal entry's text columns are edited (F-31)                                                                                  | `prev_field_hashes` (object `{title_ct?, body_ct?}` — SHA-256 hex of each prior ciphertext, server-computed) |
+| `sensitive.access_attempt`                | A C4 read attempted with a wrong per-record passphrase (G-T13-6) — emitted, no plaintext returned                                  | `reason`                                                                                                     |
+| `audit.forensic_reveal.4eyes_pending`     | A forensic-reveal proposal is filed (Amendment E)                                                                                  | `reveal_reason`, `audit_log_id`, `pending_id`                                                                |
+| `audit.forensic_reveal.4eyes_completed`   | A second member (co-chair + co-chair / co-chair + certified) approves; the target audit row's actor pseudonym is revealed for ≤24h | `reveal_reason`, `proposer_actor_pseudonym`, `approver_actor_pseudonym`                                      |
 
 The same pattern is replicated for `work_refusal` and `s51_evidence`
 in T14, enumerated below.
 
 ### Work refusal + s.51 evidence (T14)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `work_refusal.created` | An s.43 work-refusal entry is filed by a certified member (F-21 / F-17) | `created` |
-| `work_refusal.read` | **Server-emitted from `work_refusal_read`** (HG-6) — audit-before-ciphertext; the read is granted to certified members and co-chairs | `read_via` |
-| `work_refusal.update` | A work-refusal entry's text is edited (F-31) | `prev_field_hashes` (object `{title_ct?, notes_ct?}` — SHA-256 hex of each prior ciphertext, server-computed) |
-| `s51_evidence.created` | An s.51 critical-injury evidence record is filed by a certified member; photos sealed client-side and stored as a per-photo blob array | `created`, `photo_count` |
-| `s51_evidence.read` | **Server-emitted from `s51_evidence_read`** (HG-6) — audit-before-ciphertext; returns notes + sealed photos | `read_via` |
-| `s51_evidence.update` | An s.51 evidence entry's text is edited (F-31) | `prev_field_hashes` (object `{title_ct?, notes_ct?}`) |
-| `s51_evidence.create.rejected` | A submit was aborted because a photo failed `sanitizePhoto` (non-JPEG) — no row was written (G-T14-12) | `reason: 'photo_unsupported_format'`, `rejected_index` |
+| Enum value                     | When emitted                                                                                                                           | Required `meta`                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `work_refusal.created`         | An s.43 work-refusal entry is filed by a certified member (F-21 / F-17)                                                                | `created`                                                                                                     |
+| `work_refusal.read`            | **Server-emitted from `work_refusal_read`** (HG-6) — audit-before-ciphertext; the read is granted to certified members and co-chairs   | `read_via`                                                                                                    |
+| `work_refusal.update`          | A work-refusal entry's text is edited (F-31)                                                                                           | `prev_field_hashes` (object `{title_ct?, notes_ct?}` — SHA-256 hex of each prior ciphertext, server-computed) |
+| `s51_evidence.created`         | An s.51 critical-injury evidence record is filed by a certified member; photos sealed client-side and stored as a per-photo blob array | `created`, `photo_count`                                                                                      |
+| `s51_evidence.read`            | **Server-emitted from `s51_evidence_read`** (HG-6) — audit-before-ciphertext; returns notes + sealed photos                            | `read_via`                                                                                                    |
+| `s51_evidence.update`          | An s.51 evidence entry's text is edited (F-31)                                                                                         | `prev_field_hashes` (object `{title_ct?, notes_ct?}`)                                                         |
+| `s51_evidence.create.rejected` | A submit was aborted because a photo failed `sanitizePhoto` (non-JPEG) — no row was written (G-T14-12)                                 | `reason: 'photo_unsupported_format'`, `rejected_index`                                                        |
 
 Wrong-passphrase reads on the T13/T14 surfaces emit the shared
 `sensitive.access_attempt` row (`reason: 'wrong_passphrase'`, plus `table` ∈
@@ -109,55 +110,55 @@ Wrong-passphrase reads on the T13/T14 surfaces emit the shared
 
 ### Export (T11 + T12 + RA-1)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `export.generated` | A co-chair-signed export was rendered AND the audit row was written BEFORE the Blob URL was created (F-24) | `export_kind` ∈ {`minutes.final`,`recommendation`}, `target_id`, `field_set_hash`, `recipient_role`, `derived_from_concerns_count` |
-| `export.contained_concern_derived_items` | A second-class row written same-txn-as `export.generated` IFF the export included items derived from concerns (per RA-1). Lists the concern ids. | `export_audit_id`, `concern_ids` (uuid[]) |
+| Enum value                               | When emitted                                                                                                                                     | Required `meta`                                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `export.generated`                       | A co-chair-signed export was rendered AND the audit row was written BEFORE the Blob URL was created (F-24)                                       | `export_kind` ∈ {`minutes.final`,`recommendation`}, `target_id`, `field_set_hash`, `recipient_role`, `derived_from_concerns_count` |
+| `export.contained_concern_derived_items` | A second-class row written same-txn-as `export.generated` IFF the export included items derived from concerns (per RA-1). Lists the concern ids. | `export_audit_id`, `concern_ids` (uuid[])                                                                                          |
 
 ### Retention (T16)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
+| Enum value          | When emitted                                                | Required `meta`                                            |
+| ------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
 | `retention.deleted` | One row per retention-job pass with per-table counts (F-52) | `deleted_per_table` (jsonb), `job_id`, `dry_run` (boolean) |
 
 ### Membership (T06)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `member.added` | Co-chair invites + member completes enrollment | `target_member_id` |
-| `member.removed` | Co-chair removes a member; triggers key rotation downstream | `target_member_id`, `triggers_rotation_id` |
-| `member.role_changed` | Co-chair changes a member's role set (ADR-0021; reserved by T06, SQL CHECK + retention-schedule half lands in T06.1) | `roles_before`, `roles_after` |
-| `member.totp_reissued` | Co-chair re-issues a fresh TOTP bootstrap against an existing unconsumed invite (P1-6 re-send); the prior bootstrap is deleted, so this is the only durable per-re-send record (F-175). Success-only (Amendment A-1); meta carries IDs only — never the code / secret_hash / TOTP (F-176) | `actor_id`, `target_user_id`, `invite_id` |
-| `committee.key_rotated` | A scheduled (non-removal-triggered) rotation completes. NOTE: a member-removal rotation is captured by the `committee_data_key.rotation.*` enum above; this is the standalone case. | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `reason` |
+| Enum value              | When emitted                                                                                                                                                                                                                                                                              | Required `meta`                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `member.added`          | Co-chair invites + member completes enrollment                                                                                                                                                                                                                                            | `target_member_id`                                                        |
+| `member.removed`        | Co-chair removes a member; triggers key rotation downstream                                                                                                                                                                                                                               | `target_member_id`, `triggers_rotation_id`                                |
+| `member.role_changed`   | Co-chair changes a member's role set (ADR-0021; reserved by T06, SQL CHECK + retention-schedule half lands in T06.1)                                                                                                                                                                      | `roles_before`, `roles_after`                                             |
+| `member.totp_reissued`  | Co-chair re-issues a fresh TOTP bootstrap against an existing unconsumed invite (P1-6 re-send); the prior bootstrap is deleted, so this is the only durable per-re-send record (F-175). Success-only (Amendment A-1); meta carries IDs only — never the code / secret_hash / TOTP (F-176) | `actor_id`, `target_user_id`, `invite_id`                                 |
+| `committee.key_rotated` | A scheduled (non-removal-triggered) rotation completes. NOTE: a member-removal rotation is captured by the `committee_data_key.rotation.*` enum above; this is the standalone case.                                                                                                       | `committee_key_id_prev`, `committee_key_id_next`, `rotation_id`, `reason` |
 
 ### Service-worker / cache (T10 — HG-3)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
+| Enum value                      | When emitted                                                                                 | Required `meta`                                          |
+| ------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | `client.cache_policy_violation` | SW sanity check rejected a response (X-Data-Class C3/C4) for caching, queued for next online | `route`, `data_class` ∈ {`C3`,`C4`}, `allowlist_version` |
-| `client.identity_selftest_fail` | Session-start identity-key self-test failed (F-03) | (no extra meta) |
+| `client.identity_selftest_fail` | Session-start identity-key self-test failed (F-03)                                           | (no extra meta)                                          |
 
 ### Queue integrity (T10 — HG-4)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
+| Enum value             | When emitted                                                                                                                                                                                                                              | Required `meta`                       |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
 | `queue.integrity_fail` | Inspection-queue drain HMAC mismatch — equivalent to `inspection.synced.hmac_fail`; we keep both names for the threat-model cross-references. (Implementer chooses one canonical; the other becomes a forbidden alias caught by semgrep.) | same as `inspection.synced.hmac_fail` |
 
 ### Backup pipeline (T17)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
+| Enum value                | When emitted                                                                                                                                                                                                                                                                                                                                                                | Required `meta`                                                                                                                                                                                                                                  |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `backup.manifest_written` | One row per backup pass that successfully committed (ADR-0018 §"Option H" / M8.A.3b). Emitted by `backup_emit_manifest_written` AS THE LAST step of a committed pass (F-72 step 10). NO PI — structural metadata only (G-T16-PRIV-7); `actor_pseudonym` at TOP LEVEL only (G-T16-PRIV-1; F-79). Retention: 7y (mirrors `retention.deleted` — manifest is the audit anchor). | `run_id`, `sha256`, `bytes`, `committee_data_key_kid`, `audit_log_head` (`{id, ts_ms, hash}`), `per_event_row_counts`, `per_table_row_counts`, `retention_sweep_runs_snapshot_ts_ms`, `schedule_hash`, `node_runtime_pin`, `status: 'committed'` |
-| `backup.hard_deleted` | One row per `committed` → `hard_deleted` manifest transition fired by the 42-day retention pass (ADR-0018 §J / M8.A.3d). Emitted by `backup_emit_hard_deleted` AS THE LAST step of the transition. NO PI — structural metadata only; same F-79 / G-T16-PRIV-1 posture. Retention: 7y. | `run_id`, `object_ref`, `hard_deleted_at_ms`, `original_committed_at_ms` |
+| `backup.hard_deleted`     | One row per `committed` → `hard_deleted` manifest transition fired by the 42-day retention pass (ADR-0018 §J / M8.A.3d). Emitted by `backup_emit_hard_deleted` AS THE LAST step of the transition. NO PI — structural metadata only; same F-79 / G-T16-PRIV-1 posture. Retention: 7y.                                                                                       | `run_id`, `object_ref`, `hard_deleted_at_ms`, `original_committed_at_ms`                                                                                                                                                                         |
 
 ### Alerting infra echoes (T18)
 
-| Enum value | When emitted | Required `meta` |
-|---|---|---|
-| `alert.fired` | The dispatcher emits one row per fired alert (so the alert pipeline itself is auditable) | `alert_id`, `severity`, `routing` |
-| `audit.integrity_check.ran` | One row per integrity-check pass (ADR-0019 §3 / M8.B.2). Emitted by `integrity_check_emit_run_and_mismatches`. NO PI. Retention: 24mo (operational telemetry; mirrors `retention.deleted`). | `run_id`, `trigger` ∈ {`scheduled`,`post_rotation`,`post_export`,`weekly_anchor`}, `status` ∈ {`ok`,`mismatch_found`,`aborted`,`timed_out`}, `rows_walked`, `mismatches_count`, `schedule_hash`, `node_runtime_pin` |
-| `audit.integrity_check.mismatch` | One row per mismatch the integrity pass discovered (ADR-0019 §3 / M8.B.2). Emitted by `integrity_check_emit_run_and_mismatches` alongside the `ran` row. Load-bearing forensic. Retention: 7y. | `run_id`, `audit_log_id`, `mismatch_kind` ∈ {`hash_mismatch`,`row_missing`,`row_unexpected`,`head_pointer_drift`}, `attributable` (boolean), `attribution_run_id?` (uuid) |
-| `audit.chain_anchor.weekly` | One row per weekly off-app anchor delivery (ADR-0019 §"Optional audit_chain_anchors table" / G-T18-12). Emitted by `integrity_check_emit_chain_anchor_weekly`. NO PI — `email_recipient_pseudonym` is HMAC. Retention: 7y. | `anchor_id`, `head_audit_log_id`, `head_ts_ms`, `head_hash_hex`, `email_recipient_pseudonym` |
+| Enum value                       | When emitted                                                                                                                                                                                                               | Required `meta`                                                                                                                                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alert.fired`                    | The dispatcher emits one row per fired alert (so the alert pipeline itself is auditable)                                                                                                                                   | `alert_id`, `severity`, `routing`                                                                                                                                                                                   |
+| `audit.integrity_check.ran`      | One row per integrity-check pass (ADR-0019 §3 / M8.B.2). Emitted by `integrity_check_emit_run_and_mismatches`. NO PI. Retention: 24mo (operational telemetry; mirrors `retention.deleted`).                                | `run_id`, `trigger` ∈ {`scheduled`,`post_rotation`,`post_export`,`weekly_anchor`}, `status` ∈ {`ok`,`mismatch_found`,`aborted`,`timed_out`}, `rows_walked`, `mismatches_count`, `schedule_hash`, `node_runtime_pin` |
+| `audit.integrity_check.mismatch` | One row per mismatch the integrity pass discovered (ADR-0019 §3 / M8.B.2). Emitted by `integrity_check_emit_run_and_mismatches` alongside the `ran` row. Load-bearing forensic. Retention: 7y.                             | `run_id`, `audit_log_id`, `mismatch_kind` ∈ {`hash_mismatch`,`row_missing`,`row_unexpected`,`head_pointer_drift`}, `attributable` (boolean), `attribution_run_id?` (uuid)                                           |
+| `audit.chain_anchor.weekly`      | One row per weekly off-app anchor delivery (ADR-0019 §"Optional audit_chain_anchors table" / G-T18-12). Emitted by `integrity_check_emit_chain_anchor_weekly`. NO PI — `email_recipient_pseudonym` is HMAC. Retention: 7y. | `anchor_id`, `head_audit_log_id`, `head_ts_ms`, `head_hash_hex`, `email_recipient_pseudonym`                                                                                                                        |
 
 ---
 
@@ -227,8 +228,8 @@ create index audit_log_rotation_id_idx on audit_log (rotation_id) where rotation
 - `prev_hash` = `BLAKE2b-256(prev_row.hash)`. Row 1 uses a fixed
   genesis hash documented in the migration.
 - `hash` = `BLAKE2b-256(canonical_json({id, ts, actor_pseudonym, event_type,
-  target_id, target_class, severity, request_id, rotation_id, meta,
-  prev_hash}))`.
+target_id, target_class, severity, request_id, rotation_id, meta,
+prev_hash}))`.
 - Canonical JSON: keys sorted lexicographically; no whitespace; UTC
   timestamps in `ts`; bytea fields hex-encoded.
 - The hash is computed by the SECURITY DEFINER `audit_emit(...)`
@@ -314,7 +315,7 @@ failing test before the implementer touches the code path.
 1. **Chain integrity break is detected within 5 minutes.**
    - Insert a baseline of 100 rows via `audit_emit`.
    - Use a privileged test connection to UPDATE one row's `meta`
-     (bypassing the RLS revocation — this is the *attack* the test
+     (bypassing the RLS revocation — this is the _attack_ the test
      simulates).
    - **Actually** since UPDATE is revoked from every role, the test has
      to drop the revocation TEMPORARILY in a savepoint, mutate, restore.
@@ -402,3 +403,21 @@ failing test before the implementer touches the code path.
    un-projected access requires the Amendment E 4-eyes procedure.
    The social-norm backstop survives without the load-bearing
    author-inference vector. Privacy-reviewer Q1 sign-off ratified.]**
+5. **A `disclosed_for_wrap` row with no matching `wrapped_for_member` is a
+   cancelled confirm, NOT an anomaly (ADR-0029 P1-8d / A-8.7 / ISSUE-5).**
+   Screen 3's grant ceremony (Surface K, `CommitteeGrantCard`) runs the single
+   `get_member_identity_pubkey_for_wrap` disclosure on the deliberate **Grant
+   access** tap — before the co-chair confirms the fingerprint. A co-chair who
+   opens the confirm panel and **Cancels** (or whose seal/wrap POST then fails)
+   leaves an `identity_pubkey.disclosed_for_wrap` row with **no** paired
+   `committee_data_key.wrapped_for_member`. This is expected and benign — the
+   deliberate-intent-per-disclosure property (A-8.7: one disclosure ⇔ one real
+   Grant tap) is exactly what makes the disclosure row meaningful, and a
+   cancelled confirm is a normal outcome. **Consequences for tooling:** (a) any
+   membership/key-state **reconstruction** must derive who-holds-a-wrap from
+   `committee_data_key.wrapped_for_member` (the row that records the actual
+   seal), NEVER from `disclosed_for_wrap`; (b) an alert that flags unmatched
+   `disclosed_for_wrap` rows as suspicious would false-positive on every
+   cancelled confirm — do not add one. A _high rate_ of disclosures with no
+   follow-through is at most a soft UX signal (co-chairs abandoning the compare),
+   never a security event.
