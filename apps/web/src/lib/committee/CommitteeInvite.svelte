@@ -70,6 +70,12 @@
   let panelHeadingEl: HTMLHeadingElement | null = null;
   let ctaEl: HTMLButtonElement | null = null;
   let errorHeadingEl: HTMLElement | null = null;
+  // F3 (a11y): a roles-required submit lands focus on the role fieldset (the
+  // controls to fix), NOT the panel heading.
+  let fieldsetEl: HTMLFieldSetElement | null = null;
+  // Security nit: an in-flight guard so a double-click of "Send a different
+  // code" cannot fire two reissues.
+  let resendInFlight = false;
 
   $: selectedRoles = [
     ...(roleWorkerMember ? ['worker_member'] : []),
@@ -137,7 +143,8 @@
       showRolesRequired = true;
       errorKind = null;
       await tick();
-      panelHeadingEl?.focus();
+      // F3: land on the fieldset/legend so the user is at the controls to fix.
+      fieldsetEl?.focus();
       return;
     }
     showRolesRequired = false;
@@ -171,17 +178,25 @@
   async function handleResendNow(): Promise<void> {
     // "Send a different code" — re-mint a fresh code for the SAME invite; the old
     // one dies server-side. Replaces the displayed code without re-moving focus.
-    const code = generateInviteCode();
-    const result = await client.reissueTotp({ invite_id: shownInviteId, code });
-    if (result.ok) {
-      shownCode = code;
-      return;
+    // Security nit: gate on the in-flight flag so two fast clicks can't fire two
+    // reissues (which would desync the shown code from the live bootstrap).
+    if (resendInFlight) return;
+    resendInFlight = true;
+    try {
+      const code = generateInviteCode();
+      const result = await client.reissueTotp({ invite_id: shownInviteId, code });
+      if (result.ok) {
+        shownCode = code;
+        return;
+      }
+      // On failure the once-shown code is spent — fall back to the generic error
+      // (screen 2 has no invite_invalid state) and re-show the form.
+      state = 'form';
+      errorKind = result.status === 403 ? 'authz' : 'generic';
+      await focusError();
+    } finally {
+      resendInFlight = false;
     }
-    // On failure the once-shown code is spent — fall back to the generic error
-    // (screen 2 has no invite_invalid state) and re-show the form.
-    state = 'form';
-    errorKind = result.status === 403 ? 'authz' : 'generic';
-    await focusError();
   }
 
   function reloadRoster(): void {
@@ -217,16 +232,21 @@
       id={panelId}
       class="card invite-panel"
       role="group"
-      aria-labelledby="committee-invite-heading"
+      aria-labelledby={state === 'code_shown'
+        ? 'committee-invite-code-heading'
+        : 'committee-invite-heading'}
       aria-busy={state === 'submitting' ? 'true' : 'false'}
     >
       {#if state === 'code_shown'}
-        <h2 id="committee-invite-heading" class="sr-only">{t('committee.invite.code.heading')}</h2>
+        <!-- F7: no duplicate sr-only h2 — the panel names itself via the card's
+             own visible heading (aria-labelledby → committee-invite-code-heading). -->
         <OneTimeCodeCard
           code={shownCode}
           inviteId={shownInviteId}
           heading={t('committee.invite.code.heading')}
+          headingId="committee-invite-code-heading"
           codeReadyAnnounce={t('a11y.committee.invite.code_ready')}
+          codeReplacedAnnounce={t('a11y.committee.invite.code_replaced')}
           cardTestid="committee-invite-code"
           valueTestid="committee-invite-code-value"
           onDone={handleDone}
@@ -324,7 +344,9 @@
         >
           <fieldset
             class="invite-fieldset"
+            tabindex="-1"
             aria-describedby={showRolesRequired ? rolesReqId : undefined}
+            bind:this={fieldsetEl}
           >
             <legend class="invite-legend">{t('committee.invite.roles.legend')}</legend>
 
@@ -471,6 +493,9 @@
     align-items: center;
     column-gap: 0.5rem;
     row-gap: 0.25rem;
+    /* F4: a ≥44px (2.75rem, the app touch minimum) clickable area per role,
+       while the checkbox glyph itself stays visually small. */
+    min-height: 2.75rem;
   }
   .invite-role-row input[type='checkbox'] {
     min-height: auto;
@@ -479,6 +504,9 @@
     accent-color: var(--color-accent);
   }
   .invite-role-row label {
+    display: flex;
+    align-items: center;
+    min-height: 2.75rem;
     color: var(--color-fg);
     font-weight: 500;
   }

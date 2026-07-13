@@ -256,14 +256,18 @@ describe('P1-8c [a11y] code_shown — announced-not-stolen, digit-by-digit code,
     expect(group, 'the code sits in a role="group" labelled "One-time code"').toBeTruthy();
   });
 
-  it('the custody-split callout is role="alert" (assertive security instruction)', async () => {
+  it('the custody-split callout is role="status" (polite — reached via reading order, not assertive)', async () => {
+    // Accessibility review Finding 5: the callout is warning-tier guidance, not a
+    // danger-tier alert. Assertive here would PREEMPT/truncate the code
+    // announcement the co-chair needs on mount; focus lands on the card heading
+    // directly above the callout, so a polite region is reached in reading order.
     const { client } = inviteClient();
     render(CommitteeInvite, { props: { client: client as never } });
     const card = await inviteToCodeShown();
-    const callout = Array.from(card.querySelectorAll('[role="alert"]')).find((el) =>
+    const callout = Array.from(card.querySelectorAll('[role="status"]')).find((el) =>
       (el.textContent ?? '').includes(t('committee.invite.custody.heading'))
     );
-    expect(callout, 'the custody-split guidance is announced assertively').toBeTruthy();
+    expect(callout, 'the custody-split guidance is announced politely, not assertively').toBeTruthy();
   });
 });
 

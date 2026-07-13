@@ -29,8 +29,10 @@
    * the code aloud. The `code_ready` note fires via a POLITE role="status"
    * region. The code sits in a role="group" (aria-label "One-time code") and
    * carries the spaced aria-label so a screen reader spells it. The custody-split
-   * callout is role="alert" (assertive security instruction). The copy-link
-   * control announces "Link copied" via aria-live without moving focus.
+   * callout is role="status" (POLITE, a11y review Finding 5) — warning-tier
+   * guidance reached via reading order below the focused heading, so it does not
+   * preempt/truncate the code announcement on mount. The copy-link control
+   * announces "Link copied" via aria-live without moving focus.
    *
    * `<script lang="ts">` — typed props so the ts callers (CommitteeInvite /
    * PendingInvites) import it without an implicit-any.
@@ -45,8 +47,20 @@
   export let inviteId = '';
   /** Card heading copy (screen-2 vs screen-4 variant). */
   export let heading = '';
+  /**
+   * Optional id for the card heading so an OUTER panel can point its
+   * aria-labelledby here (screen 2 dedupes its own sr-only h2 — F7). Empty on
+   * screen 4, where the row group names itself.
+   */
+  export let headingId = '';
   /** Polite "code ready" announcement string (a11y.committee.*). */
   export let codeReadyAnnounce = '';
+  /**
+   * Polite "code replaced" announcement string (a11y.committee.*.code_replaced)
+   * fired on a successful in-place re-mint ("Send a different code" — F2), so an
+   * SR user learns the shown code changed WITHOUT the focus being moved.
+   */
+  export let codeReplacedAnnounce = '';
   /** Container testid ("committee-invite-code" | "committee-resend-code"). */
   export let cardTestid = 'committee-invite-code';
   /** Code-value testid ("committee-invite-code-value" | "…resend-code-value"). */
@@ -60,6 +74,16 @@
   export let onResendNow: (() => void) | null = null;
 
   let headingEl: HTMLElement | null = null;
+
+  // The single POLITE live region (F6): mounted EMPTY, populated post-mount so
+  // the announcement lands as a live-region MUTATION (VoiceOver skips regions
+  // inserted already-populated). A re-mint (F2) swaps its text in place.
+  let liveMessage = '';
+
+  // Security nit: an in-flight guard so two fast clicks of "Send a different
+  // code" cannot fire two reissues (which would desync the shown code from the
+  // live bootstrap). Mirrors the state==='submitting' guard on the primary submit.
+  let resending = false;
 
   // The digit-by-digit accessible name so a screen reader spells the code
   // ("4 8 2 9 1 7") instead of "four hundred eighty-two thousand…". This spaced
@@ -78,18 +102,41 @@
   }
 
   onMount(async () => {
+    // F6: populate the empty polite region so code-ready announces as a mutation.
+    liveMessage = codeReadyAnnounce;
     // Single deliberate focus move to the heading (announced-not-focus-stolen).
     await tick();
     if (headingEl) headingEl.focus();
   });
+
+  async function handleResendClick(): Promise<void> {
+    if (resending || !onResendNow) return;
+    resending = true;
+    const before = code;
+    try {
+      await onResendNow();
+      // Let the parent's fresh code flush into the `code` prop, then — if it did
+      // change in place (successful re-mint, focus unmoved) — announce the swap
+      // on the POLITE region so an SR user learns the shown code changed (F2).
+      await tick();
+      if (code !== before) liveMessage = codeReplacedAnnounce;
+    } finally {
+      resending = false;
+    }
+  }
 </script>
 
 <div class="otc-card" data-testid={cardTestid}>
-  <!-- POLITE code-ready announcement (never assertive — do not talk over the
-       co-chair reading the code aloud). -->
-  <p class="visually-hidden" role="status" data-testid="{cardTestid}-ready">{codeReadyAnnounce}</p>
+  <!-- POLITE announcement (never assertive — do not talk over the co-chair
+       reading the code aloud). Mounted empty (F6); carries code-ready on mount
+       and code-replaced on a re-mint (F2). -->
+  <p class="visually-hidden" role="status" aria-live="polite" data-testid="{cardTestid}-ready">
+    {liveMessage}
+  </p>
 
-  <h2 class="otc-heading" tabindex="-1" bind:this={headingEl}>{heading}</h2>
+  <h2 class="otc-heading" id={headingId || undefined} tabindex="-1" bind:this={headingEl}>
+    {heading}
+  </h2>
 
   <!-- The one-time code — selectable STATIC text, NO copy/share control. -->
   <div class="otc-code-group" role="group" aria-label={t('committee.invite.code.label')}>
@@ -103,7 +150,7 @@
 
   <!-- Custody-split callout — the load-bearing F-170 security instruction
        (assertive). Icon + text, colour never alone. -->
-  <div class="otc-callout otc-callout-warning" role="alert">
+  <div class="otc-callout otc-callout-warning" role="status">
     <svg class="otc-callout-icon" viewBox="0 0 24 24" aria-hidden="true">
       <path
         d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0z"
@@ -172,7 +219,7 @@
       {t('committee.invite.code.done')}
     </button>
     {#if onResendNow}
-      <button type="button" class="otc-ghost" on:click={onResendNow}>
+      <button type="button" class="otc-ghost" on:click={handleResendClick} disabled={resending}>
         {t('committee.invite.code.resend_now')}
       </button>
     {/if}

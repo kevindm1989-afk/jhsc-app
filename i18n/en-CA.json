@@ -1157,7 +1157,8 @@
         "expires": "Link expires {date}",
         "action": "Re-send code",
         "action_aria": "Re-send code for {name}",
-        "reinvite": "Invite again"
+        "reinvite": "Invite again",
+        "reinvite_aria": "Invite again for {name}"
       },
       "confirm": {
         "heading": "Send a new code?",
@@ -1734,11 +1735,13 @@
       },
       "invite": {
         "submitting": "Creating the invite…",
-        "code_ready": "Invite created. A one-time code is shown once below. Share it out of band."
+        "code_ready": "Invite created. A one-time code is shown once below. Share it out of band.",
+        "code_replaced": "New code ready. The previous code no longer works."
       },
       "resend": {
         "submitting": "Sending a new code…",
-        "code_ready": "New code created. It is shown once below. The previous code no longer works."
+        "code_ready": "New code created. It is shown once below. The previous code no longer works.",
+        "code_replaced": "New code ready. The previous code no longer works."
       }
     }
   },

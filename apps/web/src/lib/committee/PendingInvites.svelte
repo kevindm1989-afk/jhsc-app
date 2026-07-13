@@ -51,6 +51,9 @@
   let rowPhase: RowPhase = 'confirm';
   // F-176: the fresh re-send code lives in memory only.
   let shownCode = '';
+  // Security nit: an in-flight guard so a double-click of "Send a different
+  // code" cannot fire two reissues (which would desync the shown code).
+  let resendInFlight = false;
 
   const actionBtns: Record<string, HTMLButtonElement> = {};
   let confirmHeadingEl: HTMLElement | null = null;
@@ -143,21 +146,29 @@
 
   async function resendNowAgain(row: PendingInvite): Promise<void> {
     // "Send a different code" — re-mint a fresh code for the SAME invite.
-    const code = generateInviteCode();
-    const result = await client.reissueTotp({ invite_id: row.invite_id, code });
-    if (result.ok) {
-      shownCode = code;
-      return;
-    }
-    if (result.reason === 'invite_invalid') {
-      rowPhase = 'invalid';
+    // Security nit: gate on the in-flight flag so two fast clicks can't fire two
+    // reissues (which would desync the shown code from the live bootstrap).
+    if (resendInFlight) return;
+    resendInFlight = true;
+    try {
+      const code = generateInviteCode();
+      const result = await client.reissueTotp({ invite_id: row.invite_id, code });
+      if (result.ok) {
+        shownCode = code;
+        return;
+      }
+      if (result.reason === 'invite_invalid') {
+        rowPhase = 'invalid';
+        await tick();
+        invalidHeadingEl?.focus();
+        return;
+      }
+      rowPhase = 'error';
       await tick();
-      invalidHeadingEl?.focus();
-      return;
+      errorHeadingEl?.focus();
+    } finally {
+      resendInFlight = false;
     }
-    rowPhase = 'error';
-    await tick();
-    errorHeadingEl?.focus();
   }
 
   function reinvite(): void {
@@ -292,6 +303,7 @@
               <button
                 type="button"
                 class="pending-action"
+                aria-label={t('committee.resend.row.reinvite_aria', { name: rowName(row) })}
                 bind:this={actionBtns[row.invite_id]}
                 on:click={reinvite}
               >
@@ -394,6 +406,7 @@
                 inviteId={row.invite_id}
                 heading={t('committee.resend.code.heading')}
                 codeReadyAnnounce={t('a11y.committee.resend.code_ready')}
+                codeReplacedAnnounce={t('a11y.committee.resend.code_replaced')}
                 cardTestid="committee-resend-code"
                 valueTestid="committee-resend-code-value"
                 onDone={() => doneResend(row)}
