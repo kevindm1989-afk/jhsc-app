@@ -146,19 +146,29 @@
   // The 64-hex fingerprint split into 16 atomic groups of 4 (pubkeyFingerprint()
   // order, lowercase) — the exact split the co-chair's P1-8d screen mirrors so
   // the two humans compare group-for-group.
-  $: waitingGroups = fingerprint.length === 64 ? fingerprint.match(/.{4}/g) ?? [] : [];
+  $: waitingGroups = fingerprint.length === 64 ? (fingerprint.match(/.{4}/g) ?? []) : [];
+
+  // The six confusable hex LETTERS a-f are NATO-phoneticized for the per-group
+  // screen-reader label (and for the sighted member's read-aloud): spoken in
+  // isolation, b/c/d/e collapse into the English "E-set" ("bee/see/dee/ee") and
+  // a mis-hearing propagates straight into the read-aloud that IS the F-172
+  // boundary. Digits 0-9 are already unambiguous, so they stay plain.
+  const NATO_HEX = { a: 'alpha', b: 'bravo', c: 'charlie', d: 'delta', e: 'echo', f: 'foxtrot' };
 
   /**
    * The per-group screen-reader label: a positional landmark plus the 4 glyphs
-   * spelled digit-by-digit (the OneTimeCodeCard role="img" mechanism applied per
-   * group), e.g. "group 3 of 16, c 3 d 4". The `{chars}` fill is data, not
-   * translatable.
+   * spelled glyph-by-glyph (the OneTimeCodeCard role="img" mechanism applied per
+   * group), with a-f NATO-phoneticized, e.g. "group 3 of 16, charlie 3 delta 4".
+   * The `{chars}` fill is data, not translatable.
    * @param {number} index 1-based group position @param {string} group 4 glyphs
    */
   function waitingGroupLabel(index, group) {
     return t('a11y.settings.setup.fingerprint.group_label', {
       index,
-      chars: group.split('').join(' ')
+      chars: group
+        .split('')
+        .map((ch) => NATO_HEX[ch] ?? ch)
+        .join(' ')
     });
   }
 
@@ -690,11 +700,7 @@
           <!-- Single deliberate focus target on entry (mirrors Surface J
                success) — the lead paragraph, read first so the SR order teaches
                the mental model: you're set up → the fingerprint → what to do. -->
-          <p
-            class="setup-committee-waiting-lead"
-            tabindex="-1"
-            bind:this={waitingLeadEl}
-          >
+          <p class="setup-committee-waiting-lead" tabindex="-1" bind:this={waitingLeadEl}>
             {t('settings.setupCommitteeEncryption.waiting.lead')}
           </p>
 
@@ -777,11 +783,7 @@
       {:else if waitingState === 'derive_error'}
         <!-- Fail-safe error coverage. Unreachable in the gated branch (privkey
              guaranteed present); if it fires the honest recovery is retry. -->
-        <div
-          class="setup-committee-alert"
-          role="alert"
-          data-testid="setup-committee-waiting-error"
-        >
+        <div class="setup-committee-alert" role="alert" data-testid="setup-committee-waiting-error">
           <strong tabindex="-1" bind:this={waitingErrorEl}>
             {t('settings.setupCommitteeEncryption.waiting.error.heading')}
           </strong>

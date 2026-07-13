@@ -1466,7 +1466,7 @@
         "lead": "You're all set up on this device. Now you're waiting for a co-chair to give you access to the committee's encrypted records.",
         "fingerprint_label": "Your identity fingerprint",
         "compare_heading": "Read this to your co-chair when they grant access",
-        "compare_body": "When a co-chair is ready to give you access, read them the fingerprint above one group at a time — or show them your screen. They will check it matches what they see before they grant access. This is how they confirm it's really you.",
+        "compare_body": "When a co-chair is ready to give you access, read them the fingerprint above one group at a time — or show them your screen. Say each letter as a word (\"bravo\" for b, \"charlie\" for c) so nothing is misheard. They will check it matches what they see before they grant access. This is how they confirm it's really you.",
         "computing": "Preparing your fingerprint…",
         "copy": "Copy fingerprint",
         "copied": "Fingerprint copied",

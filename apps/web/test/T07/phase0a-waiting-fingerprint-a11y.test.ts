@@ -115,13 +115,30 @@ describe('P1-9 [a11y/F-172] grouped structure — ordered list of 16 numbered, s
     expect(group, 'the grouped fingerprint sits in a role="group"').not.toBeNull();
   });
 
-  it('each group is a role="img" spelling its 4 glyphs with a positional aria-label ("group N of 16, c 3 d 4")', async () => {
+  it('each group is a role="img" spelling its 4 glyphs with a positional aria-label ("group N of 16, charlie 3 delta 4")', async () => {
     const { box } = await toShown();
     const imgs = Array.from(box.querySelectorAll('[role="img"]')) as HTMLElement[];
     expect(imgs).toHaveLength(16);
 
-    // Every group carries position ("group N of 16") + digit-by-digit spelling.
-    const format = /^group (?:[1-9]|1[0-6]) of 16, [0-9a-f] [0-9a-f] [0-9a-f] [0-9a-f]$/;
+    // Every group carries position ("group N of 16") + glyph-by-glyph spelling,
+    // where the confusable hex LETTERS a-f are NATO-phoneticized (alpha..foxtrot)
+    // so a mis-hearing of the "E-set" (b/c/d/e) cannot corrupt the F-172
+    // read-aloud, and digits 0-9 are spoken plainly (Surface L OQ-1 resolution).
+    const NATO: Record<string, string> = {
+      a: 'alpha',
+      b: 'bravo',
+      c: 'charlie',
+      d: 'delta',
+      e: 'echo',
+      f: 'foxtrot'
+    };
+    const spell = (g: string) =>
+      g
+        .split('')
+        .map((ch) => NATO[ch] ?? ch)
+        .join(' ');
+    const glyph = '(?:alpha|bravo|charlie|delta|echo|foxtrot|[0-9])';
+    const format = new RegExp(`^group (?:[1-9]|1[0-6]) of 16, ${glyph} ${glyph} ${glyph} ${glyph}$`);
     imgs.forEach((img, i) => {
       const label = img.getAttribute('aria-label') ?? '';
       expect(label, `group ${i + 1} aria-label format`).toMatch(format);
@@ -130,7 +147,7 @@ describe('P1-9 [a11y/F-172] grouped structure — ordered list of 16 numbered, s
 
     // Byte-exact check on a specific group (the spec's own example shape).
     const g3chars = EXPECTED_FP.slice(8, 12); // group 3 (0-indexed 2)
-    const expectedG3 = `group 3 of 16, ${g3chars.split('').join(' ')}`;
+    const expectedG3 = `group 3 of 16, ${spell(g3chars)}`;
     expect(imgs[2]!.getAttribute('aria-label')).toBe(expectedG3);
   });
 
