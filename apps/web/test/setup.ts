@@ -34,14 +34,22 @@ import { cleanup } from '@testing-library/svelte';
 // dependency) we register just this one matcher here, with faithful semantics:
 // the element must be connected to its owning document. This does not weaken the
 // assertion — it makes it evaluable — and touches no test file.
+//
+// Faithfulness to jest-dom matters for the `.not` path: jest-dom THROWS when the
+// received value is neither a Node nor `null`, so `expect(undefined).not
+// .toBeInTheDocument()` errors rather than silently passing. Scoring a non-Node
+// as `pass:false` would make that `.not` a false green for a future test whose
+// query helper returns `undefined`. We mirror jest-dom: reject non-Node/non-null
+// input, and only then decide connectedness.
 expect.extend({
   toBeInTheDocument(received: unknown) {
+    if (received !== null && !(received instanceof Node)) {
+      throw new TypeError(
+        `toBeInTheDocument: received value must be an HTMLElement or null, got ${typeof received}`
+      );
+    }
     const el = received as Node | null;
-    const pass =
-      el != null &&
-      typeof el === 'object' &&
-      'ownerDocument' in el &&
-      !!(el as Node).ownerDocument?.documentElement?.contains(el as Node);
+    const pass = el !== null && !!el.ownerDocument?.documentElement?.contains(el);
     return {
       pass,
       message: () =>

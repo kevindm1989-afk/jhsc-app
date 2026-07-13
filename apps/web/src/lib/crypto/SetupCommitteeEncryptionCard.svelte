@@ -710,18 +710,20 @@
             </span>
             <!-- High-contrast display box (the audited max-contrast pair used by
                  OneTimeCodeCard / D.T19.f). The role="group" wrapper names the
-                 whole fingerprint so an SR user hears the shape up front; the
-                 <ol>/<li> keep native list semantics (role="group" on the <ol>
-                 itself would strip listitem context). -->
+                 whole fingerprint so an SR user hears the shape up front. The
+                 explicit role="list"/"listitem" restores list semantics that
+                 WebKit/Safari strips from any <ol> with `list-style: none` (the
+                 standard remediation) — the group's flex/reset CSS otherwise
+                 costs VoiceOver the "list, 16 items" announcement. -->
             <div class="setup-committee-fp-box" data-testid="setup-committee-fingerprint">
               <div
                 class="setup-committee-fp-group"
                 role="group"
                 aria-label={t('a11y.settings.setup.fingerprint.region_label')}
               >
-                <ol class="setup-committee-fp-list">
+                <ol class="setup-committee-fp-list" role="list">
                   {#each waitingGroups as group, i}
-                    <li class="setup-committee-fp-item">
+                    <li class="setup-committee-fp-item" role="listitem">
                       <!-- role="img" swaps the visible glyphs for a spelled,
                            positional aria-label in the a11y tree (per-group
                            OneTimeCodeCard mechanism). -->

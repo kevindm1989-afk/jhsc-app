@@ -344,4 +344,41 @@ describe('P1-9 [Surface L] derive_error — fails safe with no fingerprint, no c
     expect(screen.queryByTestId('setup-committee-fingerprint')).toBeNull();
     expect(screen.getByTestId('setup-committee-section')).toBeInTheDocument();
   });
+
+  it('Try again re-derives from the unchanged privkey and recovers to the shown fingerprint', async () => {
+    // Fail the FIRST digest (the initial derive), then let the real digest run so
+    // the retry succeeds. The privkey is unchanged in memory, so retry MUST
+    // reproduce the byte-identical fingerprint and clear the error.
+    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+    let digestCalls = 0;
+    vi.spyOn(crypto.subtle, 'digest').mockImplementation((algorithm, data) => {
+      digestCalls += 1;
+      if (digestCalls === 1) return Promise.reject(new Error('synthetic-digest-failure'));
+      return realDigest(algorithm, data);
+    });
+
+    renderCard(makeClient(keyState({ actor_has_wrap: false, wrap_count: 1 })), localIdentityWith(DEVICE_PRIV));
+
+    // First derive fails closed — no fingerprint.
+    await screen.findByTestId('setup-committee-waiting-error');
+    expect(screen.queryByTestId('setup-committee-fingerprint')).toBeNull();
+
+    // Retry re-derives in place.
+    await fireEvent.click(screen.getByTestId('setup-committee-waiting-retry'));
+
+    const box = await screen.findByTestId('setup-committee-fingerprint');
+    const reassembled = groupImgs(box)
+      .map((g) => g.textContent)
+      .join('');
+    expect(reassembled).toBe(EXPECTED_FP); // byte-identical recovery (F-172)
+    // The error panel is gone and focus was moved to the lead (not lost to body).
+    expect(screen.queryByTestId('setup-committee-waiting-error')).toBeNull();
+    await waitFor(() =>
+      expect(
+        (document.activeElement as HTMLElement | null)?.classList.contains(
+          'setup-committee-waiting-lead'
+        )
+      ).toBe(true)
+    );
+  });
 });
