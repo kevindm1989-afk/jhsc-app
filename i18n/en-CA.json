@@ -1075,7 +1075,8 @@
         },
         "pending_invite": {
           "text": "Invited — not joined yet",
-          "sr": "Status: Invited but has not joined yet"
+          "sr": "Status: Invited but has not joined yet",
+          "hint": "Manage in Pending invites"
         },
         "inactive": {
           "text": "Removed",
@@ -1083,6 +1084,103 @@
         }
       },
       "back_to_more": "Back to More"
+    },
+    "invite": {
+      "cta": "Invite a member",
+      "form": {
+        "heading": "Invite a new member",
+        "submit": "Create invite",
+        "cancel": "Cancel",
+        "submitting": "Creating the invite…"
+      },
+      "roles": {
+        "legend": "What roles should this member have?",
+        "required": "Choose at least one role."
+      },
+      "role": {
+        "worker_member": "Worker member",
+        "worker_co_chair": "Worker co-chair",
+        "certified_member": "Certified member",
+        "co_chair_note": "Co-chairs can invite and manage other members. Only add this for a second worker co-chair."
+      },
+      "code": {
+        "heading": "Invite created — share the code out of band",
+        "label": "One-time code",
+        "once": "This code is shown once. If you lose it before the member joins, send a new one from Pending invites.",
+        "done": "Done — I’ve shared the code",
+        "resend_now": "Send a different code"
+      },
+      "custody": {
+        "heading": "Send the code and the link separately",
+        "body": "Read the code out loud, or send it in a different app than the link. Never put the code and the link in the same message — if someone sees both, they can take over this invite."
+      },
+      "link": {
+        "label": "Redeem link (safe to send)",
+        "helper": "This link only points to the invite. It does not contain the code, so it’s safe to email or message.",
+        "copy": "Copy link",
+        "copied": "Link copied",
+        "copy_failed": "Couldn’t copy. Select the link and copy it yourself."
+      },
+      "error": {
+        "reload": "Reload roster",
+        "not_co_chair": {
+          "heading": "Your co-chair access has changed",
+          "body": "You can no longer create invites. Reload the roster to see your current access."
+        },
+        "invalid_role": {
+          "heading": "That role set can’t be used",
+          "body": "Pick from Worker member, Worker co-chair, or Certified member and try again."
+        },
+        "generic": {
+          "heading": "Couldn’t create the invite",
+          "body": "Something went wrong on our side. Try again in a moment."
+        }
+      }
+    },
+    "resend": {
+      "section": {
+        "heading": "Pending invites",
+        "blurb": "Invites that haven’t been redeemed yet. Re-send a fresh code, or invite again if one has expired."
+      },
+      "list_aria": "Pending invites",
+      "loading": "Loading pending invites…",
+      "empty": {
+        "heading": "No pending invites",
+        "body": "Everyone you’ve invited has joined. Invite a new member from the button above."
+      },
+      "status": {
+        "waiting": "Waiting to be redeemed",
+        "expired": "Expired — invite again"
+      },
+      "row": {
+        "issued": "Sent {date}",
+        "expires": "Link expires {date}",
+        "action": "Re-send code",
+        "action_aria": "Re-send code for {name}",
+        "reinvite": "Invite again",
+        "reinvite_aria": "Invite again for {name}"
+      },
+      "confirm": {
+        "heading": "Send a new code?",
+        "body": "This creates a fresh code and stops the previous one from working.",
+        "go": "Send new code",
+        "cancel": "Cancel"
+      },
+      "submitting": "Sending a new code…",
+      "code": {
+        "heading": "New code ready — the old one has stopped working"
+      },
+      "invalid": {
+        "heading": "Can’t send a new code for this invite",
+        "body": "This invite has already been used or has expired. If they still need access, invite them again.",
+        "reinvite": "Invite again"
+      },
+      "error": {
+        "generic": {
+          "heading": "Couldn’t send a new code",
+          "body": "Something went wrong on our side. Try again in a moment."
+        }
+      }
     }
   },
   "landing": {
@@ -1634,6 +1732,16 @@
     "committee": {
       "roster": {
         "loaded": "Committee roster loaded. {count} members."
+      },
+      "invite": {
+        "submitting": "Creating the invite…",
+        "code_ready": "Invite created. A one-time code is shown once below. Share it out of band.",
+        "code_replaced": "New code ready. The previous code no longer works."
+      },
+      "resend": {
+        "submitting": "Sending a new code…",
+        "code_ready": "New code created. It is shown once below. The previous code no longer works.",
+        "code_replaced": "New code ready. The previous code no longer works."
       }
     }
   },

@@ -22,7 +22,9 @@
    */
   import { env } from '$env/dynamic/public';
   import { t } from '$lib/i18n';
+  import CommitteeInvite from '$lib/committee/CommitteeInvite.svelte';
   import CommitteeRoster from '$lib/committee/CommitteeRoster.svelte';
+  import PendingInvites from '$lib/committee/PendingInvites.svelte';
   import { createSupabaseCommitteeClient } from '$lib/server-client/committee-client-factory';
   import { clearJwt, getJwt } from '$lib/auth/session-jwt-store';
 
@@ -33,6 +35,10 @@
     getJwt,
     onSessionRevoked: clearJwt
   });
+
+  // The screen-2 invite panel; the expired-row "Invite again" in the
+  // Pending-invites section (screen 4) hands off here to open it.
+  let inviteRef;
 </script>
 
 <svelte:head>
@@ -40,4 +46,8 @@
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
+<CommitteeInvite bind:this={inviteRef} client={committeeClient} />
+
 <CommitteeRoster client={committeeClient} />
+
+<PendingInvites client={committeeClient} onReinvite={() => inviteRef?.openInvitePanel()} />
