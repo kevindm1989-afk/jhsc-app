@@ -40,11 +40,12 @@
    * `<script>` (no lang="ts") + JSDoc per G-T07-13 (same reason as the sibling
    * Settings cards: the reused recovery components are plain-JS Svelte).
    */
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { t } from '$lib/i18n';
   import { getCurrentUserId } from '$lib/auth/jwt-claims';
   import { ready } from '$lib/crypto/sodium';
   import { generateRecoveryPassphrase } from '$lib/crypto/passphrase';
+  import { pubkeyFingerprint } from '$lib/crypto/identity-keys';
   import {
     enrollIdentityViaProduction,
     storeRecoveryBlobViaProduction,
@@ -53,6 +54,7 @@
   } from '$lib/crypto/production-flows';
   import D4RecoveryPassphrase from '$lib/onboarding/steps/D4RecoveryPassphrase.svelte';
   import D6TypeBackVerify from '$lib/onboarding/steps/D6TypeBackVerify.svelte';
+  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
 
   /**
    * The production t07 client (createSupabaseT07Client with a
@@ -73,10 +75,29 @@
    * Card phase.
    * @type {'probing' | 'hidden' | 'not_provisioned' | 'enrolling' |
    *        'recovery' | 'recovery_confirm' | 'init' | 'success' |
-   *        'restore_required' | 'foreign_held' | 'error'}
+   *        'restore_required' | 'foreign_held' | 'waiting' | 'error'}
    */
   let phase = 'probing';
   let errorKey = 'settings.setupCommitteeEncryption.error.unknown';
+
+  // Waiting phase (P1-9 / Surface L / F-172). The member has enrolled their
+  // identity and holds the privkey on this device, but no co-chair has wrapped
+  // them into the committee key yet. We show them their OWN identity fingerprint
+  // (SHA-256 of their X25519 pubkey) so they can read it aloud to a co-chair,
+  // who re-derives the SAME value via pubkeyFingerprint() and compares it
+  // out-of-band before granting access (P1-8d, a later increment).
+  /** @type {'computing' | 'shown' | 'derive_error'} sub-state of `waiting`. */
+  let waitingState = 'computing';
+  /** The contiguous 64-hex fingerprint (canonical lowercase); the PUBLIC copy
+   * value the 16 display groups are sliced from. Never key material. */
+  let fingerprint = '';
+  /** Polite "fingerprint ready" announcement; populated post-render so it lands
+   * as a live-region mutation (mirrors OneTimeCodeCard's F6 pattern). */
+  let waitingReady = '';
+  /** @type {HTMLElement | null} single deliberate focus target on `shown`. */
+  let waitingLeadEl = null;
+  /** @type {HTMLElement | null} focus target on `derive_error`. */
+  let waitingErrorEl = null;
 
   // In-memory ceremony state (ADR-0020 Option B — never persisted).
   let userId = '';
@@ -120,6 +141,25 @@
     if (http === 401) return 'settings.setupCommitteeEncryption.error.signed_out';
     if (http === 403) return 'settings.setupCommitteeEncryption.error.denied';
     return 'settings.setupCommitteeEncryption.error.unknown';
+  }
+
+  // The 64-hex fingerprint split into 16 atomic groups of 4 (pubkeyFingerprint()
+  // order, lowercase) — the exact split the co-chair's P1-8d screen mirrors so
+  // the two humans compare group-for-group.
+  $: waitingGroups = fingerprint.length === 64 ? fingerprint.match(/.{4}/g) ?? [] : [];
+
+  /**
+   * The per-group screen-reader label: a positional landmark plus the 4 glyphs
+   * spelled digit-by-digit (the OneTimeCodeCard role="img" mechanism applied per
+   * group), e.g. "group 3 of 16, c 3 d 4". The `{chars}` fill is data, not
+   * translatable.
+   * @param {number} index 1-based group position @param {string} group 4 glyphs
+   */
+  function waitingGroupLabel(index, group) {
+    return t('a11y.settings.setup.fingerprint.group_label', {
+      index,
+      chars: group.split('').join(' ')
+    });
   }
 
   onMount(probeState);
@@ -202,6 +242,26 @@
       return;
     }
 
+    // P1-9 / Surface L / F-180 waiting gate. Reached only when
+    // `hasDevicePrivkey === true` (every `!hasDevicePrivkey` branch above
+    // returned) AND `state.actor_has_wrap === false` (the `actor_has_wrap &&
+    // hasDevicePrivkey` branch returned `hidden` at the top), so the only
+    // remaining discriminator is `wrap_count`:
+    //   - wrap_count > 0 → a committee key exists, held by other members, and
+    //     this actor has done their part (identity enrolled + privkey here) but
+    //     has no wrap yet → they are WAITING for a co-chair to grant access.
+    //     Show their own identity fingerprint for the F-172 out-of-band compare.
+    //   - wrap_count === 0 → no committee key exists at all; this member is the
+    //     first co-chair and initialises it → falls through to not_provisioned.
+    if (state && state.wrap_count > 0) {
+      phase = 'waiting';
+      waitingState = 'computing';
+      // Fire-and-forget so the `computing` render is honoured, exactly how the
+      // card kicks off its other async steps.
+      void deriveWaitingFingerprint();
+      return;
+    }
+
     // Device has the privkey; identity is done device-side. Resume at the
     // committee-key step (recovery may or may not be done server-side — we
     // re-offer it idempotently; storeRecovery is server-cap-of-1 so a second
@@ -243,6 +303,48 @@
       return;
     }
     await beginRecovery();
+  }
+
+  /**
+   * Derive the member's OWN identity fingerprint for the waiting phase — the
+   * F-172 human-augment compare value (analogous to resumeWithDeviceKey's pubkey
+   * re-derivation). CLIENT-SIDE ONLY: no server RPC fires; the in-memory
+   * `identityPrivkey` (already read in probeState) is reused — we do NOT re-read
+   * the key. The result is byte-identical to the co-chair's
+   * getMemberPubkey().fingerprint because both call the same pubkeyFingerprint()
+   * over crypto_scalarmult_base(privkey).
+   *
+   * The WHOLE computation is wrapped so any throw fails closed to `derive_error`
+   * (never render a fingerprint from an absent/short key). In the gated branch
+   * the privkey is guaranteed 32 bytes, so this is defense-in-depth.
+   */
+  async function deriveWaitingFingerprint() {
+    try {
+      const s = await ready();
+      const pub = s.crypto_scalarmult_base(identityPrivkey);
+      fingerprint = await pubkeyFingerprint(pub);
+      // Populate the (already-mounted, previously-empty) polite region in the
+      // same batch as the shown transition so "ready" announces as a live-region
+      // mutation (VoiceOver skips regions inserted already-populated).
+      waitingState = 'shown';
+      waitingReady = t('a11y.settings.setup.fingerprint.ready');
+      // Single deliberate focus move to the lead (mirrors Surface J success).
+      await tick();
+      if (waitingLeadEl) waitingLeadEl.focus();
+    } catch {
+      // Fail-safe: no fingerprint is ever rendered from a bad derive.
+      fingerprint = '';
+      waitingState = 'derive_error';
+      await tick();
+      if (waitingErrorEl) waitingErrorEl.focus();
+    }
+  }
+
+  /** Retry the derive in place (no full re-probe — the privkey is unchanged). */
+  function retryWaiting() {
+    waitingReady = '';
+    waitingState = 'computing';
+    void deriveWaitingFingerprint();
   }
 
   async function runEnroll() {
@@ -429,7 +531,11 @@
   <section
     class="setup-committee-section"
     aria-labelledby="setup-committee-heading"
-    aria-busy={phase === 'enrolling' || phase === 'init' ? 'true' : 'false'}
+    aria-busy={phase === 'enrolling' ||
+    phase === 'init' ||
+    (phase === 'waiting' && waitingState === 'computing')
+      ? 'true'
+      : 'false'}
     data-testid="setup-committee-section"
   >
     <h2 id="setup-committee-heading">{t('settings.setupCommitteeEncryption.heading')}</h2>
@@ -563,6 +669,135 @@
       </a>
     {/if}
 
+    {#if phase === 'waiting'}
+      <!-- Polite "fingerprint ready" region: mounted empty (during `computing`),
+           populated on `shown` so it announces as a live-region mutation. -->
+      <p class="visually-hidden" role="status" aria-live="polite">{waitingReady}</p>
+      {#if waitingState === 'computing'}
+        <!-- Loading coverage for the waiting phase. SHA-256 of 32 bytes is
+             sub-millisecond, so no spinner; the section's aria-busy carries the
+             busy state and this polite line names the literal action. -->
+        <p
+          class="muted"
+          role="status"
+          aria-live="polite"
+          data-testid="setup-committee-waiting-computing"
+        >
+          {t('settings.setupCommitteeEncryption.waiting.computing')}
+        </p>
+      {:else if waitingState === 'shown'}
+        <div class="setup-committee-waiting" data-testid="setup-committee-waiting">
+          <!-- Single deliberate focus target on entry (mirrors Surface J
+               success) — the lead paragraph, read first so the SR order teaches
+               the mental model: you're set up → the fingerprint → what to do. -->
+          <p
+            class="setup-committee-waiting-lead"
+            tabindex="-1"
+            bind:this={waitingLeadEl}
+          >
+            {t('settings.setupCommitteeEncryption.waiting.lead')}
+          </p>
+
+          <div class="setup-committee-fp-block">
+            <span class="setup-committee-fp-label" aria-hidden="true">
+              {t('settings.setupCommitteeEncryption.waiting.fingerprint_label')}
+            </span>
+            <!-- High-contrast display box (the audited max-contrast pair used by
+                 OneTimeCodeCard / D.T19.f). The role="group" wrapper names the
+                 whole fingerprint so an SR user hears the shape up front; the
+                 <ol>/<li> keep native list semantics (role="group" on the <ol>
+                 itself would strip listitem context). -->
+            <div class="setup-committee-fp-box" data-testid="setup-committee-fingerprint">
+              <div
+                class="setup-committee-fp-group"
+                role="group"
+                aria-label={t('a11y.settings.setup.fingerprint.region_label')}
+              >
+                <ol class="setup-committee-fp-list">
+                  {#each waitingGroups as group, i}
+                    <li class="setup-committee-fp-item">
+                      <!-- role="img" swaps the visible glyphs for a spelled,
+                           positional aria-label in the a11y tree (per-group
+                           OneTimeCodeCard mechanism). -->
+                      <span
+                        class="setup-committee-fp-glyphs"
+                        role="img"
+                        aria-label={waitingGroupLabel(i + 1, group)}>{group}</span
+                      >
+                    </li>
+                  {/each}
+                </ol>
+              </div>
+            </div>
+            <!-- The one clipboard affordance. The fingerprint is a PUBLIC value
+                 (SHA-256 of the public key), so copy is correct here (deliberate
+                 contrast with the Surface K one-time code). Copies the CONTIGUOUS
+                 64-hex — the co-chair's paste-compare target. -->
+            <ShareUrlButton
+              url={fingerprint}
+              labelKey="settings.setupCommitteeEncryption.waiting.copy"
+              copiedKey="settings.setupCommitteeEncryption.waiting.copied"
+              errorKey="settings.setupCommitteeEncryption.waiting.copy_failed"
+              copiedAnnounceKey="a11y.settings.setup.fingerprint.copied"
+              errorAnnounceKey="settings.setupCommitteeEncryption.waiting.copy_failed"
+              fullTarget={true}
+            />
+          </div>
+
+          <!-- Compare instruction — calm info callout (icon + text, colour never
+               alone). This is a normal, expected step, not a hazard. -->
+          <div class="setup-committee-callout setup-committee-callout-info">
+            <svg class="setup-committee-callout-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                d="M12 11v5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+              <path
+                d="M12 8h.01"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+            <div>
+              <h3 class="setup-committee-callout-heading">
+                {t('settings.setupCommitteeEncryption.waiting.compare_heading')}
+              </h3>
+              <p class="setup-committee-callout-body">
+                {t('settings.setupCommitteeEncryption.waiting.compare_body')}
+              </p>
+            </div>
+          </div>
+        </div>
+      {:else if waitingState === 'derive_error'}
+        <!-- Fail-safe error coverage. Unreachable in the gated branch (privkey
+             guaranteed present); if it fires the honest recovery is retry. -->
+        <div
+          class="setup-committee-alert"
+          role="alert"
+          data-testid="setup-committee-waiting-error"
+        >
+          <strong tabindex="-1" bind:this={waitingErrorEl}>
+            {t('settings.setupCommitteeEncryption.waiting.error.heading')}
+          </strong>
+          <p>{t('settings.setupCommitteeEncryption.waiting.error.body')}</p>
+        </div>
+        <button
+          type="button"
+          class="btn-outline"
+          on:click={retryWaiting}
+          data-testid="setup-committee-waiting-retry"
+        >
+          {t('settings.setupCommitteeEncryption.waiting.error.retry')}
+        </button>
+      {/if}
+    {/if}
+
     {#if phase === 'error'}
       <div class="setup-committee-alert" role="alert" data-testid="setup-committee-error">
         {t(errorKey)}
@@ -689,5 +924,103 @@
     margin-block-start: 0.5rem;
     color: var(--color-tint-red-fg);
     font-size: 0.875rem;
+  }
+
+  /* --- P1-9 waiting phase (Surface L). Colour / border / radius / font all bind
+     to the app CSS-variable token palette; spacing + type sizing use rem
+     literals matching the sibling OneTimeCodeCard convention (this project
+     exposes no spacing-scale custom properties). --- */
+  .setup-committee-waiting {
+    display: grid;
+    gap: 1rem;
+    margin-block-start: 1rem;
+  }
+  .setup-committee-waiting-lead {
+    margin: 0;
+    color: var(--color-fg);
+  }
+  .setup-committee-fp-block {
+    display: grid;
+    gap: 0.5rem;
+    justify-items: start;
+    inline-size: 100%;
+  }
+  .setup-committee-fp-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-fg-muted);
+  }
+  /* High-contrast display box — the audited max-contrast pair OneTimeCodeCard /
+     D.T19.f use for load-bearing text. */
+  .setup-committee-fp-box {
+    inline-size: 100%;
+    padding: 1rem;
+    border: var(--border-width-thick) solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-bg);
+  }
+  /* Groups flow left-to-right and wrap ONLY at group boundaries — a 4-char group
+     is atomic (a single span), so it can never split across a line. */
+  .setup-committee-fp-list {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 0.5rem;
+    row-gap: 0.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .setup-committee-fp-item {
+    margin: 0;
+  }
+  .setup-committee-fp-glyphs {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--color-fg);
+    user-select: all;
+  }
+  .setup-committee-callout {
+    display: flex;
+    gap: 0.625rem;
+    align-items: flex-start;
+    padding: 0.75rem 1rem;
+    border: var(--border-width-default) solid transparent;
+    border-inline-start-width: var(--border-width-thick);
+    border-radius: var(--radius-md);
+  }
+  .setup-committee-callout-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex: none;
+    margin-block-start: 0.125rem;
+  }
+  .setup-committee-callout-heading {
+    margin: 0;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+  .setup-committee-callout-body {
+    margin-block: 0.25rem 0;
+    font-size: 0.875rem;
+  }
+  .setup-committee-callout-info {
+    background: var(--color-tint-blue-bg);
+    color: var(--color-tint-blue-fg);
+    border-color: var(--color-tint-blue-border);
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 </style>

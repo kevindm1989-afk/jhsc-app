@@ -1461,6 +1461,21 @@
         "denied": "This action isn't permitted for your account right now. Contact your worker co-chair if you think this is wrong.",
         "unknown": "Something went wrong during setup. Try again — your progress is saved, so it will pick up where it left off.",
         "retry": "Try again"
+      },
+      "waiting": {
+        "lead": "You're all set up on this device. Now you're waiting for a co-chair to give you access to the committee's encrypted records.",
+        "fingerprint_label": "Your identity fingerprint",
+        "compare_heading": "Read this to your co-chair when they grant access",
+        "compare_body": "When a co-chair is ready to give you access, read them the fingerprint above one group at a time — or show them your screen. They will check it matches what they see before they grant access. This is how they confirm it's really you.",
+        "computing": "Preparing your fingerprint…",
+        "copy": "Copy fingerprint",
+        "copied": "Fingerprint copied",
+        "copy_failed": "Couldn't copy. Select the fingerprint and copy it yourself.",
+        "error": {
+          "heading": "Couldn't show your fingerprint",
+          "body": "Something went wrong reading your identity key on this device. Try again. If it keeps happening, contact your co-chair.",
+          "retry": "Try again"
+        }
       }
     }
   },
@@ -1669,6 +1684,16 @@
     "loading_complete": "{action_label} complete",
     "toast_announce": "{severity}: {body}",
     "feed_new_item": "New activity: {description}",
+    "settings": {
+      "setup": {
+        "fingerprint": {
+          "ready": "Your identity fingerprint is ready to read to your co-chair. It has sixteen groups of four characters.",
+          "region_label": "Your identity fingerprint — sixteen groups of four characters",
+          "group_label": "group {index} of 16, {chars}",
+          "copied": "Fingerprint copied to the clipboard."
+        }
+      }
+    },
     "export": {
       "reauth": {
         "success": "Passkey confirmed. Reviewing export fields."
