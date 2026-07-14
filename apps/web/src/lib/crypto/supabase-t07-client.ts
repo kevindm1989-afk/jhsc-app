@@ -350,6 +350,61 @@ export class SupabaseT07Client {
   }
 
   /**
+   * F182-1 / ADR-0030 Decision 6 — read ALL of the caller's OWN committee-key
+   * wraps across every epoch (live + retired). Generalizes
+   * `getCommitteeKeyWrapForSelf` from the single live wrap to the multi-epoch
+   * SETOF — the F-183 anti-lockout property: a member keeps opening data sealed
+   * under a rotated-out key. Each wrap is SEALED ciphertext (opaque without the
+   * device-local identity privkey); the wire ships PostgREST hex (`\x…`) and
+   * this method decodes per-row via `pgHexToBytes`, mirroring
+   * `getCommitteeKeyWrapForSelf`.
+   *
+   * F-183 (i) own-wrap-only: the `get_all_key_wraps` op carries NO id/target
+   * parameter — the server resolves against `auth.uid()` only, so there is no
+   * IDOR surface. Backed by `get_all_committee_key_wraps_for_self` (migration
+   * 0045), which reads the LIVE wrap table ONLY (never the forensic archive)
+   * and emits `committee_data_key.unwrap` audit-before-return per distinct key
+   * (F-148). `is_live` is surfaced per row (the client's live-key designation
+   * for the next seal).
+   *
+   * An empty SETOF → `{ ok: true, data: [] }` (a purged/reactivated member in
+   * the holding state — never a throw). An `{ ok: false }` server denial is
+   * surfaced verbatim. A THROWN transport (network/transport fault) is caught
+   * here and surfaced as a typed `{ ok: false }` — the method never rejects
+   * (the shared `invoke` does not catch a thrown transport).
+   */
+  async getAllCommitteeKeyWrapsForSelf(): Promise<
+    T07OpResult<
+      Array<{ key_id: string; epoch: number; wrapped_ciphertext: Uint8Array; is_live: boolean }>
+    >
+  > {
+    try {
+      const r = await invoke<
+        Array<{ key_id: string; epoch: number; wrapped_ciphertext_hex: string; is_live: boolean }>
+      >(this.opts.transport, { op: 'get_all_key_wraps' });
+      if (!r.ok) return r;
+      // The per-row hex decode runs INSIDE the try so a malformed/absent
+      // `wrapped_ciphertext_hex` (a server contract drift) also resolves to a
+      // typed failure rather than throwing — the anti-lockout key-map (F182-2)
+      // relies on this method failing CLOSED, never rejecting (F-183 contract).
+      return {
+        ok: true,
+        data: (r.data ?? []).map((row) => ({
+          key_id: row.key_id,
+          epoch: row.epoch,
+          wrapped_ciphertext: pgHexToBytes(row.wrapped_ciphertext_hex),
+          is_live: row.is_live
+        }))
+      };
+    } catch {
+      // A transport fault (fetch reject) OR a malformed-row decode resolves to a
+      // typed failure. No transport detail is surfaced; `unknown` is the
+      // closed-literal T07OpReason.
+      return { ok: false, reason: 'unknown', status: 0 };
+    }
+  }
+
+  /**
    * ADR-0029 P1-4 / P1-5 — read the TARGET member's enrolled identity public
    * key for the co-chair-side wrap composition. The FIRST production client
    * method that returns ANOTHER member's identity public_key across the

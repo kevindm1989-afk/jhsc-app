@@ -26,6 +26,7 @@ import {
   committeeKeyState,
   enrollIdentityKeypair,
   finalizeCommitteeDataKeyRotation,
+  getAllKeyWrapsForSelf,
   getCommitteeKeyWrapForSelf,
   getMemberPubkey,
   getRecoveryBlob,
@@ -72,6 +73,11 @@ type Op =
   // is structural; F-142). The SQL fn emits the unwrap audit row
   // audit-before-return (F-151).
   | { op: 'get_key_wrap' }
+  // F182-1 / ADR-0030 Decision 6 — read ALL of the caller's OWN committee-key
+  // wraps across every epoch (live + retired). Read-shaped; same gate stack. No
+  // id parameter (own-wrap-only is structural; F-183 (i)). The SQL fn emits one
+  // unwrap audit row per distinct key audit-before-return (F-148).
+  | { op: 'get_all_key_wraps' }
   // ADR-0029 P1-4 / P1-5 — disclosure of a TARGET member's enrolled identity
   // pubkey for the co-chair-side wrap composition. The op accepts ONLY
   // target_user_id (F-172: NO caller-supplied pubkey field — the server is the
@@ -252,6 +258,9 @@ serveWithCors(async (req) => {
       break;
     case 'get_key_wrap':
       result = await getCommitteeKeyWrapForSelf(rpc);
+      break;
+    case 'get_all_key_wraps':
+      result = await getAllKeyWrapsForSelf(rpc);
       break;
     case 'get_member_pubkey':
       // F-172: forward ONLY target_user_id. Any caller-smuggled pubkey field
