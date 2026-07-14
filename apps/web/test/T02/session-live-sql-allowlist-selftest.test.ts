@@ -124,5 +124,16 @@ describe('T02 / F-121 — verify-session-live-uniformity.sh SQL-layer allowlist 
       status,
       `expected --self-test to exit 0 on a correct tree (negative control caught, real migrations gated); got exit ${status} and:\n${output}`
     ).toBe(0);
+    // Guard-of-the-guard (security/adversarial review F-121): the negative control
+    // MUST exercise a FUNCTION surface, not only a policy. The 3 revoke RPCs gate
+    // via `_t07_gate_session()` (not the literal `session_is_live`), so a
+    // comment-only false-green is caught ONLY if a function-surface strip is
+    // tested. Require the self-test to report a function-surface (revoke_my_session)
+    // gate strip being CAUGHT — otherwise a regression to policy-only coverage
+    // (which cannot catch a dropped PERFORM) would slip through unnoticed.
+    expect(
+      /caught[^\n]*revoke_my_session|revoke_my_session[^\n]*caught/i.test(output),
+      `expected --self-test to catch a FUNCTION-surface (revoke_my_session) gate strip, not only a policy; got:\n${output}`
+    ).toBe(true);
   });
 });

@@ -107,7 +107,19 @@ sql_surface_is_gated() {
       END { printf "%s", last }
     ' "$latest")"
   fi
-  printf '%s' "$block" | grep -qF "session_is_live"
+  # Match the REAL enforcement token per kind, on comment-stripped SQL only, so a
+  # boilerplate comment can never satisfy the gate (adversarial/security finding):
+  #   - policy   → the `session_is_live()` predicate lives in the USING clause.
+  #   - function → the gate is the `_t07_gate_session()` CALL (its body is
+  #     `IF NOT session_is_live() …`); the literal `session_is_live` appears only
+  #     in a comment, so grepping for it would false-green on a dropped PERFORM.
+  local stripped
+  stripped="$(printf '%s' "$block" | sed 's/--.*$//')"
+  if [ "$kind" = "function" ]; then
+    printf '%s' "$stripped" | grep -qE '_t07_gate_session[[:space:]]*\('
+  else
+    printf '%s' "$stripped" | grep -qF "session_is_live"
+  fi
 }
 
 # sql_layer_check <dir> — assert all six SQL surfaces are gated in <dir>.
@@ -148,23 +160,35 @@ run_self_test() {
     echo "    FAIL — a real SQL surface is ungated (see offenders above)"
   fi
 
-  # (b) Negative control — synthetic stripped-gate fixture. Copy the real
-  # migrations and TAMPER exactly one surface (strip session_is_live from the
-  # users_select_self read policy); sql_layer_check MUST catch it (non-zero).
-  echo "  [negative control] synthetic stripped-gate fixture (tamper: strip session_is_live from users_select_self):"
+  # (b) Negative control — TWO synthetic stripped-gate fixtures, ONE PER SURFACE
+  # KIND, because the gate token differs (policy: the `session_is_live()`
+  # predicate; function: the `_t07_gate_session()` call). Each MUST be caught
+  # (non-zero) or the check is a dead/comment-only gate. neg_ok stays 1 only if
+  # BOTH are caught.
+  neg_ok=1
+  # (b1) policy strip — remove the session_is_live conjunct from users_select_self.
+  echo "  [negative control · policy] tamper: strip session_is_live from users_select_self:"
   fixture="$(mktemp -d)"
   cp "$MIG_DIR"/*.sql "$fixture"/
-  # The conjunct string below is unique to the users_select_self gate, so this
-  # strips the gate from exactly one surface regardless of which ordinal the
-  # ALTER POLICY lives in (robust to future renumbering). If the string ever
-  # stops matching, the negative control catches nothing and this self-test
-  # fails closed (neg_ok stays 0) — the correct, loud direction.
   sed -i 's/public\.session_is_live() AND auth\.uid() = id/auth.uid() = id/' "$fixture"/*.sql
   if sql_layer_check "$fixture" 2>/dev/null; then
-    echo "    FAIL — the stripped-gate fixture was NOT caught; the check cannot fail (dead gate)"
+    echo "    FAIL — policy strip NOT caught (dead gate for users_select_self)"; neg_ok=0
   else
-    neg_ok=1
-    echo "    PASS — synthetic tampered fixture caught (non-zero), the check is regression-catching"
+    echo "    PASS — policy strip caught (users_select_self)"
+  fi
+  rm -rf "$fixture"
+  # (b2) function strip — the F-121 revoke RPCs gate via `_t07_gate_session()`.
+  # Delete the PERFORM (the real gate) while LEAVING the marker comment: the check
+  # MUST still catch it (this is the exact comment-only false-green the reviewers
+  # found; grepping the literal `session_is_live` would wrongly pass here).
+  echo "  [negative control · function] tamper: strip _t07_gate_session() from revoke_my_session (comment kept):"
+  fixture="$(mktemp -d)"
+  cp "$MIG_DIR"/*.sql "$fixture"/
+  sed -i '/PERFORM public\._t07_gate_session();/d' "$fixture"/*.sql
+  if sql_layer_check "$fixture" 2>/dev/null; then
+    echo "    FAIL — function strip NOT caught (comment-only false-green); revoke_my_session ungated"; neg_ok=0
+  else
+    echo "    PASS — function strip caught (revoke_my_session)"
   fi
   rm -rf "$fixture"
 
