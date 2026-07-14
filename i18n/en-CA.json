@@ -1240,6 +1240,107 @@
         "retry": "Try again",
         "close": "Close"
       }
+    },
+    "role": {
+      "row": {
+        "cta": "Change role",
+        "cta_aria": "Change {name}'s committee roles"
+      },
+      "modal": {
+        "heading": "Change committee roles",
+        "lead": "Choose the roles for {name}.",
+        "roles_legend": "Committee roles",
+        "self_note": "This is your own membership.",
+        "no_changes_hint": "Pick a different set of roles to save a change.",
+        "confirm": "Save role change",
+        "cancel": "Cancel"
+      },
+      "submitting": "Saving role change…",
+      "done": {
+        "heading": "Roles updated",
+        "body": "{name}'s committee roles are updated.",
+        "toast": "Committee roles updated."
+      },
+      "failed": {
+        "invalid_role": {
+          "body": "Pick at least one role, then try again."
+        }
+      }
+    },
+    "remove": {
+      "row": {
+        "cta": "Remove",
+        "cta_aria": "Remove {name} from the committee"
+      },
+      "modal": {
+        "heading": "Remove {name} from the committee?",
+        "what": "This removes {name}'s committee membership and starts a 90-day grace period. Their committee role is cleared and their status here changes to 'Removed'.",
+        "limit": "Removing a member does not rotate the shared committee key or re-encrypt existing records. If {name} still has a device that already opened committee data, that device can keep opening it until the key is rotated in a future update. Removal is an administrative step, not a cryptographic lockout.",
+        "self_note": "You are removing your own membership.",
+        "confirm": "Remove member",
+        "confirm_self": "Remove myself",
+        "cancel": "Cancel"
+      },
+      "submitting": "Removing member…",
+      "done": {
+        "heading": "Member removed",
+        "body": "{name}'s membership is removed. You can still reactivate them during the 90-day grace period, which ends {date}.",
+        "toast": "Member removed."
+      }
+    },
+    "reactivate": {
+      "row": {
+        "cta": "Reactivate",
+        "cta_aria": "Reactivate {name}'s committee membership"
+      },
+      "modal": {
+        "heading": "Reactivate {name}?",
+        "what": "This restores {name}'s committee membership and clears the grace period. Their previous committee role comes back and their status here returns to what it was before they were removed.",
+        "wrap": "Reactivation does not run a new grant. {name} returns to the committee-key access their device already had — nothing is re-issued. If their device still had access, they can open committee data again as soon as you reactivate them.",
+        "confirm": "Reactivate member",
+        "cancel": "Cancel"
+      },
+      "submitting": "Reactivating member…",
+      "done": {
+        "heading": "Member reactivated",
+        "body": "{name}'s membership and committee role are restored.",
+        "toast": "Member reactivated."
+      },
+      "failed": {
+        "already_active": {
+          "body": "This member is already active. Reload the roster to see the latest status."
+        }
+      }
+    },
+    "approver": {
+      "heading": "A second co-chair must approve this",
+      "explain": "Changing your own co-chair status needs another worker co-chair to approve it with you, so no single co-chair can change or remove themselves alone.",
+      "select_label": "Approving co-chair",
+      "select_placeholder": "Choose a co-chair",
+      "none_heading": "No other co-chair is available",
+      "none_body": "You may be the only worker co-chair right now. To step down, promote another member to worker co-chair first — then this will ask them to approve.",
+      "stale": "That co-chair can no longer approve. Choose another one."
+    },
+    "manage": {
+      "you_chip": "You",
+      "fourEyes": {
+        "heading": "This needs a second co-chair's approval",
+        "body": "Choose an approving co-chair to continue."
+      },
+      "lastCoChair": {
+        "heading": "The committee must keep a worker co-chair",
+        "body": "This change would leave the committee with no worker co-chair, so it can't be completed. Appoint another worker co-chair first, then try again."
+      },
+      "failed": {
+        "heading": "That didn't go through",
+        "session_body": "Your session ended. Sign in again to continue.",
+        "co_chair_body": "Your co-chair access may have changed. Reload the roster, and sign in again if you're prompted.",
+        "not_found_body": "This member's record couldn't be found. Reload the roster and try again.",
+        "generic_body": "Something went wrong on our side. Try again in a moment."
+      },
+      "retry": "Try again",
+      "reload": "Reload roster",
+      "close": "Close"
     }
   },
   "landing": {
@@ -1836,6 +1937,27 @@
         "granting": "Granting access…",
         "granted": "Access granted to {name}.",
         "failed": "Couldn't grant access."
+      },
+      "manage": {
+        "you": "This is your own membership.",
+        "fourEyes": "This action needs a second co-chair's approval. Choose an approving co-chair.",
+        "lastCoChair": "This change would leave the committee with no worker co-chair and can't be completed.",
+        "failed": "That didn't go through."
+      },
+      "role": {
+        "submitting": "Saving role change…",
+        "done": "Committee roles updated."
+      },
+      "remove": {
+        "submitting": "Removing member…",
+        "done": "Member removed. Grace period ends {date}."
+      },
+      "reactivate": {
+        "submitting": "Reactivating member…",
+        "done": "Member reactivated."
+      },
+      "approver": {
+        "selected": "{name} selected as the approving co-chair."
       }
     }
   },

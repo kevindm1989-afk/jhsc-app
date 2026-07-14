@@ -34,12 +34,31 @@
   import { onMount, tick } from 'svelte';
   import { t } from '$lib/i18n';
   import { isSignedIn } from '$lib/auth/session-jwt-svelte';
+  import { getCurrentUserId } from '$lib/auth/jwt-claims';
   import CommitteeGrantCard from './CommitteeGrantCard.svelte';
+  import CommitteeManageMemberCard from './CommitteeManageMemberCard.svelte';
   import type { RosterRow, CommitteeOpResult } from './supabase-committee-client';
   import type { SupabaseT07Client, CommitteeKeyHolder, LocalIdentityStore } from '$lib/crypto';
 
+  /**
+   * The committee-op client. `listRoster` is always required; the three
+   * screen-5 governance ops (`setRoles`/`removeMember`/`reactivateMember`) are
+   * OPTIONAL — present on the production `SupabaseCommitteeClient`, absent on the
+   * inert default. When `manageEnabled` is set AND they are present, each row
+   * mounts a `CommitteeManageMemberCard` (see the attach block below).
+   */
   type CommitteeClient = {
     listRoster: () => Promise<CommitteeOpResult<RosterRow[]>>;
+    setRoles?: (input: {
+      target_user_id: string;
+      roles: string[];
+      second_approver_id?: string | null;
+    }) => Promise<CommitteeOpResult<null>>;
+    removeMember?: (input: {
+      target_user_id: string;
+      second_approver_id?: string | null;
+    }) => Promise<CommitteeOpResult<string>>;
+    reactivateMember?: (input: { target_user_id: string }) => Promise<CommitteeOpResult<null>>;
   };
 
   /** @see createSupabaseCommitteeClient — production wires the real client. */
@@ -62,6 +81,33 @@
   export let grantHolder: CommitteeKeyHolder | null = null;
   /** The device-local identity store. */
   export let grantLocalIdentity: LocalIdentityStore | null = null;
+
+  // ── Screen 5 management deps (ADR-0029 P1-8e) ─────────────────────────────
+  // Mirrors the grant-card optional-deps attach: the /committee route sets
+  // `manageEnabled` true (it renders the roster only for co-chairs), and the same
+  // `client` now also carries the three governance ops. When enabled, each
+  // active-family / removed row mounts its per-row CommitteeManageMemberCard
+  // (change roles / remove / reactivate) inside the row's `role="group"`. When
+  // absent (the P1-8b read-only + P1-8c/d compositions) the roster stays
+  // read-only signage — no management control mounts on any row.
+  export let manageEnabled = false;
+
+  // The self-action discriminator + eligible-approver exclusion. Computed ONCE
+  // for the whole roster (F-181): `eligibleApprovers` keys off the `active`
+  // boolean + role membership (NOT the badge — a pending_grant/awaiting_identity
+  // co-chair is `active===true` and IS a valid second approver per the SQL), self
+  // excluded. Never used to compute "is last co-chair" — the server truths that.
+  $: currentUserId = getCurrentUserId();
+  $: eligibleApprovers = rows.filter(
+    (r) => r.active && r.roles.includes('worker_co_chair') && r.user_id !== currentUserId
+  );
+  // Manage mounts only when enabled AND the client actually carries the ops (the
+  // inert default does not), so an accidental enablement never no-ops loudly.
+  $: manageReady =
+    manageEnabled &&
+    typeof client.setRoles === 'function' &&
+    typeof client.removeMember === 'function' &&
+    typeof client.reactivateMember === 'function';
 
   // Surface-K state machine (signed-out is derived from $isSignedIn, ahead of
   // these phases). 'loading' is the initial phase for a signed-in mount.
@@ -439,6 +485,27 @@
                 client={grantClient}
                 holder={grantHolder}
                 localIdentity={grantLocalIdentity}
+              />
+            {/if}
+
+            <!-- Screen 5 (P1-8e): the per-row management card (change roles /
+                 remove / reactivate). Mounts ONLY when the route wires the manage
+                 deps (mirrors the grant-card attach). It owns the modal state
+                 machine; on a clean server mutation it signals `onChanged`, and we
+                 re-run the roster read (server-truthed badge refresh — no
+                 optimistic flip, F-181). The card itself renders no control on a
+                 pending_invite row. -->
+            {#if manageReady}
+              <CommitteeManageMemberCard
+                member={row}
+                isSelf={row.user_id === currentUserId}
+                {eligibleApprovers}
+                client={{
+                  setRoles: client.setRoles!,
+                  removeMember: client.removeMember!,
+                  reactivateMember: client.reactivateMember!
+                }}
+                onChanged={load}
               />
             {/if}
           </div>
