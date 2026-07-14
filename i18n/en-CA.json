@@ -1252,6 +1252,7 @@
         "roles_legend": "Committee roles",
         "self_note": "This is your own membership.",
         "no_changes_hint": "Pick a different set of roles to save a change.",
+        "empty_selection_hint": "Pick at least one role to save this change.",
         "confirm": "Save role change",
         "cancel": "Cancel"
       },
@@ -1319,7 +1320,10 @@
       "select_placeholder": "Choose a co-chair",
       "none_heading": "No other co-chair is available",
       "none_body": "You may be the only worker co-chair right now. To step down, promote another member to worker co-chair first — then this will ask them to approve.",
-      "stale": "That co-chair can no longer approve. Choose another one."
+      "stale": "That co-chair can no longer approve. Choose another one.",
+      "refetch_heading": "A co-chair may now be available",
+      "refetch_body": "Another worker co-chair may have just been added. Refresh the roster to choose an approving co-chair.",
+      "refetch_cta": "Refresh the roster"
     },
     "manage": {
       "you_chip": "You",

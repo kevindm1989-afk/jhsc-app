@@ -49,16 +49,18 @@
    */
   type CommitteeClient = {
     listRoster: () => Promise<CommitteeOpResult<RosterRow[]>>;
-    setRoles?: (input: {
+    // `_input` is a TYPE-SIGNATURE label only (never a runtime binding); the
+    // underscore keeps no-unused-vars quiet on the optional method shapes.
+    setRoles?: (_input: {
       target_user_id: string;
       roles: string[];
       second_approver_id?: string | null;
     }) => Promise<CommitteeOpResult<null>>;
-    removeMember?: (input: {
+    removeMember?: (_input: {
       target_user_id: string;
       second_approver_id?: string | null;
     }) => Promise<CommitteeOpResult<string>>;
-    reactivateMember?: (input: { target_user_id: string }) => Promise<CommitteeOpResult<null>>;
+    reactivateMember?: (_input: { target_user_id: string }) => Promise<CommitteeOpResult<null>>;
   };
 
   /** @see createSupabaseCommitteeClient — production wires the real client. */
@@ -145,7 +147,11 @@
   });
 
   async function load(): Promise<void> {
-    phase = 'loading';
+    // ADV-2: only the INITIAL load unmounts the list to show `loading`. A
+    // post-mutation refetch (onChanged from a manage card) keeps the existing
+    // list mounted and swaps `rows` in place, so the keyed {#each} preserves the
+    // open card + its done modal + its focus across the server-truthed refresh.
+    if (rows.length === 0) phase = 'loading';
     const result = await client.listRoster();
     if (result.ok) {
       rows = result.data;
@@ -501,9 +507,13 @@
                 isSelf={row.user_id === currentUserId}
                 {eligibleApprovers}
                 client={{
-                  setRoles: client.setRoles!,
-                  removeMember: client.removeMember!,
-                  reactivateMember: client.reactivateMember!
+                  // ADV-1: wrap each op in an arrow so the ORIGINAL
+                  // SupabaseCommitteeClient instance stays `this` at call time.
+                  // Pulling the bare prototype methods onto a literal detaches
+                  // `this`, so every op would throw before reaching the transport.
+                  setRoles: (i) => client.setRoles!(i),
+                  removeMember: (i) => client.removeMember!(i),
+                  reactivateMember: (i) => client.reactivateMember!(i)
                 }}
                 onChanged={load}
               />

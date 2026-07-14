@@ -55,16 +55,18 @@
   /** The three governance-op methods this card drives (structural subset of
    *  SupabaseCommitteeClient — tests inject a fake that records inputs). */
   type ManageClient = {
-    setRoles: (input: {
+    // `_input` is a TYPE-SIGNATURE label only (never a runtime binding); the
+    // underscore keeps no-unused-vars quiet on the structural method shapes.
+    setRoles: (_input: {
       target_user_id: string;
       roles: string[];
       second_approver_id?: string | null;
     }) => Promise<SetRolesResult>;
-    removeMember: (input: {
+    removeMember: (_input: {
       target_user_id: string;
       second_approver_id?: string | null;
     }) => Promise<RemoveResult>;
-    reactivateMember: (input: { target_user_id: string }) => Promise<ReactivateResult>;
+    reactivateMember: (_input: { target_user_id: string }) => Promise<ReactivateResult>;
   };
 
   /** The roster row this card manages. */
@@ -121,6 +123,15 @@
   // The reason-mapped failed body key (never the raw enum — F-176).
   let failedBodyKey = 'committee.manage.failed.generic_body';
 
+  // The card root — the stable anchor used to reach the enclosing roster subtree
+  // (background-inert target + the A11Y-6 focus-return group when a CTA detaches).
+  let mmRootEl: HTMLDivElement | null = null;
+  // Background-lock bookkeeping (A11Y-1 inert + A11Y-2 body scroll lock): the
+  // prior body overflow to restore on close, and the app-content container we
+  // marked inert while the modal is open (null in the standalone card mount).
+  let prevBodyOverflow = '';
+  let bgInerted: HTMLElement | null = null;
+
   // Focus targets — one deliberate move per state (§3.1 modal-return discipline).
   let dialogEl: HTMLDivElement | null = null;
   let headingEl: HTMLHeadingElement | null = null;
@@ -162,16 +173,46 @@
   $: emptyEligibleNote = selfDropsCoChair && eligibleApprovers.length === 0;
   $: approverGated = showPicker && selectedApprover === '';
 
+  // ADV-3 stale-roster dead-end recovery: the server returned `4eyes_required`
+  // while the local snapshot shows NO eligible co-chair (a second co-chair was
+  // added elsewhere). No picker can render, so instead of looping a null-approver
+  // resubmit we offer a single coherent refetch affordance and GATE Confirm.
+  $: staleFourEyesNoPicker =
+    phase === 'fourEyes' && selfDropsCoChair && eligibleApprovers.length === 0;
+
+  // The empty-role-selection gate (all boxes cleared) — a discrete gated case that
+  // needs its own discoverable hint (A11Y-3), distinct from the no-change gate.
+  $: emptyRoleSelection = openModal === 'role' && rolesChanged && nextRoles.length === 0;
+
   // Confirm gating per op. Role: no-op (selection === current) / empty selection /
   // picker-unfilled. Remove: only the picker-unfilled path (an other-member or
   // last-co-chair removal must never be blocked by a missing approver). Reactivate:
-  // never gated.
+  // never gated. The stale-4eyes dead-end gates every op (recover via refetch).
   $: confirmGated =
-    openModal === 'role'
+    staleFourEyesNoPicker ||
+    (openModal === 'role'
       ? !rolesChanged || nextRoles.length === 0 || approverGated
       : openModal === 'remove'
         ? approverGated
-        : false;
+        : false);
+
+  // A11Y-3: the gated Confirm always points aria-describedby at the live gating
+  // hint — the approver-required gate AND the empty-role-selection gate (was
+  // previously wired only for the no-change gate).
+  $: confirmDescribedBy =
+    openModal === 'role'
+      ? emptyRoleSelection
+        ? `${approverSelectId}-empty-roles`
+        : approverGated
+          ? `${approverSelectId}-approver-hint`
+          : !rolesChanged
+            ? `${approverSelectId}-nochange`
+            : undefined
+      : openModal === 'remove'
+        ? approverGated
+          ? `${approverSelectId}-approver-hint`
+          : undefined
+        : undefined;
 
   $: failedRetryable =
     failedBodyKey === 'committee.role.failed.invalid_role.body' ||
@@ -248,6 +289,65 @@
     return a.display_name ?? `${t('committee.roster.row.unnamed')} ${a.user_id.slice(0, 8)}`;
   }
 
+  // A11Y-1: portal the dialog out of the (soon-to-be-inert) roster subtree to a
+  // top-level container, so the background can be inerted while the dialog itself
+  // stays operable. A tiny Svelte action — moves the node to <body> on mount and
+  // removes it on destroy (idempotent with Svelte's own detach).
+  function portal(node: HTMLElement) {
+    if (typeof document !== 'undefined') document.body.appendChild(node);
+    return {
+      destroy() {
+        if (node.isConnected) node.remove();
+      }
+    };
+  }
+
+  // A11Y-1 + A11Y-2: on modal open, lock body scroll and mark the app background
+  // (the enclosing roster list / page) inert so only the portaled dialog is
+  // reachable. Standalone card mounts have no such ancestor — inert is skipped,
+  // the scroll lock still applies.
+  function lockBackground(): void {
+    if (typeof document === 'undefined') return;
+    prevBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    bgInerted =
+      mmRootEl?.closest<HTMLElement>('[data-testid="committee-roster-list"]') ??
+      mmRootEl?.closest<HTMLElement>('[data-testid="committee-page"]') ??
+      null;
+    // The dialog is portaled to <body>, so inerting this ancestor never inerts the
+    // dialog. Attribute form (not the `.inert` prop) so it is observable in jsdom.
+    bgInerted?.setAttribute('inert', '');
+  }
+
+  function unlockBackground(): void {
+    if (typeof document === 'undefined') return;
+    document.body.style.overflow = prevBodyOverflow;
+    bgInerted?.removeAttribute('inert');
+    bgInerted = null;
+  }
+
+  // A11Y-6: the return-focus target on close. Normally the CTA that opened the
+  // modal — but a mutation can flip the row's affordance (remove→reactivate),
+  // detaching that CTA. When it is gone, return focus to a STABLE, still-connected
+  // element (the row's role="group" unit), never the detached node or <body>.
+  function resolveReturnFocus(): HTMLElement | null {
+    if (lastCta && lastCta.isConnected) return lastCta;
+    const group = mmRootEl?.closest<HTMLElement>('[role="group"]') ?? null;
+    if (group) {
+      if (!group.hasAttribute('tabindex')) group.setAttribute('tabindex', '-1');
+      return group;
+    }
+    return mmRootEl;
+  }
+
+  // ADV-3: the stale-4eyes recovery affordance re-runs the roster read so the
+  // newly-eligible co-chair surfaces as an approver. The modal stays open — once
+  // `eligibleApprovers` refreshes, the picker replaces this affordance in place.
+  function onRefetchApprover(): void {
+    onChanged();
+    dispatch('changed');
+  }
+
   // ── Open / close ─────────────────────────────────────────────────────────────
   async function openRole(): Promise<void> {
     lastCta = roleCtaEl;
@@ -257,6 +357,7 @@
     resetTransient();
     openModal = 'role';
     phase = 'form';
+    lockBackground();
     await tick();
     focusEl(headingEl);
   }
@@ -265,6 +366,7 @@
     resetTransient();
     openModal = 'remove';
     phase = 'form';
+    lockBackground();
     await tick();
     focusEl(headingEl);
   }
@@ -273,6 +375,7 @@
     resetTransient();
     openModal = 'reactivate';
     phase = 'form';
+    lockBackground();
     await tick();
     focusEl(headingEl);
   }
@@ -286,12 +389,14 @@
   }
 
   async function closePanel(): Promise<void> {
-    const returnTo = lastCta;
     openModal = null;
     phase = 'form';
     resetTransient();
+    unlockBackground();
     await tick();
-    focusEl(returnTo);
+    // Resolve AFTER tick so a flipped-affordance CTA has settled (detached) and
+    // the stable fallback target is chosen (A11Y-6).
+    focusEl(resolveReturnFocus());
   }
 
   function onApproverChange(e: Event): void {
@@ -479,11 +584,20 @@
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       if (!first || !last) return;
-      const active = typeof document !== 'undefined' ? document.activeElement : null;
-      if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
+      const active =
+        typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+      // A11Y-1: the dialog container / heading carry tabindex="-1", so they are NOT
+      // in the focusables set. Treat "focus on such a boundary" as an edge too, or a
+      // Shift+Tab from the heading escapes to a per-row CTA. Shift+Tab from the first
+      // OR any non-member boundary wraps to last; Tab from the last OR a boundary
+      // wraps to first.
+      const inSet = active != null && focusables.includes(active);
+      if (e.shiftKey) {
+        if (active === first || !inSet) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !inSet) {
         e.preventDefault();
         first.focus();
       }
@@ -491,7 +605,7 @@
   }
 </script>
 
-<div class="mm-root">
+<div class="mm-root" bind:this={mmRootEl}>
   {#if isSelf}
     <!-- Self is unmistakable — a TEXT chip (never colour-only) + an SR note. -->
     <span class="mm-you">
@@ -580,10 +694,14 @@
   {/if}
 
   {#if openModal}
-    <div class="mm-backdrop">
+    <!-- A11Y-1: portaled to <body> so the roster subtree can be inerted behind it
+         (background non-operable) while the dialog itself stays operable. -->
+    <div class="mm-backdrop" use:portal>
       <!-- The keydown listener is the WAI-ARIA modal focus trap + the §3.5
            protected-variant Escape rules — focus management, not a click
-           affordance. -->
+           affordance. A11Y-4: aria-busy is NOT on the dialog (it would suppress
+           the submitting live region below); the submitting Confirm button owns
+           the aria-busy flag instead. -->
       <div
         class="mm-dialog card"
         role="dialog"
@@ -591,7 +709,6 @@
         aria-labelledby={dialogHeadingId}
         tabindex="-1"
         data-testid={`committee-${openModal}-modal`}
-        aria-busy={phase === 'submitting' ? 'true' : 'false'}
         bind:this={dialogEl}
         on:keydown={onKeyDown}
       >
@@ -763,6 +880,12 @@
               <p class="mm-note" id={`${approverSelectId}-nochange`}>
                 {t('committee.role.modal.no_changes_hint')}
               </p>
+            {:else if emptyRoleSelection}
+              <!-- A11Y-3: the empty-role gate now carries its own discoverable hint
+                   (aria-describedby target for the gated Confirm). -->
+              <p class="mm-note" id={`${approverSelectId}-empty-roles`}>
+                {t('committee.role.modal.empty_selection_hint')}
+              </p>
             {/if}
           {:else if openModal === 'remove'}
             <p class="mm-body">{t('committee.remove.modal.what', { name: nameForCopy })}</p>
@@ -828,7 +951,11 @@
             <div class="mm-callout mm-callout-info">
               <div>
                 <h3 class="mm-callout-heading">{t('committee.approver.heading')}</h3>
-                <p class="mm-callout-body">{t('committee.approver.explain')}</p>
+                <!-- A11Y-3: the aria-describedby target for the approver-required
+                     gated Confirm (a discoverable hint, not just visual context). -->
+                <p class="mm-callout-body" id={`${approverSelectId}-approver-hint`}>
+                  {t('committee.approver.explain')}
+                </p>
               </div>
             </div>
             {#if staleApprover}
@@ -851,6 +978,42 @@
               {/each}
             </select>
             <span class="mm-sr" role="status" aria-live="polite">{approverAnnounce}</span>
+          {:else if staleFourEyesNoPicker}
+            <!-- ADV-3: the server returned 4eyes_required but the local snapshot
+                 shows no eligible co-chair (one was added elsewhere). A single
+                 coherent recovery — refetch the roster to reveal the new approver.
+                 NO contradictory empty-approver note here; Confirm is gated. -->
+            <div class="mm-callout mm-callout-info" role="status">
+              <svg class="mm-callout-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+                <path
+                  d="M12 11v5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M12 8h.01"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <div>
+                <h3 class="mm-callout-heading">{t('committee.approver.refetch_heading')}</h3>
+                <p class="mm-callout-body">{t('committee.approver.refetch_body')}</p>
+                <button
+                  type="button"
+                  class="btn-outline mm-refetch"
+                  data-testid="committee-manage-refetch-approver"
+                  on:click={onRefetchApprover}
+                >
+                  {t('committee.approver.refetch_cta')}
+                </button>
+              </div>
+            </div>
           {:else if emptyEligibleNote}
             <!-- The actor is (client-side) the only active worker co-chair. No
                  picker, Confirm stays ENABLED — the server truths last_co_chair
@@ -881,11 +1044,12 @@
           {/if}
 
           <!-- Actions. The affirmative CTA is the SAME <button> across
-               form→submitting (A11Y-2 focus-order): during `submitting` it becomes
+               form→submitting (A11Y-3 focus-order): during `submitting` it becomes
                an aria-busy / aria-disabled loading button naming the literal action
-               inside itself (native `disabled` would blur focus to <body>); the
-               gated pre-submit state uses native `disabled` (a gated Confirm must
-               fire nothing). -->
+               inside itself. The gated pre-submit state is aria-disabled ONLY —
+               NEVER native `disabled` (which would drop it from the tab order and
+               hide its aria-describedby hint); the `if (confirmGated) return;`
+               no-op guard in onConfirm makes a gated click fire nothing. -->
           <div class="mm-actions">
             <button
               type="button"
@@ -894,10 +1058,7 @@
               data-testid={phase === 'submitting' ? 'committee-manage-submitting' : undefined}
               aria-busy={phase === 'submitting' ? 'true' : undefined}
               aria-disabled={phase === 'submitting' ? 'true' : confirmGated ? 'true' : undefined}
-              aria-describedby={openModal === 'role' && !rolesChanged
-                ? `${approverSelectId}-nochange`
-                : undefined}
-              disabled={phase !== 'submitting' && confirmGated}
+              aria-describedby={confirmDescribedBy}
               on:click={onConfirm}
             >
               {#if phase === 'submitting'}{submittingLabel}{:else}{confirmLabel}{/if}
@@ -971,6 +1132,8 @@
   .mm-backdrop {
     position: fixed;
     inset: 0;
+    /* z_index.modal (design-tokens.json) — the shared modal layer, 1300. (NOT the
+       PanicWipeModal layer, which is the lower z_index:50 lock-screen chrome.) */
     z-index: 1300;
     display: grid;
     place-items: center;
@@ -1037,8 +1200,18 @@
     color: var(--color-fg-muted);
     font-size: 0.8125rem;
   }
+  /* A11Y-5: amber-fg is only an audited pair against amber-bg — never the plain
+     modal surface. Wrap the stale note in the amber tint so the pairing is the
+     audited one (mirrors the .mm-alert-warning treatment). */
   .mm-stale {
+    padding: 0.5rem 0.75rem;
+    border: var(--border-width-hairline) solid var(--color-tint-amber-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-tint-amber-bg);
     color: var(--color-tint-amber-fg);
+  }
+  .mm-refetch {
+    margin-block-start: 0.5rem;
   }
 
   .mm-fieldset {
