@@ -227,4 +227,76 @@ export class SupabaseCommitteeClient {
   listPendingInvites(): Promise<CommitteeOpResult<PendingInvite[]>> {
     return invoke<PendingInvite[]>(this.opts.transport, { op: 'list_pending_invites' });
   }
+
+  /**
+   * ADR-0029 P1-8e — co-chair changes a member's committee roles (Surface K
+   * screen 5). SIBLING of `issueInvite` / `listRoster`: POSTs `{ op:'set_roles',
+   * target_user_id, roles, second_approver_id? }` to committee-op (1:1 with the
+   * `committee_set_roles` EF arm) and unwraps the void RPC return to
+   * `CommitteeOpResult<null>`.
+   *
+   * The `second_approver_id` rides the body ONLY when the acting co-chair supplies
+   * one (the single-call inline 4-eyes for a self-demotion out of worker-co-chair,
+   * `committee_set_roles` `p_second_approver_id`). For an other-member change none is
+   * supplied — the server reads the approver only inside the self-action branch, so
+   * this client must not fabricate one (it omits the field entirely, never a
+   * placeholder). Every `CommitteeOpReason` maps 1:1 with its HTTP status via the
+   * shared `invoke()` mapping — `4eyes_required` / `last_co_chair` / `invalid_role`
+   * / `not_found` / `rls_denied` are never collapsed to a generic error (the card's
+   * discriminated governance states depend on it).
+   */
+  setRoles(input: {
+    target_user_id: string;
+    roles: string[];
+    second_approver_id?: string | null;
+  }): Promise<CommitteeOpResult<null>> {
+    return invoke<null>(this.opts.transport, {
+      op: 'set_roles',
+      target_user_id: input.target_user_id,
+      roles: input.roles,
+      ...(input.second_approver_id != null ? { second_approver_id: input.second_approver_id } : {})
+    });
+  }
+
+  /**
+   * ADR-0029 P1-8e — co-chair removes (soft-deletes) a member. SIBLING of
+   * `setRoles`: POSTs `{ op:'remove', target_user_id, second_approver_id? }` to
+   * committee-op (1:1 with the `committee_remove_member` EF arm). The RPC RETURNS a
+   * bare `timestamptz` (the `grace_until` 90-day horizon), so `data` is the BARE ISO
+   * string scalar — never wrapped as `{ grace_until }` (the card interpolates it
+   * straight into `committee.remove.done.body`). Removal is NON-cryptographic
+   * (F-182): it sets `active=false` + a grace window and clears the role; it does
+   * NOT rotate the shared committee key. The `second_approver_id` rides the body
+   * only on a self-remove (a removing co-chair always drops their own co-chair
+   * role); for an other-member removal none is supplied. `last_co_chair` (409) is
+   * surfaced distinctly, never collapsed to a generic `rls_denied`.
+   */
+  removeMember(input: {
+    target_user_id: string;
+    second_approver_id?: string | null;
+  }): Promise<CommitteeOpResult<string>> {
+    return invoke<string>(this.opts.transport, {
+      op: 'remove',
+      target_user_id: input.target_user_id,
+      ...(input.second_approver_id != null ? { second_approver_id: input.second_approver_id } : {})
+    });
+  }
+
+  /**
+   * ADR-0029 P1-8e — co-chair reactivates a removed member within the grace
+   * window. SIBLING of `removeMember` but with NO 4-eyes / approver argument:
+   * POSTs `{ op:'reactivate', target_user_id }` (1:1 with the
+   * `committee_reactivate_member` EF arm) and unwraps the void RPC return to
+   * `CommitteeOpResult<null>`. Reactivation restores `active=true` and re-derives
+   * the role from the RETAINED membership row — it does NOT run a fresh grant
+   * ceremony (F-182), and the SQL raises only `not_found` / `already_active`, so
+   * this method must NOT invent a `second_approver_id` (that would falsely signal a
+   * 4-eyes control the RPC does not have).
+   */
+  reactivateMember(input: { target_user_id: string }): Promise<CommitteeOpResult<null>> {
+    return invoke<null>(this.opts.transport, {
+      op: 'reactivate',
+      target_user_id: input.target_user_id
+    });
+  }
 }

@@ -62,7 +62,14 @@ export default [
     },
     plugins: { svelte: sveltePlugin },
     rules: {
-      ...(sveltePlugin.configs?.recommended?.rules ?? {})
+      ...(sveltePlugin.configs?.recommended?.rules ?? {}),
+      // Honour the project-wide `^_` intentionally-unused convention on .svelte
+      // files too (the .ts block above already does). Base no-unused-vars is not
+      // TS-type-aware, so a required-but-unused type-signature param label like
+      // `_input` (a documentation name, never a runtime binding) would otherwise
+      // false-positive. The `^_` prefix is the sanctioned "unused on purpose"
+      // signal — matched here exactly as for .ts.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
     }
   },
   {

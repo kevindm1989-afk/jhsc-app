@@ -72,6 +72,7 @@
   grantClient={t07Client}
   grantHolder={keyHolder}
   grantLocalIdentity={localIdentity}
+  manageEnabled={true}
 />
 
 <PendingInvites client={committeeClient} onReinvite={() => inviteRef?.openInvitePanel()} />
