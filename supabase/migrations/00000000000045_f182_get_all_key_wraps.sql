@@ -110,5 +110,22 @@ GRANT EXECUTE ON FUNCTION public.get_all_committee_key_wraps_for_self()
 -- shape. The existing non-unique lookup index `committee_data_keys_active_idx`
 -- (migration 0007 :166-167) stays alongside for epoch-ordered live lookups.
 -- ===========================================================================
+-- Deploy safety: the one-live-key invariant was, until this index, only
+-- PROCEDURAL. If a live table already holds >1 live row (a historical partial
+-- rotation / manual ops fix), CREATE UNIQUE INDEX aborts with a bare 23505 and
+-- rolls back this whole migration (including the RPC above) with no diagnosis.
+-- Fail LOUD first so the operator gets the cause, not just a constraint name.
+-- (Operator pre-check: SELECT count(*) FROM public.committee_data_keys
+--  WHERE rotated_at IS NULL;  -- must be <= 1 before applying.)
+DO $$
+DECLARE
+  n integer;
+BEGIN
+  SELECT count(*) INTO n FROM public.committee_data_keys WHERE rotated_at IS NULL;
+  IF n > 1 THEN
+    RAISE EXCEPTION 'F182-1: % live committee_data_keys rows (rotated_at IS NULL); expected <= 1. Repair the multi-live-key state before applying committee_data_keys_one_live_idx.', n;
+  END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS committee_data_keys_one_live_idx
   ON public.committee_data_keys ((true)) WHERE rotated_at IS NULL;

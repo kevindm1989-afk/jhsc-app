@@ -378,29 +378,30 @@ export class SupabaseT07Client {
       Array<{ key_id: string; epoch: number; wrapped_ciphertext: Uint8Array; is_live: boolean }>
     >
   > {
-    let r: T07OpResult<
-      Array<{ key_id: string; epoch: number; wrapped_ciphertext_hex: string; is_live: boolean }>
-    >;
     try {
-      r = await invoke<
+      const r = await invoke<
         Array<{ key_id: string; epoch: number; wrapped_ciphertext_hex: string; is_live: boolean }>
       >(this.opts.transport, { op: 'get_all_key_wraps' });
+      if (!r.ok) return r;
+      // The per-row hex decode runs INSIDE the try so a malformed/absent
+      // `wrapped_ciphertext_hex` (a server contract drift) also resolves to a
+      // typed failure rather than throwing — the anti-lockout key-map (F182-2)
+      // relies on this method failing CLOSED, never rejecting (F-183 contract).
+      return {
+        ok: true,
+        data: (r.data ?? []).map((row) => ({
+          key_id: row.key_id,
+          epoch: row.epoch,
+          wrapped_ciphertext: pgHexToBytes(row.wrapped_ciphertext_hex),
+          is_live: row.is_live
+        }))
+      };
     } catch {
-      // A transport fault (fetch reject) resolves to a typed failure — the
-      // method must NOT reject (F-183 pinned client contract). No transport
-      // detail is surfaced; `unknown` is the closed-literal T07OpReason.
+      // A transport fault (fetch reject) OR a malformed-row decode resolves to a
+      // typed failure. No transport detail is surfaced; `unknown` is the
+      // closed-literal T07OpReason.
       return { ok: false, reason: 'unknown', status: 0 };
     }
-    if (!r.ok) return r;
-    return {
-      ok: true,
-      data: (r.data ?? []).map((row) => ({
-        key_id: row.key_id,
-        epoch: row.epoch,
-        wrapped_ciphertext: pgHexToBytes(row.wrapped_ciphertext_hex),
-        is_live: row.is_live
-      }))
-    };
   }
 
   /**
