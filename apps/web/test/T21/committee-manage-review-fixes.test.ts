@@ -232,7 +232,10 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   clearJwt();
-  document.body.style.overflow = '';
+  // NOTE: intentionally do NOT reset document.body.style.overflow here — cleanup()
+  // unmounts the card, whose onDestroy() must itself release the scroll-lock. A
+  // reset here would mask a stranded-lock regression (the exact tell that hid the
+  // original bug). The beforeEach reset guarantees a clean start per test.
   __resetCapture();
   vi.restoreAllMocks();
   restoreClock();
@@ -350,6 +353,23 @@ describe('P1-8e review-fix [A11Y-2] body scroll is locked while a modal is open'
     await fireEvent.click(within(modal).getByRole('button', { name: t('committee.remove.modal.cancel') }));
     await waitFor(() => expect(screen.queryByTestId('committee-remove-modal')).toBeNull());
     expect(document.body.style.overflow, 'body scroll lock is released after close').toBe(prior);
+  });
+
+  it('releases the scroll-lock when the card is DESTROYED while a modal is still open (no stranded lock)', async () => {
+    // Guaranteed on the self-governance flow: a co-chair self-removes/self-demotes
+    // → the success refetch 403s (they are no longer an active co-chair) → the
+    // roster unmounts this card mid-modal, so closePanel() never runs. onDestroy()
+    // must still release the body scroll-lock, or the app is left unscrollable.
+    const prior = document.body.style.overflow;
+    const { unmount } = renderCard({ member: ROW_OTHER_MEMBER, isSelf: false });
+    await openRemoveModal(OTHER);
+    expect(document.body.style.overflow, 'locked while the modal is open').toBe('hidden');
+
+    unmount(); // destroy the card WITHOUT closing the modal
+    expect(
+      document.body.style.overflow,
+      'scroll-lock released on destroy-while-open, never stranded'
+    ).toBe(prior);
   });
 });
 

@@ -40,7 +40,7 @@
    * No member PI / raw uid is written to a URL / storage / log here (F-176); the
    * raw `reason` enum is mapped to copy, never echoed. No `console.*`.
    */
-  import { tick, createEventDispatcher } from 'svelte';
+  import { tick, createEventDispatcher, onDestroy } from 'svelte';
   import { t } from '$lib/i18n';
   import type {
     RosterRow,
@@ -325,6 +325,17 @@
     bgInerted?.removeAttribute('inert');
     bgInerted = null;
   }
+
+  // Lifecycle safety net: if this card is destroyed while a modal is still open,
+  // closePanel() never runs, so the body scroll-lock and the roster `inert`
+  // would be stranded permanently. This fires on the GUARANTEED self-governance
+  // path (a co-chair self-removes/self-demotes → the success refetch 403s because
+  // they are no longer an active co-chair → the roster list unmounts this card
+  // mid-modal) and on any navigate-away-while-open. unlockBackground() is
+  // idempotent, so this is safe even when closePanel() already ran.
+  onDestroy(() => {
+    if (openModal) unlockBackground();
+  });
 
   // A11Y-6: the return-focus target on close. Normally the CTA that opened the
   // modal — but a mutation can flip the row's affordance (remove→reactivate),

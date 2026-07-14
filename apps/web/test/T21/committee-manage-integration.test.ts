@@ -206,12 +206,15 @@ beforeEach(() => {
   __resetCapture();
   __setTestSink();
   __resetForTest();
+  document.body.style.overflow = ''; // clean start; the leak must surface in its own test
 });
 afterEach(() => {
   cleanup();
   clearJwt();
   __resetForTest();
-  document.body.style.overflow = '';
+  // NOTE: do NOT reset document.body.style.overflow here — cleanup() must unmount
+  // the card and let its onDestroy() release the scroll-lock. Resetting here masked
+  // the original stranded-lock leak (ADV re-verify). beforeEach handles clean start.
   __resetCapture();
   vi.restoreAllMocks();
   restoreClock();
