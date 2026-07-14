@@ -37,6 +37,152 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EF_DIR="$REPO_ROOT/supabase/functions"
 ALLOWLIST_FILE="$EF_DIR/_shared/session-live-allowlist.ts"
+MIG_DIR="$REPO_ROOT/supabase/migrations"
+
+# ===========================================================================
+# F-121 — SQL-layer session-live uniformity (companion to the EF-dispatcher
+# section below).
+#
+# Where F-116 gates the Edge-Function dispatchers, F-121 (threat-model §3.14 ;
+# ADR-0023 Amendment A) gates the DIRECT-PostgREST surface: the three
+# self-scoped READ policies and the three authenticated-grantable REVOKE RPCs
+# must each gate the CALLER's session on `session_is_live` (migration
+# 00000000000046 does this — the read policies inline the conjunct; the revoke
+# RPCs call the `_t07_gate_session()` one-liner, which is itself
+# `IF NOT public.session_is_live() THEN RAISE 'rls_denied'`).
+#
+# This section grep-asserts the gate is present in the LATEST SQL definition of
+# each of the six surfaces (a later ungated CREATE OR REPLACE / ALTER POLICY
+# would re-open the bypass, so we always check the newest definition, never an
+# earlier one). Format: "<symbol>:<policy|function>".
+# ===========================================================================
+SQL_GATED_SURFACES=(
+  "users_select_self:policy"
+  "auth_sessions_select_self:policy"
+  "webauthn_credentials_select_self:policy"
+  "revoke_my_session:function"
+  "revoke_all_my_sessions:function"
+  "revoke_my_passkey:function"
+)
+
+# find_latest_migration <literal-anchor> <dir> — echo the highest-ordinal
+# migration file whose text contains <literal-anchor> (fixed string). Empty if
+# none. Filenames are zero-padded so a lexical sort is a numeric sort.
+find_latest_migration() {
+  local anchor="$1" dir="$2" latest="" f
+  for f in $(ls -1 "$dir"/*.sql 2>/dev/null | sort); do
+    if grep -qF "$anchor" "$f"; then latest="$f"; fi
+  done
+  printf '%s' "$latest"
+}
+
+# sql_surface_is_gated <symbol> <kind> <dir> — 0 iff the LATEST definition of
+# <symbol> in <dir> contains the `session_is_live` gate token. Extracts only
+# that symbol's definition block (so stripping the gate from ONE surface is
+# caught even when sibling surfaces in the same file remain gated). Uses awk
+# index() literal matching to avoid regex-escaping pitfalls.
+sql_surface_is_gated() {
+  local sym="$1" kind="$2" dir="$3" anchor latest block
+  if [ "$kind" = "function" ]; then
+    anchor="CREATE OR REPLACE FUNCTION public.$sym("
+  else
+    anchor="POLICY $sym "
+  fi
+  latest="$(find_latest_migration "$anchor" "$dir")"
+  if [ -z "$latest" ]; then
+    return 1   # no definition found at all → treat as an ungated offender
+  fi
+  if [ "$kind" = "function" ]; then
+    block="$(awk -v n="$sym" '
+      index($0, "CREATE OR REPLACE FUNCTION public." n "(") { cap=1; blk="" }
+      cap { blk = blk $0 "\n" }
+      cap && index($0, "$$;") { last = blk; cap = 0 }
+      END { printf "%s", last }
+    ' "$latest")"
+  else
+    block="$(awk -v n="$sym" '
+      (index($0, "POLICY " n " ") && (index($0, "CREATE") || index($0, "ALTER"))) { cap=1; blk="" }
+      cap { blk = blk $0 "\n" }
+      cap && index($0, ";") { last = blk; cap = 0 }
+      END { printf "%s", last }
+    ' "$latest")"
+  fi
+  printf '%s' "$block" | grep -qF "session_is_live"
+}
+
+# sql_layer_check <dir> — assert all six SQL surfaces are gated in <dir>.
+# Returns the number of ungated offenders (0 = all gated). Names each offender.
+sql_layer_check() {
+  local dir="$1" offenders=0 entry sym kind
+  for entry in "${SQL_GATED_SURFACES[@]}"; do
+    sym="${entry%%:*}"; kind="${entry##*:}"
+    if ! sql_surface_is_gated "$sym" "$kind" "$dir"; then
+      echo "verify-session-live-uniformity: FAIL — SQL surface '$sym' latest definition does NOT gate on session_is_live (F-121)" >&2
+      offenders=$((offenders + 1))
+    fi
+  done
+  return "$offenders"
+}
+
+# run_self_test — the lessons.md 2026-06-16 synthetic-probe rule: a gate that
+# cannot fail catches nothing. Prove sql_layer_check is regression-catching by
+# running it against (a) a synthetic fixture with the gate STRIPPED from one
+# allowlisted surface — must be NON-ZERO — and (b) the real migrations — must
+# be ZERO. Exit 0 iff both controls hold.
+run_self_test() {
+  local pos_ok=0 neg_ok=0 fixture
+
+  echo "verify-session-live-uniformity: F-121 SQL-layer session-live allowlist self-test"
+  echo "  finding: F-121 (session-revocation uniformity) — gate token: session_is_live"
+  echo "  gated SQL surfaces (3 self-scoped read policies + 3 revoke RPCs):"
+  for entry in "${SQL_GATED_SURFACES[@]}"; do
+    echo "    - ${entry%%:*} (${entry##*:})"
+  done
+
+  # (a) Positive control — the real migrations must be fully gated.
+  echo "  [positive control] real migrations: $MIG_DIR"
+  if sql_layer_check "$MIG_DIR"; then
+    pos_ok=1
+    echo "    PASS — all six SQL surfaces gate on session_is_live"
+  else
+    echo "    FAIL — a real SQL surface is ungated (see offenders above)"
+  fi
+
+  # (b) Negative control — synthetic stripped-gate fixture. Copy the real
+  # migrations and TAMPER exactly one surface (strip session_is_live from the
+  # users_select_self read policy); sql_layer_check MUST catch it (non-zero).
+  echo "  [negative control] synthetic stripped-gate fixture (tamper: strip session_is_live from users_select_self):"
+  fixture="$(mktemp -d)"
+  cp "$MIG_DIR"/*.sql "$fixture"/
+  # The conjunct string below is unique to the users_select_self gate, so this
+  # strips the gate from exactly one surface regardless of which ordinal the
+  # ALTER POLICY lives in (robust to future renumbering). If the string ever
+  # stops matching, the negative control catches nothing and this self-test
+  # fails closed (neg_ok stays 0) — the correct, loud direction.
+  sed -i 's/public\.session_is_live() AND auth\.uid() = id/auth.uid() = id/' "$fixture"/*.sql
+  if sql_layer_check "$fixture" 2>/dev/null; then
+    echo "    FAIL — the stripped-gate fixture was NOT caught; the check cannot fail (dead gate)"
+  else
+    neg_ok=1
+    echo "    PASS — synthetic tampered fixture caught (non-zero), the check is regression-catching"
+  fi
+  rm -rf "$fixture"
+
+  if [ "$pos_ok" -eq 1 ] && [ "$neg_ok" -eq 1 ]; then
+    echo "verify-session-live-uniformity: F-121 self-test OK (positive control gated; negative control caught)"
+    return 0
+  fi
+  echo "verify-session-live-uniformity: F-121 self-test FAILED (positive=$pos_ok negative=$neg_ok)" >&2
+  return 1
+}
+
+# --- Argument parsing --------------------------------------------------------
+# `--self-test` runs ONLY the SQL-layer self-test (the EF section has its own
+# coverage via the no-arg run). Any other/no argument runs the full gate.
+if [ "${1:-}" = "--self-test" ]; then
+  run_self_test
+  exit $?
+fi
 
 # EFs that are SCAFFOLDED but NOT YET WIRED for the TS-side
 # session_is_live precheck. The SECURITY DEFINER RPCs they call
@@ -182,5 +328,13 @@ if [ "$violations" -gt 0 ]; then
   exit 1
 fi
 
-echo "verify-session-live-uniformity: OK (rollout in progress; ${#EXEMPT_DURING_ROLLOUT[@]} EF(s) still exempt + ${#PERMANENT_ALLOWLIST[@]} permanently allowlisted)"
+# --- 3) SQL-layer (F-121) session-live uniformity check ---
+# Assert each of the six direct-PostgREST surfaces gates on session_is_live in
+# its latest migration definition (threat-model §3.14 F-121).
+if ! sql_layer_check "$MIG_DIR"; then
+  echo "verify-session-live-uniformity: SQL-layer FAIL — one or more F-121 surfaces are ungated" >&2
+  exit 1
+fi
+
+echo "verify-session-live-uniformity: OK (rollout in progress; ${#EXEMPT_DURING_ROLLOUT[@]} EF(s) still exempt + ${#PERMANENT_ALLOWLIST[@]} permanently allowlisted; ${#SQL_GATED_SURFACES[@]} SQL surfaces F-121-gated on session_is_live)"
 exit 0
