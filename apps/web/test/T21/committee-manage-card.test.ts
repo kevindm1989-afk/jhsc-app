@@ -257,11 +257,20 @@ function reactivateConfirm(modal: HTMLElement): HTMLButtonElement {
   return within(modal).getByRole('button', { name: t('committee.reactivate.modal.confirm') }) as HTMLButtonElement;
 }
 
-/** A control is GATED when it is natively disabled OR aria-disabled="true". */
+/**
+ * A control is GATED when it is aria-disabled="true".
+ *
+ * A11Y-3 corrected expectation (review-fix batch): the gated (pre-submit /
+ * submitting) Confirm is gated via `aria-disabled`, NEVER native `disabled`
+ * (native disabled drops it from tab order and hides the gating hint). This
+ * helper therefore no longer accepts native `disabled` as "gated" — a
+ * regression that gated via native `disabled` only would now (correctly) read
+ * as ungated. The mechanism itself (aria-disabled, no native disabled, a
+ * discoverable aria-describedby hint) is pinned in
+ * committee-manage-review-fixes.test.ts.
+ */
 function isGated(btn: HTMLElement): boolean {
-  return (
-    (btn as HTMLButtonElement).disabled === true || btn.getAttribute('aria-disabled') === 'true'
-  );
+  return btn.getAttribute('aria-disabled') === 'true';
 }
 
 /** The picker (native <select>) inside a modal, or null when not rendered. */
