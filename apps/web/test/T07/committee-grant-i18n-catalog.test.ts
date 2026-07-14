@@ -55,6 +55,13 @@ const GRANT_KEYS: readonly string[] = [
   'committee.grant.not_ready.heading',
   'committee.grant.not_ready.body',
   'committee.grant.not_ready.close',
+  // F-174 disclosure-ordering fix (ADV-1): the NEW `not_provisioned_actor`
+  // terminal — an unprovisioned co-chair is stopped BEFORE any disclosure with
+  // actionable copy telling them to finish setting up their OWN encryption
+  // first. New copy keys the implementer must add (mirror the not_ready shape).
+  'committee.grant.not_provisioned.heading',
+  'committee.grant.not_provisioned.body',
+  'committee.grant.not_provisioned.close',
   'committee.grant.confirm.lead',
   'committee.grant.fingerprint_label',
   'committee.grant.compare.heading',
@@ -141,6 +148,56 @@ describe('P1-8d [F-172 cross-surface] the per-group SR label is the SHARED key, 
     // design-system.md :757 — "do NOT mint a committee.grant per-group variant".
     expect(hasKey('a11y.committee.grant.fingerprint.group_label')).toBe(false);
     expect(hasKey('committee.grant.fingerprint.group_label')).toBe(false);
+  });
+});
+
+// ===========================================================================
+// A11Y-1 (WCAG 2.5.3 Label in Name) — the Grant CTA's accessible name MUST
+// contain its visible label as a substring. The visible label is
+// `committee.grant.row.cta` ("Grant access"); the accessible name is the
+// `committee.grant.row.cta_aria` override. A speech-input user saying the
+// visible words must be able to activate the control.
+// ===========================================================================
+
+describe('P1-8d [A11Y-1 / WCAG 2.5.3] the Grant CTA accessible name contains its visible label', () => {
+  it('cta_aria embeds the visible cta label ("Grant access") verbatim as a substring', () => {
+    expect(hasKey('committee.grant.row.cta'), 'committee.grant.row.cta must exist').toBe(true);
+    expect(hasKey('committee.grant.row.cta_aria'), 'committee.grant.row.cta_aria must exist').toBe(
+      true
+    );
+    const visible = t('committee.grant.row.cta');
+    const accessible = t('committee.grant.row.cta_aria', { name: 'Sam Rivera' });
+    // Label-in-name: the accessible name must CONTAIN the visible label text.
+    expect(
+      accessible,
+      `accessible name "${accessible}" must contain the visible label "${visible}" (WCAG 2.5.3)`
+    ).toContain(visible);
+  });
+});
+
+// ===========================================================================
+// ADV-1 not_provisioned_actor copy — the new terminal's body is actionable and
+// distinct from the not_ready ("the OTHER member isn't ready") copy: this one
+// is about the ACTOR's own missing setup.
+// ===========================================================================
+
+describe('P1-8d [ADV-1] not_provisioned_actor copy is actionable and distinct from not_ready', () => {
+  it('the not_provisioned body resolves to a real actionable sentence (not a miss-marker)', () => {
+    expect(hasKey('committee.grant.not_provisioned.body')).toBe(true);
+    expect(t('committee.grant.not_provisioned.body')).not.toBe(
+      '[[committee.grant.not_provisioned.body]]'
+    );
+    expect(
+      t('committee.grant.not_provisioned.body').trim().length,
+      'not_provisioned body must be an actionable message'
+    ).toBeGreaterThan(15);
+  });
+
+  it('the not_provisioned body is DISTINCT from the not_ready body (different situations)', () => {
+    for (const k of ['committee.grant.not_provisioned.body', 'committee.grant.not_ready.body']) {
+      expect(hasKey(k), `${k} must exist`).toBe(true);
+    }
+    expect(t('committee.grant.not_provisioned.body')).not.toBe(t('committee.grant.not_ready.body'));
   });
 });
 

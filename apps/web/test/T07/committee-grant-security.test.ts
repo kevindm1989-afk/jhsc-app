@@ -72,15 +72,34 @@ type Disclosure =
 
 const OK_DISCLOSURE: Disclosure = { ok: true, data: { public_key: DEVICE_PUB, fingerprint: EXPECTED_FP } };
 
+// F-174 disclosure-ordering fix (ADV-1): the grant screen probes the actor's
+// committee-key state BEFORE disclosing. actor_has_wrap:true is the happy path.
+type KeyState =
+  | { ok: true; data: { key_id: string; epoch: number; wrap_count: number; actor_has_wrap: boolean } | null }
+  | { ok: false; reason: string; status: number };
+
+const KEY_STATE_HAS_WRAP: KeyState = {
+  ok: true,
+  data: { key_id: 'k-1', epoch: 1, wrap_count: 1, actor_has_wrap: true }
+};
+const KEY_STATE_NO_WRAP: KeyState = {
+  ok: true,
+  data: { key_id: 'k-1', epoch: 1, wrap_count: 0, actor_has_wrap: false }
+};
+
 function deferred<T>() {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((res) => (resolve = res));
   return { promise, resolve };
 }
 
-function makeClient(disclosure: Disclosure | Promise<Disclosure> = OK_DISCLOSURE) {
+function makeClient(
+  disclosure: Disclosure | Promise<Disclosure> = OK_DISCLOSURE,
+  keyState: KeyState | Promise<KeyState> = KEY_STATE_HAS_WRAP
+) {
   const getMemberPubkey = vi.fn(async (_input: { target_user_id: string }) => disclosure);
-  return { getMemberPubkey };
+  const getCommitteeKeyState = vi.fn(async (_input: { actor_user_id: string }) => keyState);
+  return { getMemberPubkey, getCommitteeKeyState };
 }
 
 function makeJwt(sub: string): string {
@@ -159,6 +178,51 @@ describe('P1-8d [F-179] the ceremony discloses the member pubkey EXACTLY ONCE', 
     await confirmGrant();
     await screen.findByTestId('committee-grant-granted');
     // Still exactly one — sealing consumed the ALREADY-disclosed bytes.
+    expect(client.getMemberPubkey).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===========================================================================
+// F-174 — DISCLOSURE ORDERING: an unprovisioned co-chair must abort BEFORE the
+// disclosure. Disclosing a member pubkey writes a `disclosed_for_wrap` audit
+// row; if the grant then aborts (the actor holds no committee-key wrap of their
+// own), that disclosure + audit row happened for nothing — an information leak.
+// The fix probes getCommitteeKeyState({actor_user_id}) FIRST and short-circuits.
+// ===========================================================================
+
+describe('P1-8d [F-174] an unprovisioned co-chair discloses NOTHING (no disclosed_for_wrap audit row)', () => {
+  it('a Grant tap by an actor with actor_has_wrap:false calls getMemberPubkey ZERO times', async () => {
+    const client = makeClient(OK_DISCLOSURE, KEY_STATE_NO_WRAP);
+    renderGrant({ client });
+    await tapGrant();
+
+    // Settle to whatever state the flow reaches (fixed: not_provisioned; current
+    // buggy: confirm, because it discloses first and only checks the wrap later).
+    await waitFor(() => {
+      const settled =
+        screen.queryByTestId('committee-grant-not-provisioned') ??
+        screen.queryByTestId('committee-grant-confirm') ??
+        screen.queryByTestId('committee-grant-failed');
+      expect(settled, 'the grant flow reached a settled state').not.toBeNull();
+    });
+
+    // NO disclosure followed the probe → no `disclosed_for_wrap` audit row.
+    expect(
+      client.getMemberPubkey,
+      'F-174: the disclosure (and its audit row) must NOT happen for an unprovisioned co-chair'
+    ).toHaveBeenCalledTimes(0);
+    // The pre-disclosure probe ran, scoped to the session actor uid.
+    expect(client.getCommitteeKeyState).toHaveBeenCalledWith({ actor_user_id: ACTOR });
+    // And nothing was sealed.
+    expect(mockWrapMemberIn).not.toHaveBeenCalled();
+  });
+
+  it('the pre-disclosure probe precedes the disclosure for a provisioned co-chair (probe → disclose, both once)', async () => {
+    const client = makeClient(OK_DISCLOSURE, KEY_STATE_HAS_WRAP);
+    renderGrant({ client });
+    await tapGrant();
+    await screen.findByTestId('committee-grant-confirm');
+    expect(client.getCommitteeKeyState).toHaveBeenCalledTimes(1);
     expect(client.getMemberPubkey).toHaveBeenCalledTimes(1);
   });
 });

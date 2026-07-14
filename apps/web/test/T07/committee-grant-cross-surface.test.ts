@@ -94,6 +94,12 @@ async function renderCoChairConfirm(): Promise<HTMLElement> {
     getMemberPubkey: vi.fn(async (_i: { target_user_id: string }) => ({
       ok: true as const,
       data: { public_key: DEVICE_PUB, fingerprint: EXPECTED_FP }
+    })),
+    // F-174 disclosure-ordering fix (ADV-1): a provisioned co-chair (has a wrap)
+    // clears the pre-disclosure probe and proceeds to the confirm ceremony.
+    getCommitteeKeyState: vi.fn(async (_i: { actor_user_id: string }) => ({
+      ok: true as const,
+      data: { key_id: 'k-1', epoch: 1, wrap_count: 1, actor_has_wrap: true }
     }))
   };
   render(CommitteeGrantCard, {
@@ -210,5 +216,49 @@ describe('P1-8d [shared block] FingerprintCompareBlock is the single mirror both
     const memberLabels = readFingerprint(memberRegion).labels;
 
     expect(blockLabels).toEqual(memberLabels);
+  });
+});
+
+// ===========================================================================
+// ADV-3 — the shared block must NOT announce a fingerprint region for a
+// non-64-hex input. A role="group" carrying the "{name}'s identity fingerprint"
+// aria-label but with NO groups tells a screen-reader user a fingerprint is
+// present when there is none (an empty / partial derive). Guard: only emit the
+// region when fingerprint.length === 64.
+// ===========================================================================
+
+describe('P1-8d [ADV-3] FingerprintCompareBlock emits NO fingerprint region for a non-64-hex input', () => {
+  const REGION_LABEL = "Sam Rivera's identity fingerprint";
+
+  it('an EMPTY fingerprint renders no role="group" region and no groups', () => {
+    const { container } = render(FingerprintCompareBlock, {
+      props: { fingerprint: '', regionLabel: REGION_LABEL, testid: 'fp-empty' } as never
+    });
+    expect(
+      container.querySelector('[role="group"]'),
+      'no role="group" fingerprint region is announced for an empty fingerprint'
+    ).toBeNull();
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(0);
+    expect(container.querySelector('ol[role="list"]')).toBeNull();
+  });
+
+  it('a 40-char (non-64) fingerprint renders no role="group" region and no groups', () => {
+    const forty = 'a'.repeat(40);
+    const { container } = render(FingerprintCompareBlock, {
+      props: { fingerprint: forty, regionLabel: REGION_LABEL, testid: 'fp-40' } as never
+    });
+    expect(
+      container.querySelector('[role="group"]'),
+      'no role="group" fingerprint region is announced for a 40-char fingerprint'
+    ).toBeNull();
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(0);
+  });
+
+  it('a valid 64-hex fingerprint DOES emit the role="group" region (control — the guard is not over-broad)', () => {
+    const { container } = render(FingerprintCompareBlock, {
+      props: { fingerprint: EXPECTED_FP, regionLabel: REGION_LABEL, testid: 'fp-ok' } as never
+    });
+    expect(container.querySelector('[role="group"]')).not.toBeNull();
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(16);
   });
 });

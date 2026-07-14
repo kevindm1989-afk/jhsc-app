@@ -800,6 +800,70 @@ describe('A-8.6 — Decision 5 step 5: the holder retains the data key after a s
   });
 });
 
+// ===========================================================================
+// ADV-2 — a holder wipe DURING the seal window must not POST a zero-key wrap.
+// `getDataKey()` hands out the live buffer BY REFERENCE (:688). If a wipe
+// trigger (401 / panic / sign-out) fires during the `await pubkeyFingerprint`
+// / `await ready()` window before the synchronous `crypto_box_seal` (:739), the
+// buffer is zeroized in place — and the current code seals + POSTs that all-zero
+// key. Fix: re-check `holder.isPopulated()` immediately before the seal and
+// typed-fail (`data_key_unwrap_failed`) if wiped.
+// ===========================================================================
+
+describe('A-8.6/ADV-2 — a holder wipe during the seal window seals + POSTs nothing', () => {
+  it('a wipe between the key read and the seal → data_key_unwrap_failed, NO seal, NO wrap POST', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+
+    // A holder whose FIRST getDataKey() read schedules a wipe on the next
+    // microtask. The composition reads the key at :688 (no await follows until
+    // :722), so the scheduled wipe lands inside the `await pubkeyFingerprint(...)`
+    // window — strictly between the key read and the synchronous seal at :739.
+    // Deterministic: microtasks queued before the composition yields run FIFO at
+    // the first suspension point.
+    class WipeDuringSealHolder extends CommitteeKeyHolder {
+      armed = false;
+      getDataKey(): Uint8Array | null {
+        const k = super.getDataKey();
+        if (this.armed) {
+          this.armed = false;
+          queueMicrotask(() => this.wipe());
+        }
+        return k;
+      }
+    }
+    const holder = new WipeDuringSealHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
+
+    const sealSpy = vi.spyOn(sodium, 'crypto_box_seal');
+    const wrapSpy = vi.spyOn(client, 'wrapCommitteeDataKeyForMember');
+
+    holder.armed = true; // arm the race for THIS grant only
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+
+    // The load-bearing pin: a zeroized key must NOT be sealed and POSTed.
+    expect(r.status).toBe('failed');
+    if (r.status !== 'failed') return;
+    expect(r.reason).toBe('data_key_unwrap_failed');
+    expect(sealSpy, 'no seal is built from a zeroized key').toHaveBeenCalledTimes(0);
+    expect(wrapSpy, 'no wrap POST for a wiped-mid-seal grant').toHaveBeenCalledTimes(0);
+    expect(srv.wrapPosted, 'no zero-key wrap reaches the server').toBeNull();
+    expect(ops).not.toContain('wrap_member');
+  });
+});
+
 describe('A-8.6 — ADR-0003 Invariant 1: the plaintext data key never crosses the wire', () => {
   it('no request body the EF sees carries the plaintext 32-byte data key hex', async () => {
     const srv = newServer();

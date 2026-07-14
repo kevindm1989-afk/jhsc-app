@@ -74,6 +74,13 @@ function makeClient() {
     getMemberPubkey: vi.fn(async (_i: { target_user_id: string }) => ({
       ok: true as const,
       data: { public_key: DEVICE_PUB, fingerprint: EXPECTED_FP }
+    })),
+    // F-174 disclosure-ordering fix (ADV-1): the grant screen probes the actor's
+    // committee-key state before disclosing. A provisioned co-chair (has a wrap)
+    // proceeds to the confirm ceremony.
+    getCommitteeKeyState: vi.fn(async (_i: { actor_user_id: string }) => ({
+      ok: true as const,
+      data: { key_id: 'k-1', epoch: 1, wrap_count: 1, actor_has_wrap: true }
     }))
   };
 }
@@ -166,15 +173,32 @@ describe('P1-8d [a11y/F-172] the disclosed-fingerprint block SR structure', () =
     );
   });
 
-  it('a leading polite role="status" announces the fingerprint is ready to compare', async () => {
+  // A11Y-3 (WCAG 4.1.3 Status Messages) — the load-bearing "ready to compare"
+  // announcement must be a live-region MUTATION, not a region inserted already
+  // populated (VoiceOver/TalkBack skip the latter). Mirroring
+  // SetupCommitteeEncryptionCard.svelte `waitingReady` (:316 / :659-661), the
+  // region mounts EMPTY on confirm's first paint and is filled a tick later.
+  it('the polite "ready" region mounts EMPTY on confirm first paint and POPULATES a tick later (SR mutation)', async () => {
     expect(hasKey('a11y.committee.grant.fingerprint.ready')).toBe(true);
+    const readyText = t('a11y.committee.grant.fingerprint.ready', { name: MEMBER_NAME });
+
+    // `toConfirm()` returns the panel at the FIRST observable paint of confirm.
     const panel = await toConfirm();
-    const statuses = Array.from(panel.querySelectorAll('[role="status"]'));
+    // RED against current code, which renders the ready copy inline (already
+    // populated) the instant confirm mounts.
     expect(
-      statuses.some((r) =>
-        (r.textContent ?? '').includes(t('a11y.committee.grant.fingerprint.ready', { name: MEMBER_NAME }))
-      )
-    ).toBe(true);
+      panel.textContent ?? '',
+      'the ready region mounts EMPTY on confirm first paint (populated a tick later so it announces as a mutation)'
+    ).not.toContain(readyText);
+
+    // A tick later a polite role="status" region carries the ready announcement.
+    await waitFor(() => {
+      const statuses = Array.from(panel.querySelectorAll('[role="status"]'));
+      expect(
+        statuses.some((r) => (r.textContent ?? '').includes(readyText)),
+        'a polite role="status" region is populated with the ready announcement after a tick'
+      ).toBe(true);
+    });
   });
 
   it('the groups are STATIC (not tab stops) and nothing in the panel has a positive tabindex', async () => {
