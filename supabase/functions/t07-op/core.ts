@@ -414,6 +414,45 @@ export function getCommitteeKeyWrapForSelf(
 }
 
 /**
+ * F182-1 / ADR-0030 Decision 6 — read ALL of the caller's OWN committee-key
+ * wraps across every epoch (live + retired). Generalizes
+ * `getCommitteeKeyWrapForSelf` from the single live wrap to the multi-epoch
+ * SETOF (the F-183 anti-lockout property: a member keeps reading data sealed
+ * under a rotated-out key). Backed by the self-only
+ * `get_all_committee_key_wraps_for_self` SECURITY DEFINER fn (migration 0045)
+ * which gates on `_t07_gate_active_member`, emits `committee_data_key.unwrap`
+ * audit-before-return per distinct key (F-148), and reads ONLY
+ * `WHERE user_id = auth.uid()` on the LIVE wrap table (F-183 (i): own-wrap-only,
+ * no IDOR — the fn takes NO parameter; never `committee_key_wraps_history`).
+ *
+ * Each SQL row's `wrapped_ciphertext` bytea → `wrapped_ciphertext_hex` EXACTLY
+ * as the single-arm does (PostgREST hex `\x…`); `is_live` is surfaced per row.
+ * An empty SETOF surfaces as `{ ok: true, data: [] }` (the holding state).
+ */
+export function getAllKeyWrapsForSelf(
+  rpc: RpcPort
+): Promise<
+  OpResult<
+    Array<{ key_id: string; epoch: number; wrapped_ciphertext_hex: string; is_live: boolean }>
+  >
+> {
+  return call<
+    Array<{ key_id: string; epoch: number; wrapped_ciphertext: string; is_live: boolean }>
+  >(rpc, 'get_all_committee_key_wraps_for_self', {}).then((r) => {
+    if (!r.ok) return r;
+    return {
+      ok: true,
+      data: (r.data ?? []).map((row) => ({
+        key_id: row.key_id,
+        epoch: row.epoch,
+        wrapped_ciphertext_hex: row.wrapped_ciphertext,
+        is_live: row.is_live
+      }))
+    };
+  });
+}
+
+/**
  * ADR-0029 P1-4 / P1-5 — read the TARGET member's enrolled identity public key
  * for the co-chair-side wrap composition. The FIRST production EF surface that
  * returns ANOTHER member's pubkey across the trust boundary. Backed server-side
