@@ -736,6 +736,14 @@ export async function wrapMemberInViaProduction(opts: {
   let sealed: Uint8Array;
   try {
     const s = await ready();
+    // ADV-2: re-check the holder was not wiped during the awaits above.
+    // `getDataKey()` handed out the live data-key buffer BY REFERENCE (:688); a
+    // wipe trigger (401 / panic / sign-out) firing during the
+    // `pubkeyFingerprint` / `ready` window zeroizes that buffer in place. NEVER
+    // seal + POST a zeroized key — typed-fail before crypto_box_seal touches it.
+    if (!holder.isPopulated()) {
+      return { status: 'failed', reason: 'data_key_unwrap_failed' };
+    }
     sealed = s.crypto_box_seal(dataKey, targetPubkey);
   } catch {
     // libsodium throws on invalid input (e.g. pubkey wrong length, even

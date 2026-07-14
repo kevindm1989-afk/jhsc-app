@@ -407,7 +407,10 @@ failing test before the implementer touches the code path.
    cancelled confirm, NOT an anomaly (ADR-0029 P1-8d / A-8.7 / ISSUE-5).**
    Screen 3's grant ceremony (Surface K, `CommitteeGrantCard`) runs the single
    `get_member_identity_pubkey_for_wrap` disclosure on the deliberate **Grant
-   access** tap — before the co-chair confirms the fingerprint. A co-chair who
+   access** tap — but only once the acting co-chair is confirmed provisioned
+   (an unprovisioned co-chair's tap probes only their OWN key state via
+   `get_committee_key_state` and discloses **nothing**, F-174), and before the
+   co-chair confirms the fingerprint. A co-chair who
    opens the confirm panel and **Cancels** (or whose seal/wrap POST then fails)
    leaves an `identity_pubkey.disclosed_for_wrap` row with **no** paired
    `committee_data_key.wrapped_for_member`. This is expected and benign — the
@@ -421,3 +424,17 @@ failing test before the implementer touches the code path.
    cancelled confirm — do not add one. A _high rate_ of disclosures with no
    follow-through is at most a soft UX signal (co-chairs abandoning the compare),
    never a security event.
+6. **A wrong-pubkey wrap is NOT self-service to repair — recovery caveat
+   (ADR-0029 P1-8d, second-opinion concern).** `wrap_committee_data_key_for_member`
+   inserts `ON CONFLICT (user_id, key_id) DO NOTHING`, so a *re-grant* against
+   the same committee key **no-ops**. If a wrap were ever sealed to the wrong
+   pubkey, the member would stay locked out and a plain "just grant them again"
+   would silently do nothing — recovery requires **removing the bad wrap
+   (DELETE) or rotating the committee key**, neither of which ships in Phase 1
+   (tracked as the post-Phase-1 key-rotation-on-membership-change follow-up).
+   The triggering condition is **Phase-1-latent**: the A-8.6 single-disclosure
+   self-consistency assert (`pubkeyFingerprint(disclosed.public_key) ===
+   disclosed.fingerprint` + 32-byte guard, before any seal) plus a single stable
+   enrolled identity mean no wrong-pubkey wrap can land as shipped. **On-call:**
+   do NOT advise "re-grant" to fix a suspected bad wrap — escalate to the
+   rotation/DELETE adjudication.

@@ -51,7 +51,15 @@
   /** Device-local identity store — threaded to the wrap composition's Step-1 unwrap. */
   export let localIdentity: LocalIdentityStore;
 
-  type Phase = 'idle' | 'disclosing' | 'confirm' | 'granting' | 'granted' | 'failed' | 'not_ready';
+  type Phase =
+    | 'idle'
+    | 'disclosing'
+    | 'confirm'
+    | 'granting'
+    | 'granted'
+    | 'failed'
+    | 'not_ready'
+    | 'not_provisioned';
   type FailReason =
     | 'pubkey_disclosure_denied'
     | 'actor_has_no_wrap'
@@ -71,6 +79,12 @@
 
   let failReason: FailReason = 'unknown';
 
+  // A11Y-3 (WCAG 4.1.3): the polite "ready to compare" region mounts EMPTY on
+  // confirm's first paint and is populated one tick later, so an SR announces it
+  // as a live-region MUTATION (VoiceOver/TalkBack skip regions inserted already
+  // populated). Mirrors SetupCommitteeEncryptionCard.svelte `waitingReady`.
+  let readyAnnounce = '';
+
   // Focus targets — a single deliberate move per transition (§3.1 modal-return
   // discipline applied to the inline panel).
   let ctaEl: HTMLButtonElement | null = null;
@@ -79,6 +93,7 @@
   let grantedHeadingEl: HTMLHeadingElement | null = null;
   let failedHeadingEl: HTMLHeadingElement | null = null;
   let notReadyHeadingEl: HTMLHeadingElement | null = null;
+  let notProvisionedHeadingEl: HTMLHeadingElement | null = null;
 
   $: panelOpen = phase !== 'idle';
   $: isBusy = phase === 'disclosing' || phase === 'granting';
@@ -87,13 +102,12 @@
   // unnamed fallback (never the raw uid) so no PI-shaped uid enters the copy.
   $: nameForCopy = member.display_name ?? t('committee.roster.row.unnamed');
 
-  // The retryable reason set (design-system.md §4 reason→copy table). The
-  // disclosure-step / provisioning / unlock failures are not retryable in place.
-  const RETRYABLE: ReadonlySet<FailReason> = new Set([
-    'wrap_post_failed',
-    'invalid_pubkey',
-    'unknown'
-  ]);
+  // The retryable reason set (design-system.md §4 reason→copy table). Only
+  // genuinely-transient failures are retryable in place. SO-3: `invalid_pubkey`
+  // is NOT retryable — a retry re-seals the identical bytes and yields the
+  // identical failure, so "Try again" would be a dead button. Disclosure-step /
+  // provisioning / unlock failures are likewise not retryable in place.
+  const RETRYABLE: ReadonlySet<FailReason> = new Set(['wrap_post_failed', 'unknown']);
   $: retryable = RETRYABLE.has(failReason);
 
   /** Map a WrapMemberInResult.reason (+ disclosure denial) onto its actionable
@@ -122,15 +136,44 @@
   }
 
   /**
-   * idle → disclosing → confirm | not_ready | failed. Runs the SINGLE
-   * `getMemberPubkey` disclosure on the deliberate Grant tap (A-8.7 — never a
-   * pre-fetch).
+   * idle → disclosing → confirm | not_ready | not_provisioned | failed. Runs the
+   * SINGLE `getMemberPubkey` disclosure on the deliberate Grant tap (A-8.7 —
+   * never a pre-fetch), but ONLY after a pre-disclosure provisioning probe.
    */
   async function onGrant(): Promise<void> {
     if (phase !== 'idle') return;
     phase = 'disclosing';
     await tick();
     focusEl(disclosingHeadingEl);
+
+    // F-174 disclosure ordering: probe the ACTOR's OWN committee-key state before
+    // disclosing the target's pubkey. Disclosing writes a `disclosed_for_wrap`
+    // audit row; an unprovisioned co-chair (no wrap of their own) could not
+    // complete the grant, so that row — and the disclosure — must never happen.
+    // The probe runs first and short-circuits to the calm `not_provisioned`
+    // terminal, with NO disclosure.
+    let keyState: Awaited<ReturnType<typeof client.getCommitteeKeyState>>;
+    try {
+      keyState = await client.getCommitteeKeyState({ actor_user_id: getCurrentUserId() ?? '' });
+    } catch {
+      // F-148: a transport throw on the probe maps to the generic (retryable)
+      // failure — never a crash, and never a disclosure on an unresolved probe.
+      await enterFailed('unknown');
+      return;
+    }
+    if (!keyState.ok) {
+      // A probe that could not resolve the actor's provisioning state (a
+      // transient/denied read). Fail retryably; never disclose on an unresolved
+      // probe.
+      await enterFailed('unknown');
+      return;
+    }
+    if (!keyState.data || keyState.data.actor_has_wrap !== true) {
+      // The co-chair holds no committee-key wrap of their own → they cannot seal.
+      // Stop BEFORE any disclosure (no audit row for a grant that would abort).
+      await enterNotProvisioned();
+      return;
+    }
 
     let disclosure: Awaited<ReturnType<typeof client.getMemberPubkey>>;
     try {
@@ -205,6 +248,10 @@
 
   /** Retry re-runs the seal from the ALREADY-disclosed bytes (no second disclosure). */
   async function onRetry(): Promise<void> {
+    // ADV-4: guard against a synchronous double-activation of "Try again" — the
+    // second click must be a no-op (one extra seal, never two). Mirrors the
+    // onGrant/onConfirm phase guards.
+    if (phase !== 'failed') return;
     if (!disclosedPublicKey) {
       await closePanel();
       return;
@@ -214,9 +261,14 @@
   }
 
   async function enterConfirm(): Promise<void> {
+    // A11Y-3: mount the polite "ready" region EMPTY on confirm's first paint …
+    readyAnnounce = '';
     phase = 'confirm';
     await tick();
     focusEl(confirmHeadingEl);
+    // … then populate it a tick later so the SR hears a live-region mutation.
+    await tick();
+    readyAnnounce = t('a11y.committee.grant.fingerprint.ready', { name: nameForCopy });
   }
   async function enterGranted(): Promise<void> {
     phase = 'granted';
@@ -233,6 +285,11 @@
     phase = 'not_ready';
     await tick();
     focusEl(notReadyHeadingEl);
+  }
+  async function enterNotProvisioned(): Promise<void> {
+    phase = 'not_provisioned';
+    await tick();
+    focusEl(notProvisionedHeadingEl);
   }
 
   /** Cancel / Close / Done — unmount the panel, return focus to the Grant CTA. */
@@ -292,10 +349,9 @@
           <p class="grant-lead">{t('committee.grant.confirm.lead')}</p>
 
           <!-- Leading polite announcement: the fingerprint shape + the co-chair's
-               job (compare group-for-group). -->
-          <p class="visually-hidden" role="status" aria-live="polite">
-            {t('a11y.committee.grant.fingerprint.ready', { name: nameForCopy })}
-          </p>
+               job (compare group-for-group). A11Y-3: mounted EMPTY on confirm's
+               first paint, populated a tick later so it announces as a mutation. -->
+          <p class="visually-hidden" role="status" aria-live="polite">{readyAnnounce}</p>
 
           <!-- (3) the disclosed-fingerprint block — the SHARED cross-surface mirror. -->
           <span class="grant-fp-label" aria-hidden="true">
@@ -340,30 +396,41 @@
             </div>
           </div>
 
-          <!-- (5) actions. In `confirm` the affirmative CTA + Cancel; in `granting`
-               the loading state (server-truthed terminal only). -->
+          <!-- (5) actions. A11Y-2 (WCAG 2.4.3 Focus Order): the affirmative CTA is
+               the SAME <button> across confirm→granting — never swapped for a
+               <div> — so the focus the user placed on it is not orphaned to
+               <body>. During `granting` it becomes a disabled, aria-busy loading
+               button that names the literal action inside itself. Cancel stays
+               mounted as a disabled escape hatch (server-truthed terminal only). -->
           <div class="grant-actions">
-            {#if phase === 'confirm'}
-              <button type="button" class="grant-primary" on:click={onConfirm}>
+            <button
+              type="button"
+              class="grant-primary"
+              data-testid={phase === 'granting' ? 'committee-grant-granting' : undefined}
+              aria-busy={phase === 'granting' ? 'true' : undefined}
+              disabled={phase === 'granting'}
+              on:click={onConfirm}
+            >
+              {#if phase === 'granting'}
+                {t('committee.grant.granting')}
+              {:else}
                 {t('committee.grant.confirm.cta')}
-              </button>
-              <button type="button" class="btn-outline" on:click={closePanel}>
-                {t('committee.grant.confirm.cancel')}
-              </button>
-            {:else}
-              <div class="grant-granting" data-testid="committee-grant-granting">
-                <span class="grant-loading-label" aria-hidden="true">
-                  {t('committee.grant.granting')}
-                </span>
-                <span class="visually-hidden" role="status" aria-live="polite">
-                  {t('a11y.committee.grant.granting')}
-                </span>
-              </div>
-              <button type="button" class="btn-outline" disabled>
-                {t('committee.grant.confirm.cancel')}
-              </button>
-            {/if}
+              {/if}
+            </button>
+            <button
+              type="button"
+              class="btn-outline"
+              disabled={phase === 'granting'}
+              on:click={closePanel}
+            >
+              {t('committee.grant.confirm.cancel')}
+            </button>
           </div>
+          {#if phase === 'granting'}
+            <span class="visually-hidden" role="status" aria-live="polite">
+              {t('a11y.committee.grant.granting')}
+            </span>
+          {/if}
         </div>
       {:else if phase === 'granted'}
         <div
@@ -450,6 +517,42 @@
             <p class="grant-terminal-body">{t('committee.grant.not_ready.body')}</p>
             <button type="button" class="btn-outline" on:click={closePanel}>
               {t('committee.grant.not_ready.close')}
+            </button>
+          </div>
+        </div>
+      {:else if phase === 'not_provisioned'}
+        <!-- F-174: an unprovisioned co-chair, stopped BEFORE any disclosure. A
+             calm "finish your own setup first" stop — POLITE (role="status"),
+             NOT an alert (mirrors not_ready); a single Close, no Retry. -->
+        <div
+          class="grant-terminal grant-callout-info"
+          data-testid="committee-grant-not-provisioned"
+          role="status"
+        >
+          <svg class="grant-terminal-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+            <path
+              d="M12 11v5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+            <path
+              d="M12 8h.01"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+          <div>
+            <h2 class="grant-terminal-heading" tabindex="-1" bind:this={notProvisionedHeadingEl}>
+              {t('committee.grant.not_provisioned.heading')}
+            </h2>
+            <p class="grant-terminal-body">{t('committee.grant.not_provisioned.body')}</p>
+            <button type="button" class="btn-outline" on:click={closePanel}>
+              {t('committee.grant.not_provisioned.close')}
             </button>
           </div>
         </div>
@@ -560,14 +663,10 @@
     border-color: var(--color-accent-hover);
     opacity: 1;
   }
-  .grant-granting {
-    display: inline-flex;
-    align-items: center;
-  }
-  .grant-loading-label {
-    color: var(--color-fg-muted);
-    font-size: 0.875rem;
-    font-weight: 500;
+  /* The affirmative CTA carries its own busy state (A11Y-2 loading-button-in-
+     place); when disabled it dims via the shared :disabled token style. */
+  .grant-primary[aria-busy='true'] {
+    cursor: progress;
   }
 
   /* Terminal panels — each pairs its tint with an icon AND text (never

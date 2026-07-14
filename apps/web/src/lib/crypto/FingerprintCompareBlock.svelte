@@ -77,37 +77,46 @@
   {#if label}
     <span class="fp-label" aria-hidden="true">{label}</span>
   {/if}
-  <!-- High-contrast display box (the audited max-contrast pair OneTimeCodeCard /
-       D.T19.f use for load-bearing text). The role="group" wrapper names the
-       whole fingerprint so an SR user hears the shape up front. The explicit
-       role="list"/"listitem" restores list semantics that WebKit/Safari strips
-       from any <ol> with `list-style: none`. -->
-  <div class="fp-box" data-testid={testid}>
-    <div class="fp-group" role="group" aria-label={regionLabel}>
-      <ol class="fp-list" role="list">
-        {#each groups as group, i}
-          <li class="fp-item" role="listitem">
-            <!-- role="img" swaps the visible glyphs for a spelled, positional
-                 aria-label in the a11y tree (per-group OneTimeCodeCard mechanism). -->
-            <span class="fp-glyphs" role="img" aria-label={groupLabel(i + 1, group)}>{group}</span>
-          </li>
-        {/each}
-      </ol>
+  <!-- ADV-3: only announce a fingerprint region when there is a real, complete
+       fingerprint to announce (a valid 64-hex → 16 groups). A partial/empty
+       derive must render NOTHING — a role="group" with the "{name}'s identity
+       fingerprint" label but no groups would tell an SR user a fingerprint is
+       present when none is. The P1-9 member waiting phase and the P1-8d confirm
+       only mount this block with a valid 64-hex value. -->
+  {#if groups.length === 16}
+    <!-- High-contrast display box (the audited max-contrast pair OneTimeCodeCard /
+         D.T19.f use for load-bearing text). The role="group" wrapper names the
+         whole fingerprint so an SR user hears the shape up front. The explicit
+         role="list"/"listitem" restores list semantics that WebKit/Safari strips
+         from any <ol> with `list-style: none`. -->
+    <div class="fp-box" data-testid={testid}>
+      <div class="fp-group" role="group" aria-label={regionLabel}>
+        <ol class="fp-list" role="list">
+          {#each groups as group, i}
+            <li class="fp-item" role="listitem">
+              <!-- role="img" swaps the visible glyphs for a spelled, positional
+                   aria-label in the a11y tree (per-group OneTimeCodeCard mechanism). -->
+              <span class="fp-glyphs" role="img" aria-label={groupLabel(i + 1, group)}>{group}</span
+              >
+            </li>
+          {/each}
+        </ol>
+      </div>
     </div>
-  </div>
-  {#if showCopy}
-    <!-- The one clipboard affordance. The fingerprint is a PUBLIC value (SHA-256
-         of the public key), so copy is correct here. Copies the CONTIGUOUS
-         64-hex — the paste-compare target. -->
-    <ShareUrlButton
-      url={fingerprint}
-      labelKey={copyLabelKey}
-      {copiedKey}
-      errorKey={copyErrorKey}
-      {copiedAnnounceKey}
-      {errorAnnounceKey}
-      fullTarget={true}
-    />
+    {#if showCopy}
+      <!-- The one clipboard affordance. The fingerprint is a PUBLIC value (SHA-256
+           of the public key), so copy is correct here. Copies the CONTIGUOUS
+           64-hex — the paste-compare target. -->
+      <ShareUrlButton
+        url={fingerprint}
+        labelKey={copyLabelKey}
+        {copiedKey}
+        errorKey={copyErrorKey}
+        {copiedAnnounceKey}
+        {errorAnnounceKey}
+        fullTarget={true}
+      />
+    {/if}
   {/if}
 </div>
 

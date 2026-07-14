@@ -1185,7 +1185,7 @@
     "grant": {
       "row": {
         "cta": "Grant access",
-        "cta_aria": "Grant committee-key access to {name}"
+        "cta_aria": "Grant access to {name}'s committee key"
       },
       "panel": {
         "heading": "Grant committee-key access"
@@ -1194,6 +1194,11 @@
       "not_ready": {
         "heading": "This member isn't ready yet",
         "body": "They need to finish setting up encryption on their own device before you can grant access. When they're ready, their status here changes to 'Waiting for key access.'",
+        "close": "Close"
+      },
+      "not_provisioned": {
+        "heading": "Finish setting up your own encryption first",
+        "body": "You don't have committee-key access on this device yet, so there's no key for you to share. Set up committee encryption in Settings first, then come back and grant access.",
         "close": "Close"
       },
       "confirm": {
