@@ -300,7 +300,7 @@ jobs:
       - name: Run committee pgTAP against the live stack (real auth.uid/RLS)
         run: |
           pg_prove -d "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
-            supabase/test/committee_rls.sql supabase/test/mint_rls.sql supabase/test/concerns_rls.sql supabase/test/concern_list_default_rls.sql supabase/test/reprisal_rls.sql supabase/test/t14_rls.sql supabase/test/t07_rls.sql supabase/test/t07_f02_rls.sql supabase/test/t07_selftest_fail_rls.sql supabase/test/t07_recovery_blob_get_rls.sql supabase/test/t19_panic_wipe_rls.sql
+            supabase/test/committee_rls.sql supabase/test/t05_session_live_rls.sql supabase/test/mint_rls.sql supabase/test/concerns_rls.sql supabase/test/concern_list_default_rls.sql supabase/test/reprisal_rls.sql supabase/test/t14_rls.sql supabase/test/t07_rls.sql supabase/test/t07_f02_rls.sql supabase/test/t07_selftest_fail_rls.sql supabase/test/t07_recovery_blob_get_rls.sql supabase/test/t19_panic_wipe_rls.sql
 
       - name: Stop Supabase
         if: always()
