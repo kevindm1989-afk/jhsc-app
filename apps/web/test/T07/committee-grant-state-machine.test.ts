@@ -345,7 +345,7 @@ describe('P1-8d [granting] loading state while wrapMemberInViaProduction is in f
   // system.md:769 keeps the SAME <button> mounted as a disabled loading button
   // (spinner + "Granting access…" INSIDE the button). RED against current code,
   // which swaps the CTA <button> for a <div> and drops focus.
-  it('keeps the confirm CTA MOUNTED as a disabled aria-busy loading button and does NOT lose focus to <body>', async () => {
+  it('keeps the confirm CTA MOUNTED as an aria-disabled aria-busy loading button and does NOT lose focus to <body>', async () => {
     const wrap = deferred<WrapMemberInResult>();
     mockWrapMemberIn.mockReturnValue(wrap.promise);
     const { panel } = await toConfirm();
@@ -361,11 +361,16 @@ describe('P1-8d [granting] loading state while wrapMemberInViaProduction is in f
     await fireEvent.click(cta);
 
     const granting = (await screen.findByTestId('committee-grant-granting')) as HTMLButtonElement;
-    // The granting affordance IS a disabled, aria-busy <button> (not a bare <div>).
+    // The granting affordance IS an aria-disabled, aria-busy <button> (not a bare
+    // <div>). aria-disabled (not native `disabled`) keeps it focusable so focus is
+    // genuinely retained in a real browser (native disabled would blur to <body>).
     expect(granting.tagName.toLowerCase(), 'the granting affordance is a native <button>').toBe(
       'button'
     );
-    expect(granting.disabled, 'the loading button is disabled').toBe(true);
+    expect(
+      granting.getAttribute('aria-disabled'),
+      'the loading button is aria-disabled (stays focusable → focus retained)'
+    ).toBe('true');
     expect(granting.getAttribute('aria-busy'), 'the loading button is aria-busy').toBe('true');
     // The literal action is named in/with the button, never a bare spinner.
     expect(
@@ -373,10 +378,11 @@ describe('P1-8d [granting] loading state while wrapMemberInViaProduction is in f
       'the loading state names the literal action'
     ).toContain(t('committee.grant.granting'));
 
-    // WCAG 2.4.3: focus is NOT orphaned to <body>; it rests on the now-disabled
-    // loading button (jsdom keeps focus on an in-DOM element that becomes disabled).
+    // WCAG 2.4.3: focus is NOT orphaned to <body>; it rests on the aria-disabled
+    // loading button (which stays focusable, so focus is retained in a real
+    // browser, not just jsdom).
     expect(document.activeElement, 'focus is not orphaned to <body>').not.toBe(document.body);
-    expect(document.activeElement, 'focus stays on the disabled loading button').toBe(granting);
+    expect(document.activeElement, 'focus stays on the aria-disabled loading button').toBe(granting);
 
     // Cancel is still present (a disabled escape hatch).
     expect(

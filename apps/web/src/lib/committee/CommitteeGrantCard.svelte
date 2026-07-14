@@ -399,16 +399,20 @@
           <!-- (5) actions. A11Y-2 (WCAG 2.4.3 Focus Order): the affirmative CTA is
                the SAME <button> across confirm→granting — never swapped for a
                <div> — so the focus the user placed on it is not orphaned to
-               <body>. During `granting` it becomes a disabled, aria-busy loading
-               button that names the literal action inside itself. Cancel stays
-               mounted as a disabled escape hatch (server-truthed terminal only). -->
+               <body>. During `granting` it becomes an `aria-disabled`, aria-busy
+               loading button that names the literal action inside itself. We use
+               `aria-disabled` (NOT the native `disabled` attribute) precisely so
+               it stays focusable and genuinely RETAINS focus — a native `disabled`
+               would blur the focused element back to <body>; re-activation is
+               already a no-op via `onConfirm`'s `phase !== 'confirm'` guard. Cancel
+               stays natively disabled (it isn't the focused element, so no blur). -->
           <div class="grant-actions">
             <button
               type="button"
               class="grant-primary"
               data-testid={phase === 'granting' ? 'committee-grant-granting' : undefined}
               aria-busy={phase === 'granting' ? 'true' : undefined}
-              disabled={phase === 'granting'}
+              aria-disabled={phase === 'granting' ? 'true' : undefined}
               on:click={onConfirm}
             >
               {#if phase === 'granting'}
