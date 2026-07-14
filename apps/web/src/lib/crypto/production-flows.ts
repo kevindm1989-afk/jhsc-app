@@ -590,20 +590,28 @@ export type WrapMemberInResult =
 
 /**
  * Compose the co-chair-side "grant committee-key access to a member" path
- * (ADR-0029 Decision 5; threat-model §3.18 F-172 / F-174 / F-176).
+ * (ADR-0029 Decision 5 + Amendment A-8.6; threat-model §3.18 F-172 / F-174 /
+ * F-176 / F-179).
+ *
+ * A-8.6 SINGLE-DISCLOSURE: the caller (the F-172 confirm screen) performs the
+ * ONE `getMemberPubkey` disclosure and hands the confirmed
+ * `disclosed:{public_key, fingerprint}` down; this composition no longer
+ * discloses internally (which would be a SECOND disclosure and re-open the
+ * TOCTOU the confirm screen closes).
  *
  * Step 1 — Ensure the actor's `CommitteeKeyHolder` is populated. If empty,
  *          run `unwrapCommitteeDataKeyViaProduction` (probe + unwrap). A
- *          no-wrap actor short-circuits to `actor_has_no_wrap` BEFORE the
- *          disclosure RPC fires (F-174 information-hiding: no disclosure
- *          audit row for an aborted grant).
- * Step 2 — Read the target member's enrolled pubkey via
- *          `client.getMemberPubkey({target_user_id})` — the FIRST production
- *          read of another member's identity pubkey (F-172 server-bound:
- *          the server is the SOLE source of the seal target).
- * Step 3 — Seal `holder.data_key` to the server-disclosed pubkey via
- *          libsodium `crypto_box_seal` (sender-anonymous; sealed-box, not
- *          secretbox — Decision 5 step 3).
+ *          no-wrap actor short-circuits to `actor_has_no_wrap` BEFORE any
+ *          seal (F-174 information-hiding: no wrap for an aborted grant).
+ * Step 2 — Validate the caller's `disclosed` pubkey structurally (32 bytes)
+ *          and re-derive `pubkeyFingerprint(disclosed.public_key)`, requiring
+ *          it to equal the confirmed `disclosed.fingerprint`. A mismatch (or a
+ *          missing/malformed `disclosed`) typed-fails as `invalid_pubkey` with
+ *          NO seal and NO POST (F-179 mitigation #3; the confirmed bytes ARE
+ *          the sealed bytes — F-172 TOCTOU closed).
+ * Step 3 — Seal `holder.data_key` to `disclosed.public_key` via libsodium
+ *          `crypto_box_seal` (sender-anonymous; sealed-box, not secretbox —
+ *          Decision 5 step 3).
  * Step 4 — POST `client.wrapCommitteeDataKeyForMember(...)` with the sealed
  *          bytes. `rotation_id` is null (non-rotation grant).
  * Step 5 — The composition does NOT zeroize `holder.data_key` (Decision 5
@@ -616,10 +624,10 @@ export type WrapMemberInResult =
  * the fingerprint NEVER appear in any logger / sessionStorage / localStorage
  * / URL. No `console.*` calls in this composition.
  *
- * F-172 attempted-bypass: a caller-supplied `target_public_key` (or any
- * pubkey field) in the opts object is structurally IGNORED — the function
- * destructures only `{client, holder, localIdentity, user_id, target_user_id}`,
- * so smuggled fields cannot influence the seal target.
+ * F-172 attempted-bypass: only the six named fields cross into the
+ * composition; any OTHER smuggled pubkey field in opts is dropped by the
+ * destructure. The seal target is always `disclosed.public_key`, which is
+ * re-checked against its own confirmed fingerprint before it is used.
  */
 export async function wrapMemberInViaProduction(opts: {
   client: SupabaseT07Client;
@@ -627,12 +635,14 @@ export async function wrapMemberInViaProduction(opts: {
   localIdentity: LocalIdentityStore;
   user_id: string;
   target_user_id: string;
+  disclosed: { public_key: Uint8Array; fingerprint: string };
 }): Promise<WrapMemberInResult> {
-  // Defensive: only the five named fields cross into the composition. Any
-  // smuggled `target_public_key` / `public_key` / `pubkey` field in opts is
-  // dropped here (F-172 attempted-bypass mitigation: the seal target is
-  // always the server-disclosed pubkey, never a caller hint).
-  const { client, holder, localIdentity, user_id, target_user_id } = opts;
+  // A-8.6 single-disclosure: the caller (the F-172 confirm screen) disclosed the
+  // target pubkey ONCE and hands the confirmed `{public_key, fingerprint}` down
+  // as `disclosed`. The composition no longer reads `getMemberPubkey` itself — so
+  // the human-compared bytes ARE the bytes we seal to (TOCTOU closed). Only the
+  // six named fields cross in; any other smuggled pubkey field is dropped here.
+  const { client, holder, localIdentity, user_id, target_user_id, disclosed } = opts;
 
   // Step 1 — ensure the holder is populated. The unwrap composition is the
   // single source of truth for the probe + disclosure + AEAD-open sequence
@@ -681,46 +691,41 @@ export async function wrapMemberInViaProduction(opts: {
     return { status: 'failed', reason: 'actor_has_no_wrap' };
   }
 
-  // Step 2 — read the target member's pubkey from the server (F-172). This is
-  // the FIRST production non-self identity-pubkey read. The server-side
-  // keystone (migration 0042) emits identity_pubkey.disclosed_for_wrap
-  // audit-before-return SUCCESS-ONLY (Amendment A-1) and collapses all four
-  // target-failure branches to `member_not_enrolled` (Amendment A-2).
-  let disclosure: Awaited<ReturnType<typeof client.getMemberPubkey>>;
-  try {
-    disclosure = await client.getMemberPubkey({ target_user_id });
-  } catch {
-    // F-148: the transport could throw on a network blow-up. Map to a
-    // typed failure; never propagate a raw Error whose .message / .stack
-    // could carry buffer bytes.
-    return { status: 'failed', reason: 'pubkey_disclosure_denied' };
+  // Step 2 (A-8.6 single-disclosure) — validate the caller's ONE disclosed
+  // `{public_key, fingerprint}`. The composition does NOT call `getMemberPubkey`
+  // (that would be a SECOND disclosure, F-179, re-opening the TOCTOU the confirm
+  // screen closes). F-148: a malformed / missing `disclosed` (e.g. a cast-omitted
+  // caller) MUST NOT throw — map it to a typed failure with NO seal, NO POST.
+  if (
+    !disclosed ||
+    !(disclosed.public_key instanceof Uint8Array) ||
+    typeof disclosed.fingerprint !== 'string'
+  ) {
+    return { status: 'failed', reason: 'invalid_pubkey' };
   }
-  if (!disclosure.ok) {
-    if (disclosure.reason === 'member_not_enrolled' || disclosure.reason === 'not_found') {
-      // F-174 closed-denial collapse — the UI's terminal "this member isn't
-      // ready yet" state. No wrap is POSTed; the composition exits clean.
-      return { status: 'member_not_enrolled' };
-    }
-    if (disclosure.reason === 'invalid_input') {
-      // The alternative SQL literal (Amendment A admits either) — same
-      // terminal state.
-      return { status: 'member_not_enrolled' };
-    }
-    // rls_denied / wrong_nonce / unknown — the caller-side denial set.
-    // DISTINCT from member_not_enrolled (different UI message). F-148
-    // safe: only the closed-set reason crosses the boundary.
-    return {
-      status: 'failed',
-      reason: 'pubkey_disclosure_denied',
-      http: disclosure.status
-    };
+  const targetPubkey = disclosed.public_key;
+
+  // Defensive structural check (F-172 mitigation #5, re-pointed onto the disclosed
+  // pubkey): a 32-byte pubkey is what crypto_box_seal expects. A wrong length is a
+  // regression; typed-fail before throwing into libsodium.
+  if (targetPubkey.length !== 32) {
+    return { status: 'failed', reason: 'invalid_pubkey' };
   }
 
-  // Defensive structural check (F-172 mitigation #5): a 32-byte pubkey is
-  // what crypto_box_seal expects. A server returning the wrong length is a
-  // regression; map to a typed failure before throwing into libsodium.
-  const targetPubkey = disclosure.data.public_key;
-  if (targetPubkey.length !== 32) {
+  // Self-consistency assert (F-179 mitigation #3 / F-172 confirmed==sealed):
+  // re-derive `pubkeyFingerprint(disclosed.public_key)` and require it to equal
+  // the confirmed `disclosed.fingerprint`. A mismatch means the confirmed
+  // fingerprint and the pubkey bytes no longer correspond (a TOCTOU shape) —
+  // typed-fail with NO seal, NO POST.
+  let derivedFingerprint: string;
+  try {
+    derivedFingerprint = await pubkeyFingerprint(targetPubkey);
+  } catch {
+    // F-148 / F-176: never surface a raw crypto exception (its .message / .stack
+    // could carry buffer bytes). Map to the structural invalid-pubkey failure.
+    return { status: 'failed', reason: 'invalid_pubkey' };
+  }
+  if (derivedFingerprint !== disclosed.fingerprint) {
     return { status: 'failed', reason: 'invalid_pubkey' };
   }
 
@@ -731,6 +736,14 @@ export async function wrapMemberInViaProduction(opts: {
   let sealed: Uint8Array;
   try {
     const s = await ready();
+    // ADV-2: re-check the holder was not wiped during the awaits above.
+    // `getDataKey()` handed out the live data-key buffer BY REFERENCE (:688); a
+    // wipe trigger (401 / panic / sign-out) firing during the
+    // `pubkeyFingerprint` / `ready` window zeroizes that buffer in place. NEVER
+    // seal + POST a zeroized key — typed-fail before crypto_box_seal touches it.
+    if (!holder.isPopulated()) {
+      return { status: 'failed', reason: 'data_key_unwrap_failed' };
+    }
     sealed = s.crypto_box_seal(dataKey, targetPubkey);
   } catch {
     // libsodium throws on invalid input (e.g. pubkey wrong length, even

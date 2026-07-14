@@ -1,93 +1,86 @@
 /**
- * ADR-0029 P1-5 — `wrapMemberInViaProduction` (the co-chair-side composition
- * that fetches a member's pubkey via the new disclosure RPC, opens the
- * actor's own committee data key, seals the data key to the member's pubkey
- * via libsodium `crypto_box_seal`, and lands the wrap via the existing
- * `wrap_committee_data_key_for_member` RPC).
+ * ADR-0029 P1-8d / Amendment A-8.6 — the SINGLE-DISCLOSURE refactor of
+ * `wrapMemberInViaProduction`.
  *
- * This is the FIRST production composition that operates against ANOTHER
- * member's pubkey. Every prior wrap (Phase 0a / 2a / 2b) sealed to the
- * actor's OWN pubkey. ADR-0029 Decisions 4 + 5; threat-model §3.18
- * F-172 / F-174 / F-176.
+ * This suite is REWRITTEN for the A-8.6 pinned signature. It supersedes the
+ * P1-5 double-disclosure suite (the composition no longer fetches the target
+ * pubkey itself — the caller/UI discloses ONCE, for the F-172 confirm screen,
+ * and hands the pre-disclosed `{public_key, fingerprint}` to the composition).
  *
- * RED-FIRST (TDD): written against:
- *   - `SupabaseT07Client.getMemberPubkey(input)` (P1-5)
- *   - `wrapMemberInViaProduction(...)` exported from `src/lib/crypto` (P1-5)
- * Both do NOT exist on `main`; the imports below fail to resolve until the
- * implementer lands them. The implementer treats this file as READ-ONLY.
+ *   BEFORE (P1-5):  wrapMemberInViaProduction({client, holder, localIdentity,
+ *                     user_id, target_user_id})  — Step 2 internally called
+ *                     `client.getMemberPubkey` → TWO `identity_pubkey
+ *                     .disclosed_for_wrap` rows per grant + a TOCTOU (the
+ *                     fingerprint the human CONFIRMED and the pubkey actually
+ *                     SEALED were separate reads).
+ *   AFTER  (A-8.6): wrapMemberInViaProduction({client, holder, localIdentity,
+ *                     user_id, target_user_id,
+ *                     disclosed: {public_key, fingerprint}})  — `disclosed`
+ *                     is REQUIRED; the internal Step-2 `getMemberPubkey`
+ *                     (production-flows.ts:689-717) is REMOVED; the
+ *                     composition re-derives `pubkeyFingerprint(
+ *                     disclosed.public_key)` and typed-fails unless it equals
+ *                     `disclosed.fingerprint` AND `disclosed.public_key` is 32
+ *                     bytes; then seals to `disclosed.public_key` and POSTs.
  *
- * Surface under test (per ADR-0029 Decision 5):
+ * ───────────────────────────────────────────────────────────────────────────
+ * RED-FIRST NOTE (for the implementer):
+ *   These tests are written to FAIL against the CURRENT double-disclosing
+ *   implementation and PASS once A-8.6 lands. The load-bearing structural
+ *   property is asserted two independent ways:
+ *     (1) `vi.spyOn(client, 'getMemberPubkey')` — the composition must call it
+ *         ZERO times (the disclosure moved to the caller). Under current code
+ *         it is called once → these assertions fail RED.
+ *     (2) the mock transport records every dispatched op in `ops` — the string
+ *         `get_member_pubkey` must NOT appear. Under current code it does → RED.
+ *   The "seal target" property is asserted by spying on the libsodium singleton
+ *   (`vi.spyOn(_sodium, 'crypto_box_seal')`, which — verified — intercepts the
+ *   composition's `ready().crypto_box_seal(...)` call because `ready()` returns
+ *   the same module singleton) AND by opening the POSTed sealed box with the
+ *   private half of `disclosed.public_key`.
  *
- *   wrapMemberInViaProduction({
- *     client: SupabaseT07Client,
- *     holder: CommitteeKeyHolder,
- *     localIdentity: LocalIdentityStore,  // for the holder-unwrap fallback
- *     user_id: string,                    // the actor's own uid (caller)
- *     target_user_id: string              // the member to grant key access to
- *   }) ->
- *     | { status: 'ok' }
- *     | { status: 'member_not_enrolled' }       // disclosure RPC: no pubkey
- *     | { status: 'failed';
- *         reason:
- *           | 'pubkey_disclosure_denied'        // disclosure rls_denied
- *           | 'actor_has_no_wrap'               // holder empty + probe says no
- *           | 'data_key_unwrap_failed'          // holder unwrap failed
- *           | 'wrap_post_failed'                // wrap_member RPC failed
- *           | 'decrypt_failed'                  // (defensive; bad holder bytes)
- *           | 'invalid_pubkey'                  // server returned wrong-length
- *         ; http?: number }
+ * ───────────────────────────────────────────────────────────────────────────
+ * TEST → CONTRACT MAP
+ * ───────────────────────────────────────────────────────────────────────────
+ *   A-8.6 / F-179 mitigation (2)  — `disclosed` is REQUIRED (no-bypass): no
+ *                                    seal path is reachable without a
+ *                                    disclosed-and-confirmed pubkey. Documented
+ *                                    at the TYPE level (`__typeLevelContract_*`;
+ *                                    NOT gated — test/** is tsc-excluded, see
+ *                                    that fn's note) AND ENFORCED at runtime (a
+ *                                    cast-omitted `disclosed` yields a typed
+ *                                    failure, NO seal, NO POST).
+ *   A-8.6 / F-179 mitigation (1)  — ONE disclosure per grant: the composition
+ *                                    NEVER calls `client.getMemberPubkey`.
+ *   A-8.6 / F-179 mitigation (3)  — client-side self-consistency: a
+ *                                    `{public_key, fingerprint}` whose derived
+ *                                    `pubkeyFingerprint(public_key)` ≠
+ *                                    `fingerprint` → typed fail, NO seal, NO
+ *                                    POST. A non-32-byte `public_key` → typed
+ *                                    fail (the re-pointed :722-725 check).
+ *   A-8.6 / F-179 mitigation (4)  — confirmed == sealed (TOCTOU closed): the
+ *   / F-172                          pubkey handed to `crypto_box_seal` and
+ *                                    POSTed is EXACTLY `disclosed.public_key`,
+ *                                    not any re-fetched value.
+ *   A-8.6 (happy)                 — the new signature grants a member key with
+ *                                    ONE disclosure (in the caller) and ONE
+ *                                    wrap POST.
+ *   A-8.6 / F-174 (Step 1 kept)   — a co-chair with no wrap short-circuits to
+ *                                    `actor_has_no_wrap` BEFORE any seal (and
+ *                                    with NO disclosure), preserving the
+ *                                    abort-without-audit property.
+ *   Preserved behavioural guards  — holder retains the data key (Decision 5
+ *   (must survive the refactor)      step 5); F-176 leak sweep; heap-only (no
+ *                                    Storage write); ADR-0003 Invariant 1
+ *                                    (plaintext data key never crosses the
+ *                                    wire); F-148 (never throws a raw error);
+ *                                    wrap_post_failed on a mid-grant target
+ *                                    deactivation.
  *
- * Hermetic: a mock t07-op transport with op-capture (mirrors
- * phase2a-unwrap-composition.test.ts); a real BrowserLocalIdentityStore (SSR
- * Map fallback); a real CommitteeKeyHolder; real libsodium. No real network,
- * no real clock, no seeded RNG (we capture what libsodium hands out).
- *
- * ───────────────────────────────────────────────────────────────────────
- * TEST → FINDING / DECISION MAP
- * ───────────────────────────────────────────────────────────────────────
- *   Decision 5 step 2 / F-172 — composition fetches the TARGET pubkey from
- *                               get_member_pubkey (server-bound), NOT from
- *                               a caller-supplied input; the sealed-to key
- *                               MUST equal the server-returned bytes byte-
- *                               for-byte.
- *   Decision 5 step 3 / F-172 — composition seals the data key with
- *                               crypto_box_seal (libsodium, sender-anonymous).
- *                               The wrap is a sealed box, NOT a secretbox.
- *   Decision 5 step 4 / F-172 — composition POSTs via wrap_committee_data_key_for_member
- *                               (the existing `wrap_member` op) with the
- *                               sealed bytes only; rotation_id is null
- *                               (non-rotation grant).
- *   Decision 5 step 5         — composition does NOT zeroize holder.data_key
- *                               (the holder owns its lifecycle; the unwrap
- *                               composition handed back live bytes by
- *                               reference, Decision 2 step 5).
- *   F-172                     — the plaintext data key NEVER appears in any
- *                               request the EF receives (only the sealed bytes
- *                               do); also asserted via SEALBYTES length.
- *   F-172 / Decision 4 Rejected (a)
- *                             — server-side-seal STAYS rejected: no RPC /
- *                               EF op accepts a plaintext data key; no
- *                               request body field in the wire history
- *                               carries the data key (a structural / wire
- *                               pin, not just a "the implementer didn't
- *                               write it").
- *   F-174                     — member_not_enrolled: the disclosure RPC
- *                               returning the closed denial maps to a
- *                               typed terminal state (no wrap POSTed; the
- *                               co-chair UI surfaces "this member isn't
- *                               ready").
- *   F-176                     — leak sweep: the 32-byte plaintext data key,
- *                               the target's pubkey bytes, the sealed wrap
- *                               bytes, the device privkey, the target uid,
- *                               and the actor uid never appear in
- *                               console.* / thrown errors / structured
- *                               logs / sessionStorage / localStorage.
- *   F-148 carry-forward       — typed failure shapes; the composition NEVER
- *                               throws a raw libsodium error (which could
- *                               carry key bytes in its message/stack).
- *
- * Cross-ref: phase2a-unwrap-composition.test.ts is the sibling pattern;
- * mirror the FakeKeyServer shape and the leak-sweep helper.
+ * Hermetic: a mock t07-op transport with op-capture; a real
+ * BrowserLocalIdentityStore (SSR Map fallback); a real CommitteeKeyHolder;
+ * real libsodium; real `pubkeyFingerprint` (SHA-256) so every fingerprint
+ * match/mismatch is genuine. No real network, no real clock, no seeded RNG.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -96,18 +89,17 @@ import {
   BrowserLocalIdentityStore,
   CommitteeKeyHolder,
   SupabaseT07Client,
+  pubkeyFingerprint,
+  wrapMemberInViaProduction,
   type T07OpTransport
 } from '../../src/lib/crypto';
-// RED-FIRST: the implementer adds this export at P1-5. Importing it here
-// pins the public name + signature.
-import { wrapMemberInViaProduction } from '../../src/lib/crypto';
 import { __getCapturedLines, __resetCapture, __setTestSink } from '../../src/lib/log/test-sink';
 
 await _sodium.ready;
 const sodium = _sodium;
 
-// Synthetic actor / target uids — the F-176 sweep will assert neither
-// appears in any log line.
+// Synthetic actor / target uids — the F-176 sweep asserts neither appears in
+// any log line.
 const ACTOR = '9f4e9b40-0000-4000-8000-00000000001a'; // SYNTHETIC_USER_COCHAIR
 const TARGET = '9f4e9b40-0000-4000-8000-00000000002b'; // SYNTHETIC_USER_MEMBER
 
@@ -117,43 +109,41 @@ function bytesToPgHex(b: Uint8Array): string {
   return s;
 }
 
+function pgHexToBytes(h: string): Uint8Array {
+  const body = h.startsWith('\\x') ? h.slice(2) : h;
+  return new Uint8Array(body.match(/.{1,2}/g)!.map((x) => parseInt(x, 16)));
+}
+
 function silentStore(): BrowserLocalIdentityStore {
   return new BrowserLocalIdentityStore({ idbFactory: null, warn: () => undefined });
 }
 
 /**
- * The fake t07-op server the mock transport drives. Models the three reads
- * the composition needs:
- *   - committee_key_state  (metadata probe; reused from holder-unwrap path)
- *   - get_key_wrap         (the actor's own sealed wrap; reused from unwrap)
- *   - get_member_pubkey    (NEW — the target's pubkey for Decision 5 step 2)
- *   - wrap_member          (the existing wrap-for-member RPC; lands the seal)
+ * The fake t07-op server the mock transport drives. Models the reads the
+ * composition needs post-A-8.6:
+ *   - committee_key_state  (metadata probe; Step 1 holder-unwrap fallback)
+ *   - get_key_wrap         (the actor's own sealed wrap; Step 1 fallback)
+ *   - wrap_member          (Step 4 — lands the seal)
+ * `get_member_pubkey` is STILL modelled so the CURRENT (pre-refactor) code —
+ * which still calls it internally — runs to completion and the RED failures
+ * are about the composition's OBSERVABLE structure, not an incidental throw.
+ * After A-8.6 the composition MUST NOT dispatch it at all.
  */
 interface FakeKeyServer {
-  // Live committee key
   liveKeyId: string;
   liveEpoch: number;
-  // The actor's holdings (used by the holder-unwrap fallback path)
   actorHasWrap: boolean;
-  actorWrapBytes: Uint8Array | null; // sealed-to-actor wrap; if set, holder can
-                                     // be filled by unwrap; if null, holder
-                                     // stays empty.
-  actorDataKey: Uint8Array | null;   // the 32-byte oracle — what the holder
-                                     // would resolve to.
-  // The target's enrolled pubkey (the NEW disclosure RPC's return value).
-  // `null` means the member has not enrolled an identity yet → server raises
-  // the closed denial literal (the F-174 closed oracle).
-  targetPubkey: Uint8Array | null;
-  targetFingerprint: string | null;
-  // The denial literal the server raises when the target pubkey is null.
-  // ADR-0029 has not pinned the exact literal (target_not_member /
-  // not_found / member_not_enrolled); the EF mapRpcError surfaces it as
-  // either 404/not_found or 422/invalid_input. We assert the
-  // COMPOSITION'S OUTCOME, not the wire-internal mapping (which the EF
-  // tests pin).
-  notEnrolledReason: 'not_found' | 'invalid_input';
-  // Recording surfaces
-  wrapPosted: null | { member_user_id: string; key_id: string; sealed_hex: string; rotation_id: string | null };
+  actorWrapBytes: Uint8Array | null;
+  actorDataKey: Uint8Array | null;
+  // The SERVER-side pubkey the REMOVED internal disclosure would return. Kept
+  // ONLY so the current double-disclosing code completes; the A-8.6 code never
+  // reads it. Deliberately a DIFFERENT keypair than `disclosed` so the
+  // confirmed==sealed test sees current code seal to the wrong key.
+  serverTargetPubkey: Uint8Array | null;
+  serverTargetFingerprint: string | null;
+  wrapPosted:
+    | null
+    | { member_user_id: string; key_id: string; sealed_hex: string; rotation_id: string | null };
 }
 
 function newServer(): FakeKeyServer {
@@ -163,18 +153,16 @@ function newServer(): FakeKeyServer {
     actorHasWrap: true,
     actorWrapBytes: null,
     actorDataKey: null,
-    targetPubkey: null,
-    targetFingerprint: null,
-    notEnrolledReason: 'not_found',
+    serverTargetPubkey: null,
+    serverTargetFingerprint: null,
     wrapPosted: null
   };
 }
 
 /**
- * Seed the actor's holder-side state: generate a keypair for the ACTOR,
- * store the privkey device-locally, generate the 32-byte data key oracle,
- * and seal it to the actor's pubkey so the holder-unwrap path can populate
- * the holder.
+ * Seed the actor's holder-side state: keypair for the ACTOR, device-local
+ * privkey, the 32-byte data-key oracle, and its actor-sealed wrap (so the
+ * Step-1 holder-unwrap fallback can populate the holder).
  */
 async function seedActor(
   srv: FakeKeyServer,
@@ -188,14 +176,31 @@ async function seedActor(
   return { pub: kp.publicKey, priv: kp.privateKey, dataKey };
 }
 
-/** Seed the TARGET's enrolled pubkey server-side (the disclosure RPC return). */
-function seedTarget(srv: FakeKeyServer): { pub: Uint8Array; priv: Uint8Array } {
+/**
+ * Seed the SERVER's disclosure return (the value the REMOVED internal
+ * `getMemberPubkey` would produce). Lets the CURRENT code complete a grant so
+ * the RED assertions bite on structure/seal-target, not on an incidental error
+ * path. The A-8.6 code never touches this.
+ */
+function seedServerTarget(srv: FakeKeyServer): { pub: Uint8Array; priv: Uint8Array } {
   const kp = sodium.crypto_box_keypair();
-  srv.targetPubkey = kp.publicKey;
-  // The fingerprint format is the JS lib's BLAKE2b-32 hex (64 hex chars).
-  // Compute it here so the leak-sweep can search for it.
-  srv.targetFingerprint = sodium.to_hex(sodium.crypto_generichash(32, kp.publicKey));
+  srv.serverTargetPubkey = kp.publicKey;
+  srv.serverTargetFingerprint = sodium.to_hex(sodium.crypto_generichash(32, kp.publicKey));
   return { pub: kp.publicKey, priv: kp.privateKey };
+}
+
+/**
+ * Build a valid pre-disclosed `{public_key, fingerprint}` using the REAL
+ * `pubkeyFingerprint` (SHA-256), so the composition's self-consistency
+ * re-derivation matches. Returns the private half for open-the-seal proofs.
+ */
+async function makeDisclosed(): Promise<{
+  disclosed: { public_key: Uint8Array; fingerprint: string };
+  priv: Uint8Array;
+}> {
+  const kp = sodium.crypto_box_keypair();
+  const fingerprint = await pubkeyFingerprint(kp.publicKey);
+  return { disclosed: { public_key: kp.publicKey, fingerprint }, priv: kp.privateKey };
 }
 
 function makeTransport(srv: FakeKeyServer): {
@@ -236,31 +241,24 @@ function makeTransport(srv: FakeKeyServer): {
           }
         };
       case 'get_member_pubkey': {
-        // Decision 4 / F-174: the disclosure RPC. The server is the SOLE
-        // source of target pubkey bytes for the composition.
-        if (!srv.targetPubkey || !srv.targetFingerprint) {
-          // Closed denial — the literal exact form maps via the EF
-          // mapRpcError to either not_found/404 or invalid_input/422
-          // (depending on the SQL literal ADR-0029 ratifies). The
-          // composition translates EITHER to 'member_not_enrolled'.
-          return {
-            status: srv.notEnrolledReason === 'not_found' ? 404 : 422,
-            body: { ok: false, error: srv.notEnrolledReason }
-          };
+        // A-8.6: the composition MUST NOT dispatch this. Modelled only so the
+        // pre-refactor code completes (its presence in `ops` is itself a RED
+        // signal after the refactor).
+        if (!srv.serverTargetPubkey || !srv.serverTargetFingerprint) {
+          return { status: 404, body: { ok: false, error: 'not_found' } };
         }
         return {
           status: 200,
           body: {
             ok: true,
             data: {
-              public_key_hex: bytesToPgHex(srv.targetPubkey),
-              fingerprint: srv.targetFingerprint
+              public_key_hex: bytesToPgHex(srv.serverTargetPubkey),
+              fingerprint: srv.serverTargetFingerprint
             }
           }
         };
       }
       case 'wrap_member': {
-        // The existing :485-522 contract; the EF op forwards through.
         srv.wrapPosted = {
           member_user_id: String(body.member_user_id),
           key_id: String(body.key_id),
@@ -276,6 +274,40 @@ function makeTransport(srv: FakeKeyServer): {
   return { transport, ops, bodies };
 }
 
+/**
+ * TYPE-LEVEL CONTRACT — A-8.6 / F-179 mitigation (2): `disclosed` is a REQUIRED
+ * parameter, so there is no COMPILE-TIME path to a seal without a
+ * disclosed-and-confirmed pubkey. This function is never invoked; it exists
+ * only to pin the type contract.
+ *
+ * How it would gate: against the CURRENT signature (no `disclosed` field) the
+ * `@ts-expect-error` below is UNUSED → `tsc` raises TS2578; it goes GREEN once
+ * the implementer makes `disclosed` required. The excess-property `disclosed:`
+ * literals throughout this file are the mirror pin (TS2353 under the current
+ * signature, clean under A-8.6).
+ *
+ * ⚠️ NOT CURRENTLY GATED: this project EXCLUDES `test/**` from tsc
+ * (`apps/web/tsconfig.json` `exclude`), and there is no separate typecheck over
+ * the test tree — so `npm run typecheck` does NOT surface this. The ENFORCED
+ * no-bypass check is therefore the RUNTIME test below (a cast-omitted
+ * `disclosed` → typed failure, NO seal, NO POST). Flagged for the implementer/
+ * verifier: add `test/**` to a typecheck program to promote this contract from
+ * documented to gated.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function __typeLevelContract_disclosedRequired(): Promise<void> {
+  const base = {
+    client: null as unknown as SupabaseT07Client,
+    holder: null as unknown as CommitteeKeyHolder,
+    localIdentity: null as unknown as BrowserLocalIdentityStore,
+    user_id: ACTOR,
+    target_user_id: TARGET
+  };
+  // @ts-expect-error A-8.6/F-179: omitting `disclosed` MUST be a compile error.
+  await wrapMemberInViaProduction(base);
+}
+void __typeLevelContract_disclosedRequired;
+
 beforeEach(() => {
   __resetCapture();
   __setTestSink();
@@ -287,322 +319,383 @@ afterEach(() => {
 });
 
 // ===========================================================================
-// HAPPY PATH — full composition (Decision 5 steps 1..4)
+// (1) A-8.6 / F-179 mitigation (2) — `disclosed` is REQUIRED (no-bypass)
 // ===========================================================================
 
-describe('ADR-0029 P1-5 — happy composition (Decision 5)', () => {
-  it('Decision 5 step 4: posts a wrap_member with the sealed-to-target ciphertext and returns ok', async () => {
-    const srv = newServer();
-    const { transport, ops } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-
-    // Seed actor + target.
-    const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
-    // Populate the holder up-front (Decision 5 step 1 says "ensures the
-    // holder is populated, unwrap if null" — when the holder is already
-    // populated by a prior session-resident unwrap, no re-unwrap happens).
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-
-    expect(r.status).toBe('ok');
-    // The disclosure RPC was hit (Decision 5 step 2). The wrap RPC was hit
-    // (Decision 5 step 4). The order of the two is implementation-defined
-    // but BOTH must be present.
-    expect(ops).toContain('get_member_pubkey');
-    expect(ops).toContain('wrap_member');
-    // Wrap recorded server-side with the right target uid + key_id.
-    expect(srv.wrapPosted).not.toBeNull();
-    expect(srv.wrapPosted?.member_user_id).toBe(TARGET);
-    expect(srv.wrapPosted?.key_id).toBe(srv.liveKeyId);
-    expect(srv.wrapPosted?.rotation_id).toBeNull();
-  });
-
-  it('Decision 5 step 1: when holder is empty AND actor has a wrap, unwrap first then proceed', async () => {
-    // The holder is empty; the composition resorts to the unwrap path
-    // (committee_key_state probe + get_key_wrap → crypto_box_seal_open with
-    // device privkey). Then the disclosure + seal + wrap_member sequence.
-    const srv = newServer();
-    const { transport, ops } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-
-    await seedActor(srv, localIdentity);
-    seedTarget(srv);
-    // Holder DELIBERATELY empty.
-    expect(holder.isPopulated()).toBe(false);
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-
-    expect(r.status).toBe('ok');
-    // The full set of ops fired (probe + unwrap + disclosure + wrap).
-    expect(ops).toContain('committee_key_state');
-    expect(ops).toContain('get_key_wrap');
-    expect(ops).toContain('get_member_pubkey');
-    expect(ops).toContain('wrap_member');
-    // The holder is now populated (the unwrap step's side effect).
-    expect(holder.isPopulated()).toBe(true);
-  });
-});
-
-// ===========================================================================
-// F-172 — seal to the SERVER-disclosed pubkey, byte-for-byte
-// ===========================================================================
-
-describe('ADR-0029 P1-5 — F-172 server-bound seal target', () => {
-  it('the sealed-to pubkey is EXACTLY what get_member_pubkey returned (the composition does NOT accept a caller-supplied pubkey)', async () => {
-    // Threat: a compromised co-chair client substitutes an attacker pubkey
-    // and seals the data key to it. Mitigation: the composition reads the
-    // pubkey from the server's disclosure RPC and seals to THAT — there
-    // is no path that lets the caller bypass the disclosure.
-    //
-    // We verify by mocking the disclosure to return a KNOWN pubkey and
-    // checking that the wrap_member call seals to BYTES OPENABLE BY THAT
-    // KEY'S PRIVATE HALF (which only the target holds). crypto_box_seal_open
-    // with the target's privkey MUST recover the actor's data key bytes
-    // exactly — proving the seal target is the server-disclosed pubkey.
-    const srv = newServer();
-    const { transport } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    const target = seedTarget(srv);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-    expect(r.status).toBe('ok');
-
-    // Recover the sealed bytes from the recorded wrap and open with the
-    // TARGET's privkey. Successful open with target.priv proves the seal
-    // target is target.pub (the server-disclosed key) byte-for-byte.
-    expect(srv.wrapPosted).not.toBeNull();
-    const sealedHex = (srv.wrapPosted as { sealed_hex: string }).sealed_hex;
-    const sealed = new Uint8Array(
-      (sealedHex.startsWith('\\x') ? sealedHex.slice(2) : sealedHex)
-        .match(/.{1,2}/g)!
-        .map((h) => parseInt(h, 16))
-    );
-    const opened = sodium.crypto_box_seal_open(sealed, target.pub, target.priv);
-    expect(opened.length).toBe(32);
-    expect(Array.from(opened)).toEqual(Array.from(actor.dataKey));
-  });
-
-  it('Decision 5 step 3: sealed bytes are EXACTLY plaintext.length + crypto_box_SEALBYTES (a sealed box, not a secretbox)', async () => {
-    const srv = newServer();
-    const { transport } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-
-    const sealedHex = (srv.wrapPosted as { sealed_hex: string }).sealed_hex;
-    const sealedLen = ((sealedHex.startsWith('\\x') ? sealedHex.slice(2) : sealedHex).length) / 2;
-    expect(sealedLen).toBe(32 + sodium.crypto_box_SEALBYTES);
-    // And specifically NOT the 32 plaintext bytes (the canary against an
-    // accidental "send the plaintext data key" regression — F-172 / F-176).
-    expect(sealedLen).not.toBe(32);
-  });
-});
-
-// ===========================================================================
-// F-172 / Decision 4 Rejected (a) — server-side seal STAYS rejected: no
-// request body field anywhere in the wire history carries the plaintext
-// data key. Asserted as a structural / wire pin.
-// ===========================================================================
-
-describe('ADR-0029 P1-5 — F-172 server-side-seal-stays-rejected (Decision 4 Rejected (a))', () => {
-  it('the plaintext 32-byte data key NEVER appears in any request body the EF sees', async () => {
-    const srv = newServer();
-    const { transport, bodies } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-
-    // The plaintext data key's hex form …
-    const dataKeyHex = sodium.to_hex(actor.dataKey);
-    // … must NOT appear in ANY recorded request body (the EF sees the
-    // sealed bytes only, never the plaintext — ADR-0003 Invariant 1/5/6,
-    // Decision 4 Rejected (a)).
-    for (const body of bodies) {
-      const blob = JSON.stringify(body);
-      expect(blob).not.toContain(dataKeyHex);
-    }
-  });
-
-  it('the composition NEVER calls a "server-side seal" op (no wrap_member_server_side / seal_member / similar shape)', async () => {
+describe('A-8.6/F-179 — `disclosed` is required (no-bypass)', () => {
+  it('a runtime call omitting `disclosed` returns a typed failure and reaches NO seal / NO wrap POST', async () => {
     const srv = newServer();
     const { transport, ops } = makeTransport(srv);
     const localIdentity = silentStore();
     const client = new SupabaseT07Client({ transport, localIdentity });
     const holder = new CommitteeKeyHolder();
     const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
+    seedServerTarget(srv); // lets the CURRENT code run all the way through
     holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
 
-    await wrapMemberInViaProduction({
+    const sealSpy = vi.spyOn(sodium, 'crypto_box_seal');
+    const getPubSpy = vi.spyOn(client, 'getMemberPubkey');
+    const wrapSpy = vi.spyOn(client, 'wrapCommitteeDataKeyForMember');
+
+    // Deliberately omit `disclosed`. The double-cast compiles under BOTH the
+    // current signature (no `disclosed`) and the A-8.6 signature (`disclosed`
+    // required) so the vitest transform is unaffected either way.
+    const optsNoDisclosed = {
       client,
       holder,
       localIdentity,
       user_id: ACTOR,
       target_user_id: TARGET
-    });
-
-    // Pin structurally: the composition only ever dispatches the four
-    // expected ops (probe + wrap-read + disclosure + wrap_post). A future
-    // "optimization" that introduces a server-side-seal would surface here.
-    for (const op of ops) {
-      expect(op).toMatch(/^(committee_key_state|get_key_wrap|get_member_pubkey|wrap_member)$/);
-      expect(op).not.toMatch(/server.?side.?seal|seal.?member|server.?seal/i);
-    }
-  });
-});
-
-// ===========================================================================
-// F-174 — member_not_enrolled: the disclosure RPC returning the closed
-// denial maps to a typed terminal state (no wrap POSTed; the co-chair UI
-// surfaces "this member isn't ready yet").
-// ===========================================================================
-
-describe('ADR-0029 P1-5 — F-174 member_not_enrolled terminal (Decision 5 step 2)', () => {
-  it('disclosure RPC returning not_found (member has no identity_keys row) → member_not_enrolled, no wrap_member posted', async () => {
-    const srv = newServer();
-    srv.targetPubkey = null;
-    srv.notEnrolledReason = 'not_found';
-    const { transport, ops } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-
-    expect(r.status).toBe('member_not_enrolled');
-    // CRITICAL: wrap_member was NOT posted (we did not seal to a partial /
-    // wrong pubkey; the composition aborted before the seal step).
-    expect(ops).not.toContain('wrap_member');
-    expect(srv.wrapPosted).toBeNull();
-  });
-
-  it('disclosure RPC returning invalid_input (the alternative ADR-0029 literal) ALSO maps to member_not_enrolled', async () => {
-    // ADR-0029 has not pinned the exact SQL literal (Decision 4 says
-    // target_not_member; Decision 5 step 2 says "no-pubkey returns
-    // {status:'member_not_enrolled'}"; F-174 says
-    // "member_not_enrolled/not_found"). The composition must collapse
-    // EITHER server denial into the SAME terminal client state so the UI
-    // doesn't have to branch on the literal.
-    const srv = newServer();
-    srv.targetPubkey = null;
-    srv.notEnrolledReason = 'invalid_input';
-    const { transport, ops } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-
-    expect(r.status).toBe('member_not_enrolled');
-    expect(ops).not.toContain('wrap_member');
-  });
-
-  it('disclosure RPC returning rls_denied (non-co-chair caller) → pubkey_disclosure_denied (NOT member_not_enrolled)', async () => {
-    // The two denial classes are DIFFERENT: "member is not ready" vs "you
-    // are not authorized". Conflating them would confuse the UI; the
-    // composition must distinguish.
-    const srv = newServer();
-    const localIdentity = silentStore();
-    // Override transport for this case to inject rls_denied on disclosure.
-    const transport: T07OpTransport = async (body) => {
-      if (body.op === 'get_member_pubkey') {
-        return { status: 403, body: { ok: false, error: 'rls_denied' } };
-      }
-      // The holder is empty so the composition will hit get_key_wrap first;
-      // return a normal happy path for those ops.
-      return makeTransport(srv).transport(body);
     };
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
+    const r = await wrapMemberInViaProduction(
+      optsNoDisclosed as unknown as Parameters<typeof wrapMemberInViaProduction>[0]
+    ).catch((e: unknown) => {
+      // F-148: the composition must map the missing-disclosure to a typed
+      // failure, NEVER throw (a raw error could carry buffer bytes).
+      throw new Error(
+        `A-8.6/F-179: wrapMemberInViaProduction must not throw when \`disclosed\` is ` +
+          `absent — it must typed-fail. Got: ${
+            e instanceof Error ? e.constructor.name : 'non-error throw'
+          }`
+      );
     });
 
     expect(r.status).toBe('failed');
     if (r.status !== 'failed') return;
-    expect(r.reason).toBe('pubkey_disclosure_denied');
+    // A typed, closed-set reason (the missing/invalid pubkey class).
+    expect(['invalid_pubkey', 'unknown']).toContain(r.reason);
+
+    // Load-bearing: NO seal, NO wrap POST were performed.
+    expect(sealSpy).toHaveBeenCalledTimes(0);
+    expect(wrapSpy).toHaveBeenCalledTimes(0);
+    expect(srv.wrapPosted).toBeNull();
+    expect(ops).not.toContain('wrap_member');
+    // And the composition performed NO internal disclosure either.
+    expect(getPubSpy).toHaveBeenCalledTimes(0);
+    expect(ops).not.toContain('get_member_pubkey');
   });
 });
 
 // ===========================================================================
-// Holder-unwrap fallback failure branches (Decision 5 step 1)
+// (2) A-8.6 / F-179 mitigation (1) — single disclosure: NO internal re-fetch
 // ===========================================================================
 
-describe('ADR-0029 P1-5 — actor key-state preconditions', () => {
-  it('actor has no wrap and the holder is empty → actor_has_no_wrap (no disclosure RPC hit)', async () => {
+describe('A-8.6/F-179 — single disclosure: the composition never calls getMemberPubkey', () => {
+  it('a full successful grant dispatches NO get_member_pubkey (the disclosure lives in the caller)', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
+
+    const getPubSpy = vi.spyOn(client, 'getMemberPubkey');
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+
+    expect(r.status).toBe('ok');
+    // THE load-bearing structural property — one disclosure per grant.
+    expect(getPubSpy).toHaveBeenCalledTimes(0);
+    expect(ops).not.toContain('get_member_pubkey');
+    // The wrap still lands exactly once, for the right target + live key.
+    expect(srv.wrapPosted).not.toBeNull();
+    expect(srv.wrapPosted?.member_user_id).toBe(TARGET);
+    expect(srv.wrapPosted?.key_id).toBe(srv.liveKeyId);
+  });
+
+  it('the only ops dispatched are a subset of {committee_key_state, get_key_wrap, wrap_member}', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    // Holder empty → exercises Step-1 fallback ops too (probe + get_key_wrap).
+    const { disclosed } = await makeDisclosed();
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+
+    expect(r.status).toBe('ok');
+    for (const op of ops) {
+      expect(op).toMatch(/^(committee_key_state|get_key_wrap|wrap_member)$/);
+    }
+    // Explicit: the disclosure op is gone from the composition.
+    expect(ops).not.toContain('get_member_pubkey');
+  });
+});
+
+// ===========================================================================
+// (3) A-8.6 / F-179 mitigation (3) — self-consistency: fingerprint mismatch
+// ===========================================================================
+
+describe('A-8.6/F-179 — self-consistency assert (fingerprint mismatch)', () => {
+  it('disclosed {public_key: PK, fingerprint: WRONG} where pubkeyFingerprint(PK) ≠ WRONG → typed fail, NO seal, NO POST', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+
+    // A genuine mismatch: PK is a real 32-byte pubkey; the fingerprint is the
+    // REAL SHA-256 of a DIFFERENT pubkey (the TOCTOU shape — the confirmed
+    // fingerprint belongs to a pubkey the disclosed bytes no longer are).
+    const pk = sodium.crypto_box_keypair().publicKey;
+    const otherPub = sodium.crypto_box_keypair().publicKey;
+    const wrongFingerprint = await pubkeyFingerprint(otherPub);
+    // Precondition: the mismatch is real (not an accidental collision).
+    expect(await pubkeyFingerprint(pk)).not.toBe(wrongFingerprint);
+
+    const sealSpy = vi.spyOn(sodium, 'crypto_box_seal');
+    const wrapSpy = vi.spyOn(client, 'wrapCommitteeDataKeyForMember');
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed: { public_key: pk, fingerprint: wrongFingerprint }
+    });
+
+    expect(r.status).toBe('failed');
+    if (r.status !== 'failed') return;
+    expect(['invalid_pubkey', 'unknown']).toContain(r.reason);
+
+    // Both mocks uncalled — the composition aborted BEFORE the seal step.
+    expect(sealSpy).toHaveBeenCalledTimes(0);
+    expect(wrapSpy).toHaveBeenCalledTimes(0);
+    expect(srv.wrapPosted).toBeNull();
+    expect(ops).not.toContain('wrap_member');
+  });
+});
+
+// ===========================================================================
+// (4) A-8.6 / F-179 mitigation (3) — 32-byte pubkey length guard
+// ===========================================================================
+
+describe('A-8.6/F-179 — 32-byte pubkey length guard', () => {
+  it('disclosed.public_key of length ≠ 32 (even with a self-consistent fingerprint) → typed fail, NO seal, NO POST', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+
+    // 31 bytes — a wrong-length pubkey. Its fingerprint is computed over the
+    // SAME (wrong-length) bytes so the self-consistency check passes and the
+    // LENGTH guard is unambiguously what fires.
+    const badPub = new Uint8Array(31).fill(7);
+    const selfConsistentFingerprint = await pubkeyFingerprint(badPub);
+
+    const sealSpy = vi.spyOn(sodium, 'crypto_box_seal');
+    const wrapSpy = vi.spyOn(client, 'wrapCommitteeDataKeyForMember');
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed: { public_key: badPub, fingerprint: selfConsistentFingerprint }
+    });
+
+    expect(r.status).toBe('failed');
+    if (r.status !== 'failed') return;
+    // The re-pointed :722-725 structural check.
+    expect(r.reason).toBe('invalid_pubkey');
+
+    expect(sealSpy).toHaveBeenCalledTimes(0);
+    expect(wrapSpy).toHaveBeenCalledTimes(0);
+    expect(srv.wrapPosted).toBeNull();
+    expect(ops).not.toContain('wrap_member');
+  });
+});
+
+// ===========================================================================
+// (5) A-8.6 / F-179 mitigation (4) / F-172 — confirmed == sealed (TOCTOU closed)
+// ===========================================================================
+
+describe('A-8.6/F-172 — confirmed == sealed: the seal target is exactly disclosed.public_key', () => {
+  it('crypto_box_seal receives disclosed.public_key, and the POSTed box opens with its private half', async () => {
+    const srv = newServer();
+    const { transport } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    // A DIFFERENT server-side key: under current (double-disclosing) code the
+    // seal goes here, NOT to `disclosed.public_key` → this test fails RED.
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+
+    const { disclosed, priv: disclosedPriv } = await makeDisclosed();
+
+    const sealSpy = vi.spyOn(sodium, 'crypto_box_seal');
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+    expect(r.status).toBe('ok');
+
+    // (a) the pubkey handed to crypto_box_seal is EXACTLY disclosed.public_key.
+    expect(sealSpy).toHaveBeenCalledTimes(1);
+    const sealedToPubkey = sealSpy.mock.calls[0][1] as Uint8Array;
+    expect(Array.from(sealedToPubkey)).toEqual(Array.from(disclosed.public_key));
+
+    // (b) behavioural proof: the POSTed box opens with disclosed's private half
+    // and recovers the actor's data key byte-for-byte (confirmed == sealed).
+    expect(srv.wrapPosted).not.toBeNull();
+    const sealed = pgHexToBytes((srv.wrapPosted as { sealed_hex: string }).sealed_hex);
+    const opened = sodium.crypto_box_seal_open(sealed, disclosed.public_key, disclosedPriv);
+    expect(Array.from(opened)).toEqual(Array.from(actor.dataKey));
+  });
+
+  it('sealed bytes are exactly 32 + crypto_box_SEALBYTES (a sealed box, not the plaintext data key)', async () => {
+    const srv = newServer();
+    const { transport } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
+
+    const getPubSpy = vi.spyOn(client, 'getMemberPubkey');
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+    expect(r.status).toBe('ok');
+    // Single-disclosure invariant (makes this test RED under current code too).
+    expect(getPubSpy).toHaveBeenCalledTimes(0);
+
+    const sealedLen = pgHexToBytes((srv.wrapPosted as { sealed_hex: string }).sealed_hex).length;
+    expect(sealedLen).toBe(32 + sodium.crypto_box_SEALBYTES);
+    expect(sealedLen).not.toBe(32); // canary against shipping the plaintext key
+  });
+});
+
+// ===========================================================================
+// (6) A-8.6 — happy path with the new signature
+// ===========================================================================
+
+describe('A-8.6 — happy path (new signature)', () => {
+  it('a valid `disclosed` whose fingerprint matches → seals to disclosed.public_key, POSTs once, returns ok', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed, priv: disclosedPriv } = await makeDisclosed();
+
+    const getPubSpy = vi.spyOn(client, 'getMemberPubkey');
+    const wrapSpy = vi.spyOn(client, 'wrapCommitteeDataKeyForMember');
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+
+    // Success variant of WrapMemberInResult.
+    expect(r).toEqual({ status: 'ok' });
+    // Exactly one wrap POST, no internal disclosure.
+    expect(wrapSpy).toHaveBeenCalledTimes(1);
+    expect(getPubSpy).toHaveBeenCalledTimes(0);
+    expect(ops.filter((o) => o === 'wrap_member')).toHaveLength(1);
+    // Sealed to the disclosed (confirmed) pubkey.
+    const sealed = pgHexToBytes((srv.wrapPosted as { sealed_hex: string }).sealed_hex);
+    const opened = sodium.crypto_box_seal_open(sealed, disclosed.public_key, disclosedPriv);
+    expect(Array.from(opened)).toEqual(Array.from(actor.dataKey));
+    expect(srv.wrapPosted?.rotation_id).toBeNull();
+  });
+
+  it('Step 1 preserved: when the holder is empty AND the actor has a wrap, it unwraps first then grants with ONE disclosure', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    expect(holder.isPopulated()).toBe(false);
+    const { disclosed } = await makeDisclosed();
+
+    const getPubSpy = vi.spyOn(client, 'getMemberPubkey');
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+
+    expect(r.status).toBe('ok');
+    // Step-1 fallback ran (probe + unwrap) …
+    expect(ops).toContain('committee_key_state');
+    expect(ops).toContain('get_key_wrap');
+    // … the wrap landed …
+    expect(ops).toContain('wrap_member');
+    // … and the holder is now populated (unwrap side effect) …
+    expect(holder.isPopulated()).toBe(true);
+    // … all with ZERO internal disclosure.
+    expect(getPubSpy).toHaveBeenCalledTimes(0);
+    expect(ops).not.toContain('get_member_pubkey');
+  });
+});
+
+// ===========================================================================
+// (7) A-8.6 / F-174 — Step 1 preserved: actor_has_no_wrap short-circuit
+//     (a PRESERVED invariant — passes against current code AND must keep
+//     passing after the refactor: an unprovisioned co-chair aborts BEFORE any
+//     disclosure/seal, leaving no `disclosed_for_wrap` audit row.)
+// ===========================================================================
+
+describe('A-8.6/F-174 — an unprovisioned co-chair aborts before any disclosure or seal', () => {
+  it('actor has no wrap and the holder is empty → actor_has_no_wrap, NO disclosure, NO seal, NO wrap POST', async () => {
     const srv = newServer();
     srv.actorHasWrap = false;
     srv.actorWrapBytes = null;
@@ -610,62 +703,65 @@ describe('ADR-0029 P1-5 — actor key-state preconditions', () => {
     const localIdentity = silentStore();
     const client = new SupabaseT07Client({ transport, localIdentity });
     const holder = new CommitteeKeyHolder();
-    // No seedActor for the wrap; just store a privkey so the device-side
-    // has SOMETHING (the no_wrap path is the "actor has no key access"
-    // case, which Phase 1 explicitly distinguishes from "no device key").
+    // Device has a privkey (this is "no key ACCESS", not "no device key").
     const kp = sodium.crypto_box_keypair();
     await localIdentity.storeIdentityPrivateKey(ACTOR, kp.privateKey);
-    seedTarget(srv);
+    seedServerTarget(srv);
+    const { disclosed } = await makeDisclosed();
+
+    const sealSpy = vi.spyOn(sodium, 'crypto_box_seal');
+    const getPubSpy = vi.spyOn(client, 'getMemberPubkey');
 
     const r = await wrapMemberInViaProduction({
       client,
       holder,
       localIdentity,
       user_id: ACTOR,
-      target_user_id: TARGET
+      target_user_id: TARGET,
+      disclosed
     });
 
     expect(r.status).toBe('failed');
     if (r.status !== 'failed') return;
     expect(r.reason).toBe('actor_has_no_wrap');
-    // F-174 information-hiding: we do NOT hit the disclosure RPC if the
-    // co-chair can't proceed anyway (no point leaving a disclosure audit
-    // row for an aborted grant).
+    // F-174 abort-without-audit: no disclosure, no seal, no wrap.
+    expect(getPubSpy).toHaveBeenCalledTimes(0);
     expect(ops).not.toContain('get_member_pubkey');
-    // And of course no wrap was posted.
+    expect(sealSpy).toHaveBeenCalledTimes(0);
     expect(ops).not.toContain('wrap_member');
+    expect(srv.wrapPosted).toBeNull();
   });
 });
 
 // ===========================================================================
-// wrap_post_failed — the final RPC fails (e.g. the target became inactive
-// between disclosure and wrap, F-172 mitigation #2 `:502-503`).
+// Preserved behavioural guards (must survive the refactor)
 // ===========================================================================
 
-describe('ADR-0029 P1-5 — wrap_post_failed (race between disclosure and wrap)', () => {
-  it('wrap_member returning rls_denied → failed/wrap_post_failed (the target deactivated mid-grant)', async () => {
+describe('A-8.6 — wrap_post_failed (target deactivated mid-grant)', () => {
+  it('wrap_member returning rls_denied → failed/wrap_post_failed', async () => {
     const srv = newServer();
     const localIdentity = silentStore();
-    // Make wrap_member fail with rls_denied (the F-172 active-member re-assert
-    // at :502-503 firing because the target deactivated mid-flow).
+    const base = makeTransport(srv);
     const transport: T07OpTransport = async (body) => {
       if (body.op === 'wrap_member') {
         return { status: 403, body: { ok: false, error: 'rls_denied' } };
       }
-      return makeTransport(srv).transport(body);
+      return base.transport(body);
     };
     const client = new SupabaseT07Client({ transport, localIdentity });
     const holder = new CommitteeKeyHolder();
     const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
+    seedServerTarget(srv);
     holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
 
     const r = await wrapMemberInViaProduction({
       client,
       holder,
       localIdentity,
       user_id: ACTOR,
-      target_user_id: TARGET
+      target_user_id: TARGET,
+      disclosed
     });
 
     expect(r.status).toBe('failed');
@@ -674,61 +770,164 @@ describe('ADR-0029 P1-5 — wrap_post_failed (race between disclosure and wrap)'
   });
 });
 
-// ===========================================================================
-// Holder lifecycle — Decision 5 step 5: the composition does NOT zeroize
-// holder.data_key. (Contrast with initCommitteeDataKeyViaProduction at
-// production-flows.ts:371,431 which zeroizes a throwaway buffer.)
-// ===========================================================================
-
-describe('ADR-0029 P1-5 — Decision 5 step 5: holder retains the data key after a successful wrap', () => {
-  it('after a successful grant, the holder STILL holds the live data key (no premature zeroize)', async () => {
+describe('A-8.6 — Decision 5 step 5: the holder retains the data key after a successful grant', () => {
+  it('after a successful grant the holder still holds the ORIGINAL live data key (no premature zeroize)', async () => {
     const srv = newServer();
     const { transport } = makeTransport(srv);
     const localIdentity = silentStore();
     const client = new SupabaseT07Client({ transport, localIdentity });
     const holder = new CommitteeKeyHolder();
     const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
+    seedServerTarget(srv);
     holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
 
     const r = await wrapMemberInViaProduction({
       client,
       holder,
       localIdentity,
       user_id: ACTOR,
-      target_user_id: TARGET
+      target_user_id: TARGET,
+      disclosed
     });
     expect(r.status).toBe('ok');
 
-    // The holder is still populated (Decision 5 step 5 contrast with the
-    // throwaway-buffer init).
     expect(holder.isPopulated()).toBe(true);
     const live = holder.getDataKey();
     expect(live).not.toBeNull();
-    // And the bytes are the ORIGINAL data key (no .fill(0) anywhere
-    // along the path).
     expect(Array.from(live!)).toEqual(Array.from(actor.dataKey));
     expect(Array.from(live!).some((b) => b !== 0)).toBe(true);
   });
 });
 
 // ===========================================================================
-// F-176 — leak sweep: the full set of "must never log" values, across the
-// happy path AND each failure branch.
+// ADV-2 — a holder wipe DURING the seal window must not POST a zero-key wrap.
+// `getDataKey()` hands out the live buffer BY REFERENCE (:688). If a wipe
+// trigger (401 / panic / sign-out) fires during the `await pubkeyFingerprint`
+// / `await ready()` window before the synchronous `crypto_box_seal` (:739), the
+// buffer is zeroized in place — and the current code seals + POSTs that all-zero
+// key. Fix: re-check `holder.isPopulated()` immediately before the seal and
+// typed-fail (`data_key_unwrap_failed`) if wiped.
 // ===========================================================================
 
-describe('ADR-0029 P1-5 — F-176 key-material + pseudonym leak sweep', () => {
-  it('happy path: data key / target pubkey / sealed bytes / privkey / actor uid / target uid never appear in logs', async () => {
+describe('A-8.6/ADV-2 — a holder wipe during the seal window seals + POSTs nothing', () => {
+  it('a wipe between the key read and the seal → data_key_unwrap_failed, NO seal, NO wrap POST', async () => {
+    const srv = newServer();
+    const { transport, ops } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+
+    // A holder whose FIRST getDataKey() read schedules a wipe on the next
+    // microtask. The composition reads the key at :688 (no await follows until
+    // :722), so the scheduled wipe lands inside the `await pubkeyFingerprint(...)`
+    // window — strictly between the key read and the synchronous seal at :739.
+    // Deterministic: microtasks queued before the composition yields run FIFO at
+    // the first suspension point.
+    class WipeDuringSealHolder extends CommitteeKeyHolder {
+      armed = false;
+      getDataKey(): Uint8Array | null {
+        const k = super.getDataKey();
+        if (this.armed) {
+          this.armed = false;
+          queueMicrotask(() => this.wipe());
+        }
+        return k;
+      }
+    }
+    const holder = new WipeDuringSealHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
+
+    const sealSpy = vi.spyOn(sodium, 'crypto_box_seal');
+    const wrapSpy = vi.spyOn(client, 'wrapCommitteeDataKeyForMember');
+
+    holder.armed = true; // arm the race for THIS grant only
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+
+    // The load-bearing pin: a zeroized key must NOT be sealed and POSTed.
+    expect(r.status).toBe('failed');
+    if (r.status !== 'failed') return;
+    expect(r.reason).toBe('data_key_unwrap_failed');
+    expect(sealSpy, 'no seal is built from a zeroized key').toHaveBeenCalledTimes(0);
+    expect(wrapSpy, 'no wrap POST for a wiped-mid-seal grant').toHaveBeenCalledTimes(0);
+    expect(srv.wrapPosted, 'no zero-key wrap reaches the server').toBeNull();
+    expect(ops).not.toContain('wrap_member');
+  });
+});
+
+describe('A-8.6 — ADR-0003 Invariant 1: the plaintext data key never crosses the wire', () => {
+  it('no request body the EF sees carries the plaintext 32-byte data key hex', async () => {
+    const srv = newServer();
+    const { transport, bodies } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
+
+    await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+
+    const dataKeyHex = sodium.to_hex(actor.dataKey);
+    for (const body of bodies) {
+      expect(JSON.stringify(body)).not.toContain(dataKeyHex);
+    }
+  });
+
+  it('no sessionStorage / localStorage write occurs during the grant (data key + seal are heap-only)', async () => {
+    const setSpy = vi.spyOn(Storage.prototype, 'setItem');
+    const srv = newServer();
+    const { transport } = makeTransport(srv);
+    const localIdentity = silentStore();
+    const client = new SupabaseT07Client({ transport, localIdentity });
+    const holder = new CommitteeKeyHolder();
+    const actor = await seedActor(srv, localIdentity);
+    seedServerTarget(srv);
+    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
+
+    const r = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id: ACTOR,
+      target_user_id: TARGET,
+      disclosed
+    });
+    expect(r.status).toBe('ok');
+    expect(setSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('A-8.6/F-176 — key-material + pseudonym leak sweep', () => {
+  it('happy path: data key / disclosed pubkey+privkey / actor privkey / sealed bytes / uids / fingerprint never appear in logs', async () => {
     const errs: string[] = [];
     const warns: string[] = [];
     const infos: string[] = [];
-    const errSpy = vi.spyOn(console, 'error').mockImplementation((...a) => {
+    vi.spyOn(console, 'error').mockImplementation((...a) => {
       errs.push(a.map(String).join(' '));
     });
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...a) => {
+    vi.spyOn(console, 'warn').mockImplementation((...a) => {
       warns.push(a.map(String).join(' '));
     });
-    const infoSpy = vi.spyOn(console, 'log').mockImplementation((...a) => {
+    vi.spyOn(console, 'log').mockImplementation((...a) => {
       infos.push(a.map(String).join(' '));
     });
 
@@ -738,24 +937,30 @@ describe('ADR-0029 P1-5 — F-176 key-material + pseudonym leak sweep', () => {
     const client = new SupabaseT07Client({ transport, localIdentity });
     const holder = new CommitteeKeyHolder();
     const actor = await seedActor(srv, localIdentity);
-    const target = seedTarget(srv);
+    seedServerTarget(srv);
     holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed, priv: disclosedPriv } = await makeDisclosed();
 
     const r = await wrapMemberInViaProduction({
       client,
       holder,
       localIdentity,
       user_id: ACTOR,
-      target_user_id: TARGET
+      target_user_id: TARGET,
+      disclosed
     });
     expect(r.status).toBe('ok');
 
-    const dataKeyHex = sodium.to_hex(actor.dataKey);
-    const targetPubHex = sodium.to_hex(target.pub);
-    const targetPrivHex = sodium.to_hex(target.priv);
-    const actorPrivHex = sodium.to_hex(actor.priv);
-    const sealedHex = sodium.to_hex(sodium.crypto_box_seal(actor.dataKey, target.pub));
-
+    const banned = [
+      sodium.to_hex(actor.dataKey), // the committee data key
+      sodium.to_hex(actor.priv), // the actor device privkey
+      sodium.to_hex(disclosedPriv), // the target device privkey
+      sodium.to_hex(disclosed.public_key), // the target pubkey
+      sodium.to_hex(sodium.crypto_box_seal(actor.dataKey, disclosed.public_key)), // sealed wrap
+      disclosed.fingerprint, // re-identification aid
+      TARGET, // target pseudonym source
+      ACTOR // actor identity
+    ];
     const haystacks = [
       ...errs,
       ...warns,
@@ -763,111 +968,40 @@ describe('ADR-0029 P1-5 — F-176 key-material + pseudonym leak sweep', () => {
       ...__getCapturedLines().map((l) => JSON.stringify(l))
     ];
     for (const h of haystacks) {
-      // Key material — every byte sequence the F-176 list bans.
-      expect(h).not.toContain(dataKeyHex);
-      expect(h).not.toContain(actorPrivHex);
-      expect(h).not.toContain(targetPrivHex);
-      expect(h).not.toContain(targetPubHex);
-      // The sealed wrap bytes (a server-known artifact, but the audit
-      // contract — F-172 mitigation #4 — keeps them out of the wrap audit
-      // meta; the client-side log surface MUST follow the same posture).
-      expect(h).not.toContain(sealedHex);
-      // Pseudonymity: the target uid is the re-identification aid
-      // (F-174). The actor uid is the co-chair's identity. Neither
-      // belongs in operator logs (the EF emits opcode + outcome only —
-      // the closed-literal posture established by bootstrap-first-co-chair
-      // and inherited by every Phase 1 surface).
-      expect(h).not.toContain(TARGET);
-      expect(h).not.toContain(ACTOR);
-      // The target fingerprint (re-identification aid; F-174's
-      // companion field).
-      if (srv.targetFingerprint) expect(h).not.toContain(srv.targetFingerprint);
+      for (const secret of banned) {
+        expect(h).not.toContain(secret);
+      }
     }
-
-    errSpy.mockRestore();
-    warnSpy.mockRestore();
-    infoSpy.mockRestore();
   });
+});
 
-  it('member_not_enrolled branch: the leak sweep also passes (denial branches log nothing more than happy path)', async () => {
-    const errs: string[] = [];
-    const warns: string[] = [];
-    const errSpy = vi.spyOn(console, 'error').mockImplementation((...a) => {
-      errs.push(a.map(String).join(' '));
-    });
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...a) => {
-      warns.push(a.map(String).join(' '));
-    });
-
+describe('A-8.6/F-148 — the composition never throws a raw error on transport failure', () => {
+  it('a transport that throws on wrap_member is caught and mapped to a typed failure carrying no key bytes', async () => {
     const srv = newServer();
-    srv.targetPubkey = null;
-    srv.notEnrolledReason = 'not_found';
-    const { transport } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-    expect(r.status).toBe('member_not_enrolled');
-
-    const dataKeyHex = sodium.to_hex(actor.dataKey);
-    const actorPrivHex = sodium.to_hex(actor.priv);
-    const haystacks = [
-      ...errs,
-      ...warns,
-      ...__getCapturedLines().map((l) => JSON.stringify(l))
-    ];
-    for (const h of haystacks) {
-      expect(h).not.toContain(dataKeyHex);
-      expect(h).not.toContain(actorPrivHex);
-      expect(h).not.toContain(TARGET);
-      expect(h).not.toContain(ACTOR);
-    }
-
-    errSpy.mockRestore();
-    warnSpy.mockRestore();
-  });
-
-  it('on any failure the composition returns a TYPED failure value — NEVER throws a raw libsodium / fetch error', async () => {
-    // F-148 carry-forward: a raw thrown error could carry buffer bytes in
-    // its .message / .stack. The composition must catch and map every
-    // crypto / transport exception to a closed-literal typed failure.
-    const srv = newServer();
-    // Inject a hostile transport that throws (simulating a network blow-up).
+    const base = makeTransport(srv);
     const transport: T07OpTransport = async (body) => {
       if (body.op === 'wrap_member') {
-        // Throw with a payload that LOOKS like it might be key material — if
-        // the composition surfaces this to the caller verbatim, the bytes
-        // leak. The composition must catch + map to wrap_post_failed
-        // (or unknown), NEVER propagate.
+        // A payload shaped like it might carry key material — if the
+        // composition surfaced it verbatim, bytes would leak.
         throw new Error(`network failure: ${sodium.to_hex(srv.actorDataKey ?? new Uint8Array(32))}`);
       }
-      return makeTransport(srv).transport(body);
+      return base.transport(body);
     };
     const localIdentity = silentStore();
     const client = new SupabaseT07Client({ transport, localIdentity });
     const holder = new CommitteeKeyHolder();
     const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
+    seedServerTarget(srv);
     holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
+    const { disclosed } = await makeDisclosed();
 
-    // .catch is the "must NOT throw" assertion: if the composition
-    // propagates the raw Error, the catch fires and we re-throw a
-    // clearer test failure.
     const r = await wrapMemberInViaProduction({
       client,
       holder,
       localIdentity,
       user_id: ACTOR,
-      target_user_id: TARGET
+      target_user_id: TARGET,
+      disclosed
     }).catch((e: unknown) => {
       throw new Error(
         `F-148: wrapMemberInViaProduction must not throw on transport failure; got: ${
@@ -878,193 +1012,12 @@ describe('ADR-0029 P1-5 — F-176 key-material + pseudonym leak sweep', () => {
 
     expect(r.status).toBe('failed');
     if (r.status !== 'failed') return;
-    // Closed-set typed failure (one of the documented reasons).
     expect(['wrap_post_failed', 'unknown']).toContain(r.reason);
-
-    // The returned failure object MUST NOT smuggle any Uint8Array / raw
-    // exception message — every field is a metadata primitive.
     for (const v of Object.values(r as Record<string, unknown>)) {
       expect(v instanceof Uint8Array).toBe(false);
       if (typeof v === 'string') {
         expect(v).not.toContain(sodium.to_hex(actor.dataKey));
       }
     }
-  });
-});
-
-// ===========================================================================
-// Plaintext-data-key never leaves the browser — REUSED ADR-0003 Invariant 1
-// pin. (Closely related to F-172 Decision 4 Rejected (a) but framed at the
-// composition output level: even on EVERY failure branch, the data key
-// hex never appears in any request body.)
-// ===========================================================================
-
-describe('ADR-0029 P1-5 — ADR-0003 Invariant 1 (plaintext data key never crosses the wire)', () => {
-  it('across happy + member_not_enrolled + wrap_post_failed branches, no request body carries the plaintext data key hex', async () => {
-    const branches: Array<() => Promise<void>> = [
-      async () => {
-        const srv = newServer();
-        const { transport, bodies } = makeTransport(srv);
-        const localIdentity = silentStore();
-        const client = new SupabaseT07Client({ transport, localIdentity });
-        const holder = new CommitteeKeyHolder();
-        const actor = await seedActor(srv, localIdentity);
-        seedTarget(srv);
-        holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-        await wrapMemberInViaProduction({
-          client,
-          holder,
-          localIdentity,
-          user_id: ACTOR,
-          target_user_id: TARGET
-        });
-        const hex = sodium.to_hex(actor.dataKey);
-        for (const b of bodies) expect(JSON.stringify(b)).not.toContain(hex);
-      },
-      async () => {
-        const srv = newServer();
-        srv.targetPubkey = null;
-        srv.notEnrolledReason = 'not_found';
-        const { transport, bodies } = makeTransport(srv);
-        const localIdentity = silentStore();
-        const client = new SupabaseT07Client({ transport, localIdentity });
-        const holder = new CommitteeKeyHolder();
-        const actor = await seedActor(srv, localIdentity);
-        holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-        await wrapMemberInViaProduction({
-          client,
-          holder,
-          localIdentity,
-          user_id: ACTOR,
-          target_user_id: TARGET
-        });
-        const hex = sodium.to_hex(actor.dataKey);
-        for (const b of bodies) expect(JSON.stringify(b)).not.toContain(hex);
-      },
-      async () => {
-        const srv = newServer();
-        const bodies: Record<string, unknown>[] = [];
-        const localIdentity = silentStore();
-        const transport: T07OpTransport = async (body) => {
-          bodies.push(body);
-          if (body.op === 'wrap_member') {
-            return { status: 403, body: { ok: false, error: 'rls_denied' } };
-          }
-          return makeTransport(srv).transport(body);
-        };
-        const client = new SupabaseT07Client({ transport, localIdentity });
-        const holder = new CommitteeKeyHolder();
-        const actor = await seedActor(srv, localIdentity);
-        seedTarget(srv);
-        holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-        await wrapMemberInViaProduction({
-          client,
-          holder,
-          localIdentity,
-          user_id: ACTOR,
-          target_user_id: TARGET
-        });
-        const hex = sodium.to_hex(actor.dataKey);
-        for (const b of bodies) expect(JSON.stringify(b)).not.toContain(hex);
-      }
-    ];
-    for (const run of branches) await run();
-  });
-
-  it('no sessionStorage / localStorage write occurs during the composition (the data key + sealed bytes are heap-only)', async () => {
-    // The Phase 0a / Phase 2a F-145/F-146 pattern: the data key lives in
-    // the heap holder only. The wrap composition must not "cache" the
-    // seal in browser storage as an optimization. We spy on Storage.setItem
-    // to catch any write.
-    const setSpy = vi.spyOn(Storage.prototype, 'setItem');
-
-    const srv = newServer();
-    const { transport } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    seedTarget(srv);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    const r = await wrapMemberInViaProduction({
-      client,
-      holder,
-      localIdentity,
-      user_id: ACTOR,
-      target_user_id: TARGET
-    });
-    expect(r.status).toBe('ok');
-
-    expect(setSpy).not.toHaveBeenCalled();
-    setSpy.mockRestore();
-  });
-});
-
-// ===========================================================================
-// EXPLICIT NEGATIVE — the caller-supplied pubkey escape hatch does NOT exist
-// ===========================================================================
-
-describe('ADR-0029 P1-5 — F-172 the composition signature does NOT accept a caller-supplied pubkey', () => {
-  it('passing a smuggled target_public_key field has NO effect on what gets sealed (server-disclosed key is authoritative)', async () => {
-    // Even if a caller adds a target_public_key to the opts (a "hint" /
-    // optimization), the composition MUST sealed-to the server-disclosed
-    // pubkey, not the caller's. We seed a different pubkey on the server
-    // than the smuggled one and assert the sealed bytes open with the
-    // SERVER's privkey, not the smuggled one's.
-    const srv = newServer();
-    const { transport } = makeTransport(srv);
-    const localIdentity = silentStore();
-    const client = new SupabaseT07Client({ transport, localIdentity });
-    const holder = new CommitteeKeyHolder();
-    const actor = await seedActor(srv, localIdentity);
-    const serverTarget = seedTarget(srv);
-    holder.set({ data_key: actor.dataKey, key_id: srv.liveKeyId, epoch: srv.liveEpoch });
-
-    // The smuggled "attacker pubkey" the test pretends a hostile caller
-    // passes through opts.
-    const attacker = sodium.crypto_box_keypair();
-
-    const r = await wrapMemberInViaProduction(
-      // deno-lint-ignore no-explicit-any
-      {
-        client,
-        holder,
-        localIdentity,
-        user_id: ACTOR,
-        target_user_id: TARGET,
-        // F-172 attempted bypass — must be ignored.
-        target_public_key: attacker.publicKey,
-        public_key: attacker.publicKey,
-        pubkey: attacker.publicKey
-      } as any
-    );
-    expect(r.status).toBe('ok');
-
-    // The wrap_member call recorded the seal; recover it and prove it
-    // opens with the SERVER's target privkey (not the attacker's).
-    expect(srv.wrapPosted).not.toBeNull();
-    const sealedHex = (srv.wrapPosted as { sealed_hex: string }).sealed_hex;
-    const sealed = new Uint8Array(
-      (sealedHex.startsWith('\\x') ? sealedHex.slice(2) : sealedHex)
-        .match(/.{1,2}/g)!
-        .map((h) => parseInt(h, 16))
-    );
-
-    // Opening with the SERVER target's keypair succeeds (proving the
-    // composition sealed to the server-disclosed pubkey).
-    const opened = sodium.crypto_box_seal_open(sealed, serverTarget.pub, serverTarget.priv);
-    expect(Array.from(opened)).toEqual(Array.from(actor.dataKey));
-
-    // Opening with the ATTACKER's keypair fails (F-172: the data key was
-    // NOT sealed to the attacker pubkey).
-    let attackerOpened: Uint8Array | null = null;
-    try {
-      attackerOpened = sodium.crypto_box_seal_open(sealed, attacker.publicKey, attacker.privateKey);
-    } catch {
-      // Expected: AEAD verification fails — the seal target is not the
-      // attacker key.
-    }
-    expect(attackerOpened).toBeNull();
   });
 });

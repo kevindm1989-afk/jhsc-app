@@ -26,6 +26,9 @@
   import CommitteeRoster from '$lib/committee/CommitteeRoster.svelte';
   import PendingInvites from '$lib/committee/PendingInvites.svelte';
   import { createSupabaseCommitteeClient } from '$lib/server-client/committee-client-factory';
+  import { createSupabaseT07Client } from '$lib/server-client/t07-client-factory';
+  import { BrowserLocalIdentityStore } from '$lib/crypto/browser-local-identity-store';
+  import { getSessionCommitteeKeyHolder } from '$lib/crypto/committee-key-holder';
   import { clearJwt, getJwt } from '$lib/auth/session-jwt-store';
 
   const baseUrl = env.PUBLIC_SUPABASE_URL ?? 'http://localhost:54321';
@@ -35,6 +38,22 @@
     getJwt,
     onSessionRevoked: clearJwt
   });
+
+  // Screen-3 grant ceremony deps (ADR-0029 P1-8d). Mirrors the Settings /
+  // /concerns client-construction site: a t07 client threaded with the
+  // device-local identity store (the single getMemberPubkey disclosure + the
+  // seal composition), the session-scoped committee-key holder, and the local
+  // identity store. Threaded into CommitteeRoster so a pending-grant row can
+  // reveal its CommitteeGrantCard. Same getJwt + F-39 revocation wiring as the
+  // committee client above.
+  const localIdentity = new BrowserLocalIdentityStore();
+  const t07Client = createSupabaseT07Client({
+    baseUrl,
+    getJwt,
+    onSessionRevoked: clearJwt,
+    localIdentity
+  });
+  const keyHolder = getSessionCommitteeKeyHolder();
 
   // The screen-2 invite panel; the expired-row "Invite again" in the
   // Pending-invites section (screen 4) hands off here to open it.
@@ -48,6 +67,11 @@
 
 <CommitteeInvite bind:this={inviteRef} client={committeeClient} />
 
-<CommitteeRoster client={committeeClient} />
+<CommitteeRoster
+  client={committeeClient}
+  grantClient={t07Client}
+  grantHolder={keyHolder}
+  grantLocalIdentity={localIdentity}
+/>
 
 <PendingInvites client={committeeClient} onReinvite={() => inviteRef?.openInvitePanel()} />

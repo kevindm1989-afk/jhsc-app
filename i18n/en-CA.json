@@ -1181,6 +1181,65 @@
           "body": "Something went wrong on our side. Try again in a moment."
         }
       }
+    },
+    "grant": {
+      "row": {
+        "cta": "Grant access",
+        "cta_aria": "Grant access to {name}'s committee key"
+      },
+      "panel": {
+        "heading": "Grant committee-key access"
+      },
+      "disclosing": "Getting this member's fingerprint…",
+      "not_ready": {
+        "heading": "This member isn't ready yet",
+        "body": "They need to finish setting up encryption on their own device before you can grant access. When they're ready, their status here changes to 'Waiting for key access.'",
+        "close": "Close"
+      },
+      "not_provisioned": {
+        "heading": "Finish setting up your own encryption first",
+        "body": "You don't have committee-key access on this device yet, so there's no key for you to share. Set up committee encryption in Settings first, then come back and grant access.",
+        "close": "Close"
+      },
+      "confirm": {
+        "lead": "Before you grant access, check you're granting it to the right person.",
+        "cta": "It matches — grant access",
+        "cancel": "Cancel",
+        "copy": "Copy fingerprint",
+        "copied": "Fingerprint copied",
+        "copy_failed": "Couldn't copy. Select the fingerprint and copy it yourself."
+      },
+      "fingerprint_label": "Their identity fingerprint",
+      "compare": {
+        "heading": "Check this matches their screen",
+        "body": "Ask {name} to read their fingerprint from their own device, one group at a time — or have them show you their screen. Check every group matches the one above. This is an extra check that you're granting access to the right person; the app already makes sure the key only goes to the member who set up encryption."
+      },
+      "granting": "Granting access…",
+      "granted": {
+        "heading": "Access granted",
+        "body": "{name} now has access to the committee's encrypted records. They'll see it the next time they open the app.",
+        "done": "Done"
+      },
+      "failed": {
+        "heading": "Couldn't grant access",
+        "disclosure_denied": {
+          "body": "Your co-chair access may have changed, or your session ended. Reload the roster, and sign in again if you're prompted."
+        },
+        "no_actor_wrap": {
+          "body": "You don't have committee-key access on this device yet, so you can't grant it to others. Set up committee encryption in Settings first, then try again."
+        },
+        "unlock": {
+          "body": "This device couldn't unlock the committee key. You may need to restore your access on this device before you can grant it."
+        },
+        "wrap_post": {
+          "body": "The grant didn't go through. The member may have just been removed, or something changed on our side. Reload the roster and try again."
+        },
+        "generic": {
+          "body": "Something went wrong on our side. Try again in a moment."
+        },
+        "retry": "Try again",
+        "close": "Close"
+      }
     }
   },
   "landing": {
@@ -1767,6 +1826,16 @@
         "submitting": "Sending a new code…",
         "code_ready": "New code created. It is shown once below. The previous code no longer works.",
         "code_replaced": "New code ready. The previous code no longer works."
+      },
+      "grant": {
+        "fingerprint": {
+          "region_label": "{name}'s identity fingerprint — sixteen groups of four characters",
+          "ready": "{name}'s identity fingerprint is ready to compare. It has sixteen groups of four characters. Read each group and check it matches what they read to you.",
+          "copied": "Fingerprint copied to the clipboard."
+        },
+        "granting": "Granting access…",
+        "granted": "Access granted to {name}.",
+        "failed": "Couldn't grant access."
       }
     }
   },

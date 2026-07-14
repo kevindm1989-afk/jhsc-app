@@ -54,7 +54,7 @@
   } from '$lib/crypto/production-flows';
   import D4RecoveryPassphrase from '$lib/onboarding/steps/D4RecoveryPassphrase.svelte';
   import D6TypeBackVerify from '$lib/onboarding/steps/D6TypeBackVerify.svelte';
-  import ShareUrlButton from '$lib/ui/ShareUrlButton.svelte';
+  import FingerprintCompareBlock from '$lib/crypto/FingerprintCompareBlock.svelte';
 
   /**
    * The production t07 client (createSupabaseT07Client with a
@@ -143,34 +143,10 @@
     return 'settings.setupCommitteeEncryption.error.unknown';
   }
 
-  // The 64-hex fingerprint split into 16 atomic groups of 4 (pubkeyFingerprint()
-  // order, lowercase) — the exact split the co-chair's P1-8d screen mirrors so
-  // the two humans compare group-for-group.
-  $: waitingGroups = fingerprint.length === 64 ? (fingerprint.match(/.{4}/g) ?? []) : [];
-
-  // The six confusable hex LETTERS a-f are NATO-phoneticized for the per-group
-  // screen-reader label (and for the sighted member's read-aloud): spoken in
-  // isolation, b/c/d/e collapse into the English "E-set" ("bee/see/dee/ee") and
-  // a mis-hearing propagates straight into the read-aloud that IS the F-172
-  // boundary. Digits 0-9 are already unambiguous, so they stay plain.
-  const NATO_HEX = { a: 'alpha', b: 'bravo', c: 'charlie', d: 'delta', e: 'echo', f: 'foxtrot' };
-
-  /**
-   * The per-group screen-reader label: a positional landmark plus the 4 glyphs
-   * spelled glyph-by-glyph (the OneTimeCodeCard role="img" mechanism applied per
-   * group), with a-f NATO-phoneticized, e.g. "group 3 of 16, charlie 3 delta 4".
-   * The `{chars}` fill is data, not translatable.
-   * @param {number} index 1-based group position @param {string} group 4 glyphs
-   */
-  function waitingGroupLabel(index, group) {
-    return t('a11y.settings.setup.fingerprint.group_label', {
-      index,
-      chars: group
-        .split('')
-        .map((ch) => NATO_HEX[ch] ?? ch)
-        .join(' ')
-    });
-  }
+  // The 16-groups-of-4 fingerprint render (split + per-group NATO SR labels) now
+  // lives in the shared FingerprintCompareBlock, which the co-chair's P1-8d grant
+  // screen also consumes — so the two surfaces byte-match group-for-group by
+  // construction rather than by two hand-kept copies (design-system.md §4).
 
   onMount(probeState);
 
@@ -704,53 +680,23 @@
             {t('settings.setupCommitteeEncryption.waiting.lead')}
           </p>
 
-          <div class="setup-committee-fp-block">
-            <span class="setup-committee-fp-label" aria-hidden="true">
-              {t('settings.setupCommitteeEncryption.waiting.fingerprint_label')}
-            </span>
-            <!-- High-contrast display box (the audited max-contrast pair used by
-                 OneTimeCodeCard / D.T19.f). The role="group" wrapper names the
-                 whole fingerprint so an SR user hears the shape up front. The
-                 explicit role="list"/"listitem" restores list semantics that
-                 WebKit/Safari strips from any <ol> with `list-style: none` (the
-                 standard remediation) — the group's flex/reset CSS otherwise
-                 costs VoiceOver the "list, 16 items" announcement. -->
-            <div class="setup-committee-fp-box" data-testid="setup-committee-fingerprint">
-              <div
-                class="setup-committee-fp-group"
-                role="group"
-                aria-label={t('a11y.settings.setup.fingerprint.region_label')}
-              >
-                <ol class="setup-committee-fp-list" role="list">
-                  {#each waitingGroups as group, i}
-                    <li class="setup-committee-fp-item" role="listitem">
-                      <!-- role="img" swaps the visible glyphs for a spelled,
-                           positional aria-label in the a11y tree (per-group
-                           OneTimeCodeCard mechanism). -->
-                      <span
-                        class="setup-committee-fp-glyphs"
-                        role="img"
-                        aria-label={waitingGroupLabel(i + 1, group)}>{group}</span
-                      >
-                    </li>
-                  {/each}
-                </ol>
-              </div>
-            </div>
-            <!-- The one clipboard affordance. The fingerprint is a PUBLIC value
-                 (SHA-256 of the public key), so copy is correct here (deliberate
-                 contrast with the Surface K one-time code). Copies the CONTIGUOUS
-                 64-hex — the co-chair's paste-compare target. -->
-            <ShareUrlButton
-              url={fingerprint}
-              labelKey="settings.setupCommitteeEncryption.waiting.copy"
-              copiedKey="settings.setupCommitteeEncryption.waiting.copied"
-              errorKey="settings.setupCommitteeEncryption.waiting.copy_failed"
-              copiedAnnounceKey="a11y.settings.setup.fingerprint.copied"
-              errorAnnounceKey="settings.setupCommitteeEncryption.waiting.copy_failed"
-              fullTarget={true}
-            />
-          </div>
+          <!-- The disclosed-fingerprint block — the SHARED cross-surface mirror
+               (design-system.md §4). The co-chair's P1-8d grant screen consumes
+               the SAME component, so the two humans compare group-for-group by
+               construction. Copy of a PUBLIC value (SHA-256 of the public key) is
+               correct here — the CONTIGUOUS 64-hex, the paste-compare target. -->
+          <FingerprintCompareBlock
+            {fingerprint}
+            regionLabel={t('a11y.settings.setup.fingerprint.region_label')}
+            label={t('settings.setupCommitteeEncryption.waiting.fingerprint_label')}
+            testid="setup-committee-fingerprint"
+            showCopy={true}
+            copyLabelKey="settings.setupCommitteeEncryption.waiting.copy"
+            copiedKey="settings.setupCommitteeEncryption.waiting.copied"
+            copyErrorKey="settings.setupCommitteeEncryption.waiting.copy_failed"
+            copiedAnnounceKey="a11y.settings.setup.fingerprint.copied"
+            errorAnnounceKey="settings.setupCommitteeEncryption.waiting.copy_failed"
+          />
 
           <!-- Compare instruction — calm info callout (icon + text, colour never
                alone). This is a normal, expected step, not a hazard. -->
@@ -942,50 +888,6 @@
   .setup-committee-waiting-lead {
     margin: 0;
     color: var(--color-fg);
-  }
-  .setup-committee-fp-block {
-    display: grid;
-    gap: 0.5rem;
-    justify-items: start;
-    inline-size: 100%;
-  }
-  .setup-committee-fp-label {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-fg-muted);
-  }
-  /* High-contrast display box — the audited max-contrast pair OneTimeCodeCard /
-     D.T19.f use for load-bearing text. */
-  .setup-committee-fp-box {
-    inline-size: 100%;
-    padding: 1rem;
-    border: var(--border-width-thick) solid var(--color-border-strong);
-    border-radius: var(--radius-md);
-    background: var(--color-bg);
-  }
-  /* Groups flow left-to-right and wrap ONLY at group boundaries — a 4-char group
-     is atomic (a single span), so it can never split across a line. */
-  .setup-committee-fp-list {
-    display: flex;
-    flex-wrap: wrap;
-    column-gap: 0.5rem;
-    row-gap: 0.25rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .setup-committee-fp-item {
-    margin: 0;
-  }
-  .setup-committee-fp-glyphs {
-    font-family: var(--font-mono);
-    font-size: 1rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    color: var(--color-fg);
-    user-select: all;
   }
   .setup-committee-callout {
     display: flex;
