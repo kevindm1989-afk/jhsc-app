@@ -7,25 +7,35 @@
  * file as READ-ONLY.
  *
  * The holder is the SOLE owner of the session-resident plaintext 32-byte
- * committee data key. It is heap-only (never serialized) and is wiped on
- * SIX mandatory triggers, each `.fill(0)`-zeroizing the single by-reference
- * buffer and nulling the holder.
+ * committee data key(s). It is heap-only (never serialized) and is wiped on
+ * FIVE session-end triggers, each `.fill(0)`-zeroizing EVERY by-reference
+ * buffer in the multi-epoch map and nulling the holder. A SIXTH seam,
+ * `onKeyRotationObserved`, is a DISTINCT add-not-wipe rotation transition
+ * (ADR-0030 Decision 6.3 / threat-model §3.18 A-8.10-R) — it re-designates the
+ * live key when the observed key is HELD, and DEMOTES the live designation
+ * (fail-closed seal gate, retaining the buffer for reads) when the observed
+ * key is NOT held. It NEVER zeroizes a held buffer.
  *
  * Surface under test (the contract the implementer must satisfy):
  *   class CommitteeKeyHolder {
  *     set(entry: { data_key: Uint8Array; key_id: string; epoch: number }): void
+ *     populate(entries: ReadonlyArray<{ data_key; key_id; epoch; is_live }>): void
  *     isPopulated(): boolean
- *     getDataKey(): Uint8Array | null   // the live by-reference buffer
+ *     size(): number
+ *     hasLiveKey(): boolean
+ *     getDataKey(): Uint8Array | null   // the LIVE by-reference buffer, or null
  *     getKeyId(): string | null
  *     getEpoch(): number | null
- *     wipe(): void                      // .fill(0) the buffer, then null
- *     // the six wipe triggers — every one routes to wipe():
+ *     trialOpen<T>(open): Promise<{status:'ok';value:T}|{status:'unavailable'}>
+ *     wipe(): void                      // .fill(0) EVERY buffer, then clear
+ *     // the FIVE session-end wipe triggers — every one routes to wipe():
  *     onSignOut(): void                 // trigger 1 (clearJwt / sign-out)
  *     onSessionRevoked(): void          // trigger 2 (HTTP 401)
  *     onPanicWipe(): void               // trigger 3 (BrowserWipeStore)
  *     onSessionExpiry(): void           // trigger 4 (mint-session expiry)
  *     onPageUnload(): void              // trigger 5 (beforeunload/pagehide)
- *     onKeyRotationObserved(newKeyId: string): void  // trigger 6 (epoch advance)
+ *     // the DISTINCT rotation seam (add-not-wipe; NOT a session-end trigger):
+ *     onKeyRotationObserved(newKeyId: string): void  // re-designate | demote
  *   }
  *   // panic-wipe ordering seam (Decision 1 / F-145): MUST wipe the holder
  *   // BEFORE the WipeStore clears IndexedDB.
@@ -43,8 +53,9 @@
  * ───────────────────────────────────────────────────────────────────────
  * TEST → AC / FINDING MAP
  * ───────────────────────────────────────────────────────────────────────
- *   AC-8 / F-145 — each of the SIX triggers .fill(0)-zeroizes the EXACT
- *                  buffer and nulls the holder (six assertions).
+ *   AC-8 / F-145 — each of the FIVE session-end triggers .fill(0)-zeroizes
+ *                  the EXACT buffer(s) and nulls the holder (single-key AND a
+ *                  multi-epoch {k1,k2,k3} map: EVERY buffer, not just live).
  *   AC-8 / F-145 — single-buffer-by-reference: the buffer the holder exposes
  *                  IS the buffer passed in; wiping it zeros that same array.
  *   AC-8 / F-145 — panic-wipe ordering: holder.wipe() happens-before the
@@ -52,8 +63,12 @@
  *   F-146 / AC-9 — no serialization: the 32 key bytes never appear in
  *                  sessionStorage / localStorage / a JSON snapshot / a URL.
  *   F-148 / AC-9 — set+wipe leaks no key bytes to console.* / structured log.
- *   AC-11        — rotation-observed wipe drops the stale key so a re-unwrap
- *                  is forced (no seal/open under the stale epoch).
+ *   AC-11 / A-8.10-R — observed rotation is ADD-not-wipe: a HELD newer key is
+ *                  re-designated live (old buffer RETAINED, both keys remain,
+ *                  old record still opens via trialOpen); a NOT-HELD newer key
+ *                  DEMOTES the live designation (hasLiveKey()→false /
+ *                  getDataKey()→null, fail-closed seal gate) while RETAINING
+ *                  the buffer for reads; the same key_id is a no-op.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,6 +81,10 @@ import {
   CommitteeKeyHolder,
   panicWipeWithCommitteeKeyHolder
 } from '../../src/lib/crypto';
+// Real libsodium secretbox (the exact seal primitive the sealed registers
+// share) — used to prove a RETAINED old-epoch key still OPENS a pre-rotation
+// record via trialOpen after an add-not-wipe rotation.
+import { sealUtf8, openUtf8 } from '../../src/lib/concerns/seal';
 
 await _sodium.ready;
 const sodium = _sodium;
@@ -120,11 +139,14 @@ describe('CommitteeKeyHolder — populate + single buffer (F-145 / F-147)', () =
 });
 
 // ---------------------------------------------------------------------------
-// AC-8 / F-145 — each of the SIX wipe triggers zeroizes + nulls
+// AC-8 / F-145 — each of the FIVE session-end wipe triggers zeroizes + nulls.
+// (A-8.10-R item 1: trigger-6 `onKeyRotationObserved` is REMOVED from the wipe
+// table — it is a DISTINCT add-not-wipe rotation seam, proven separately below.
+// A wipe here would re-open the F-183 anti-lockout hole.)
 // ---------------------------------------------------------------------------
 
-describe('CommitteeKeyHolder — six wipe triggers (AC-8 / F-145)', () => {
-  // One row per trigger. Each fires the trigger, then asserts BOTH:
+describe('CommitteeKeyHolder — five session-end wipe triggers (AC-8 / F-145)', () => {
+  // One row per SESSION-END trigger. Each fires the trigger, then asserts BOTH:
   //   (a) the EXACT buffer that was set is now all-zero, and
   //   (b) the holder reports empty (reference nulled).
   const triggers: ReadonlyArray<[string, (h: CommitteeKeyHolder) => void]> = [
@@ -132,8 +154,7 @@ describe('CommitteeKeyHolder — six wipe triggers (AC-8 / F-145)', () => {
     ['trigger 2 — session revocation / HTTP 401', (h) => h.onSessionRevoked()],
     ['trigger 3 — panic-wipe', (h) => h.onPanicWipe()],
     ['trigger 4 — session expiry', (h) => h.onSessionExpiry()],
-    ['trigger 5 — page unload (beforeunload/pagehide)', (h) => h.onPageUnload()],
-    ['trigger 6 — observed key rotation', (h) => h.onKeyRotationObserved('k-live-2')]
+    ['trigger 5 — page unload (beforeunload/pagehide)', (h) => h.onPageUnload()]
   ];
 
   for (const [name, fire] of triggers) {
@@ -149,6 +170,36 @@ describe('CommitteeKeyHolder — six wipe triggers (AC-8 / F-145)', () => {
       expect(holder.isPopulated()).toBe(false);
       expect(holder.getDataKey()).toBeNull();
       expect(holder.getKeyId()).toBeNull();
+    });
+  }
+
+  // A-8.10-R item 1: the MULTI-epoch map must zeroize EVERY buffer, not just the
+  // live one, under each of the FIVE session-end triggers. (This is the F-183 ii
+  // "wipe-every-buffer survives the multi-epoch refactor" property at the T07
+  // unit level; the multi-key populate + all-keys-zero check is what a single-
+  // buffer wipe would silently under-cover.)
+  for (const [name, fire] of triggers) {
+    it(`${name}: over a 3-epoch map, zeroizes EVERY held buffer (not just live) AND empties the map`, () => {
+      const holder = new CommitteeKeyHolder();
+      const k1 = freshKey();
+      const k2 = freshKey();
+      const k3 = freshKey();
+      holder.populate([
+        { data_key: k1, key_id: 'k-epoch-1', epoch: 1, is_live: false },
+        { data_key: k2, key_id: 'k-epoch-2', epoch: 2, is_live: false },
+        { data_key: k3, key_id: 'k-epoch-3', epoch: 3, is_live: true }
+      ]);
+      expect(holder.size()).toBe(3);
+
+      fire(holder);
+
+      for (const b of [k1, k2, k3]) {
+        expect(Array.from(b).every((x) => x === 0)).toBe(true);
+      }
+      expect(holder.size()).toBe(0);
+      expect(holder.isPopulated()).toBe(false);
+      expect(holder.hasLiveKey()).toBe(false);
+      expect(holder.getDataKey()).toBeNull();
     });
   }
 
@@ -168,26 +219,75 @@ describe('CommitteeKeyHolder — six wipe triggers (AC-8 / F-145)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-11 — observed rotation wipes the stale key (re-unwrap forced)
+// AC-11 / A-8.10-R item 2 — observed rotation is ADD-not-wipe.
+//   SUPERSEDES the old "observing a NEWER key_id WIPES the stale key" case.
+//   The multi-epoch holder must NEVER zeroize a held read buffer on rotation:
+//     (i)  newer key HELD    → re-designate it live; old buffer RETAINED.
+//     (ii) newer key NOT held → DEMOTE the live designation (fail-closed seal
+//          gate) but RETAIN the buffer for reads. [requires F-183-R fix]
+//     (iii) same key_id      → no-op (unchanged).
 // ---------------------------------------------------------------------------
 
-describe('CommitteeKeyHolder — observed-rotation wipe (AC-11 / F-154)', () => {
-  it('observing a NEWER key_id wipes the stale key so a re-unwrap is forced', () => {
-    const { holder, key } = populated(); // cached at k-live-1 / epoch 3
-    holder.onKeyRotationObserved('k-live-2'); // a co-chair rotated elsewhere
-    expect(Array.from(key).every((b) => b === 0)).toBe(true);
-    expect(holder.isPopulated()).toBe(false);
-    // No seal/open can proceed under the stale key — the holder is empty.
-    expect(holder.getDataKey()).toBeNull();
+describe('CommitteeKeyHolder — observed-rotation is add-not-wipe (AC-11 / A-8.10-R)', () => {
+  it('(i) observing a HELD newer key_id RE-DESIGNATES it live, RETAINS the old buffer (size stays 2), and the OLD-epoch record still opens via trialOpen', async () => {
+    const holder = new CommitteeKeyHolder();
+    const kOld = freshKey();
+    const kNew = freshKey();
+    // A pre-rotation record sealed under the OLD epoch key (real secretbox).
+    const record = 'concern-filed-under-the-old-epoch';
+    const ctOld = await sealUtf8(record, kOld);
+    // Multi-epoch holding state: epoch-1 live, epoch-2 already held but retired.
+    holder.populate([
+      { data_key: kOld, key_id: 'k-live-1', epoch: 3, is_live: true },
+      { data_key: kNew, key_id: 'k-live-2', epoch: 4, is_live: false }
+    ]);
+
+    holder.onKeyRotationObserved('k-live-2'); // a co-chair rotated; k-live-2 held
+
+    // Re-designated live — NEVER a wipe. Both epochs remain; the OLD buffer is
+    // RETAINED (not zeroized) so pre-rotation reads still work.
+    expect(holder.getKeyId()).toBe('k-live-2');
+    expect(holder.getDataKey()).toBe(kNew);
+    expect(holder.size()).toBe(2);
+    expect(Array.from(kOld).some((b) => b !== 0)).toBe(true); // retained, not zeroized
+    const opened = await holder.trialOpen((k) => openUtf8(ctOld, k));
+    expect(opened.status).toBe('ok');
+    if (opened.status === 'ok') expect(opened.value).toBe(record);
   });
 
-  it('observing the SAME key_id does NOT wipe (no spurious re-unwrap churn)', () => {
-    const { holder, key } = populated(); // cached at k-live-1
-    holder.onKeyRotationObserved('k-live-1'); // same epoch — no rotation
-    // The key is still live (no zeroize) and still cached.
+  it('(ii) observing a NOT-HELD newer key_id DEMOTES the live designation (hasLiveKey()→false, getDataKey()→null) but RETAINS the buffer for reads [requires F-183-R fix]', async () => {
+    const { holder, key } = populated(); // cached at k-live-1 / epoch 3, single live
+    const record = 'concern-still-readable-after-demote';
+    const ctOld = await sealUtf8(record, key);
+
+    // The AUTHORITATIVE probe reports a rotation to a key the holder does NOT
+    // hold. The holder MUST demote (fail-closed seal gate) — leaving hasLiveKey()
+    // a FALSE POSITIVE would let a NEW record seal under the RETIRED k-live-1
+    // (the F-183-R forward-secrecy regression).
+    holder.onKeyRotationObserved('k-live-2'); // NOT held
+
+    // Fail-closed SEAL gate: no live key is designated anymore.
+    expect(holder.hasLiveKey()).toBe(false);
+    expect(holder.getDataKey()).toBeNull();
+    expect(holder.getKeyId()).toBeNull();
+    // But the buffer is RETAINED (NOT zeroized) — reads still work, and this
+    // signals the consumer "no live key — re-populate needed" (not a wipe).
     expect(Array.from(key).some((b) => b !== 0)).toBe(true);
     expect(holder.isPopulated()).toBe(true);
+    const opened = await holder.trialOpen((k) => openUtf8(ctOld, k));
+    expect(opened.status).toBe('ok');
+    if (opened.status === 'ok') expect(opened.value).toBe(record);
+  });
+
+  it('(iii) observing the SAME key_id is a no-op (no demote, no churn)', () => {
+    const { holder, key } = populated(); // cached at k-live-1
+    holder.onKeyRotationObserved('k-live-1'); // same epoch — no rotation
+    // Still live (no zeroize, no demote) and still cached.
+    expect(Array.from(key).some((b) => b !== 0)).toBe(true);
+    expect(holder.isPopulated()).toBe(true);
+    expect(holder.hasLiveKey()).toBe(true);
     expect(holder.getDataKey()).toBe(key);
+    expect(holder.getKeyId()).toBe('k-live-1');
   });
 });
 

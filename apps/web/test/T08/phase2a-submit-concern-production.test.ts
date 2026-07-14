@@ -88,6 +88,9 @@ import {
 import { submitConcernViaProduction } from '../../src/lib/concerns';
 import { __getCapturedLines, __resetCapture, __setTestSink } from '../../src/lib/log/test-sink';
 import { pgHexToBytes } from '../../src/lib/server-client/pg-hex';
+// Real secretbox open — proves the posted ciphertext seals under the LIVE
+// (rotated-to) key ONLY, never the retired key (forward secrecy, A-8.10-R).
+import { openUtf8 } from '../../src/lib/concerns/seal';
 
 await _sodium.ready;
 const sodium = _sodium;
@@ -115,6 +118,11 @@ interface FakeKeyServer {
   actorHasWrap: boolean;
   liveWrap: Uint8Array | null;
   plaintextKey: Uint8Array | null;
+  // A-8.10-R: the multi-epoch wrap set the re-populate path
+  // (`unwrapAllCommitteeKeysViaProduction` → `get_all_key_wraps`) fetches. Each
+  // `wrap` is a sealed-box of the epoch's data key to the actor pubkey. When
+  // unset, `get_all_key_wraps` derives a single live row from `liveWrap`.
+  allWraps?: Array<{ key_id: string; epoch: number; wrap: Uint8Array; is_live: boolean }>;
 }
 
 function newServer(): FakeKeyServer {
@@ -171,6 +179,26 @@ function makeT07Transport(srv: FakeKeyServer): {
             }
           }
         };
+      case 'get_all_key_wraps': {
+        // A-8.10-R re-populate path (F-183 (i) own-wrap-only, no id parameter).
+        const rows =
+          srv.allWraps ??
+          (srv.liveWrap
+            ? [{ key_id: srv.liveKeyId, epoch: srv.liveEpoch, wrap: srv.liveWrap, is_live: true }]
+            : []);
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            data: rows.map((r) => ({
+              key_id: r.key_id,
+              epoch: r.epoch,
+              wrapped_ciphertext_hex: bytesToPgHexLocal(r.wrap),
+              is_live: r.is_live
+            }))
+          }
+        };
+      }
       default:
         throw new Error(`makeT07Transport: unexpected op ${String(body.op)}`);
     }
@@ -591,36 +619,39 @@ describe('Phase 2a PR2 — submit 401 wipes holder (AC-8)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-11 / C2 — rotation observation on submit
+// AC-11 / C2 / A-8.10-R item 4 — rotation-on-submit seals under the LIVE key,
+// never the retired one (forward secrecy). SUPERSEDES the old "wipe the stale
+// key" case: the first submit after an observed rotation re-populates and seals
+// under the NEW live key; the retired key is RETAINED (not zeroized), and the
+// posted ciphertext is NEVER openable under the retired key. [requires
+// F-183-R fix — the current impl seals a NEW record under the RETIRED key,
+// exactly the forward-secrecy regression F-183-R exists to prevent.]
 // ---------------------------------------------------------------------------
 
-describe('Phase 2a PR2 — rotation observation on submit (AC-11 / C2)', () => {
-  it('when the server reports a NEWER live key (probe OR response carries k-live-2 while the holder caches k-live-1), the holder is wiped + the NEXT op re-unwraps under the new key', async () => {
-    const { t07Client, localIdentity, keyHolder, plaintextKey, srv, t07 } = await buildWired();
+describe('Phase 2a PR2 — rotation-on-submit seals under the live key (AC-11 / A-8.10-R)', () => {
+  it('the first submit, observing k-live-2 while cached at k-live-1, seals under the LIVE k-live-2 (NEVER the retired k-live-1); k-live-1 is RETAINED; the posted ciphertext opens under k-live-2 only', async () => {
+    const { t07Client, localIdentity, keyHolder, plaintextKey, srv, t07, kp } = await buildWired();
     keyHolder.set({ data_key: plaintextKey, key_id: 'k-live-1', epoch: 3 });
-    // The "server" has advanced to k-live-2 (a co-chair on another device
-    // rotated). The submit composition MUST observe the rotation BEFORE
-    // sealing/posting under the stale k-live-1 — implementations may
-    // satisfy this via (a) the probe re-reading state and feeding key_id
-    // to onKeyRotationObserved, OR (b) the submit response carrying
-    // key_id that the composition forwards to onKeyRotationObserved. We
-    // assert the observable contract: the stale buffer is zeroized and
-    // re-unwrap drives the next op under the new key.
+
+    // A co-chair on another device rotated: the server now reports k-live-2 and
+    // the multi-epoch wrap set carries the RETAINED k-live-1 (retired) + the NEW
+    // live k-live-2, both sealed to the actor pubkey.
     srv.liveKeyId = 'k-live-2';
     srv.liveEpoch = 4;
-    const priv = await localIdentity.getIdentityPrivateKey(USER);
-    const pub = sodium.crypto_scalarmult_base(priv);
-    seedWrap(srv, pub);
+    const newKey = sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES);
+    srv.allWraps = [
+      {
+        key_id: 'k-live-1',
+        epoch: 3,
+        wrap: sodium.crypto_box_seal(plaintextKey, kp.publicKey),
+        is_live: false
+      },
+      { key_id: 'k-live-2', epoch: 4, wrap: sodium.crypto_box_seal(newKey, kp.publicKey), is_live: true }
+    ];
 
     const concern = makeConcernTransport([
-      {
-        // The implementer may or may not have the composition POST submit
-        // BEFORE the rotation is observed. Either way, the holder ends in
-        // the wiped state for the stale key (F-154 stale-key guard).
-        status: 200,
-        body: { ok: true, data: { id: 'c-r1', key_id: 'k-live-2' } }
-      },
-      { status: 200, body: { ok: true, data: { id: 'c-r2', key_id: 'k-live-2' } } }
+      { status: 200, body: { ok: true, data: { id: 'c-r1' } } },
+      { status: 200, body: { ok: true, data: { id: 'c-r2' } } }
     ]);
     const concernClient = new SupabaseConcernClient({ transport: concern.transport });
 
@@ -640,12 +671,21 @@ describe('Phase 2a PR2 — rotation observation on submit (AC-11 / C2)', () => {
       }
     });
 
-    // Stale buffer zeroized (the rotation was observed via the probe or
-    // the response and routed through onKeyRotationObserved).
-    expect(Array.from(plaintextKey).every((b) => b === 0)).toBe(true);
+    // Forward secrecy: the posted ciphertext opens under the LIVE k-live-2 ONLY,
+    // NEVER the retired k-live-1. (A removed member who exfiltrated k-live-1
+    // must not be able to read records filed AFTER the rotation — F-183-R.)
+    const submitBody = concern.bodies[0] as { title_ct: string; body_ct: string };
+    const postedTitle = pgHexToBytes(submitBody.title_ct);
+    const postedBody = pgHexToBytes(submitBody.body_ct);
+    await expect(openUtf8(postedTitle, newKey)).resolves.toBe('t1');
+    await expect(openUtf8(postedBody, newKey)).resolves.toBe('b1');
+    await expect(openUtf8(postedTitle, plaintextKey)).rejects.toThrow();
+    await expect(openUtf8(postedBody, plaintextKey)).rejects.toThrow();
 
-    // The next submit must run under k-live-2 — assert the holder ends
-    // populated under the new key_id, which proves re-unwrap fired.
+    // The retired k-live-1 buffer is RETAINED (add-not-wipe), not zeroized.
+    expect(Array.from(plaintextKey).some((b) => b !== 0)).toBe(true);
+
+    // A SECOND submit runs cleanly under the re-populated live key.
     await submitConcernViaProduction({
       client: t07Client,
       concernClient,
@@ -661,9 +701,10 @@ describe('Phase 2a PR2 — rotation observation on submit (AC-11 / C2)', () => {
         anonymous: true
       }
     });
+    // The multi-epoch re-populate fired (gated on getKeyId() !== probe.key_id).
+    expect(t07.ops).toContain('get_all_key_wraps');
     expect(keyHolder.getKeyId()).toBe('k-live-2');
     expect(keyHolder.isPopulated()).toBe(true);
-    expect(t07.ops).toContain('get_key_wrap');
   });
 });
 

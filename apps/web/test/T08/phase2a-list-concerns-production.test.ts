@@ -103,6 +103,11 @@ interface FakeKeyServer {
   actorHasWrap: boolean;
   liveWrap: Uint8Array | null;
   plaintextKey: Uint8Array | null;
+  // A-8.10-R: the multi-epoch wrap set the re-populate path
+  // (`unwrapAllCommitteeKeysViaProduction` → `get_all_key_wraps`) fetches. Each
+  // `wrap` is a sealed-box of the epoch's data key to the actor pubkey. When
+  // unset, `get_all_key_wraps` derives a single live row from `liveWrap`.
+  allWraps?: Array<{ key_id: string; epoch: number; wrap: Uint8Array; is_live: boolean }>;
 }
 
 function newServer(): FakeKeyServer {
@@ -156,6 +161,26 @@ function makeT07Transport(srv: FakeKeyServer): {
             }
           }
         };
+      case 'get_all_key_wraps': {
+        // A-8.10-R re-populate path (F-183 (i) own-wrap-only, no id parameter).
+        const rows =
+          srv.allWraps ??
+          (srv.liveWrap
+            ? [{ key_id: srv.liveKeyId, epoch: srv.liveEpoch, wrap: srv.liveWrap, is_live: true }]
+            : []);
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            data: rows.map((r) => ({
+              key_id: r.key_id,
+              epoch: r.epoch,
+              wrapped_ciphertext_hex: bytesToPgHex(r.wrap),
+              is_live: r.is_live
+            }))
+          }
+        };
+      }
       default:
         throw new Error(`unexpected op ${String(body.op)}`);
     }
@@ -422,24 +447,57 @@ describe('Phase 2a PR2 — list 401 wipes holder (AC-8)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-11 / C2 — rotation observation on the list path
+// AC-11 / C2 / A-8.10-R item 3 — rotation observation on the list path is
+// ADD-not-wipe. SUPERSEDES the old "probe observing a NEWER key_id WIPES the
+// holder" case: the stale key is RETAINED for reads, a NEW live key is added
+// via the multi-epoch re-populate, and a pre-rotation row STILL opens.
+// [requires F-183-R fix]
 // ---------------------------------------------------------------------------
 
-describe('Phase 2a PR2 — rotation observation on list (AC-11 / C2)', () => {
-  it('the probe observing a NEWER key_id BEFORE list returns ⇒ holder wiped + the NEXT op re-unwraps', async () => {
-    const { t07Client, localIdentity, keyHolder, plaintextKey, srv, t07 } = await buildWired();
-    // Cache an OLD key_id on the holder; the probe will report k-live-2.
+describe('Phase 2a PR2 — rotation observation on list is add-not-wipe (AC-11 / A-8.10-R)', () => {
+  it('the probe observing a NEWER key_id (holder cached the OLD key, not held) RETAINS the stale key, re-populates the new live key via get_all_key_wraps, and a pre-rotation row still opens', async () => {
+    const { t07Client, localIdentity, keyHolder, plaintextKey, srv, t07, kp } = await buildWired();
+    // Cache the OLD key_id on the holder; the probe will report k-live-2 (which
+    // the holder does NOT hold).
     keyHolder.set({ data_key: plaintextKey, key_id: 'k-live-OLD', epoch: 2 });
     srv.liveKeyId = 'k-live-2';
     srv.liveEpoch = 5;
-    // Seal under the actor pubkey so re-unwrap succeeds at the new key_id.
-    const priv = await localIdentity.getIdentityPrivateKey(USER);
-    const pub = sodium.crypto_scalarmult_base(priv);
-    seedWrap(srv, pub);
 
-    const concern = makeConcernTransport([{ status: 200, body: { ok: true, data: [] } }]);
+    // The re-populate path fetches ALL wraps: the RETAINED old epoch (k-live-OLD,
+    // still opens pre-rotation rows) + the NEW live epoch (k-live-2). Both sealed
+    // to the actor pubkey.
+    const newKey = sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES);
+    srv.allWraps = [
+      {
+        key_id: 'k-live-OLD',
+        epoch: 2,
+        wrap: sodium.crypto_box_seal(plaintextKey, kp.publicKey),
+        is_live: false
+      },
+      { key_id: 'k-live-2', epoch: 5, wrap: sodium.crypto_box_seal(newKey, kp.publicKey), is_live: true }
+    ];
+
+    // A pre-rotation concern row, sealed under the OLD epoch key — it MUST still
+    // open after the re-populate (the retained old-epoch key survives; a
+    // `.set()`-based repopulate would discard it → F-183 lockout).
+    const nowIso = new Date().toISOString();
+    const rowsFromView = [
+      {
+        id: 'c-pre',
+        title_ct: seal('pre-rotation title', plaintextKey),
+        body_ct: seal('pre-rotation body', plaintextKey),
+        hazard_class: 'physical',
+        severity: 'low',
+        location_id: 'L-1',
+        created_at: nowIso,
+        actor_pseudonym: 'p-pre',
+        anonymous_default_kept: true,
+        has_named_source: false
+      }
+    ];
+    const concern = makeConcernTransport([{ status: 200, body: { ok: true, data: rowsFromView } }]);
     const concernClient = new SupabaseConcernClient({ transport: concern.transport });
-    await listConcernsViaProduction({
+    const r = await listConcernsViaProduction({
       client: t07Client,
       concernClient,
       keyHolder,
@@ -447,14 +505,22 @@ describe('Phase 2a PR2 — rotation observation on list (AC-11 / C2)', () => {
       user_id: USER
     });
 
-    // The stale key was wiped (zeroized) — the rotation was observed.
-    expect(Array.from(plaintextKey).every((b) => b === 0)).toBe(true);
-    // The holder ended this call populated under the NEW key — the
-    // re-unwrap fired in the same call (the holder is then usable for the
-    // decrypt that follows).
+    // The stale key is RETAINED (NOT zeroized) — add-not-wipe (F-183 anti-lockout).
+    expect(Array.from(plaintextKey).some((b) => b !== 0)).toBe(true);
+    // The multi-epoch re-populate fired (NOT a no-op) — gated on
+    // getKeyId() !== probe.key_id, via `get_all_key_wraps` + `populate()`.
+    expect(t07.ops).toContain('get_all_key_wraps');
+    // The holder ended under the NEW live key, with a live sealing key.
     expect(keyHolder.getKeyId()).toBe('k-live-2');
-    // The disclosure RPC was hit — that is the re-unwrap.
-    expect(t07.ops).toContain('get_key_wrap');
+    expect(keyHolder.hasLiveKey()).toBe(true);
+    // Anti-lockout: the pre-rotation row STILL opens via trial-decrypt over the
+    // RETAINED old-epoch key.
+    expect(r.status).toBe('ok');
+    if (r.status === 'ok') {
+      expect(r.items.length).toBe(1);
+      expect(r.items[0]!.title).toBe('pre-rotation title');
+      expect(r.items[0]!.body).toBe('pre-rotation body');
+    }
   });
 });
 

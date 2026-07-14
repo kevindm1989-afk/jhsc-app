@@ -48,7 +48,10 @@ import type {
   SupabaseT07Client,
   UnwrapCommitteeDataKeyResult
 } from '../crypto';
-import { unwrapCommitteeDataKeyViaProduction } from '../crypto';
+import {
+  unwrapAllCommitteeKeysViaProduction,
+  unwrapCommitteeDataKeyViaProduction
+} from '../crypto';
 import { openUtf8, sealUtf8 } from './seal';
 import type { ConcernOpResult, SupabaseConcernClient } from './supabase-concern-client';
 import type { ConcernIntake } from './types';
@@ -122,9 +125,8 @@ type EnsureHolderResult =
  * never reaches `get_key_wrap`. When the holder is already populated AND the
  * probe reports the SAME key_id, we skip the disclosure RPC entirely (Decision
  * 1 dwell policy: one unwrap per session). When the probe reports a NEWER
- * key_id than the cached one, `onKeyRotationObserved` wipes the holder and
- * the unwrap composition runs to re-populate under the new key (C2 / F-154
- * stale-key guard).
+ * key_id than the cached one, the probe-driven self-heal DEMOTES the stale live
+ * key and re-populates ALL wraps under the new epoch (F-183-R / A-8.10-R).
  */
 async function ensureHolderPopulated(args: EnsureHolderArgs): Promise<EnsureHolderResult> {
   const { client, localIdentity, keyHolder, user_id } = args;
@@ -142,15 +144,37 @@ async function ensureHolderPopulated(args: EnsureHolderArgs): Promise<EnsureHold
     return { status: 'needs_setup' };
   }
 
-  // C2 — rotation observed on probe. If the holder cached an older key_id, the
-  // .set() invariant we relied on is stale; wipe so the unwrap below repopulates
-  // under the new key. Same-key_id is a no-op (no spurious unwrap churn).
-  if (keyHolder.isPopulated()) {
+  // C2 / ADR-0030 Decision 6.3 / A-8.10-R — probe-driven rotation self-heal.
+  // Gate the re-populate on the LIVE key_id MISMATCH (getKeyId() !== probe
+  // key_id), NOT merely `!hasLiveKey()`: while a stale key is still designated
+  // live, `!hasLiveKey()` is a FALSE POSITIVE and the re-populate would never
+  // fire (the F-183-R stuck session). When the probe (authoritative) reports a
+  // live key_id different from the one we hold, `onKeyRotationObserved` DEMOTES
+  // the stale live key (fail-closed seal gate; buffer RETAINED for reads), then
+  // we re-fetch EVERY wrap and `populate()` — so the retained old-epoch read
+  // keys SURVIVE the re-fetch. `.set()` would REPLACE the map and discard them,
+  // re-introducing the F-183 historical-read lockout.
+  if (keyHolder.isPopulated() && keyHolder.getKeyId() !== probe.data.key_id) {
     keyHolder.onKeyRotationObserved(probe.data.key_id);
+    const all = await unwrapAllCommitteeKeysViaProduction({ client, localIdentity, user_id });
+    if (all.status === 'needs_recovery') return { status: 'needs_recovery' };
+    if (all.status === 'failed') {
+      if (all.http === 401) {
+        keyHolder.onSessionRevoked();
+        return { status: 'session_expiry' };
+      }
+      return { status: 'failed', reason: all.reason, http: all.http };
+    }
+    // status === 'ok' — hand every epoch's plaintext key to the holder BY
+    // REFERENCE (multi-epoch: retained + new-live). populate(), never set().
+    keyHolder.populate(all.entries);
   }
 
-  if (keyHolder.isPopulated()) {
-    // Reuse the cached key — Decision 1 dwell policy.
+  if (keyHolder.hasLiveKey()) {
+    // Reuse the cached LIVE key — Decision 1 dwell policy. Seal-gating is on the
+    // LIVE key, not mere population: a retired-only holding state (isPopulated
+    // true, no live key) falls through to unwrap a live wrap (F182-2 fail-closed
+    // seal gate).
     return { status: 'ok' };
   }
 
@@ -389,8 +413,9 @@ export async function listConcernsViaProduction(
     }
   }
 
-  const dataKey = keyHolder.getDataKey();
-  if (!dataKey) {
+  // Reads trial-decrypt over EVERY held epoch key (F182-2), so only require the
+  // holder to hold SOME key material — a retired-only holding state still reads.
+  if (!keyHolder.isPopulated()) {
     return { status: 'session_expiry' };
   }
 
@@ -399,20 +424,30 @@ export async function listConcernsViaProduction(
   const items: ListedConcern[] = [];
 
   for (const row of rows) {
-    // C2 — observe per-row key_id if present.
+    // C2 / A-8.10-R — observe a per-row key_id hint if present. This is the
+    // ADD-only path (`redesignateLiveIfHeld`), NEVER the demoting
+    // `onKeyRotationObserved`: a list row can carry an OLDER epoch's key_id (a
+    // pre-rotation row), and demoting on a stale row hint would wrongly clear
+    // the live designation. Re-designate live only if the hinted key is held;
+    // otherwise no-op. Demote is driven exclusively by the authoritative probe.
     if (typeof row.key_id === 'string' && row.key_id.length > 0) {
-      keyHolder.onKeyRotationObserved(row.key_id);
+      keyHolder.redesignateLiveIfHeld(row.key_id);
     }
-    let title: string;
-    let body: string;
-    try {
-      title = await openUtf8(toBytes(row.title_ct), dataKey);
-      body = await openUtf8(toBytes(row.body_ct), dataKey);
-    } catch {
-      // F-147 / F-148 — never let a libsodium error propagate; surface a typed
-      // failure that the UI handles uniformly.
+    // F182-2 trial-decrypt: a pre-rotation row opens under its own retired-epoch
+    // key; the AEAD MAC is the sole authority (no epoch tag). A wrong key throws
+    // → try the next; no held key authenticates → typed decrypt_failed (F-148,
+    // the thrown libsodium error never propagates with buffer bytes).
+    const titleBytes = toBytes(row.title_ct);
+    const bodyBytes = toBytes(row.body_ct);
+    const opened = await keyHolder.trialOpen(async (k) => ({
+      title: await openUtf8(titleBytes, k),
+      body: await openUtf8(bodyBytes, k)
+    }));
+    if (opened.status !== 'ok') {
       return { status: 'failed', reason: 'decrypt_failed', http: 0 };
     }
+    const title = opened.value.title;
+    const body = opened.value.body;
 
     const createdMs = Date.parse(row.created_at);
     const days = Number.isFinite(createdMs)
@@ -498,18 +533,18 @@ export async function revealConcernSourceViaProduction(
     return { status: 'anonymous' };
   }
 
-  // Audit has committed — only now read the holder's data key and open the
-  // returned ciphertext.
-  const dataKey = keyHolder.getDataKey();
-  if (!dataKey) {
+  // Audit has committed — only now open the returned ciphertext. Reads
+  // trial-decrypt over EVERY held epoch key (F182-2): a source_name sealed under
+  // a retired epoch still opens. Require only that the holder holds SOME key
+  // material (a mid-flight wipe empties it → session_expiry).
+  if (!keyHolder.isPopulated()) {
     return { status: 'session_expiry' };
   }
 
-  let source_name: string;
-  try {
-    source_name = await openUtf8(reveal.data.source_name_ct, dataKey);
-  } catch {
+  const sourceCt = reveal.data.source_name_ct;
+  const opened = await keyHolder.trialOpen((k) => openUtf8(sourceCt, k));
+  if (opened.status !== 'ok') {
     return { status: 'failed', reason: 'decrypt_failed', http: 0 };
   }
-  return { status: 'ok', source_name };
+  return { status: 'ok', source_name: opened.value };
 }
