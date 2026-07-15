@@ -79,7 +79,9 @@ import {
   type ConcernOpTransport
 } from '../../src/lib/concerns/supabase-concern-client';
 // RED-FIRST: this import does not resolve yet.
-import { listConcernsViaProduction } from '../../src/lib/concerns';
+import { listConcernsViaProduction, submitConcernViaProduction } from '../../src/lib/concerns';
+import { openUtf8 } from '../../src/lib/concerns/seal';
+import { pgHexToBytes } from '../../src/lib/server-client/pg-hex';
 import { __resetCapture, __setTestSink } from '../../src/lib/log/test-sink';
 
 await _sodium.ready;
@@ -103,6 +105,11 @@ interface FakeKeyServer {
   actorHasWrap: boolean;
   liveWrap: Uint8Array | null;
   plaintextKey: Uint8Array | null;
+  // A-8.10-R: the multi-epoch wrap set the re-populate path
+  // (`unwrapAllCommitteeKeysViaProduction` → `get_all_key_wraps`) fetches. Each
+  // `wrap` is a sealed-box of the epoch's data key to the actor pubkey. When
+  // unset, `get_all_key_wraps` derives a single live row from `liveWrap`.
+  allWraps?: Array<{ key_id: string; epoch: number; wrap: Uint8Array; is_live: boolean }>;
 }
 
 function newServer(): FakeKeyServer {
@@ -156,6 +163,26 @@ function makeT07Transport(srv: FakeKeyServer): {
             }
           }
         };
+      case 'get_all_key_wraps': {
+        // A-8.10-R re-populate path (F-183 (i) own-wrap-only, no id parameter).
+        const rows =
+          srv.allWraps ??
+          (srv.liveWrap
+            ? [{ key_id: srv.liveKeyId, epoch: srv.liveEpoch, wrap: srv.liveWrap, is_live: true }]
+            : []);
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            data: rows.map((r) => ({
+              key_id: r.key_id,
+              epoch: r.epoch,
+              wrapped_ciphertext_hex: bytesToPgHex(r.wrap),
+              is_live: r.is_live
+            }))
+          }
+        };
+      }
       default:
         throw new Error(`unexpected op ${String(body.op)}`);
     }
@@ -422,24 +449,57 @@ describe('Phase 2a PR2 — list 401 wipes holder (AC-8)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-11 / C2 — rotation observation on the list path
+// AC-11 / C2 / A-8.10-R item 3 — rotation observation on the list path is
+// ADD-not-wipe. SUPERSEDES the old "probe observing a NEWER key_id WIPES the
+// holder" case: the stale key is RETAINED for reads, a NEW live key is added
+// via the multi-epoch re-populate, and a pre-rotation row STILL opens.
+// [requires F-183-R fix]
 // ---------------------------------------------------------------------------
 
-describe('Phase 2a PR2 — rotation observation on list (AC-11 / C2)', () => {
-  it('the probe observing a NEWER key_id BEFORE list returns ⇒ holder wiped + the NEXT op re-unwraps', async () => {
-    const { t07Client, localIdentity, keyHolder, plaintextKey, srv, t07 } = await buildWired();
-    // Cache an OLD key_id on the holder; the probe will report k-live-2.
+describe('Phase 2a PR2 — rotation observation on list is add-not-wipe (AC-11 / A-8.10-R)', () => {
+  it('the probe observing a NEWER key_id (holder cached the OLD key, not held) RETAINS the stale key, re-populates the new live key via get_all_key_wraps, and a pre-rotation row still opens', async () => {
+    const { t07Client, localIdentity, keyHolder, plaintextKey, srv, t07, kp } = await buildWired();
+    // Cache the OLD key_id on the holder; the probe will report k-live-2 (which
+    // the holder does NOT hold).
     keyHolder.set({ data_key: plaintextKey, key_id: 'k-live-OLD', epoch: 2 });
     srv.liveKeyId = 'k-live-2';
     srv.liveEpoch = 5;
-    // Seal under the actor pubkey so re-unwrap succeeds at the new key_id.
-    const priv = await localIdentity.getIdentityPrivateKey(USER);
-    const pub = sodium.crypto_scalarmult_base(priv);
-    seedWrap(srv, pub);
 
-    const concern = makeConcernTransport([{ status: 200, body: { ok: true, data: [] } }]);
+    // The re-populate path fetches ALL wraps: the RETAINED old epoch (k-live-OLD,
+    // still opens pre-rotation rows) + the NEW live epoch (k-live-2). Both sealed
+    // to the actor pubkey.
+    const newKey = sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES);
+    srv.allWraps = [
+      {
+        key_id: 'k-live-OLD',
+        epoch: 2,
+        wrap: sodium.crypto_box_seal(plaintextKey, kp.publicKey),
+        is_live: false
+      },
+      { key_id: 'k-live-2', epoch: 5, wrap: sodium.crypto_box_seal(newKey, kp.publicKey), is_live: true }
+    ];
+
+    // A pre-rotation concern row, sealed under the OLD epoch key — it MUST still
+    // open after the re-populate (the retained old-epoch key survives; a
+    // `.set()`-based repopulate would discard it → F-183 lockout).
+    const nowIso = new Date().toISOString();
+    const rowsFromView = [
+      {
+        id: 'c-pre',
+        title_ct: seal('pre-rotation title', plaintextKey),
+        body_ct: seal('pre-rotation body', plaintextKey),
+        hazard_class: 'physical',
+        severity: 'low',
+        location_id: 'L-1',
+        created_at: nowIso,
+        actor_pseudonym: 'p-pre',
+        anonymous_default_kept: true,
+        has_named_source: false
+      }
+    ];
+    const concern = makeConcernTransport([{ status: 200, body: { ok: true, data: rowsFromView } }]);
     const concernClient = new SupabaseConcernClient({ transport: concern.transport });
-    await listConcernsViaProduction({
+    const r = await listConcernsViaProduction({
       client: t07Client,
       concernClient,
       keyHolder,
@@ -447,14 +507,28 @@ describe('Phase 2a PR2 — rotation observation on list (AC-11 / C2)', () => {
       user_id: USER
     });
 
-    // The stale key was wiped (zeroized) — the rotation was observed.
+    // F-145-C (A-8.10-R2-a): the ORIGINAL .set() buffer reference IS zeroized once
+    // populate() orphans it (identity-compare orphan-wipe). Anti-lockout is NOT
+    // proven by this buffer's bytes surviving — it is a property of the holder's
+    // MAP, proven at map granularity by the pre-rotation-row round-trip below
+    // (:524-531): the retired k-live-OLD epoch is re-installed as a FRESH buffer
+    // and STILL opens the pre-rotation row. That round-trip is the correct proof;
+    // the byte proxy here was redundant AND wrong under F-145-C.
     expect(Array.from(plaintextKey).every((b) => b === 0)).toBe(true);
-    // The holder ended this call populated under the NEW key — the
-    // re-unwrap fired in the same call (the holder is then usable for the
-    // decrypt that follows).
+    // The multi-epoch re-populate fired (NOT a no-op) — gated on
+    // getKeyId() !== probe.key_id, via `get_all_key_wraps` + `populate()`.
+    expect(t07.ops).toContain('get_all_key_wraps');
+    // The holder ended under the NEW live key, with a live sealing key.
     expect(keyHolder.getKeyId()).toBe('k-live-2');
-    // The disclosure RPC was hit — that is the re-unwrap.
-    expect(t07.ops).toContain('get_key_wrap');
+    expect(keyHolder.hasLiveKey()).toBe(true);
+    // Anti-lockout: the pre-rotation row STILL opens via trial-decrypt over the
+    // RETAINED old-epoch key.
+    expect(r.status).toBe('ok');
+    if (r.status === 'ok') {
+      expect(r.items.length).toBe(1);
+      expect(r.items[0]!.title).toBe('pre-rotation title');
+      expect(r.items[0]!.body).toBe('pre-rotation body');
+    }
   });
 });
 
@@ -498,5 +572,205 @@ describe('Phase 2a PR2 — list wire posture (F-150 / F-18)', () => {
     const keys = Object.keys(r.items[0]!);
     expect(keys).not.toContain('source_name_ct');
     expect(JSON.stringify(r.items[0])).not.toContain('CANARY-SOURCE-NAME');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Finding-1 (F182-2 panel, HIGH) — the per-row hint on the list path must NOT
+// demote the live key to an OLDER epoch.
+// ---------------------------------------------------------------------------
+// `listConcernsViaProduction` feeds every row's `key_id` to
+// `keyHolder.redesignateLiveIfHeld` (production-flows.ts:433-435). Lists are
+// newest-first, so the OLDEST (pre-rotation, RETIRED-epoch) row is processed
+// LAST. Because `redesignateLiveIfHeld` ignores `epoch` today
+// (committee-key-holder.ts:328-337), that last row deterministically demotes
+// the live designation onto the RETIRED epoch whenever ≥1 pre-rotation row is
+// present — so the holder ends the list with a retired sealing key (forward-
+// secrecy regression; threat-model re-pass trigger #8).
+//
+// RED expectation against b891cf5:
+//   - Test 1 FAILS — after a list whose oldest row carries k-epoch-1, the
+//     holder's live key is wrongly k-epoch-1 (getKeyId/getEpoch/getDataKey).
+//   - Test 2 FAILS — a subsequent submit is forced to burn a self-heal round
+//     trip (`get_all_key_wraps`) to recover the live epoch the list corrupted;
+//     the fixed impl leaves the holder correct so the submit needs no re-fetch.
+//
+// Determinism: fixed 32-byte fill keys (no seeded-RNG dependence for the epoch
+// keys); assertions are on holder state / decrypt round-trips / op-invocation,
+// never on raw ciphertext bytes. created_at uses the harness's Date.now() seed
+// exactly as the sibling tests do (no clock control needed — days_since_filed
+// is not asserted here). No real network (mock t07 + concern transports).
+// ---------------------------------------------------------------------------
+
+/** A fixed, deterministic 32-byte secretbox key (never asserted on raw bytes). */
+function mkEpochKey(byte: number): Uint8Array {
+  return new Uint8Array(sodium.crypto_secretbox_KEYBYTES).fill(byte);
+}
+
+describe('Phase 2a PR2 — Finding-1: a pre-rotation (retired-epoch) list row never demotes the live key (F182-2 / A-8.10-R)', () => {
+  it('after a newest-first list whose OLDEST row carries the RETIRED k-epoch-1, the holder live key stays k-epoch-2 (never demotes to the retired epoch)', async () => {
+    const { t07Client, localIdentity, keyHolder, srv, t07, kp } = await buildWired();
+    // The server (authoritative probe) reports epoch-2 live — matches the
+    // holder's live below, so the list's own ensure does NOT self-heal.
+    srv.liveKeyId = 'k-epoch-2';
+    srv.liveEpoch = 2;
+
+    // The realistic post-rotation holding state (the self-heal result): the
+    // RETIRED epoch-1 read key + the LIVE epoch-2 key, held by reference.
+    const kE1 = mkEpochKey(0x11);
+    const kE2 = mkEpochKey(0x22);
+    keyHolder.populate([
+      { data_key: kE1, key_id: 'k-epoch-1', epoch: 1, is_live: false },
+      { data_key: kE2, key_id: 'k-epoch-2', epoch: 2, is_live: true }
+    ]);
+
+    // Newest-first list: a NEW (epoch-2) row first, then a PRE-ROTATION (epoch-1)
+    // row LAST — the row order that deterministically triggers the demote bug.
+    const nowIso = new Date().toISOString();
+    const rowsNewestFirst = [
+      {
+        id: 'c-new',
+        title_ct: seal('post-rotation title', kE2),
+        body_ct: seal('post-rotation body', kE2),
+        hazard_class: 'physical',
+        severity: 'low',
+        location_id: 'L-2',
+        created_at: nowIso,
+        actor_pseudonym: 'p-new',
+        anonymous_default_kept: true,
+        has_named_source: false,
+        key_id: 'k-epoch-2'
+      },
+      {
+        id: 'c-pre',
+        title_ct: seal('pre-rotation title', kE1),
+        body_ct: seal('pre-rotation body', kE1),
+        hazard_class: 'physical',
+        severity: 'low',
+        location_id: 'L-1',
+        created_at: nowIso,
+        actor_pseudonym: 'p-pre',
+        anonymous_default_kept: true,
+        has_named_source: false,
+        key_id: 'k-epoch-1' // the RETIRED epoch — processed LAST
+      }
+    ];
+    const concern = makeConcernTransport([
+      { status: 200, body: { ok: true, data: rowsNewestFirst } }
+    ]);
+    const concernClient = new SupabaseConcernClient({ transport: concern.transport });
+
+    const r = await listConcernsViaProduction({
+      client: t07Client,
+      concernClient,
+      keyHolder,
+      localIdentity,
+      user_id: USER
+    });
+
+    // Both rows open (anti-lockout via trial-decrypt over both epochs).
+    expect(r.status).toBe('ok');
+    if (r.status !== 'ok') return;
+    expect(r.items.length).toBe(2);
+
+    // Finding-1: the live sealing key MUST remain the NEWEST held epoch. The
+    // retired-epoch row hint processed last must NOT have demoted it.
+    expect(keyHolder.getKeyId()).toBe('k-epoch-2');
+    expect(keyHolder.getEpoch()).toBe(2);
+    expect(keyHolder.getDataKey()).toBe(kE2); // the epoch-2 buffer, by reference
+    expect(keyHolder.hasLiveKey()).toBe(true);
+    // The list did not trigger any self-heal re-fetch (probe matched live).
+    expect(t07.ops).not.toContain('get_all_key_wraps');
+    void kp; // (kp is only exercised by the submit sibling test)
+  });
+
+  it('a submit issued right after that list seals under the LIVE k-epoch-2 (never the retired k-epoch-1) WITHOUT burning a self-heal re-fetch', async () => {
+    const { t07Client, localIdentity, keyHolder, srv, t07, kp } = await buildWired();
+    srv.liveKeyId = 'k-epoch-2';
+    srv.liveEpoch = 2;
+
+    const kE1 = mkEpochKey(0x11);
+    const kE2 = mkEpochKey(0x22);
+    keyHolder.populate([
+      { data_key: kE1, key_id: 'k-epoch-1', epoch: 1, is_live: false },
+      { data_key: kE2, key_id: 'k-epoch-2', epoch: 2, is_live: true }
+    ]);
+    // Back the potential (buggy-path) self-heal so it reconstructs the SAME
+    // epoch bytes — this keeps the forward-secrecy assertion meaningful whether
+    // or not a self-heal fires; the RED signal is that a self-heal fires AT ALL.
+    srv.allWraps = [
+      { key_id: 'k-epoch-1', epoch: 1, wrap: sodium.crypto_box_seal(kE1, kp.publicKey), is_live: false },
+      { key_id: 'k-epoch-2', epoch: 2, wrap: sodium.crypto_box_seal(kE2, kp.publicKey), is_live: true }
+    ];
+
+    const nowIso = new Date().toISOString();
+    const rowsNewestFirst = [
+      {
+        id: 'c-pre',
+        title_ct: seal('pre-rotation title', kE1),
+        body_ct: seal('pre-rotation body', kE1),
+        hazard_class: 'physical',
+        severity: 'low',
+        location_id: 'L-1',
+        created_at: nowIso,
+        actor_pseudonym: 'p-pre',
+        anonymous_default_kept: true,
+        has_named_source: false,
+        key_id: 'k-epoch-1' // retired-epoch hint — corrupts live under the bug
+      }
+    ];
+    const concern = makeConcernTransport([
+      { status: 200, body: { ok: true, data: rowsNewestFirst } },
+      { status: 200, body: { ok: true, data: { id: 'c-created' } } }
+    ]);
+    const concernClient = new SupabaseConcernClient({ transport: concern.transport });
+
+    await listConcernsViaProduction({
+      client: t07Client,
+      concernClient,
+      keyHolder,
+      localIdentity,
+      user_id: USER
+    });
+
+    // Ops recorded strictly DURING the submit (isolate the submit-phase probe).
+    const opsBeforeSubmit = t07.ops.length;
+    const submitRes = await submitConcernViaProduction({
+      client: t07Client,
+      concernClient,
+      keyHolder,
+      localIdentity,
+      user_id: USER,
+      intake: {
+        title: 'brand-new-concern-title',
+        body: 'brand-new-concern-body',
+        hazard_class: 'physical',
+        severity: 'low',
+        location_id: 'L-3',
+        anonymous: true
+      }
+    });
+    const submitOps = t07.ops.slice(opsBeforeSubmit);
+
+    expect(submitRes.status).toBe('ok');
+
+    // RED discriminator: the submit must NOT need a self-heal re-fetch. A correct
+    // list leaves the holder on the live epoch, so the submit's probe matches and
+    // `get_all_key_wraps` is never hit. Under the bug the list demoted live to
+    // epoch-1, forcing the submit to burn a recovery round trip.
+    expect(submitOps).not.toContain('get_all_key_wraps');
+
+    // Forward-secrecy invariant (must hold regardless): the posted ciphertext
+    // seals under the LIVE epoch-2 key and NEVER opens under the retired epoch-1.
+    const submitBody = concern.bodies.find(
+      (b) => typeof (b as { title_ct?: unknown }).title_ct === 'string'
+    ) as { title_ct: string } | undefined;
+    expect(submitBody).toBeDefined();
+    if (submitBody) {
+      await expect(openUtf8(pgHexToBytes(submitBody.title_ct), kE2)).resolves.toBe(
+        'brand-new-concern-title'
+      );
+      await expect(openUtf8(pgHexToBytes(submitBody.title_ct), kE1)).rejects.toThrow();
+    }
   });
 });

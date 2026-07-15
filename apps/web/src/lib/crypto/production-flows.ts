@@ -530,6 +530,107 @@ export async function unwrapCommitteeDataKeyViaProduction(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// Committee data key — unwrap ALL epochs (ADR-0030 Decision 6 / F182-2; the
+// multi-epoch POPULATE flow behind the anti-lockout key-map, threat-model
+// §3.18 A-8.10 F-183).
+// ---------------------------------------------------------------------------
+
+/** One opened multi-epoch entry the holder's `populate()` installs by reference. */
+export interface UnwrapAllCommitteeKeyEntry {
+  data_key: Uint8Array;
+  key_id: string;
+  epoch: number;
+  is_live: boolean;
+}
+
+export type UnwrapAllCommitteeKeysResult =
+  // Every wrap the caller holds across live + retired epochs, opened with the
+  // device-local identity privkey. The caller hands `entries` to
+  // `CommitteeKeyHolder.populate()`, which takes ownership of each `data_key` BY
+  // REFERENCE and owns its zeroization lifecycle — this composition does NOT
+  // `.fill(0)` here. An EMPTY array is a valid holding state (a purged /
+  // reactivated member mid-window), never a throw.
+  | { status: 'ok'; entries: UnwrapAllCommitteeKeyEntry[] }
+  // A server-side wrap exists but the device holds no identity privkey to open
+  // it. Route to restore-from-recovery (never re-enroll); ADR-0026 AC-7.
+  | { status: 'needs_recovery' }
+  // A typed failure surface — NEVER a thrown raw exception. Server denial /
+  // transport fault surfaced verbatim (401/403 split by the caller).
+  | { status: 'failed'; reason: T07OpReason; http: number };
+
+/**
+ * Compose the multi-epoch committee-key unwrap (ADR-0030 Decision 6, F182-2 —
+ * the sibling of `unwrapCommitteeDataKeyViaProduction`, which unwraps only the
+ * single LIVE wrap). Fetch EVERY wrap the caller holds across live + retired
+ * epochs via `getAllCommitteeKeyWrapsForSelf()` (F-183 (i) own-wrap-only, no
+ * IDOR — the op carries no id parameter), open each SEALED wrap with the
+ * device-local identity privkey via `crypto_box_seal_open` (public half derived
+ * from the privkey via `crypto_scalarmult_base`), and return the decrypted
+ * entries for the holder's `populate()`.
+ *
+ * Fail-closed discipline (F-183 / F-148):
+ *  - `{ ok:false }` server denial ⇒ `{ status:'failed', reason, http }` (verbatim).
+ *  - EMPTY SETOF ⇒ `{ status:'ok', entries:[] }` (holding state — never a throw).
+ *  - No device privkey ⇒ `{ status:'needs_recovery' }` (route to restore).
+ *  - A wrap that FAILS to open (sealed to a different device / corrupt bytes) is
+ *    SKIPPED from the entries — never a partial-garbage key in the map; the good
+ *    wraps still land. The method NEVER rejects and NEVER logs key material.
+ *
+ * libsodium-only (ADR-0003 Invariant 4). NEVER logs key material (F-148): no
+ * `console.*`, no thrown exception carrying bytes — every outcome is a typed
+ * union value.
+ */
+export async function unwrapAllCommitteeKeysViaProduction(opts: {
+  client: SupabaseT07Client;
+  localIdentity: LocalIdentityStore;
+  user_id: string;
+}): Promise<UnwrapAllCommitteeKeysResult> {
+  // 1. Fetch ALL wraps (F-183 (i) own-wrap-only). The client method never
+  //    rejects — a transport fault resolves to a typed `{ ok:false }`.
+  const all = await opts.client.getAllCommitteeKeyWrapsForSelf();
+  if (!all.ok) return { status: 'failed', reason: all.reason, http: all.status };
+
+  // 2. Empty SETOF ⇒ holding state. Nothing to open, so the device privkey is
+  //    not even consulted — return the empty entry set (never a throw).
+  if (all.data.length === 0) return { status: 'ok', entries: [] };
+
+  // 3. Read the device-local identity privkey. Absent → needs_recovery (the
+  //    wraps exist server-side but cannot be opened on this device; route to
+  //    restore-from-recovery, ADR-0026 AC-7). `getIdentityPrivateKey` throws
+  //    when no key is stored — catch and map, never propagate (F-148).
+  let priv: Uint8Array;
+  try {
+    priv = await opts.localIdentity.getIdentityPrivateKey(opts.user_id);
+  } catch {
+    return { status: 'needs_recovery' };
+  }
+
+  // 4. Open each sealed wrap. `crypto_box_seal` is sender-anonymous, so opening
+  //    needs BOTH halves of the recipient keypair; the public half is derived
+  //    from the privkey via crypto_scalarmult_base (X25519 base-point mult). A
+  //    wrap that fails AEAD verification (wrong device / tampered ciphertext)
+  //    THROWS — caught and SKIPPED (fail-closed per-wrap, never a garbage key in
+  //    the map), never propagated (F-142 / F-148).
+  const s = await ready();
+  const pub = s.crypto_scalarmult_base(priv);
+  const entries: UnwrapAllCommitteeKeyEntry[] = [];
+  for (const row of all.data) {
+    try {
+      const data_key = s.crypto_box_seal_open(row.wrapped_ciphertext, pub, priv);
+      entries.push({
+        data_key,
+        key_id: row.key_id,
+        epoch: row.epoch,
+        is_live: row.is_live
+      });
+    } catch {
+      // Fail-closed per-wrap: skip an unopenable wrap; the good wraps still land.
+    }
+  }
+  return { status: 'ok', entries };
+}
+
+// ---------------------------------------------------------------------------
 // ADR-0029 P1-5 — grant committee-key access to a member (the co-chair-side
 // composition; threat-model §3.18 F-172 / F-174 / F-176).
 // ---------------------------------------------------------------------------
@@ -644,11 +745,14 @@ export async function wrapMemberInViaProduction(opts: {
   // six named fields cross in; any other smuggled pubkey field is dropped here.
   const { client, holder, localIdentity, user_id, target_user_id, disclosed } = opts;
 
-  // Step 1 — ensure the holder is populated. The unwrap composition is the
-  // single source of truth for the probe + disclosure + AEAD-open sequence
-  // (Decision 5 step 1; Decision 2 step 5 hands back live bytes by reference,
-  // so re-populating via .set() is safe — the buffer is the same one).
-  if (!holder.isPopulated()) {
+  // Step 1 — ensure the holder holds a LIVE key to seal with. The unwrap
+  // composition is the single source of truth for the probe + disclosure +
+  // AEAD-open sequence (Decision 5 step 1; Decision 2 step 5 hands back live
+  // bytes by reference, so re-populating via .set() is safe — the buffer is the
+  // same one). Gate on hasLiveKey, NOT mere population: a multi-epoch holding
+  // state can be populated with retired-only keys and still have no live sealing
+  // key (F182-2 fail-closed seal gate).
+  if (!holder.hasLiveKey()) {
     let unwrapped: UnwrapCommitteeDataKeyResult;
     try {
       unwrapped = await unwrapCommitteeDataKeyViaProduction({
@@ -736,12 +840,13 @@ export async function wrapMemberInViaProduction(opts: {
   let sealed: Uint8Array;
   try {
     const s = await ready();
-    // ADV-2: re-check the holder was not wiped during the awaits above.
-    // `getDataKey()` handed out the live data-key buffer BY REFERENCE (:688); a
-    // wipe trigger (401 / panic / sign-out) firing during the
-    // `pubkeyFingerprint` / `ready` window zeroizes that buffer in place. NEVER
-    // seal + POST a zeroized key — typed-fail before crypto_box_seal touches it.
-    if (!holder.isPopulated()) {
+    // ADV-2: re-check the holder still holds a LIVE key (not wiped during the
+    // awaits above). `getDataKey()` handed out the live data-key buffer BY
+    // REFERENCE (:688); a wipe trigger (401 / panic / sign-out) firing during the
+    // `pubkeyFingerprint` / `ready` window zeroizes that buffer in place and
+    // empties the map. NEVER seal + POST a zeroized/retired key — typed-fail
+    // before crypto_box_seal touches it (F182-2 fail-closed seal gate).
+    if (!holder.hasLiveKey()) {
       return { status: 'failed', reason: 'data_key_unwrap_failed' };
     }
     sealed = s.crypto_box_seal(dataKey, targetPubkey);
