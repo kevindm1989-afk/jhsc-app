@@ -32,7 +32,7 @@
  * plaintext (F-148).
  */
 
-import { ready } from '../crypto/sodium';
+import { ready, type Sodium } from '../crypto/sodium';
 
 /**
  * libsodium secretbox MAC overhead — 16 bytes. The constant is part of the
@@ -43,8 +43,21 @@ import { ready } from '../crypto/sodium';
  */
 const SECRETBOX_MAC_LEN = 16;
 
-export async function sealUtf8(plaintext: string, key: Uint8Array): Promise<Uint8Array> {
-  const s = await ready();
+/**
+ * SYNCHRONOUS secretbox seal over an ALREADY-ready libsodium instance `s`.
+ *
+ * F-190 / re-pass trigger #13: the async `sealUtf8` below does `await ready()`
+ * BEFORE the synchronous `crypto_secretbox_easy`, and that internal `await` is a
+ * TOCTOU window — a mid-`await` wipe / rotation-observing `populate()` can zero
+ * the captured data-key buffer BY REFERENCE, so the resuming secretbox seals
+ * under an all-zero key (world-readable). Seal paths must resolve `ready()` ONCE
+ * up front, re-check liveness, RE-READ `getDataKey()`, then call THIS variant
+ * with NO `await` between the re-read and the primitive — because
+ * `crypto_secretbox_easy` is synchronous, that block is atomic and no
+ * wipe/populate can interleave. Byte format is IDENTICAL to `sealUtf8`:
+ * `[nonce(24)][crypto_secretbox_easy ct]` with a FRESH random nonce per call.
+ */
+export function sealUtf8Sync(plaintext: string, key: Uint8Array, s: Sodium): Uint8Array {
   const nonce = s.randombytes_buf(s.crypto_secretbox_NONCEBYTES);
   // Re-wrap the encoder output in a fresh `new Uint8Array(...)`: jsdom's
   // TextEncoder output sometimes fails the wasm bridge's strict cross-realm
@@ -58,6 +71,11 @@ export async function sealUtf8(plaintext: string, key: Uint8Array): Promise<Uint
   out.set(nonce, 0);
   out.set(ct, nonce.length);
   return out;
+}
+
+export async function sealUtf8(plaintext: string, key: Uint8Array): Promise<Uint8Array> {
+  const s = await ready();
+  return sealUtf8Sync(plaintext, key, s);
 }
 
 export async function openUtf8(ciphertext: Uint8Array, key: Uint8Array): Promise<string> {
