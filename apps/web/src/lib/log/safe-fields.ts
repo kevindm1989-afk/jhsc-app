@@ -92,7 +92,15 @@ export const SAFE_FIELDS: ReadonlySet<string> = new Set([
   'alert.outcome',
   'alert.would_delete_total',
   'alert.deleted_total',
-  'alert.deleted_count'
+  'alert.deleted_count',
+
+  // Baseline multi-epoch anti-lockout read miss (F182-9 / ADR-0031 Decision 5 /
+  // F-183-B-OBS). Key-material-FREE telemetry ONLY — a COUNT of held epochs +
+  // two booleans that separate a benign missing-epoch boundary from a genuine
+  // corrupt/tampered row. NEVER a key_id VALUE, key bytes, or plaintext (F-148).
+  'epochs_held',
+  'escalated',
+  'row_epoch_held'
 ]);
 
 /**

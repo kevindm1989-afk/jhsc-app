@@ -10200,3 +10200,218 @@ Continue threat-model.md §3.18; this pass should mark **F-182 closed/narrowed**
 - **The one genuinely un-engineerable thing — stated so no downstream agent tries to "fix" it:** rotation CANNOT retroactively revoke a key already cached/exfiltrated by a removed member; the only mechanism that would touch historical ciphertext is full re-encryption, which is rejected (Decision 3) because it re-exposes all plaintext on one device and still fails against a prior cache. **Do not let any downstream copy or task claim removal "revokes access to committee data" outright** — the honest claim is "cuts access to data filed from now on." Whether the residual is acceptable is a human risk-acceptance decision (privacy counsel advisable at commercialization), not an engineering one.
 
 ---
+
+# ADR-0031 (2026-07-15) — F-183-B baseline-load anti-lockout: escalate-on-miss (NOT load-all-on-init) for the fresh-session / retired-only multi-epoch read; retired-only reads via `isPopulated()`; bounded once-per-op escalation + a key-material-free missing-epoch-vs-corrupt observability seam
+
+**Status:** Accepted (design only — no feature code in this entry; the fix tranche is **F182-9**, below). **Human gate: HG-KEY-ROTATION** — this design changes the read composition around the security-critical `CommitteeKeyHolder` (F-145/F-146/F-147/F-148), adds a new `populate()` call site on the read path, and is the last hard-block on F182-4 (the rotation composition). Per ADR-0030 (HG-KEY-ROTATION) and constraints.md Human Gates ("Production deploys of changes touching auth … or personal data") + hard rule 5, **security-reviewer + threat-modeler co-sign is required on the F182-9 PR that carries this**, and this ADR MANDATES a threat-modeler handoff (below). This ADR does NOT edit `.context/constraints.md`.
+
+**Decider(s):** architect. **Resolves an OPEN design point deferred by ADR-0030 Decision 6** ("escalate-to-unwrap-all on the first `trialOpen` miss … Design tradeoff for that tranche — load-all-on-init … vs escalate-on-miss … — is for the threat-modeler/architect to rule when the tranche opens"). **Cross-references:** threat-model.md §3.18 Amendment A-8.10-R2 **F-183-B** (the keystone gap this closes; the un-skip/closure condition; the F-183-B-OBS observability note at line ~4429; second-opinion Concern 2 = the retired-only read misroute), **re-pass trigger #12** (F182-4 hard-block until F-183-B closes + its from-empty-holder test un-skips GREEN), **re-pass trigger #13** (the F-190 mid-seal guard this design must not widen), **re-pass triggers #10/#11/#14** (F-183-R2 epoch-aware routing, F-145-C orphan-wipe, anti-lockout-at-map-granularity — all must survive); ADR-0030 Decision 6 (multi-epoch read model, trial-decrypt, retain remaining members' old-epoch wraps), Decision 5 (retired/reactivated member is a read-only holding state until a fresh grant); ADR-0027 / ADR-0028 (the concern/reprisal production compositions being edited); ADR-0003 Invariants 1/4/5/6 (plaintext committee data key never touches the server; libsodium-only); ADR-0001 (ca-central-1 residency); ADR-0016 (audit retention). **Trigger:** F182-2 merged with the baseline-load anti-lockout unproven — the from-empty-holder test (`test/T07/phase2a-f183b-baseline-multiepoch-lockout.test.ts`) is committed `it.skip` as an executable record of the gap. This ADR is the ruling that opens the fix tranche.
+
+## The gap (ground truth — verified this pass, file:line)
+
+- **The multi-epoch re-populate never fires on a fresh session.** `ensureHolderPopulated` gates the multi-epoch self-heal on `keyHolder.isPopulated() && keyHolder.getKeyId() !== probe.data.key_id` (`concerns/production-flows.ts:158`; `reprisal/production-flows.ts:162`) — a WITHIN-SESSION key_id delta detector. On a fresh session the holder is EMPTY → the branch is skipped → the baseline load falls to the single-live-key `unwrapCommitteeDataKeyViaProduction` + `keyHolder.set(...)` (`concerns:185-205`; `reprisal:193-213`), which loads ONLY the live epoch. A post-rotation fresh session therefore never holds the retired epoch it needs to read pre-rotation data.
+- **The whole page then aborts.** `listConcernsViaProduction` calls `keyHolder.trialOpen(...)` per row and, on the first un-openable row, returns `{ status:'failed', reason:'decrypt_failed', http:0 }` for the ENTIRE list (`concerns:466-468`). `readReprisalViaProduction` (`reprisal:405-411`) and `revealConcernSourceViaProduction` (`concerns:565-568`) do the same for a single record. On the common re-sign-in path this is the exact F-183 anti-lockout catastrophe.
+- **Retired-only remaining member is misrouted to `needs_setup` for READS (second-opinion Concern 2).** A remaining member who was offline during the rotation holds ONLY a retired wrap. The probe reports `actor_has_wrap:true` (they hold *a* wrap) but the single-live disclosure RPC `getCommitteeKeyWrapForSelf()` is live-only → returns null → `unwrapCommitteeDataKeyViaProduction` yields `no_wrap` → `ensureHolderPopulated` returns `needs_setup` (`concerns:190`; `reprisal:198`). This contradicts ADR-0030 Decision 5/6 (a retired-only member must still READ) and makes the `isPopulated()`-sufficient read branch (`concerns:438`, `reprisal:395`) unreachable via the fresh-session path.
+- **Observability collapse (F-183-B-OBS).** `trialOpen` returns a bare `{status:'unavailable'}` (`committee-key-holder.ts:168-180`); the compositions collapse it to `decrypt_failed` with NO signal separating "I hold fewer epochs than this row needs" (missing-epoch / anti-lockout) from "this row is CORRUPT."
+- **INERT today, HIGH the moment F182-4 ships.** Pre-F182-4 every member holds exactly one epoch, so the single-epoch fresh-session load is correct NOW. This is a prerequisite fix, not a live bug.
+
+## Decision 1 — THE fork ruling: **escalate-on-miss**, NOT load-all-on-init
+
+**Chosen: keep the cheap single-live-key fast path on the baseline load; escalate to the multi-epoch load (`unwrapAllCommitteeKeysViaProduction` + `populate()`) ONCE, on the FIRST `trialOpen` miss on a read, then retry. The load-all cost is paid only when historical / pre-rotation data is actually read.**
+
+**Decision drivers (in order of weight):**
+
+1. **Audit-noise / minimal-disclosure (decisive).** F182-1 pins the multi-epoch read RPC's audit posture at "ONE `committee_data_key.unwrap` per distinct key materialized" — so `unwrapAllCommitteeKeysViaProduction` emits **N disclosure-audit rows (one per held epoch) every time it runs.** **load-all-on-init** would emit those N rows on **every session start**, for **every** signed-in member, regardless of whether any historical data is ever read. Over a committee's life (several rotations → several epochs) this floods `committee_data_key.unwrap` with login-noise and destroys the forensic value of that event as a "someone accessed historical committee-key material" signal. **escalate-on-miss** emits the N rows only when a member genuinely opens a pre-rotation record — which is exactly when the disclosure event is privacy-meaningful. This is PIPEDA principle 4/5 (limiting collection/use — do not materialize or disclose more key material than the session's task needs) applied to the audit trail, and it matches the project's fail-closed / minimal-disclosure posture.
+2. **Fast path stays fast for the common case.** No-rotation-yet sessions, and sessions that only read current-epoch data, pay exactly one `committee_data_key.unwrap` (the existing single-live path) and zero extra sealed-box opens. The multi-epoch fetch + N `crypto_box_seal_open`s land only on demand.
+3. **Reversibility / blast radius.** escalate-on-miss is additive to the read compositions and to `ensureHolderPopulated`; it changes no crypto boundary and no holder internals. It is **easy** to reverse (delete the escalation seam → back to the pre-fix behaviour) and easy to later PROMOTE to load-all-on-init if the audit-noise calculus ever inverts (e.g. an epoch-hint column lands per ADR-0030 Decision 6.4 forward-compat).
+
+**Rejected — load-all-on-init** (on every fresh session, when the probe shows a wrap, populate via `unwrapAllCommitteeKeysViaProduction` instead of the single-live `set()`). It is genuinely **simpler** (one populate path; the read loops need no escalation seam; `trialOpen` never misses for a held epoch), and that simplicity is real. **Rejected because the N-audit-rows-per-login cost is a standing privacy/forensics regression, not a one-time cost** — it degrades the very audit signal the rotation design leans on for accountability, and it materializes every epoch key into the client heap on every login when the session may never touch historical data. The simplicity does not justify a permanent audit-noise + over-disclosure tax. **Recorded as the forward-compatible fallback:** if an epoch-hint column is ever added (ADR-0030 Decision 6.4) OR the audit posture changes so the multi-epoch fetch emits a single call-scoped row, load-all-on-init becomes cheap and this ruling should be revisited.
+
+**Honest cost of the chosen path (stated, not hidden):** escalate-on-miss is **more complex** than load-all-on-init in exactly two places — (a) the read loops gain an escalate-once-then-retry seam, and (b) `ensureHolderPopulated` gains a retired-only branch (Decision 3). Both are bounded and testable (Decisions 2–4). This is the tradeoff we are buying the audit-minimality with.
+
+**Reversibility:** easy (additive read-path composition; no holder-internal or crypto change).
+
+## Decision 2 — the escalate-on-miss control flow (read compositions)
+
+A shared, bounded escalation seam `escalateToAllEpochs(args, guard)` — used by BOTH `ensureHolderPopulated` (Decision 3) and the read loops — that runs the multi-epoch load AT MOST ONCE per read op:
+
+```
+type EscalationOutcome =
+  | { status: 'escalated' }          // load-all ok; holder now populated with ALL held epochs
+  | { status: 'already' }            // guard already spent this op → caller treats the miss as terminal
+  | { status: 'needs_recovery' }
+  | { status: 'session_expiry' }
+  | { status: 'failed'; reason; http };
+
+async function escalateToAllEpochs(args, guard: { used: boolean }): Promise<EscalationOutcome> {
+  if (guard.used) return { status: 'already' };
+  guard.used = true;                                       // BOUND: set BEFORE the await (idempotent, no re-entry)
+  const all = await unwrapAllCommitteeKeysViaProduction({ client, localIdentity, user_id });
+  if (all.status === 'needs_recovery') return { status: 'needs_recovery' };
+  if (all.status === 'failed') {
+    if (all.http === 401) { keyHolder.onSessionRevoked(); return { status: 'session_expiry' }; }
+    return { status: 'failed', reason: all.reason, http: all.http };
+  }
+  keyHolder.populate(all.entries);                         // F-145-C-safe; ADD-not-wipe; live re-established from is_live
+  return { status: 'escalated' };
+}
+```
+
+`listConcernsViaProduction` per-row (the loop change):
+
+```
+let opened = await keyHolder.trialOpen(<open title+body under k>);
+if (opened.status !== 'ok') {
+  const esc = await escalateToAllEpochs(args, guard);            // at most once per op
+  if (esc.status === 'needs_recovery' || esc.status === 'session_expiry' || esc.status === 'failed')
+    return mapEscalation(esc);                                    // NOT decrypt_failed — a real fetch error
+  if (esc.status === 'escalated') opened = await keyHolder.trialOpen(<same row>);   // retry after populate
+  if (opened.status !== 'ok') {
+    emitDecryptMissDiagnostic(keyHolder, row, /*escalated*/ true);   // Decision 5 seam
+    return { status: 'failed', reason: 'decrypt_failed', http: 0 };  // persistent miss AFTER escalation → genuine
+  }
+}
+```
+
+Single-record reads (`readReprisalViaProduction`, `revealConcernSourceViaProduction`) use the same shape without the loop: trialOpen → miss → `escalateToAllEpochs` → retry → still-miss ⇒ `decrypt_failed` + diagnostic. The per-row `redesignateLiveIfHeld` (concerns list) is UNCHANGED — it stays the F-183-R2 add-only epoch-aware path (re-pass trigger #10 untouched).
+
+**Ordering guarantee:** once escalation populates ALL held epochs, every subsequent row in the same page opens without re-escalating (the guard is spent AND the holder now holds every epoch). The `guard.used = true` is set BEFORE the `await` so a re-entrant miss cannot double-fetch.
+
+## Decision 3 — the retired-only read-path change: `mode: 'read' | 'seal'` on `ensureHolderPopulated`
+
+`ensureHolderPopulated` is called by both read and write compositions and currently cannot tell them apart. It gains an explicit `mode` discriminator (concerns AND reprisal mirrors):
+
+- **`mode: 'seal'` (submit / update) — UNCHANGED behaviour, fail-closed.** A retired-only member (single-live unwrap → `no_wrap`) still returns `needs_setup`. Correct: they hold no live key, cannot seal a new record, and must obtain a fresh current-epoch grant (ADR-0030 Decision 5 holding state). The seal gate stays on the LIVE key. NO escalation on the seal path — the seal path NEVER calls `escalateToAllEpochs` (keeps the F-190 mid-seal `populate()` trigger surface exactly as re-pass trigger #13 closed it — see Decision 6).
+- **`mode: 'read'` (list / read / reveal) — escalate a retired-only member instead of misrouting to `needs_setup`.** When the single-live unwrap returns `no_wrap` BUT the probe reported `actor_has_wrap:true` (i.e. they hold *some* wrap, just not the live one — a retired-only state), call `escalateToAllEpochs(args, guard)`:
+  - `escalated` + holder now `isPopulated()` → return `ok` (the read loop's `trialOpen` will open the retired-sealed record).
+  - `escalated` + holder still empty (load-all returned `entries:[]` — a genuinely purged member mid-window) → `needs_setup`.
+  - `needs_recovery` / `session_expiry` / `failed` → propagate.
+
+This makes the retired-only read branch (`concerns:438` / `reprisal:395` `isPopulated()`-sufficient guard) reachable on the fresh-session path. The mid-flight-wipe → `session_expiry` semantics of that guard are PRESERVED (Decision 6): a holder emptied by a concurrent wipe is NOT a retired-only state — the wipe path never populated it, and the `guard`/`no_wrap`+`actor_has_wrap` precondition distinguishes "never had a live wrap" (escalate) from "was populated then wiped" (session_expiry).
+
+**Why a `mode` param and not "always read-mode + let the seal path's own null-check catch it":** routing a retired-only WRITER through read-mode would (a) return `ok` from `ensureHolderPopulated`, forcing the seal path to fall back to its F-190 `getDataKey()`-null → `session_expiry`, which mislabels a "you need a grant" state as "session expired" (UX regression), and (b) make the seal path pay the load-all escalation cost for a writer who cannot write. The two-value discriminator serves a named need — fail-closed seal gate vs anti-lockout read — and is not premature genericness.
+
+## Decision 4 — the bounded-escalation invariant (requirement 3)
+
+**Invariant (testable):** within a single read composition invocation, `unwrapAllCommitteeKeysViaProduction` (the `get_all_committee_key_wraps_for_self` RPC) is called **AT MOST ONCE**. Enforced by a single mutable `guard = { used: false }` created at the top of each read composition and passed by reference into BOTH `ensureHolderPopulated` (Decision 3) and the read-loop `escalateToAllEpochs` (Decision 2). `guard.used` is set to `true` synchronously before the fetch `await`, so:
+
+- Multiple missing rows in one list page ⇒ exactly one load-all (first miss fetches; the rest either open against the now-complete holder or hit `already`).
+- A retired-only member whose `ensureHolderPopulated` already escalated ⇒ the read loop sees `guard.used === true`; if a row STILL misses it is terminal `decrypt_failed` (never a second fetch).
+- No unbounded re-fetch loop under any interleaving.
+
+A persistent miss after the guard is spent is fail-closed to `decrypt_failed` (never a wrong-key value, never a retry storm).
+
+## Decision 5 — the observability seam (F-183-B-OBS): missing-epoch vs corrupt, key-material-free
+
+When a miss PERSISTS after escalation, the composition (NOT `trialOpen`, which stays a pure fail-closed primitive that never logs) emits ONE structured diagnostic through the existing key-material-free logger (F-148). The seam carries only non-sensitive, correlation-safe signals — **never key bytes, never epoch key_id VALUES, never plaintext:**
+
+- `epochs_held` — `keyHolder.size()` (a COUNT of held epochs; no ids).
+- `escalated` — boolean (did the once-per-op load-all already run this op).
+- `row_epoch_held` — a derived BOOLEAN, emitted only when the row carries a `key_id` hint: "does the holder hold the row's claimed epoch?" — computed as membership of `row.key_id` in the held set. The key_id VALUE is NEVER logged; only the boolean.
+
+**Classification for telemetry (the two failure classes, now separable):**
+- `escalated:true` + `row_epoch_held:false` ⇒ **missing-epoch.** The actor holds every wrap they were granted and still does not hold the epoch this row was sealed under → a legitimate anti-lockout boundary (e.g. a record from before they joined, which they were never wrapped for), NOT corruption. Expected-and-benign; distinct from a defect.
+- `escalated:true` + (`row_epoch_held:true` or no hint) ⇒ **corrupt / tampered.** The actor holds the row's claimed epoch key yet the AEAD MAC will not authenticate → genuine `decrypt_failed`; a real integrity signal worth alerting on.
+- **[CORRECTED 2026-07-15 — the earlier "`escalated:false`+miss ⇒ escalation wiring broke (a bug signal)" claim was a DEAD signal and is REMOVED.]** The diagnostic (`emitBaselineMissDiagnostic`) is emitted ONLY on the read path AFTER `escalateToAllEpochs` has already run, so `escalated` (= `guard.used`) is ALWAYS `true` at emit time — an `escalated:false` line can NEVER appear at this seam, and the previously-asserted "`escalated:false`+miss is observable here ⇒ a bug signal" can therefore never fire. Drop that assertion (it claimed an observable that does not exist). The diagnostic REMAINS a useful "escalated and STILL missed" signal; its two LIVE, separable classes are the missing-epoch vs corrupt split above, BOTH with `escalated:true`. Detecting a genuinely un-escalated read miss (a real wiring break) requires a SEPARATE assertion/test at the read-loop call site, NOT this post-escalation diagnostic. (The same dead-signal sentence in the DESIGN VALIDATION Property 6 record, threat-model.md ~line 4570, is superseded by this correction — see the F-183-B post-closure record.)
+
+The returned discriminated-union value stays `decrypt_failed` in ALL cases (the class split lives in telemetry, never in the UI-facing union) so the seam adds no new client-visible surface and leaks nothing to the browser. Exact metric name + field schema is for observability-setup; this ADR pins the fields and the no-leak constraint.
+
+## Decision 6 — no-regression envelope (requirement 4 — each pinned)
+
+- **F182-2 mid-session self-heal — INTACT.** The `isPopulated() && getKeyId() !== probe.key_id` branch runs first and is UNCHANGED; the Decision 3 retired-only escalation is added only in the downstream `no_wrap`+`actor_has_wrap` read-mode path.
+- **F-183-R2 epoch-aware routing — INTACT.** Per-row `redesignateLiveIfHeld` (add-only, strictly-newer-epoch) is untouched; escalation re-establishes the live designation via `populate()`'s `is_live` flags (authoritative), introducing no new demote/promote path. Re-pass trigger #10 unaffected.
+- **F-145-C orphan-wipe + anti-lockout-at-map-granularity — INTACT.** Escalation reuses the existing `populate()`, whose `#wipeOrphanedBuffers` identity-compare wipes only the orphaned pre-escalation single-live buffer; the fresh multi-epoch buffers (carrying the same key bytes) are retained and readable. Re-pass triggers #11 and #14 unaffected (a retained epoch stays `trialOpen`-openable after the populate — this is exactly the A-8.10-R2-a reconciliation).
+- **F-190 mid-seal guards — INTACT and NOT WIDENED.** Escalation is READ-PATH-ONLY; the seal paths (submit/update, mode `'seal'`) NEVER escalate. The new `populate()` call site lands only inside read compositions, which do not capture a data-key buffer across an `await` then seal — so it introduces NO new seal-under-zeroed-key window. It is, at worst, another instance of the SAME "rotation-observing `populate([...fresh])`" trigger class that re-pass trigger #13 already closed (the four holder-backed seal paths re-read `getDataKey()` after their liveness re-check); it is within that already-closed envelope, not a new trigger. **Hard rule for the implementer: do NOT wire `escalateToAllEpochs` into any seal path.**
+
+## Numbering reconciliation (the A-8.10-R2 F-183-B FLAG)
+
+The F182-2 panel named this fix tranche "F182-3", but the ADR-0030 sub-PR map already assigns **F182-3** to F-184 (`regrant_committee_data_key_for_member` + `wrap_replaced`). **Ruling: the panel's "F182-3" label for this tranche is REJECTED (collision). This tranche is assigned the fresh id `F182-9` (a.k.a. "the F-183-B baseline-load anti-lockout tranche").** Dependency, not the number, fixes ordering: **F182-9 runs AFTER F182-2 (merged) and MUST land BEFORE F182-4.** F182-4 stays HARD-BLOCKED (re-pass trigger #12) until F182-9 closes AND the from-empty-holder test un-skips GREEN on both the concern and reprisal read paths AND the retired-only read succeeds.
+
+## Capacity & cost sketch
+
+- **Common session (no rotation yet, or reads only current-epoch data):** unchanged from today — one `committee_data_key.unwrap`, one single-live sealed-box open, zero escalation. No new cost.
+- **Post-rotation session that reads historical data:** one extra `get_all_committee_key_wraps_for_self` RPC + N `crypto_box_seal_open`s (N = held epochs, typically 1–5 per ADR-0030) + N `committee_data_key.unwrap` audit rows, paid ONCE per read op on the first miss. Single-digit-milliseconds client CPU at committee scale.
+- **Cost drivers:** (1) N sealed-box opens on escalation (trivial); (2) N audit rows on escalation (bounded, on-demand, and privacy-meaningful — the whole point of the fork ruling); (3) one extra RPC round-trip on the first historical miss. **No new subprocessor, no new region, no new PI field, no ciphertext schema change — all in ca-central-1 (ADR-0001).** Fits the existing envelope at zero incremental infra cost.
+- **Cliff:** if committees ever grew to hundreds of epochs (not in scope — removals are rare, ADR-0021 single-tenant ~12–30 members), the O(epochs) trial-decrypt + the N-audit-per-escalation would want the epoch-hint column (ADR-0030 Decision 6.4). Flagged only.
+
+## Failure-mode analysis
+
+- **Fresh post-rotation session, reads pre-rotation row (the keystone):** single-live load → trialOpen miss → escalate once → populate(all) → retry → opens. Whole-page lockout PREVENTED. **Recoverable / correct.**
+- **Retired-only remaining member reads:** single-live unwrap `no_wrap` + probe `actor_has_wrap` → read-mode escalate → populate(retired) → `isPopulated()` → reads via trialOpen. NOT `needs_setup`. **Correct.**
+- **Retired-only member WRITES:** seal-mode → `no_wrap` → `needs_setup` (fail-closed; must get a fresh grant). **Correct, unchanged.**
+- **Genuinely corrupt / tampered row (post-escalation persistent miss):** fail-closed `decrypt_failed` + the Decision 5 diagnostic (`escalated:true`, `row_epoch_held:*`). No wrong-key value ever surfaced. **Fail-closed, observable.**
+- **Missing-epoch row (data from before the member joined, never wrapped for that epoch):** post-escalation miss, `row_epoch_held:false` → telemetry classifies as benign anti-lockout boundary, UI sees `decrypt_failed`. **Honest limit, observable, distinguishable from corruption.**
+- **Load-all fails mid-escalation (401 / transport):** 401 → wipe + `session_expiry`; other → `failed` (NOT `decrypt_failed` — a fetch fault, not a crypto miss). **Correctly typed.**
+- **Mid-flight wipe empties the holder during a read:** the existing `isPopulated()` guard still returns `session_expiry`; Decision 3's `no_wrap`+`actor_has_wrap` precondition prevents mis-escalating a wiped holder as retired-only. **Preserved.**
+- **Escalation `populate()` racing a concurrent seal:** within re-pass trigger #13's already-closed envelope (seal paths re-read `getDataKey()`); escalation itself never seals. **No new hazard.**
+
+## Reversibility summary
+
+- escalate-on-miss read-path seam + `mode` param: **easy** (additive read-path composition; delete to revert).
+- The observability seam: **easy** (log-field only; no behaviour dependency).
+- The fork itself (escalate-on-miss vs load-all-on-init): **directional but cheaply revisitable** — promote to load-all-on-init if an epoch-hint column or a call-scoped audit posture ever makes the multi-epoch fetch cheap (flagged).
+- No holder-internal change, no crypto-boundary change, no ciphertext schema change, no new subprocessor / region / PI field.
+
+## Compliance check
+
+- [x] ca-central-1 only; NO new subprocessor / region / PI field / retention class (ADR-0001, ADR-0016, constraints.md hard rules 3/4/6).
+- [x] ADR-0003 Invariants 1/4/5/6 — the plaintext committee data key never touches the server; escalation opens own-wrap sealed boxes client-side with the device privkey; libsodium-only; no key material logged (the Decision 5 seam is counts + booleans only, F-148).
+- [x] PIPEDA principle 4/5 (limiting collection/use) — the fork ruling minimizes key-material disclosure and audit-trail inflation by materializing retired epochs only when historical data is actually read.
+- [x] Anti-lockout preserved at MAP granularity through the escalation `populate()` (A-8.10-R2-a reconciliation; re-pass trigger #14).
+- [x] Fail-closed seal gate preserved (retired-only WRITE → `needs_setup`; F-190 mid-seal envelope not widened).
+- [x] No edit to `.context/constraints.md`.
+- [ ] **HG-KEY-ROTATION** — security-reviewer + threat-modeler co-sign on the F182-9 PR (security-critical read path around `CommitteeKeyHolder`; last F182-4 hard-block); never auto-merge.
+
+## Acceptance criteria (for the test-writer to encode; hermetic, real libsodium, mock transports)
+
+**AC-1 (the un-skipped keystone — concerns).** `test/T07/phase2a-f183b-baseline-multiepoch-lockout.test.ts` un-skipped (`it` not `it.skip`) and GREEN: EMPTY holder, fresh post-rotation session holding `{retired epoch-1, live epoch-2}`; a pre-rotation (epoch-1-sealed) concern row opens; `r.status==='ok'`, one item, title/body decrypt correctly; `keyHolder.size() >= 2`; `keyHolder.getKeyId()==='k-epoch-2'`.
+
+**AC-2 (reprisal symmetry).** The mirror for `readReprisalViaProduction`: EMPTY holder, fresh post-rotation session holding `{retired epoch-1, live epoch-2}`; a reprisal record sealed under epoch-1 opens (`status==='ok'`, title+body correct); holder ends with both epochs, live=epoch-2. (And a `revealConcernSourceViaProduction` mirror: a source_name sealed under the retired epoch reveals after escalation.)
+
+**AC-3 (retired-only read — concerns AND reprisal).** Holder empty; probe reports `actor_has_wrap:true` with live key_id the member does NOT hold; `get_key_wrap` (live) returns null; `get_all_key_wraps` returns ONLY a retired entry (`is_live:false`). A retired-sealed record reads `ok` (NOT `needs_setup`); `keyHolder.hasLiveKey()===false`; `keyHolder.isPopulated()===true`. Exercises the `isPopulated()`-sufficient read branch.
+
+**AC-4 (retired-only WRITE stays fail-closed).** Same retired-only holder; `submitConcernViaProduction` / `submitReprisalViaProduction` returns `needs_setup` (NOT `ok`, NOT a seal under a retired key); no submit POST is made; no escalation RPC fires on the seal path.
+
+**AC-5 (bounded escalation — at most once per op).** A list page with MULTIPLE pre-rotation rows (all epoch-1): assert the `get_all_committee_key_wraps_for_self` op appears EXACTLY ONCE in the transport op log across the whole list; all rows open.
+
+**AC-6 (persistent miss after escalation → fail-closed decrypt_failed).** Holder loads all epochs the member has, but a row is sealed under an epoch the member never held (or is byte-corrupt): after escalation the read returns `decrypt_failed`; NO wrong-key plaintext is returned; the escalation RPC fired at most once.
+
+**AC-7 (observability seam — key-material-free).** On the AC-6 persistent miss, the structured log carries `epochs_held` (a count), `escalated:true`, and (when the row hints a key_id) `row_epoch_held` (a boolean); assert the log contains NO key bytes, NO key_id value, NO plaintext. A missing-epoch row logs `row_epoch_held:false`; a corrupt-but-held-epoch row logs `row_epoch_held:true`.
+
+**AC-8 (no-regression).** The four A-8.10-R reconciliation self-heal tests, the F-183-R2 four assertions, the F-145-C three assertions, and the F-190 seven mid-seal tests all stay GREEN. A mid-session self-heal (`isPopulated() && getKeyId()!==probe.key_id`) still fires the pre-existing path (not the new escalation seam) and does not double-fetch.
+
+**AC-9 (escalation fetch-fault typing).** A 401 during `escalateToAllEpochs` → `session_expiry` + holder wiped; a non-401 transport fault → `failed` (NOT `decrypt_failed`).
+
+## Ordered task breakdown (tranche F182-9 — sequenced BEFORE F182-4)
+
+Ordering rule: the shared seam first (unblocks both consumers), then concerns, then the reprisal mirror, then the retired-only branch, then observability, then the un-skip + no-regression sweep. Fail-fast: the highest-risk shared seam + the keystone un-skip come early.
+
+- **F182-9a — [client] the bounded escalation seam `escalateToAllEpochs` + `mode` on `ensureHolderPopulated` (concerns).** Add the shared once-per-op `escalateToAllEpochs(args, guard)` helper and thread `mode:'read'|'seal'` through `concerns/production-flows.ts:ensureHolderPopulated`; seal-mode behaviour byte-for-byte unchanged. Dep: none (F182-1/F182-2 merged). AC: AC-4 (seal-mode unchanged) + AC-5 seam-called-once at unit granularity + AC-9 fetch-fault typing. Owner: implementer. Risk: HIGH (security-critical read path around the holder). Est: M. *security-reviewer + threat-modeler.*
+- **F182-9b — [client] escalate-on-miss in `listConcernsViaProduction` + `revealConcernSourceViaProduction`.** Wire the retry-once-then-terminal loop change; un-skip nothing yet. Dep: F182-9a. AC: AC-1 (concerns list) + AC-5 (bounded) + AC-6 (persistent-miss fail-closed) for concerns. Owner: implementer. Risk: HIGH. Est: M. *security-reviewer + threat-modeler.*
+- **F182-9c — [client] the reprisal mirror.** Apply `mode` + `escalateToAllEpochs` + escalate-on-miss to `reprisal/production-flows.ts` (`ensureHolderPopulated`, `readReprisalViaProduction`; submit/update stay seal-mode). Dep: F182-9a (shared seam). AC: AC-2 + AC-3 (reprisal) + AC-4 (reprisal seal-mode) + AC-5/AC-6 (reprisal). Owner: implementer. Risk: HIGH. Est: M. *security-reviewer + threat-modeler.*
+- **F182-9d — [client] retired-only read branch (Decision 3).** The `no_wrap`+`actor_has_wrap` read-mode escalation in both mirrors; assert the `isPopulated()`-sufficient branch is reachable and mid-flight-wipe still yields `session_expiry`. Dep: F182-9a/b/c. AC: AC-3 (both) + the mid-flight-wipe preservation case. Owner: implementer. Risk: MED. Est: S. *security-reviewer + threat-modeler.*
+- **F182-9e — [client/observability] the F-183-B-OBS diagnostic seam (Decision 5).** Emit `epochs_held`/`escalated`/`row_epoch_held` (counts+booleans only) on a post-escalation persistent miss, both mirrors; extend the key-material-never-logged canary over the new log site. Dep: F182-9b/c. AC: AC-7. Owner: implementer + observability-setup. Risk: LOW. Est: S.
+- **F182-9f — [test] un-skip the keystone + no-regression sweep.** Un-skip `phase2a-f183b-baseline-multiepoch-lockout.test.ts`; add the reprisal + retired-only + bounded + persistent-miss + OBS tests (AC-1..AC-9); prove AC-8 (the A-8.10-R / F-183-R2 / F-145-C / F-190 suites stay GREEN); flip the suite from "3 skips" toward the F-183-B skip resolved. Dep: F182-9a..e. AC: full suite GREEN with the F-183-B test un-skipped; keystone re-affirmed. Owner: test-writer + implementer. Risk: MED. Est: M. *threat-modeler co-sign (closure).*
+- **F182-9g — [threat-model] F-183-B closure + re-pass-trigger #12 update.** On GREEN, record "F-183-B CLOSED" in §3.18, re-affirm the anti-lockout keystone on the BASELINE path, and update re-pass trigger #12 so F182-4's remaining hard-block is cleared (F-190 already cleared). Dep: F182-9f. AC: threat-model.md updated; F182-4 unblocked. Owner: threat-modeler. Risk: LOW. Est: S. **Human gate: HG-KEY-ROTATION co-sign.**
+
+## Human-gate items (called out loudly)
+
+- **HG-KEY-ROTATION** — security-reviewer + threat-modeler co-sign on the F182-9 PR(s); never auto-merge. This is the security-critical read path around `CommitteeKeyHolder` and the LAST hard-block on F182-4.
+- **F182-4 stays HARD-BLOCKED** (re-pass trigger #12) until F182-9 closes AND the from-empty-holder test un-skips GREEN (concern + reprisal) AND the retired-only read succeeds. No rotation source may land before then.
+- **The keystone re-affirmation is a threat-modeler act** (F182-9g), not an implementer self-certification.
+
+## Threat-modeler handoff (MANDATED)
+
+This ADR MUST route to the **threat-modeler** before the F182-9 PR merges — it is the closure of the F-183-B keystone gap and the last F182-4 hard-block. Model at least:
+
+- **Anti-lockout on the BASELINE path (the property F-183-B exists to prove).** Confirm a from-empty-holder session holding `{retired epoch-1, live epoch-2}` opens a pre-rotation row via escalate-on-miss; confirm the escalation `populate()` retains BOTH epochs at MAP granularity (re-pass trigger #14) and does not orphan the retired read key.
+- **Audit-cost / minimal-disclosure (the fork ruling's core security tradeoff).** Confirm escalate-on-miss materializes retired epochs (and emits the N `committee_data_key.unwrap` rows) ONLY on genuine historical reads — that the fork ruling does not itself become a disclosure/repudiation surface, and that the on-demand audit rows are a faithful "historical committee-key access happened" signal, not noise.
+- **The retired-only read vs write split (Decision 3).** Confirm read-mode escalates a retired-only member to READ while seal-mode fails CLOSED to `needs_setup` (no seal under a retired key); confirm the `mode` param cannot be induced to let a writer seal under a retired key.
+- **Bounded escalation (Decision 4).** Confirm the once-per-op guard cannot be driven into an unbounded re-fetch loop (a hostile/garbled list page of all-missing rows fetches exactly once), and that a persistent miss fails CLOSED to `decrypt_failed` with no wrong-key value.
+- **No-regression envelope (Decision 6) — the security-critical properties.** Confirm the new read-path `populate()` call site does NOT widen the F-190 mid-seal trigger surface (re-pass trigger #13 stays closed; escalation is read-only and never wired into a seal path), and that F-183-R2 (#10), F-145-C (#11), and anti-lockout-at-map-granularity (#14) all survive.
+- **The observability seam (Decision 5).** Confirm the `epochs_held`/`escalated`/`row_epoch_held` diagnostic leaks NO key material, NO key_id value, NO plaintext, and that `row_epoch_held` (a derived boolean) is not a correlation aid; confirm the missing-epoch-vs-corrupt split is a telemetry-only distinction that never reaches the UI union.
+- **New re-pass triggers to pin:** (1) `escalateToAllEpochs` wired into ANY seal path (submit/update) → re-opens F-190 (a new mid-seal `populate()` trigger outside the closed envelope); (2) the once-per-op guard removed or made per-row → unbounded re-fetch / audit-amplification; (3) read-mode escalation regressed so a retired-only holder yields a live key or a writer seals under a retired epoch → re-opens the seal-under-retired class; (4) the OBS seam ever logging a key_id value / bytes / plaintext → F-148 leak; (5) load-all-on-init adopted WITHOUT the audit posture changing to call-scoped → the audit-noise regression this ADR rejected.
+
+Continue threat-model.md §3.18; on GREEN this pass should mark **F-183-B CLOSED** and re-affirm the anti-lockout keystone on the baseline path, clearing F182-4's last hard-block (re-pass trigger #12). The orchestrator routes from here.
+
+---

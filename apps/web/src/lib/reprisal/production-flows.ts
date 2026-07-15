@@ -62,6 +62,7 @@ import {
 import type { UnwrapCommitteeDataKeyResult } from '../crypto';
 import { openUtf8, sealUtf8Sync } from '../concerns/seal';
 import { ready } from '../crypto/sodium';
+import { log } from '../log';
 import type {
   ReprisalFeedRow,
   ReprisalOpResult,
@@ -124,6 +125,84 @@ type EnsureHolderResult =
   | { status: 'failed'; reason: string; http: number };
 
 /**
+ * F182-9 / ADR-0031 Decision 4 — the once-per-read-op escalation guard (reprisal
+ * mirror). One `{ used }` is shared BY REFERENCE across `ensureHolderPopulated`
+ * (retired-only read branch) + `escalateToAllEpochs`, so the multi-epoch
+ * disclosure RPC fires AT MOST ONCE per read op.
+ */
+interface EscalationGuard {
+  used: boolean;
+}
+
+type EscalationOutcome =
+  | { status: 'escalated' }
+  | { status: 'already' }
+  | { status: 'needs_recovery' }
+  | { status: 'session_expiry' }
+  | { status: 'failed'; reason: string; http: number };
+
+/**
+ * F182-9 / ADR-0031 Decision 2 — the bounded escalate-to-all-epochs seam (reprisal
+ * mirror). READ PATH ONLY: NEVER wired into a seal path (re-pass trigger #15 /
+ * F-190 envelope not widened). The guard is spent BEFORE the `await` so a
+ * re-entrant miss cannot double-fetch.
+ *
+ * Fetch-fault typing (AC-9): 401 → wipe + `session_expiry`; a non-401 HTTP fault
+ * → `failed` (kept OUT of `decrypt_failed`); a thrown / no-HTTP-verdict transport
+ * (`http:0`) falls through to the persistent-miss `decrypt_failed`, fail-closed.
+ *
+ * F-145-C (Decision 6, ADD-not-wipe): `populate()` runs ONLY when the fetch ADDS
+ * a not-yet-held epoch, so a no-new-epoch escalation never orphan-wipes a retained
+ * read buffer.
+ */
+async function escalateToAllEpochs(
+  args: EnsureHolderArgs,
+  guard: EscalationGuard
+): Promise<EscalationOutcome> {
+  if (guard.used) return { status: 'already' };
+  guard.used = true; // BOUND: spent synchronously BEFORE the await (no re-entry)
+  const { t07Client, localIdentity, keyHolder, user_id } = args;
+  const all = await unwrapAllCommitteeKeysViaProduction({
+    client: t07Client,
+    localIdentity,
+    user_id
+  });
+  if (all.status === 'needs_recovery') return { status: 'needs_recovery' };
+  if (all.status === 'failed') {
+    if (all.http === 401) {
+      keyHolder.onSessionRevoked();
+      return { status: 'session_expiry' };
+    }
+    return { status: 'failed', reason: all.reason, http: all.http };
+  }
+  // F-VAL-1(b) (accepted pre-existing residual): a panic-wipe / 401 / unload
+  // firing during the escalation fetch `await` above can resurrect the just-
+  // wiped key map when this populate() resumes. The tracked fast-follow is a
+  // uniform wipe-generation latch; do NOT paper over it with an `isPopulated()`
+  // re-check here (a boolean is a FALSE-negative once populate() re-installs).
+  const addsNewEpoch = all.entries.some((e) => !keyHolder.holdsKeyId(e.key_id));
+  if (addsNewEpoch) keyHolder.populate(all.entries);
+  return { status: 'escalated' };
+}
+
+/**
+ * F182-9 / ADR-0031 Decision 5 (F-183-B-OBS, reprisal mirror) — key-material-free
+ * missing-epoch-vs-corrupt telemetry on a persistent post-escalation read miss. A
+ * COUNT of held epochs + `escalated`; NEVER a key_id VALUE / key bytes / plaintext
+ * (F-148). The reprisal read carries no per-record key_id hint (ADR-0028 option
+ * (a)), so `row_epoch_held` is omitted (classified corrupt/tamper by telemetry).
+ */
+function emitBaselineMissDiagnostic(opts: {
+  keyHolder: CommitteeKeyHolder;
+  escalated: boolean;
+}): void {
+  log.warn({
+    event: 'reprisal.baseline_multiepoch_read_miss',
+    attributes: { escalated: opts.escalated, epochs_held: opts.keyHolder.size() }
+  });
+}
+
+/**
  * Probe-first guard + lazy unwrap (Decision 7 / F-163). Always consults the
  * cheap metadata probe BEFORE touching the disclosure RPC — a no-wrap actor
  * never reaches `get_key_wrap`. When the holder is already populated AND the
@@ -132,8 +211,18 @@ type EnsureHolderResult =
  * key_id than the cached one, the probe-driven self-heal DEMOTES the stale live
  * key and re-populates ALL wraps under the new epoch (F-162 / F-183-R /
  * A-8.10-R).
+ *
+ * `mode` is a STATIC per-call-site literal (never derived from wire input):
+ *   - `'seal'` (submit / update) — UNCHANGED, fail-closed. A retired-only member
+ *     returns `needs_setup`; the seal path NEVER escalates (re-pass trigger #15).
+ *   - `'read'` (read) — a retired-only member is ESCALATED to READ (Decision 3)
+ *     via the shared once-per-op `guard`.
  */
-async function ensureHolderPopulated(args: EnsureHolderArgs): Promise<EnsureHolderResult> {
+async function ensureHolderPopulated(
+  args: EnsureHolderArgs,
+  mode: 'read' | 'seal',
+  guard: EscalationGuard
+): Promise<EnsureHolderResult> {
   const { t07Client, localIdentity, keyHolder, user_id } = args;
 
   // Probe FIRST (Decision 7 / F-163). Metadata-only — no key material.
@@ -161,6 +250,13 @@ async function ensureHolderPopulated(args: EnsureHolderArgs): Promise<EnsureHold
   // re-introducing the F-183 historical-read lockout.
   if (keyHolder.isPopulated() && keyHolder.getKeyId() !== probe.data.key_id) {
     keyHolder.onKeyRotationObserved(probe.data.key_id);
+    // F-183-B adversarial (Finding 3 / re-pass trigger #16) — this self-heal
+    // fetch IS the op's once-per-op multi-epoch disclosure. Spend the shared
+    // guard SYNCHRONOUSLY before the await so a later read-loop
+    // `escalateToAllEpochs` in the SAME op sees a spent guard and does NOT fire
+    // a second `get_all_key_wraps` (the "exactly one all-wraps RPC per op"
+    // bound). In seal mode the guard is a throwaway, so this is a harmless set.
+    guard.used = true;
     const all = await unwrapAllCommitteeKeysViaProduction({
       client: t07Client,
       localIdentity,
@@ -195,7 +291,19 @@ async function ensureHolderPopulated(args: EnsureHolderArgs): Promise<EnsureHold
     localIdentity,
     user_id
   });
-  if (unwrap.status === 'no_wrap') return { status: 'needs_setup' };
+  if (unwrap.status === 'no_wrap') {
+    // F182-9 / ADR-0031 Decision 3 — a retired-only remaining member: READ mode
+    // escalates so the retired-sealed record still opens; SEAL mode stays
+    // fail-closed to `needs_setup` (no live key to seal — re-pass trigger #15).
+    if (mode === 'read') {
+      const esc = await escalateToAllEpochs(args, guard);
+      if (esc.status === 'needs_recovery') return { status: 'needs_recovery' };
+      if (esc.status === 'session_expiry') return { status: 'session_expiry' };
+      if (esc.status === 'failed') return { status: 'failed', reason: esc.reason, http: esc.http };
+      return keyHolder.isPopulated() ? { status: 'ok' } : { status: 'needs_setup' };
+    }
+    return { status: 'needs_setup' };
+  }
   if (unwrap.status === 'needs_recovery') return { status: 'needs_recovery' };
   if (unwrap.status === 'failed') {
     if (unwrap.http === 401) {
@@ -263,8 +371,9 @@ export async function submitReprisalViaProduction(
   const { reprisalClient, intake, keyHolder } = args;
 
   // Probe-first (F-163). A no-wrap actor short-circuits to needs_setup BEFORE
-  // any disclosure RPC OR submit POST.
-  const holderRes = await ensureHolderPopulated(args);
+  // any disclosure RPC OR submit POST. SEAL mode — NEVER escalates (re-pass
+  // trigger #15 / F-190); the guard is a throwaway on the seal path.
+  const holderRes = await ensureHolderPopulated(args, 'seal', { used: false });
   if (holderRes.status !== 'ok') return holderRes;
 
   const dataKey = keyHolder.getDataKey();
@@ -347,7 +456,10 @@ export async function readReprisalViaProduction(
 ): Promise<ReadReprisalViaProductionResult> {
   const { reprisalClient, keyHolder } = args;
 
-  const holderRes = await ensureHolderPopulated(args);
+  // F182-9 / ADR-0031 Decision 4 — one guard per read op, shared by
+  // ensureHolderPopulated (retired-only read) + the escalate-on-miss below.
+  const guard: EscalationGuard = { used: false };
+  const holderRes = await ensureHolderPopulated(args, 'read', guard);
   if (holderRes.status !== 'ok') return holderRes;
 
   // F-165 audit-before-decrypt: the SERVER's `reprisal_read` emits the
@@ -402,12 +514,33 @@ export async function readReprisalViaProduction(
   // unavailable; the opened plaintext is never returned on failure.
   const titleCt = read.data.title_ct;
   const bodyCt = read.data.body_ct;
-  const opened = await keyHolder.trialOpen(async (k) => ({
-    title: await openUtf8(titleCt, k),
-    body: await openUtf8(bodyCt, k)
-  }));
+  const doOpen = () =>
+    keyHolder.trialOpen(async (k) => ({
+      title: await openUtf8(titleCt, k),
+      body: await openUtf8(bodyCt, k)
+    }));
+  // F182-9 / ADR-0031 Decision 2 — escalate-on-miss (single record). A retired-
+  // epoch-sealed record opens after the once-per-op multi-epoch load; a
+  // persistent post-escalation miss is a genuine `decrypt_failed` (F-148). A real
+  // fetch fault is typed by AC-9 (401 → session_expiry; non-401 → failed).
+  let opened = await doOpen();
   if (opened.status !== 'ok') {
-    return { status: 'failed', reason: 'decrypt_failed', http: 0 };
+    const esc = await escalateToAllEpochs(args, guard);
+    if (esc.status === 'needs_recovery') return { status: 'needs_recovery' };
+    if (esc.status === 'session_expiry') return { status: 'session_expiry' };
+    if (esc.status === 'failed' && esc.http !== 0) {
+      return { status: 'failed', reason: esc.reason, http: esc.http };
+    }
+    // F-183-B adversarial (Finding 1) — re-open on 'already' too, not just
+    // 'escalated'. A concurrent op may have re-populated the SHARED holder
+    // after this op's guard was spent (→ 'already'), so the record is now
+    // openable; a persistent miss still re-misses → decrypt_failed, and
+    // 'already' fires NO new fetch (the once-per-op RPC bound holds).
+    if (esc.status === 'escalated' || esc.status === 'already') opened = await doOpen();
+    if (opened.status !== 'ok') {
+      emitBaselineMissDiagnostic({ keyHolder, escalated: guard.used });
+      return { status: 'failed', reason: 'decrypt_failed', http: 0 };
+    }
   }
 
   return { status: 'ok', title: opened.value.title, body: opened.value.body };
@@ -429,7 +562,8 @@ export async function updateReprisalViaProduction(
 ): Promise<UpdateReprisalViaProductionResult> {
   const { reprisalClient, keyHolder, id, title, body } = args;
 
-  const holderRes = await ensureHolderPopulated(args);
+  // SEAL mode — fail-closed, NEVER escalates (re-pass trigger #15 / F-190).
+  const holderRes = await ensureHolderPopulated(args, 'seal', { used: false });
   if (holderRes.status !== 'ok') return holderRes;
 
   const dataKey = keyHolder.getDataKey();
