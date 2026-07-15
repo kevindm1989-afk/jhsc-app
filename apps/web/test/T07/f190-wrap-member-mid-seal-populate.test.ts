@@ -267,6 +267,16 @@ describe('F-190 Finding-2 / wrapMemberInViaProduction — rotation self-heal pop
       // A correct fix re-reads getDataKey() → seals the FRESH live key. Prove it
       // recovers exactly freshLiveKey (never actor.dataKey, which is now zeros).
       expect(Array.from(opened)).toEqual(Array.from(freshLiveKey));
+      // F-190 Finding-1 / re-pass trigger #13: a distributed wrap must NEVER
+      // straddle a rotation — the (key_id, ciphertext-epoch) pair MUST be
+      // consistent. The seal above re-read getDataKey() and sealed the FRESH
+      // (k-live-2, epoch 8) buffer, but the POSTed key_id is captured BEFORE the
+      // awaits (production-flows.ts:793) and still reads the STALE, pre-rotation
+      // 'k-live-1' → an epoch-mislabeled wrap (F-183-class anti-lockout hazard).
+      // The fix must re-read getKeyId() ATOMICALLY with getDataKey() after the
+      // liveness re-check and POST the fresh key_id so the label matches the
+      // sealed epoch.
+      expect(srv.wrapPosted.key_id).toBe('k-live-2');
     } else {
       expect(r.status).toBe('failed');
       expect(ops).not.toContain('wrap_member');

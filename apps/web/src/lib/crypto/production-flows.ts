@@ -838,6 +838,7 @@ export async function wrapMemberInViaProduction(opts: {
   // is `plaintext.length + crypto_box_SEALBYTES` bytes of opaque ciphertext
   // (NOT a secretbox — Decision 5 step 3).
   let sealed: Uint8Array;
+  let freshKeyId: string;
   try {
     const s = await ready();
     // ADV-2: re-check the holder still holds a LIVE key (not wiped during the
@@ -856,10 +857,19 @@ export async function wrapMemberInViaProduction(opts: {
     // wipe ZEROES the captured `dataKey` (:792). Re-reading it here (with NO
     // `await` before the synchronous crypto_box_seal) fetches the CURRENT live
     // buffer afresh — never the stale/zeroed captured reference.
+    // F-190 Finding-1 — the distributed wrap must never straddle a rotation;
+    // re-read key_id atomically with the data key so the (key_id, ciphertext-
+    // epoch) pair is always consistent (re-pass trigger #13). A mid-seal
+    // self-heal populate([...fresh]) seals the NEW epoch's key; the pre-await
+    // `keyId` (:793) still labels the STALE, pre-rotation epoch — an epoch-
+    // mislabeled wrap. Fetch both from the CURRENT live buffer with NO `await`
+    // before the synchronous crypto_box_seal / POST.
     const freshDataKey = holder.getDataKey();
-    if (!freshDataKey) {
+    const freshId = holder.getKeyId();
+    if (!freshDataKey || !freshId) {
       return { status: 'failed', reason: 'data_key_unwrap_failed' };
     }
+    freshKeyId = freshId;
     sealed = s.crypto_box_seal(freshDataKey, targetPubkey);
   } catch {
     // libsodium throws on invalid input (e.g. pubkey wrong length, even
@@ -876,7 +886,10 @@ export async function wrapMemberInViaProduction(opts: {
   try {
     wrap = await client.wrapCommitteeDataKeyForMember({
       member_user_id: target_user_id,
-      key_id: keyId,
+      // F-190 Finding-1 — POST the freshly re-read key_id (atomic with the
+      // sealed data key), NEVER the pre-await `keyId` (:793) which may label a
+      // stale, pre-rotation epoch under a mid-seal self-heal.
+      key_id: freshKeyId,
       wrapped_ciphertext: sealed,
       rotation_id: null
     });
