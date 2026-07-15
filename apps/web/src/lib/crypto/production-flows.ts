@@ -849,7 +849,18 @@ export async function wrapMemberInViaProduction(opts: {
     if (!holder.hasLiveKey()) {
       return { status: 'failed', reason: 'data_key_unwrap_failed' };
     }
-    sealed = s.crypto_box_seal(dataKey, targetPubkey);
+    // F-190 Finding-2 / re-pass trigger #13: the boolean `hasLiveKey()` re-check
+    // above is INSUFFICIENT on its own. A rotation-observing self-heal
+    // `populate([...fresh])` firing in the await window installs a FRESH live
+    // buffer (hasLiveKey() stays TRUE) while F-145-C's identity-compare orphan-
+    // wipe ZEROES the captured `dataKey` (:792). Re-reading it here (with NO
+    // `await` before the synchronous crypto_box_seal) fetches the CURRENT live
+    // buffer afresh — never the stale/zeroed captured reference.
+    const freshDataKey = holder.getDataKey();
+    if (!freshDataKey) {
+      return { status: 'failed', reason: 'data_key_unwrap_failed' };
+    }
+    sealed = s.crypto_box_seal(freshDataKey, targetPubkey);
   } catch {
     // libsodium throws on invalid input (e.g. pubkey wrong length, even
     // though we guarded above). F-148 / F-176: NEVER propagate the raw

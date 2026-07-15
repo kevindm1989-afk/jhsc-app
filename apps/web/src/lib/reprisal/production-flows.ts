@@ -60,7 +60,8 @@ import {
   unwrapCommitteeDataKeyViaProduction
 } from '../crypto';
 import type { UnwrapCommitteeDataKeyResult } from '../crypto';
-import { openUtf8, sealUtf8 } from '../concerns/seal';
+import { openUtf8, sealUtf8Sync } from '../concerns/seal';
+import { ready } from '../crypto/sodium';
 import type {
   ReprisalFeedRow,
   ReprisalOpResult,
@@ -273,13 +274,31 @@ export async function submitReprisalViaProduction(
     return { status: 'session_expiry' };
   }
 
-  // Seal title + body. Wrap in try/catch so a libsodium failure cannot
-  // propagate with buffer bytes in its message/stack (F-161 / F-167).
+  // F-190 / re-pass trigger #13 (mid-seal liveness TOCTOU). Resolve libsodium
+  // ONCE up front so the seal carries NO `await` between the liveness re-check
+  // and the synchronous secretbox — the gap `sealUtf8`'s internal `await
+  // ready()` used to open. A wipe (panic/401/unload) OR a rotation-observing
+  // self-heal `populate([...fresh])` firing in that gap would zero the captured
+  // `dataKey` BY REFERENCE, and the resuming secretbox would seal under an
+  // all-zero key (world-readable post-F-145-C). Seal title + body in a try/catch
+  // so a libsodium failure cannot propagate with buffer bytes (F-161 / F-167).
   let title_ct: Uint8Array;
   let body_ct: Uint8Array;
   try {
-    title_ct = await sealUtf8(intake.title, dataKey);
-    body_ct = await sealUtf8(intake.body, dataKey);
+    const s = await ready();
+    // NO `await` from here to the last secretbox: re-check liveness, then
+    // RE-READ getDataKey() (a boolean hasLiveKey() re-check is INSUFFICIENT —
+    // post-self-heal-populate it is TRUE while the captured buffer is zeroed;
+    // never reuse the earlier `dataKey`), then seal every field synchronously.
+    if (!keyHolder.hasLiveKey()) {
+      return { status: 'session_expiry' };
+    }
+    const liveKey = keyHolder.getDataKey();
+    if (!liveKey) {
+      return { status: 'session_expiry' };
+    }
+    title_ct = sealUtf8Sync(intake.title, liveKey, s);
+    body_ct = sealUtf8Sync(intake.body, liveKey, s);
   } catch {
     return { status: 'failed', reason: 'seal_failed', http: 0 };
   }
@@ -421,10 +440,30 @@ export async function updateReprisalViaProduction(
   // Seal only the provided field(s). A field left undefined is omitted from the
   // wire body so the SQL treats it as NULL = unchanged (F-31). Wrap the seal in
   // try/catch so a libsodium failure surfaces typed (F-161 / F-167).
+  //
+  // F-190 / re-pass trigger #13 (mid-seal liveness TOCTOU). Resolve libsodium
+  // ONCE up front so the seal carries NO `await` between the liveness re-check
+  // and the synchronous secretbox — the gap `sealUtf8`'s internal `await
+  // ready()` used to open. A wipe (panic/401/unload) OR a rotation-observing
+  // self-heal `populate([...fresh])` firing in that gap would zero the captured
+  // `dataKey` BY REFERENCE, and the resuming secretbox would seal under an
+  // all-zero key (world-readable post-F-145-C).
   const sealInput: { id: string; title_ct?: Uint8Array; body_ct?: Uint8Array } = { id };
   try {
-    if (title !== undefined) sealInput.title_ct = await sealUtf8(title, dataKey);
-    if (body !== undefined) sealInput.body_ct = await sealUtf8(body, dataKey);
+    const s = await ready();
+    // NO `await` from here to the last secretbox: re-check liveness, then
+    // RE-READ getDataKey() (a boolean hasLiveKey() re-check is INSUFFICIENT —
+    // post-self-heal-populate it is TRUE while the captured buffer is zeroed;
+    // never reuse the earlier `dataKey`), then seal every field synchronously.
+    if (!keyHolder.hasLiveKey()) {
+      return { status: 'session_expiry' };
+    }
+    const liveKey = keyHolder.getDataKey();
+    if (!liveKey) {
+      return { status: 'session_expiry' };
+    }
+    if (title !== undefined) sealInput.title_ct = sealUtf8Sync(title, liveKey, s);
+    if (body !== undefined) sealInput.body_ct = sealUtf8Sync(body, liveKey, s);
   } catch {
     return { status: 'failed', reason: 'seal_failed', http: 0 };
   }
