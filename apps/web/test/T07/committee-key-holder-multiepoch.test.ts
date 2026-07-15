@@ -121,6 +121,7 @@ interface MultiEpochHolder {
   onSessionExpiry(): void;
   onPageUnload(): void;
   onKeyRotationObserved(newKeyId: string): void;
+  redesignateLiveIfHeld(keyId: string): void;
   trialOpen<T>(open: (dataKey: Uint8Array) => Promise<T> | T): Promise<TrialResult<T>>;
 }
 
@@ -618,6 +619,251 @@ describe('F182-2 KAT-9 — panic seam zeroizes the whole map BEFORE IndexedDB (F
 
     wipeSpy.mockRestore();
     idbSpy.mockRestore();
+  });
+});
+
+// ===========================================================================
+// Finding-1 (F182-2 panel, HIGH) — redesignateLiveIfHeld MUST be epoch-aware.
+// ---------------------------------------------------------------------------
+// The per-row list hint (`redesignateLiveIfHeld`) currently re-designates the
+// live key for ANY held key_id, ignoring `epoch` (committee-key-holder.ts:
+// 328-337). Its own doc (:319-327) forbids exactly this: "a row may carry an
+// OLDER epoch's key_id … it must NOT be allowed to demote the live
+// designation." A newest-first list processes the OLDEST (retired) pre-rotation
+// row LAST, so the holder deterministically ends on the RETIRED epoch whenever
+// ≥1 pre-rotation row is present → a subsequent seal uses a retired key
+// (forward-secrecy regression, threat-model re-pass trigger #8).
+//
+// CONTRACT (the fix these tests pin): re-designate live ONLY when the hinted
+// entry's epoch is STRICTLY GREATER than the current live entry's epoch; a
+// pure no-op for an equal-or-older hint and for a not-held hint.
+//
+// RED expectation against b891cf5: the first test FAILS — the older-epoch hint
+// wrongly flips `getKeyId()`/`getEpoch()` to epoch-1. The strictly-newer and
+// no-op cases are POSITIVE CONTROLS (green on both the buggy and fixed impl):
+// they guard against an over-correction that no-ops every hint.
+//
+// Determinism: no clock / no RNG / no network — fixed byte fixtures via mkKey,
+// synchronous holder calls only.
+// ===========================================================================
+describe('F182-2 Finding-1 — redesignateLiveIfHeld is epoch-aware (per-row hint never demotes to an OLDER epoch)', () => {
+  it('an OLDER-epoch hint on {epoch-1 retired, epoch-2 live} is a NO-OP: live stays epoch-2 (never demotes to the retired epoch-1)', () => {
+    const kE1 = mkKey(0x11);
+    const kE2 = mkKey(0x22);
+    const { mh } = mk();
+    mh.populate([
+      { data_key: kE1, key_id: 'k-epoch-1', epoch: 1, is_live: false },
+      { data_key: kE2, key_id: 'k-epoch-2', epoch: 2, is_live: true }
+    ]);
+
+    // A pre-rotation list row carries the RETIRED epoch-1 key_id. Under a
+    // newest-first list this is the row processed LAST, so the buggy impl
+    // deterministically demotes live → epoch-1 here.
+    mh.redesignateLiveIfHeld('k-epoch-1');
+
+    // The live sealing key MUST remain the NEWEST held epoch (epoch-2). A retired
+    // hint never re-designates a newer live down to an older epoch.
+    expect(mh.getKeyId()).toBe('k-epoch-2');
+    expect(mh.getEpoch()).toBe(2);
+    // …and the live buffer is still the epoch-2 buffer BY REFERENCE (the seal key).
+    expect(mh.getDataKey()).toBe(kE2);
+    // Anti-lockout is unaffected — the retired epoch-1 key stays held for reads.
+    expect(mh.size()).toBe(2);
+  });
+
+  it('POSITIVE CONTROL — a STRICTLY-NEWER held-not-live hint DOES promote: {epoch-2 live} + held epoch-3 → live becomes epoch-3', () => {
+    const kE2 = mkKey(0x22);
+    const kE3 = mkKey(0x33);
+    const { mh } = mk();
+    mh.populate([
+      { data_key: kE2, key_id: 'k-epoch-2', epoch: 2, is_live: true },
+      { data_key: kE3, key_id: 'k-epoch-3', epoch: 3, is_live: false }
+    ]);
+
+    mh.redesignateLiveIfHeld('k-epoch-3');
+
+    // A strictly-newer held key is the legitimate promotion path — it MUST win.
+    expect(mh.getEpoch()).toBe(3);
+    expect(mh.getKeyId()).toBe('k-epoch-3');
+    expect(mh.getDataKey()).toBe(kE3);
+  });
+
+  it('EQUAL-epoch hint (the hint equals the current live key_id) is a stable no-op', () => {
+    const kE1 = mkKey(0x11);
+    const kE2 = mkKey(0x22);
+    const { mh } = mk();
+    mh.populate([
+      { data_key: kE1, key_id: 'k-epoch-1', epoch: 1, is_live: false },
+      { data_key: kE2, key_id: 'k-epoch-2', epoch: 2, is_live: true }
+    ]);
+
+    mh.redesignateLiveIfHeld('k-epoch-2'); // re-designate the CURRENT live to itself
+
+    expect(mh.getKeyId()).toBe('k-epoch-2');
+    expect(mh.getEpoch()).toBe(2);
+    expect(mh.getDataKey()).toBe(kE2);
+  });
+
+  it('NOT-HELD hint is a pure no-op: the live designation is untouched (no demote, no crash)', () => {
+    const kE2 = mkKey(0x22);
+    const { mh } = mk();
+    mh.populate([{ data_key: kE2, key_id: 'k-epoch-2', epoch: 2, is_live: true }]);
+
+    expect(() => mh.redesignateLiveIfHeld('k-epoch-NEVER-HELD')).not.toThrow();
+
+    expect(mh.getKeyId()).toBe('k-epoch-2');
+    expect(mh.getEpoch()).toBe(2);
+    expect(mh.hasLiveKey()).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // F-183-R2 CLOSURE — the demoted-state no-op (re-pass trigger #10). The
+  // F-183-R2 fail-closed ruling (A-8.10-R2, threat-model line 4374) is a
+  // FOUR-clause contract on redesignateLiveIfHeld; the three above pin the
+  // older-epoch, strictly-newer, and equal / not-held clauses. This pins the
+  // fourth and last: with NO current live entry (`#liveKeyId === null` — the
+  // demoted / retired-only state after an authoritative rotation to a key we do
+  // not hold), a per-row list hint is UNAUTHENTICATED for the "which epoch is
+  // live" designation and MUST NOT bootstrap live out of the demoted state. Only
+  // the AUTHORITATIVE probe (`onKeyRotationObserved`) may re-establish live.
+  // This pins the fail-closed behavior of the source guard at
+  // committee-key-holder.ts:365 (`if (this.#liveKeyId === null) return;`) — any
+  // future refactor that lets a per-row hint bootstrap live out of the demoted
+  // state (e.g. treating a null live epoch as -Infinity → "promote anything")
+  // turns this test RED.
+  // ---------------------------------------------------------------------------
+  it('DEMOTED-STATE NO-OP — with no live entry (#liveKeyId===null), a held-key row hint does NOT bootstrap live; only the authoritative probe re-establishes it (F-183-R2, re-pass trigger #10)', () => {
+    const kE2 = mkKey(0x22);
+    const { mh } = mk();
+
+    // Seed a single LIVE holder (backward-compat set path), then observe an
+    // AUTHORITATIVE rotation to a key we do NOT hold. Per onKeyRotationObserved
+    // (committee-key-holder.ts:328-337) this DEMOTES the current live and nulls
+    // #liveKeyId while RETAINING the epoch-2 buffer for reads (F-183-R fail-
+    // closed seal gate). This is the demoted state F-183-R2 governs.
+    mh.set({ data_key: kE2, key_id: 'k-epoch-2', epoch: 2 });
+    mh.onKeyRotationObserved('k-epoch-NOT-HELD');
+
+    // PRECONDITION proof — the demoted state was actually reached: no live key,
+    // seal gate closed (getKeyId/getDataKey null), but the buffer is RETAINED in
+    // the map for reads (demote never wipes).
+    expect(mh.hasLiveKey()).toBe(false);
+    expect(mh.getKeyId()).toBeNull();
+    expect(mh.getDataKey()).toBeNull();
+    expect(mh.size()).toBe(1);
+
+    // A per-row list hint for the HELD (now-retired) epoch-2 key must be a PURE
+    // NO-OP out of the demoted state: an unauthenticated row may NOT bootstrap
+    // live (fail-closed ruling A-8.10-R2 line 4374). Guarded at
+    // committee-key-holder.ts:365.
+    mh.redesignateLiveIfHeld('k-epoch-2');
+    expect(mh.hasLiveKey()).toBe(false);
+    expect(mh.getKeyId()).toBeNull();
+    expect(mh.getDataKey()).toBeNull();
+
+    // ONLY the AUTHORITATIVE probe re-establishes live out of the demoted state —
+    // proving the row-hint no-op above was the guard firing, not a dead holder.
+    mh.onKeyRotationObserved('k-epoch-2');
+    expect(mh.hasLiveKey()).toBe(true);
+    expect(mh.getKeyId()).toBe('k-epoch-2');
+    expect(mh.getDataKey()).toBe(kE2); // the RETAINED buffer, re-designated live
+  });
+});
+
+// ===========================================================================
+// Finding-2 (F182-2 panel, MEDIUM) — populate()/set() zeroize ORPHANED buffers.
+// ---------------------------------------------------------------------------
+// populate() (committee-key-holder.ts:119-128) and set() (:173-178) reassign
+// `this.#keys` WITHOUT zeroizing any buffer that is being evicted from the map.
+// wipe() (:212-218) only iterates the CURRENT map, so an evicted buffer is
+// never `.fill(0)`'d and lingers live-but-unreferenced in the JS heap
+// (recoverable via heap dump / swap / core) until GC — defeating the module's
+// "zeroize in place, never rely on GC" discipline (F-145 / security LOW-1).
+//
+// CONTRACT (the fix these tests pin): before reassigning `#keys`, iterate the
+// OUTGOING map and `.fill(0)` any buffer whose reference is NOT carried into the
+// next map — compared BY IDENTITY, so a re-installed same-reference buffer (as
+// in `wrapMemberInViaProduction`'s re-`set()`) is NOT wiped from under a live
+// caller.
+//
+// RED expectation against b891cf5: the two eviction tests FAIL (the orphaned
+// buffer is still non-zero after the replace). The identity-guard tests are
+// POSITIVE CONTROLS (green on the buggy impl too — nothing is wiped today — and
+// green on the fixed impl, proving the fix does not over-wipe a retained ref).
+//
+// Determinism: no clock / no RNG / no network — fixed byte fixtures via mkKey.
+// ===========================================================================
+describe('F182-2 Finding-2 — populate()/set() zeroize orphaned (evicted) buffers (F-145 no-orphan-buffer)', () => {
+  it('populate() replacing the map ZEROIZES an evicted buffer in place (the orphaned live key is not left in the heap)', () => {
+    const b0 = mkKey(0x11); // the ORIGINAL live buffer for k-epoch-1
+    const { mh } = mk();
+    mh.populate([{ data_key: b0, key_id: 'k-epoch-1', epoch: 1, is_live: true }]);
+    expect(Array.from(b0).some((x) => x !== 0)).toBe(true); // non-zero before
+
+    // A fresh unwrap returns FRESH buffers (crypto_box_seal_open allocates new
+    // arrays): a different buffer for the SAME key_id, plus a new epoch. b0 is
+    // now orphaned — evicted from the map but never handed to wipe().
+    const b0b = mkKey(0x1b); // fresh buffer, same key_id, DIFFERENT bytes/identity
+    const b1 = mkKey(0x22);
+    mh.populate([
+      { data_key: b0b, key_id: 'k-epoch-1', epoch: 1, is_live: false },
+      { data_key: b1, key_id: 'k-epoch-2', epoch: 2, is_live: true }
+    ]);
+
+    // The ORIGINAL orphaned buffer MUST be zeroized in place (F-145).
+    expect(Array.from(b0).every((x) => x === 0)).toBe(true);
+    // The buffers carried into the new map are untouched (still hold key bytes).
+    expect(Array.from(b0b).some((x) => x !== 0)).toBe(true);
+    expect(Array.from(b1).some((x) => x !== 0)).toBe(true);
+  });
+
+  it('set() replacing a NON-EMPTY map ZEROIZES the evicted buffer in place', () => {
+    const b0 = mkKey(0x11); // the ORIGINAL live buffer
+    const { mh } = mk();
+    mh.populate([{ data_key: b0, key_id: 'k-epoch-1', epoch: 1, is_live: true }]);
+    expect(Array.from(b0).some((x) => x !== 0)).toBe(true);
+
+    // set() replaces the whole map with a single-entry live map under a fresh
+    // buffer — the old b0 is orphaned.
+    const bNew = mkKey(0x22);
+    mh.set({ data_key: bNew, key_id: 'k-epoch-2', epoch: 2 });
+
+    // The evicted b0 MUST be zeroized in place; the new live key survives.
+    expect(Array.from(b0).every((x) => x === 0)).toBe(true);
+    expect(Array.from(bNew).some((x) => x !== 0)).toBe(true);
+    expect(mh.getDataKey()).toBe(bNew);
+  });
+
+  it('IDENTITY GUARD (populate) — a re-installed SAME-REFERENCE buffer is NOT wiped from under the caller', () => {
+    const b0 = mkKey(0x11);
+    const { mh } = mk();
+    mh.populate([{ data_key: b0, key_id: 'k-epoch-1', epoch: 1, is_live: true }]);
+
+    // Re-populate carrying the SAME b0 reference forward (identity match) plus a
+    // new epoch. b0 is still referenced by the next map, so it MUST survive.
+    const b1 = mkKey(0x22);
+    mh.populate([
+      { data_key: b0, key_id: 'k-epoch-1', epoch: 1, is_live: false },
+      { data_key: b1, key_id: 'k-epoch-2', epoch: 2, is_live: true }
+    ]);
+
+    // The retained reference must still hold its key bytes (never wiped).
+    expect(Array.from(b0).some((x) => x !== 0)).toBe(true);
+    // …and it still opens/holds — the entry is present for reads.
+    expect(mh.size()).toBe(2);
+  });
+
+  it('IDENTITY GUARD (set) — set() re-installing the SAME-REFERENCE buffer under the same key_id is NOT wiped', () => {
+    const b0 = mkKey(0x11);
+    const { mh } = mk();
+    mh.set({ data_key: b0, key_id: 'k-epoch-1', epoch: 1 });
+
+    // Re-`set()` the SAME reference (wrapMemberInViaProduction re-set pattern):
+    // the buffer identity is carried forward, so it must NOT be zeroized.
+    mh.set({ data_key: b0, key_id: 'k-epoch-1', epoch: 1 });
+
+    expect(Array.from(b0).some((x) => x !== 0)).toBe(true);
+    expect(mh.getDataKey()).toBe(b0);
   });
 });
 

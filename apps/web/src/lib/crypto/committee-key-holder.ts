@@ -123,8 +123,26 @@ export class CommitteeKeyHolder {
       next.set(e.key_id, { data_key: e.data_key, epoch: e.epoch, is_live: e.is_live });
       if (e.is_live) liveKeyId = e.key_id;
     }
+    this.#wipeOrphanedBuffers(next);
     this.#keys = next;
     this.#liveKeyId = liveKeyId;
+  }
+
+  /**
+   * Zeroize (`.fill(0)`) every OUTGOING buffer that is NOT carried into `next`,
+   * compared by OBJECT IDENTITY, BEFORE `this.#keys` is reassigned (F-145-C). A
+   * bare reassign would orphan an evicted buffer un-wiped in the JS heap
+   * (recoverable via heap dump / swap / core until GC), defeating the "zeroize
+   * in place, never rely on GC" discipline (F-145). A re-installed SAME-reference
+   * buffer (identity match — e.g. `wrapMemberInViaProduction`'s re-`set()` of the
+   * live buffer) is retained, NEVER wiped out from under a live caller.
+   */
+  #wipeOrphanedBuffers(next: Map<string, HeldKey>): void {
+    const carried = new Set<Uint8Array>();
+    for (const entry of next.values()) carried.add(entry.data_key);
+    for (const entry of this.#keys.values()) {
+      if (!carried.has(entry.data_key)) entry.data_key.fill(0);
+    }
   }
 
   /** The number of held keys across all epochs. */
@@ -171,9 +189,11 @@ export class CommitteeKeyHolder {
    * one-entry live map. The buffer is held BY REFERENCE (F-145 / F-147).
    */
   set(entry: CommitteeKeyEntry): void {
-    this.#keys = new Map([
+    const next = new Map<string, HeldKey>([
       [entry.key_id, { data_key: entry.data_key, epoch: entry.epoch, is_live: true }]
     ]);
+    this.#wipeOrphanedBuffers(next);
+    this.#keys = next;
     this.#liveKeyId = entry.key_id;
   }
 
@@ -317,18 +337,36 @@ export class CommitteeKeyHolder {
   }
 
   /**
-   * Per-row key_id hint — ADD / re-designate ONLY, NEVER demote (A-8.10-R). A
-   * list row may carry the key_id it was sealed under; unlike the authoritative
-   * probe, a row hint can be an OLDER epoch (a pre-rotation row), so it must NOT
-   * be allowed to demote the live designation (that is the probe path's job —
-   * `onKeyRotationObserved`). If the hinted key is HELD, re-designate it live
-   * (add-not-wipe, demoting the prior live's flag but retaining its buffer); if
-   * it is NOT held, this is a pure no-op (no demote, no re-fetch). NEVER a wipe.
+   * Per-row key_id hint — ADD / re-designate ONLY, NEVER demote, and EPOCH-AWARE
+   * (A-8.10-R / A-8.10-R2 F-183-R2). A list row may carry the key_id it was
+   * sealed under; unlike the authoritative probe, a row hint can be an OLDER
+   * epoch (a pre-rotation row), so it must NOT be allowed to move the live
+   * designation onto anything but a STRICTLY-NEWER held epoch:
+   *   - hinted key NOT held → pure no-op (no demote, no re-fetch).
+   *   - NO current live entry (`#liveKeyId === null` — demoted / retired-only)
+   *     → pure no-op that DEFERS to the authoritative probe
+   *     (`onKeyRotationObserved`) to re-establish live. A list row is
+   *     UNAUTHENTICATED for the "which epoch is live" designation, so it may
+   *     re-designate among probe-blessed epochs but MUST NEVER bootstrap live out
+   *     of the demoted state (fail-closed; same add-only-vs-authoritative split
+   *     as `onKeyRotationObserved` :288-293, now enforced on the epoch axis).
+   *   - hinted epoch EQUAL-or-OLDER than the current live epoch → pure no-op
+   *     (no state change, no demote, no churn) — this is what stops a newest-first
+   *     list's trailing pre-rotation row from demoting live to a RETIRED epoch.
+   *   - hinted epoch STRICTLY GREATER than the current live epoch → re-designate
+   *     it live (add-not-wipe, demoting the prior live's flag but retaining its
+   *     buffer for reads). NEVER a wipe.
    */
   redesignateLiveIfHeld(keyId: string): void {
     const entry = this.#keys.get(keyId);
     if (!entry) return; // not held — a row hint never demotes / re-fetches.
-    if (this.#liveKeyId !== null && this.#liveKeyId !== keyId) {
+    // Fail-closed: with no current live entry, a row hint may not bootstrap live
+    // out of the demoted state — only the authoritative probe can (F-183-R2).
+    if (this.#liveKeyId === null) return;
+    const liveEpoch = this.#keys.get(this.#liveKeyId)?.epoch;
+    // Promote ONLY on a STRICTLY-NEWER epoch; equal/older is a pure no-op.
+    if (liveEpoch === undefined || entry.epoch <= liveEpoch) return;
+    if (this.#liveKeyId !== keyId) {
       const prevLive = this.#keys.get(this.#liveKeyId);
       if (prevLive) prevLive.is_live = false;
     }

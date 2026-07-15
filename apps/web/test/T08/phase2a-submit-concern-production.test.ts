@@ -90,7 +90,8 @@ import { __getCapturedLines, __resetCapture, __setTestSink } from '../../src/lib
 import { pgHexToBytes } from '../../src/lib/server-client/pg-hex';
 // Real secretbox open — proves the posted ciphertext seals under the LIVE
 // (rotated-to) key ONLY, never the retired key (forward secrecy, A-8.10-R).
-import { openUtf8 } from '../../src/lib/concerns/seal';
+// `sealUtf8` seals the retained-epoch anti-lockout probe (A-8.10-R2-a).
+import { openUtf8, sealUtf8 } from '../../src/lib/concerns/seal';
 
 await _sodium.ready;
 const sodium = _sodium;
@@ -633,6 +634,13 @@ describe('Phase 2a PR2 — rotation-on-submit seals under the live key (AC-11 / 
     const { t07Client, localIdentity, keyHolder, plaintextKey, srv, t07, kp } = await buildWired();
     keyHolder.set({ data_key: plaintextKey, key_id: 'k-live-1', epoch: 3 });
 
+    // A-8.10-R2-a anti-lockout proof at MAP granularity (a read round-trip over
+    // the RETAINED epoch), not a buffer-byte proxy. Capture a COPY of k-live-1's
+    // bytes and seal a probe under them BEFORE the self-heal fires — F-145-C's
+    // populate() orphan-wipe will zeroize the original .set() buffer.
+    const k1Bytes = Uint8Array.from(plaintextKey);
+    const probe = await sealUtf8('PROBE-RETAINED-K1', k1Bytes);
+
     // A co-chair on another device rotated: the server now reports k-live-2 and
     // the multi-epoch wrap set carries the RETAINED k-live-1 (retired) + the NEW
     // live k-live-2, both sealed to the actor pubkey.
@@ -682,8 +690,15 @@ describe('Phase 2a PR2 — rotation-on-submit seals under the live key (AC-11 / 
     await expect(openUtf8(postedTitle, plaintextKey)).rejects.toThrow();
     await expect(openUtf8(postedBody, plaintextKey)).rejects.toThrow();
 
-    // The retired k-live-1 buffer is RETAINED (add-not-wipe), not zeroized.
-    expect(Array.from(plaintextKey).some((b) => b !== 0)).toBe(true);
+    // F-145-C (A-8.10-R2-a): the ORIGINAL .set() buffer reference IS zeroized once
+    // the self-heal populate() orphans it (identity-compare orphan-wipe).
+    // Anti-lockout is NOT proven by this buffer's bytes surviving — it is a
+    // property of the holder's MAP: the retired k-live-1 epoch is re-installed as
+    // a FRESH buffer (unsealed from the server's own-wrap set) and STILL opens
+    // k-live-1 ciphertext via a trialOpen round-trip.
+    expect(Array.from(plaintextKey).every((b) => b === 0)).toBe(true);
+    const probeOpen = await keyHolder.trialOpen((dk) => openUtf8(probe, dk));
+    expect(probeOpen).toEqual({ status: 'ok', value: 'PROBE-RETAINED-K1' });
 
     // A SECOND submit runs cleanly under the re-populated live key.
     await submitConcernViaProduction({

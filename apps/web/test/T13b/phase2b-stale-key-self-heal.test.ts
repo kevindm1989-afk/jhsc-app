@@ -267,6 +267,13 @@ describe('Phase 2b PR1 — C4 stale-key self-heal (AC-10 / F-162 / A-8.10-R item
     // The holder is cached at the pre-rotation k-live-1.
     keyHolder.set({ data_key: plaintextKey, key_id: 'k-live-1', epoch: 3 });
 
+    // A-8.10-R2-a anti-lockout proof at MAP granularity (a read round-trip over
+    // the RETAINED epoch), not a buffer-byte proxy. Capture a COPY of k-live-1's
+    // bytes and seal a probe under them BEFORE the self-heal fires — F-145-C's
+    // populate() orphan-wipe will zeroize the original .set() buffer.
+    const k1Bytes = Uint8Array.from(plaintextKey);
+    const probe = pgHexToBytes(sealHex('PROBE-RETAINED-K1', k1Bytes));
+
     // The rotation is now VISIBLE via the probe: the server reports k-live-2 and
     // the multi-epoch wrap set carries the RETAINED k-live-1 + the NEW k-live-2,
     // both sealed to the actor pubkey.
@@ -308,8 +315,14 @@ describe('Phase 2b PR1 — C4 stale-key self-heal (AC-10 / F-162 / A-8.10-R item
       expect(r.body).toBe(REC_BODY);
     }
     expect(keyHolder.getKeyId()).toBe('k-live-2');
-    // The stale k-live-1 buffer is RETAINED (add-not-wipe), not zeroized.
-    expect(Array.from(plaintextKey).some((b) => b !== 0)).toBe(true);
+    // F-145-C (A-8.10-R2-a): the ORIGINAL .set() buffer reference IS zeroized once
+    // populate() orphans it (identity-compare orphan-wipe). Anti-lockout is NOT
+    // proven by this buffer's bytes surviving — it is a property of the holder's
+    // MAP: the retired k-live-1 epoch is re-installed as a FRESH buffer (unsealed
+    // from the server's own-wrap set) and STILL opens k-live-1 ciphertext.
+    expect(Array.from(plaintextKey).every((b) => b === 0)).toBe(true);
+    const probeOpen = await keyHolder.trialOpen((dk) => openUtf8(probe, dk));
+    expect(probeOpen).toEqual({ status: 'ok', value: 'PROBE-RETAINED-K1' });
   });
 
   it('a genuine stale-key decrypt (ciphertext under a key the cached key cannot open, no rotation observed on the probe) ⇒ typed decrypt_failed, opened plaintext NEVER returned', async () => {
@@ -360,6 +373,13 @@ describe('Phase 2b PR1 — C4 stale-key self-heal (AC-10 / F-162 / A-8.10-R item
     const { t07Client, localIdentity, keyHolder, srv, plaintextKey, t07, kp } = await buildWired();
     keyHolder.set({ data_key: plaintextKey, key_id: 'k-live-1', epoch: 3 });
 
+    // A-8.10-R2-a anti-lockout proof at MAP granularity (a read round-trip over
+    // the RETAINED epoch), not a buffer-byte proxy. Capture a COPY of k-live-1's
+    // bytes and seal a probe under them BEFORE the self-heal fires — F-145-C's
+    // populate() orphan-wipe will zeroize the original .set() buffer.
+    const k1Bytes = Uint8Array.from(plaintextKey);
+    const probe = pgHexToBytes(sealHex('PROBE-RETAINED-K1', k1Bytes));
+
     // Server rotated to k-live-2; the multi-epoch wrap set carries the RETAINED
     // k-live-1 (retired) + the NEW live k-live-2, both sealed to the actor pubkey.
     srv.liveKeyId = 'k-live-2';
@@ -393,12 +413,18 @@ describe('Phase 2b PR1 — C4 stale-key self-heal (AC-10 / F-162 / A-8.10-R item
     await expect(openUtf8(postedBody, newKey)).resolves.toBe('reprisal-body');
     await expect(openUtf8(postedTitle, plaintextKey)).rejects.toThrow();
 
-    // The multi-epoch re-populate fired; the holder ends under the new live key;
-    // the retired k-live-1 buffer is RETAINED (add-not-wipe), not zeroized.
+    // The multi-epoch re-populate fired; the holder ends under the new live key.
     expect(t07.ops).toContain('get_all_key_wraps');
     expect(keyHolder.getKeyId()).toBe('k-live-2');
     expect(keyHolder.isPopulated()).toBe(true);
-    expect(Array.from(plaintextKey).some((b) => b !== 0)).toBe(true);
+    // F-145-C (A-8.10-R2-a): the ORIGINAL .set() buffer reference IS zeroized once
+    // populate() orphans it (identity-compare orphan-wipe). Anti-lockout is NOT
+    // proven by this buffer's bytes surviving — it is a property of the holder's
+    // MAP: the retired k-live-1 epoch is re-installed as a FRESH buffer (unsealed
+    // from the server's own-wrap set) and STILL opens k-live-1 ciphertext.
+    expect(Array.from(plaintextKey).every((b) => b === 0)).toBe(true);
+    const probeOpen = await keyHolder.trialOpen((dk) => openUtf8(probe, dk));
+    expect(probeOpen).toEqual({ status: 'ok', value: 'PROBE-RETAINED-K1' });
   });
 });
 
