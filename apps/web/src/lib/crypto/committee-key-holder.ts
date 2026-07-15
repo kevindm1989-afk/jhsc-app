@@ -203,6 +203,24 @@ export class CommitteeKeyHolder {
   }
 
   /**
+   * Whether a key for `keyId` is currently held (any epoch, live or retired).
+   * Read-only membership probe — returns a boolean ONLY, never key bytes (F-148).
+   *
+   * Used by the F182-9 / ADR-0031 escalate-on-miss READ path for two purposes:
+   *   1. Decide whether a multi-epoch re-fetch would ADD an epoch the holder does
+   *      not already hold, so `escalateToAllEpochs` re-`populate()`s ONLY when it
+   *      brings in something new — a no-new-epoch escalation must NOT re-install
+   *      the map (populate()'s identity-compare orphan-wipe would otherwise zeroize
+   *      a still-valid retained read buffer for nothing; F-145-C anti-lockout).
+   *   2. Derive the key-material-free `row_epoch_held` OBS boolean (Decision 5):
+   *      "does the holder hold the row's claimed epoch?" — the key_id VALUE is
+   *      never logged, only this boolean.
+   */
+  holdsKeyId(keyId: string): boolean {
+    return this.#keys.has(keyId);
+  }
+
+  /**
    * The LIVE by-reference key buffer, or `null` when NO live key is held. A
    * retired-only holding state returns null here — the seal path fails CLOSED
    * (never seals under a retired key) while reads still work via `trialOpen`.
