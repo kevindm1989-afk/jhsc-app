@@ -753,6 +753,13 @@ export async function wrapMemberInViaProduction(opts: {
   // state can be populated with retired-only keys and still have no live sealing
   // key (F182-2 fail-closed seal gate).
   if (!holder.hasLiveKey()) {
+    // F-VAL-1(b) Finding 1 — snapshot the monotonic wipe-generation latch BEFORE
+    // the Step-1 unwrap fetch. A session-end wipe (panic / 401 / sign-out /
+    // page-unload) landing during the await below empties the holder and ticks
+    // this counter (even on an EMPTY holder). The counter — NOT isPopulated() —
+    // is the discriminator: a mid-await-wiped EMPTY holder is byte-identical to a
+    // never-populated one, so only the counter can tell them apart.
+    const gen = holder.wipeGeneration();
     let unwrapped: UnwrapCommitteeDataKeyResult;
     try {
       unwrapped = await unwrapCommitteeDataKeyViaProduction({
@@ -768,6 +775,15 @@ export async function wrapMemberInViaProduction(opts: {
     }
     switch (unwrapped.status) {
       case 'ok':
+        // F-VAL-1(b) Finding 1 — re-check the latch immediately before install
+        // (NO `await` between this check and the set() below). A changed value
+        // means a session-end wipe landed mid-unwrap: set() would RESURRECT the
+        // just-wiped live key, which is then sealed + POSTed off-device. Fail
+        // closed to `data_key_unwrap_failed` (the same typed failure this branch
+        // returns on unwrap failure) — do NOT set(), do NOT proceed to seal/POST.
+        if (holder.wipeGeneration() !== gen) {
+          return { status: 'failed', reason: 'data_key_unwrap_failed' };
+        }
         holder.set({
           data_key: unwrapped.data_key,
           key_id: unwrapped.key_id,

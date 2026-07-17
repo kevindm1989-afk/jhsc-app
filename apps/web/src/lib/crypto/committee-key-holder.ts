@@ -105,6 +105,18 @@ export class CommitteeKeyHolder {
   #keys: Map<string, HeldKey> = new Map();
   #liveKeyId: string | null = null;
 
+  // F-VAL-1(b) — the monotonic wipe-generation latch (threat-model §3.18 F-183-B
+  // CLOSURE). Advances by exactly one inside `wipe()` under ALL FIVE session-end
+  // triggers (each routes through `wipe()`), and does so EVEN ON AN EMPTY holder.
+  // A read composition snapshots this before its fetch `await` and re-checks it
+  // immediately before installing keys (`populate()` / `set()`); a change means a
+  // session-end wipe landed mid-await, so the install is abandoned rather than
+  // resurrecting the just-wiped key map. The counter — not `isPopulated()` — is
+  // the discriminator: an empty holder wiped mid-await is byte-identical to a
+  // never-populated one. NON-wipe mutations (`populate` / `set` /
+  // `onKeyRotationObserved` / `redesignateLiveIfHeld`) NEVER advance it.
+  #wipeGeneration = 0;
+
   // -----------------------------------------------------------------------
   // Multi-epoch surface (ADR-0030 Decision 6 / F182-2)
   // -----------------------------------------------------------------------
@@ -253,6 +265,27 @@ export class CommitteeKeyHolder {
     }
     this.#keys.clear();
     this.#liveKeyId = null;
+    // F-VAL-1(b): advance the monotonic latch on EVERY wipe — including a wipe on
+    // an already-empty holder — so a composition's mid-await snapshot/re-check can
+    // detect a session-end wipe that landed during a fetch and refuse to resurrect
+    // the key map. This is the SOLE mutation of `#wipeGeneration`.
+    this.#wipeGeneration += 1;
+  }
+
+  /**
+   * F-VAL-1(b) — the current monotonic wipe generation (threat-model §3.18
+   * F-183-B CLOSURE). READ-ONLY: reading does NOT mutate it; only `wipe()`
+   * advances it (by one, under every session-end trigger, even on an empty
+   * holder). A read composition snapshots this at entry — before its disclosure
+   * fetch `await` — and re-checks it immediately before any `populate()` / `set()`
+   * install; a changed value means a session-end wipe (sign-out / 401 / panic /
+   * expiry / page-unload) landed mid-await, so the install MUST be abandoned
+   * (fail closed to `session_expiry`) rather than resurrect the just-wiped keys.
+   * The counter is the discriminator, NOT `isPopulated()`: a single-live `set()`
+   * on an EMPTY holder wiped mid-await is byte-identical to a never-populated one.
+   */
+  wipeGeneration(): number {
+    return this.#wipeGeneration;
   }
 
   // -----------------------------------------------------------------------

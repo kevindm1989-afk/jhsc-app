@@ -165,6 +165,9 @@ async function escalateToAllEpochs(
   if (guard.used) return { status: 'already' };
   guard.used = true; // BOUND: spent synchronously BEFORE the await (no re-entry)
   const { client, localIdentity, keyHolder, user_id } = args;
+  // F-VAL-1(b) — snapshot the wipe generation at entry, BEFORE the fetch `await`,
+  // re-checked immediately before the populate() install below.
+  const gen = keyHolder.wipeGeneration();
   const all = await unwrapAllCommitteeKeysViaProduction({ client, localIdentity, user_id });
   if (all.status === 'needs_recovery') return { status: 'needs_recovery' };
   if (all.status === 'failed') {
@@ -174,14 +177,14 @@ async function escalateToAllEpochs(
     }
     return { status: 'failed', reason: all.reason, http: all.http };
   }
+  // F-VAL-1(b) — re-check the wipe latch immediately before installing. A
+  // session-end wipe (panic / 401 / page-unload) that landed during the fetch
+  // `await` above advanced #wipeGeneration; letting populate() resume would
+  // RESURRECT the just-wiped key map. Fail closed to session_expiry, do NOT
+  // install, and leave the holder empty (never half-populated).
+  if (keyHolder.wipeGeneration() !== gen) return { status: 'session_expiry' };
   // status === 'ok'. Re-populate ONLY when the fetch brings in a not-yet-held
   // epoch (F-145-C ADD-not-wipe); a no-new-epoch fetch is a pure no-op.
-  //
-  // F-VAL-1(b) (accepted pre-existing residual): a panic-wipe / 401 / unload
-  // firing during the escalation fetch `await` above can resurrect the just-
-  // wiped key map when this populate() resumes. The tracked fast-follow is a
-  // uniform wipe-generation latch; do NOT paper over it with an `isPopulated()`
-  // re-check here (a boolean is a FALSE-negative once populate() re-installs).
   const addsNewEpoch = all.entries.some((e) => !keyHolder.holdsKeyId(e.key_id));
   if (addsNewEpoch) keyHolder.populate(all.entries);
   return { status: 'escalated' };
@@ -269,6 +272,9 @@ async function ensureHolderPopulated(
     // a second `get_all_key_wraps` (the "exactly one all-wraps RPC per op"
     // bound). In seal mode the guard is a throwaway, so this is a harmless set.
     guard.used = true;
+    // F-VAL-1(b) — snapshot the wipe generation BEFORE the self-heal fetch
+    // `await`, re-checked immediately before the populate() install below.
+    const gen = keyHolder.wipeGeneration();
     const all = await unwrapAllCommitteeKeysViaProduction({ client, localIdentity, user_id });
     if (all.status === 'needs_recovery') return { status: 'needs_recovery' };
     if (all.status === 'failed') {
@@ -278,6 +284,11 @@ async function ensureHolderPopulated(
       }
       return { status: 'failed', reason: all.reason, http: all.http };
     }
+    // F-VAL-1(b) — re-check before install: a session-end wipe (401 / panic /
+    // page-unload) that landed during the self-heal fetch advanced
+    // #wipeGeneration; do NOT let populate() resurrect the just-wiped map. Fail
+    // closed to session_expiry, leaving the holder empty (never half-populated).
+    if (keyHolder.wipeGeneration() !== gen) return { status: 'session_expiry' };
     // status === 'ok' — hand every epoch's plaintext key to the holder BY
     // REFERENCE (multi-epoch: retained + new-live). populate(), never set().
     keyHolder.populate(all.entries);
@@ -294,6 +305,13 @@ async function ensureHolderPopulated(
   // Lazy unwrap (Decision 2 / PR1). The unwrap composition probes again, which
   // is fine — the probe is cheap + the server emits no audit on the metadata
   // read. The disclosure RPC fires here for the first time this session.
+  //
+  // F-VAL-1(b) — snapshot the wipe generation BEFORE the single-live fetch
+  // `await`, re-checked immediately before the set() install below. This is the
+  // CRITICAL counter-not-isPopulated case: the holder is EMPTY before AND right
+  // after a mid-await wipe, so only the monotonic counter can distinguish
+  // "never populated" from "wiped".
+  const gen = keyHolder.wipeGeneration();
   const unwrap: UnwrapCommitteeDataKeyResult = await unwrapCommitteeDataKeyViaProduction({
     client,
     localIdentity,
@@ -325,6 +343,13 @@ async function ensureHolderPopulated(
     }
     return { status: 'failed', reason: unwrap.reason, http: unwrap.http };
   }
+  // F-VAL-1(b) — re-check before install: a session-end wipe (page-unload /
+  // panic / 401) that landed during the single-live fetch advanced
+  // #wipeGeneration. set() would resurrect the just-wiped key on an EMPTY holder
+  // (isPopulated() is false in BOTH the never-populated and the wiped-mid-await
+  // cases, so only the counter can tell them apart). Fail closed to
+  // session_expiry, leaving the holder empty (never half-populated).
+  if (keyHolder.wipeGeneration() !== gen) return { status: 'session_expiry' };
   // status === 'ok' — hand the plaintext key to the holder BY REFERENCE
   // (Decision 1: single buffer; the holder owns the wipe lifecycle).
   keyHolder.set({
