@@ -74,6 +74,32 @@ type SetRolesResult = OpOk<null> | OpErr;
 type RemoveResult = OpOk<string> | OpErr;
 type ReactivateResult = OpOk<null> | OpErr;
 
+// F182-6 / ADR-0030 Amendment C — the rotation status union the rotation-capable
+// client returns (structural MIRROR of the card's local RotationResult). The card
+// only reads `.status` on the `ok` case, so the handle/count fields are optional
+// here. Its mere PRESENCE on the client un-gates the Remove CTA (VC-1 pure-presence
+// gate — CommitteeManageMemberCard.svelte:258); production ALWAYS wires the crypto
+// deps on the /committee route, so these sibling fakes are rotation-capable too.
+type RotationResult =
+  | {
+      status: 'ok';
+      rotation_id?: string;
+      new_key_id?: string;
+      members_rewrapped_count?: number;
+      pending_members?: string[];
+    }
+  | {
+      status: 'ok_with_pending';
+      rotation_id: string;
+      new_key_id: string;
+      members_rewrapped_count: number;
+      pending_members: string[];
+    }
+  | { status: 'orphaned'; rotation_id: string; new_key_id: string }
+  | { status: 'incomplete'; rotation_id: string; new_key_id: string; pending_members: string[] }
+  | { status: 'cannot_resume_not_holder'; rotation_id: string; new_key_id: string }
+  | { status: 'failed'; reason: string; http?: number };
+
 const ACTOR = 'aaaa1111-0000-4000-8000-00000000self';
 const OTHER = 'bbbb2222-0000-4000-8000-0000000other';
 const REMOVED = 'cccc3333-0000-4000-8000-000000removd';
@@ -160,21 +186,39 @@ interface ManageCalls {
   setRoles: Array<{ target_user_id: string; roles: string[]; second_approver_id?: string | null }>;
   removeMember: Array<{ target_user_id: string; second_approver_id?: string | null }>;
   reactivateMember: Array<{ target_user_id: string }>;
+  rotateOnRemoval: Array<{
+    removed_member_id: string;
+    remaining_members: ReadonlyArray<{ user_id: string }>;
+    resume?: { rotation_id: string; new_key_id: string };
+  }>;
 }
 
 function fakeClient(opts: {
   setRoles?: Array<SetRolesResult | Promise<SetRolesResult>>;
   remove?: Array<RemoveResult | Promise<RemoveResult>>;
   reactivate?: Array<ReactivateResult | Promise<ReactivateResult>>;
+  rotate?: Array<RotationResult | Promise<RotationResult>>;
   throwOn?: 'setRoles' | 'remove' | 'reactivate';
 }) {
-  const calls: ManageCalls = { setRoles: [], removeMember: [], reactivateMember: [] };
+  const calls: ManageCalls = {
+    setRoles: [],
+    removeMember: [],
+    reactivateMember: [],
+    rotateOnRemoval: []
+  };
   let si = 0;
   let ri = 0;
   let ai = 0;
+  let roti = 0;
   const setQ = opts.setRoles ?? [{ ok: true, data: null }];
   const remQ = opts.remove ?? [{ ok: true, data: GRACE_ISO }];
   const reaQ = opts.reactivate ?? [{ ok: true, data: null }];
+  // F182-6 (ADR-0030 Amd C / VC-1) — a rotation-capable client. Its PRESENCE
+  // un-gates the Remove CTA (the card's pure-presence gate), matching production:
+  // the /committee route ALWAYS wires the crypto deps. Default: a clean
+  // `{ status: 'ok' }` so a successful NON-SELF removal auto-rotates and reaches
+  // the `committee-manage-rotation-done` terminal.
+  const rotQ = opts.rotate ?? [{ status: 'ok' } as RotationResult];
   const client = {
     setRoles: async (input: ManageCalls['setRoles'][number]) => {
       calls.setRoles.push(input);
@@ -190,6 +234,10 @@ function fakeClient(opts: {
       calls.reactivateMember.push(input);
       if (opts.throwOn === 'reactivate') throw new Error('boom');
       return reaQ[Math.min(ai++, reaQ.length - 1)];
+    },
+    rotateOnRemoval: async (input: ManageCalls['rotateOnRemoval'][number]) => {
+      calls.rotateOnRemoval.push(input);
+      return rotQ[Math.min(roti++, rotQ.length - 1)];
     }
   };
   return { client, calls };
@@ -349,12 +397,16 @@ describe('P1-8e [edge] per-row affordances keyed off badgeKind', () => {
 // ===========================================================================
 
 describe('P1-8e [F-181 :4046] terminal `done` renders ONLY on a clean server return', () => {
-  it('a clean success (no raised reason) → `done`, and NOT any denial/failed state', async () => {
+  it('a clean NON-SELF success → the rotation-done terminal, and NOT any denial/failed state', async () => {
     const built = fakeClient({ remove: [{ ok: true, data: GRACE_ISO }] });
     renderCard({ member: ROW_OTHER_MEMBER, isSelf: false, client: built.client, calls: built.calls });
     const modal = await openRemoveModal(OTHER);
     await fireEvent.click(removeConfirm(modal));
-    await screen.findByTestId('committee-manage-done');
+    // F182-6 (ADR-0030 Amd C): a clean OTHER-member removal AUTO-ROTATES the
+    // committee key in the same action, so the server-truthed success terminal is
+    // the rotation-done state — NOT the governance `done` (self-removal-only) one.
+    await screen.findByTestId('committee-manage-rotation-done');
+    expect(screen.queryByTestId('committee-manage-done')).toBeNull();
     expect(screen.queryByTestId('committee-manage-4eyes')).toBeNull();
     expect(screen.queryByTestId('committee-manage-last-co-chair')).toBeNull();
     expect(screen.queryByTestId('committee-manage-failed')).toBeNull();
@@ -396,18 +448,20 @@ describe('P1-8e [F-181 :4046] terminal `done` renders ONLY on a clean server ret
     expect(screen.queryByTestId('committee-manage-done')).toBeNull();
   });
 
-  it('while the RPC is in flight the card is `submitting`, NOT optimistically `done`', async () => {
+  it('while the RPC is in flight the card is `submitting`, NOT optimistically a success terminal', async () => {
     const d = deferred<RemoveResult>();
     const built = fakeClient({ remove: [d.promise] });
     renderCard({ member: ROW_OTHER_MEMBER, isSelf: false, client: built.client, calls: built.calls });
     const modal = await openRemoveModal(OTHER);
     await fireEvent.click(removeConfirm(modal));
-    // Pending: the loading state is shown, but there is NO premature `done`.
+    // Pending: the loading state is shown, but there is NO premature success.
     await screen.findByTestId('committee-manage-submitting');
+    expect(screen.queryByTestId('committee-manage-rotation-done')).toBeNull();
     expect(screen.queryByTestId('committee-manage-done')).toBeNull();
-    // Only once the server confirms does `done` appear.
+    // Only once the server confirms (removeMember ok → auto-rotation ok) does the
+    // rotation-done success terminal appear (F182-6 auto-rotate on NON-SELF removal).
     d.resolve({ ok: true, data: GRACE_ISO });
-    await screen.findByTestId('committee-manage-done');
+    await screen.findByTestId('committee-manage-rotation-done');
   });
 
   it('a clean success signals the parent to re-fetch the roster (no optimistic local flip)', async () => {
@@ -430,7 +484,9 @@ describe('P1-8e [F-181 :4046] terminal `done` renders ONLY on a clean server ret
     }
     const modal = await openRemoveModal(OTHER);
     await fireEvent.click(removeConfirm(modal));
-    await screen.findByTestId('committee-manage-done');
+    // F182-6: a clean NON-SELF removal auto-rotates → the rotation-done terminal is
+    // where the server-truthed refetch signal fires (never mid-flight, F-181).
+    await screen.findByTestId('committee-manage-rotation-done');
     // The refetch signal fired (callback prop OR the `changed` event).
     await waitFor(() => expect(onChanged.mock.calls.length + eventFired).toBeGreaterThanOrEqual(1));
   });
@@ -732,26 +788,87 @@ describe('P1-8e [F-160] blocking/error copy names no other member', () => {
 });
 
 // ===========================================================================
-// FINDING 6 (F-182 :4091) — remove copy is honest about the NON-crypto limit.
+// FINDING 6 — remove-confirm copy honesty.
+//
+// RECONCILED for F182-6 (ADR-0030 Amd C / AC-C12): under AUTO-ROTATE the OLD
+// assertion ("does not rotate the shared key") is now FALSE — removal DOES rotate
+// the committee key. This render-level assertion is the sibling of the stale
+// i18n-catalog assertion the ADR calls the live-contradiction BLOCKER; it is
+// replaced here with the F-189 forward-secrecy contract so the implementer's copy
+// rewrite is not blocked by an unsatisfiable test. RED until the copy is rewritten:
+// the current en-CA.json still renders "does not rotate …", so the "from now on"
+// match fails until F182-6 lands.
 // ===========================================================================
 
-describe('P1-8e [F-182 :4091] remove-confirm copy states the non-cryptographic limit, no over-claim', () => {
-  it('the rendered remove-confirm UI states the honest limit and the "removes membership" framing', async () => {
+const FORBIDDEN_REVOCATION_RENDER =
+  /revokes? access to committee data|can no longer decrypt|loses? access to (the )?data|cryptographically remove|removes? access to (existing|all) committee data/i;
+
+describe('P1-8e [F-189/AC-C12] remove-confirm copy states forward-secrecy ("from now on"), never absolute revocation', () => {
+  it('the rendered remove-confirm UI states the forward-secrecy cutover + the retroactive limit', async () => {
     renderCard({ member: ROW_OTHER_MEMBER, isSelf: false });
     const modal = await openRemoveModal(OTHER);
     const text = modal.textContent ?? '';
-    // Honest limit (does not rotate the key / not a cryptographic lockout / an admin step).
-    expect(text).toMatch(/does not rotate|not a cryptographic lockout|administrative step/i);
-    // Framed as a MEMBERSHIP removal.
-    expect(text).toMatch(/removes .*membership|committee membership/i);
+    // Honest forward-secrecy: rotating the key protects data filed FROM NOW ON,
+    // and cannot retroactively protect earlier records.
+    expect(text).toMatch(/from now on/i);
+    expect(text).toMatch(/cannot retroactively protect earlier records/i);
   });
 
-  it('the rendered remove-confirm UI contains NO data-access-revocation claim', async () => {
+  it('the rendered remove-confirm UI contains NO absolute/retroactive data-access-revocation claim', async () => {
     renderCard({ member: ROW_OTHER_MEMBER, isSelf: false });
     const modal = await openRemoveModal(OTHER);
     const text = modal.textContent ?? '';
-    expect(text).not.toMatch(
-      /revokes? access to committee data|can no longer decrypt|loses? access to (the )?data|cryptographically remove/i
+    expect(text).not.toMatch(FORBIDDEN_REVOCATION_RENDER);
+  });
+});
+
+// ===========================================================================
+// Adversarial F2 (F-189 honest-copy BLOCKER, round-1 closure fix). `submitRemove`
+// SKIPS the key rotation for a SELF removal (the leaver cannot run it), yet the
+// remove-confirm modal renders `committee.remove.modal.limit` ("Removing {name}
+// rotates the committee key … from now on …") UNCONDITIONALLY — promising a
+// rotation the self path never performs. The fix renders a self variant
+// `committee.remove.modal.limit_self` when `isSelf` (key NOT rotated from this
+// device; a remaining worker co-chair must rotate it). RED today: the isSelf=true
+// modal still renders the forward-secrecy `modal.limit`, so the "rotates the
+// committee key" / "from now on" / "protected from" claims are present.
+//
+// This is the RENDER-level check the context-free i18n-catalog test cannot make.
+// ===========================================================================
+
+describe('P1-8e [Adversarial F2/F-189] self-removal confirm copy does not over-claim a rotation the self path skips', () => {
+  // A self member (worker_member only) — a self-remove of a non-co-chair reveals no
+  // 4-eyes picker, keeping the modal copy under test uncluttered. This describe owns
+  // this fixture.
+  const ROW_SELF_MEMBER = makeRow({ user_id: ACTOR, roles: ['worker_member'], display_name: NAME_SELF });
+
+  it('isSelf=true remove-confirm copy makes NO rotation claim, and says a remaining co-chair must rotate', async () => {
+    renderCard({ member: ROW_SELF_MEMBER, isSelf: true });
+    const modal = await openRemoveModal(ACTOR);
+    const text = modal.textContent ?? '';
+    // The self path rotates nothing from this device — the confirm step must not promise it.
+    expect(text, 'self-confirm must not claim the removal rotates the key').not.toMatch(
+      /rotates the committee key/i
+    );
+    expect(text, 'self-confirm must not claim a forward-secrecy cutover ("from now on")').not.toMatch(
+      /from now on/i
+    );
+    expect(text, 'self-confirm must not claim the removed device is "protected from" anything').not.toMatch(
+      /protected from/i
+    );
+    // It DOES convey a remaining worker co-chair must still rotate the key.
+    expect(text, 'self-confirm must say a remaining co-chair still needs to rotate').toMatch(
+      /remaining .*co-?chair.*rotate|co-?chair.*must .*rotate/i
+    );
+  });
+
+  it('CONTROL — isSelf=false remove-confirm copy is UNCHANGED (still states the "from now on" forward-secrecy cutover)', async () => {
+    renderCard({ member: ROW_OTHER_MEMBER, isSelf: false });
+    const modal = await openRemoveModal(OTHER);
+    const text = modal.textContent ?? '';
+    expect(text, 'the non-self path still gets the forward-secrecy modal.limit copy').toMatch(/from now on/i);
+    expect(text, 'the non-self path still frames the removal as rotating the committee key').toMatch(
+      /rotates the committee key/i
     );
   });
 });

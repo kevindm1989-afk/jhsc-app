@@ -10559,3 +10559,177 @@ F182-4 MUST route to the **threat-modeler** (with security-reviewer) BEFORE the 
 Continue threat-model.md §3.18 (F-185 family). F-182 RETIRE stays at F182-8. The orchestrator routes from here.
 
 ---
+
+# ADR-0030 Amendment C (2026-07-19) — F182-6 removal-ceremony UI integration: wiring `rotateCommitteeKeyOnRemovalViaProduction` into `CommitteeManageMemberCard`
+
+**Status:** Proposed (design only — no component code in this entry). **Human gate: HG-KEY-ROTATION** — F182-6 is one of the four PRs the parent ADR-0030 pins for **security-reviewer + threat-modeler co-sign, never auto-merge** (ADR-0030 compliance box `[ ]` line; ADR-0030 Amendment B human-gate list; constraints.md Human Gates "Production deploys of changes touching auth … or personal data"; hard rule 5). This amendment changes the **confidentiality posture of member removal** at the UI seam (removal now runs the forward-secrecy rotation in the same action) and edits the **honest-copy contract** that a string test currently pins — both threat-modeler-load-bearing. This entry does NOT edit `.context/constraints.md`.
+
+**Decider(s):** architect (design only — no application code). **Builds on (do NOT re-derive):** ADR-0030 Decisions 1–7 (the four-part flow, forward-secrecy-only residual F-189, multi-epoch anti-lockout, "any active co-chair completes / fails OPEN" F-187); **ADR-0030 Amendment B** (the `rotateCommitteeKeyOnRemovalViaProduction` composition + its fail-loud union + the Ordering-B ruling that the administrative removal DECISION runs BEFORE the rotation and supplies `remaining_members`); ADR-0029 P1-8e (the `CommitteeManageMemberCard` state machine + a11y packet this extends); threat-model.md §3.18 **F-189** (honest-copy contract, lines ~4249-4253), **F-187** (hostile-co-chair fail-open), **F-181** (anti-optimism / server-truthed terminals), **F-160** (blocking copy names no member), **F-176** (no raw enum / PI / key material in UI or logs). **The product decision is FIXED and not relitigated here:** AUTO-ROTATE ON REMOVAL — a co-chair removing a member runs the rotation in the same action; the removed member loses FUTURE access immediately; past records they already held a key for stay readable (F-189, accepted).
+
+## Discovery findings (ground truth — verified this pass; file:line)
+
+- **The composition is built and exported** (`apps/web/src/lib/crypto/production-flows.ts:1053` `rotateCommitteeKeyOnRemovalViaProduction`; union type `:977-999`; re-exported from `crypto/index.ts`). It takes `{ client:SupabaseT07Client, holder:CommitteeKeyHolder, localIdentity:LocalIdentityStore, user_id, actor_public_key:Uint8Array, removed_member_id, remaining_members:ReadonlyArray<{user_id}>, resume?:{rotation_id,new_key_id} }` and is **hermetic** — it fetches NO roster; the caller supplies `remaining_members` (ADR-0030 Amendment B `:1006`). It internally runs rotate → revoke (purge-early) → self-wrap-first → install epoch → re-wrap loop → finalize → zeroize, and NEVER returns `ok` without a landed self-wrap AND a successful `finalize`.
+- **The card is a pure structural-client consumer** (`CommitteeManageMemberCard.svelte`). It injects `client: ManageClient` = `{ setRoles, removeMember, reactivateMember }` (`:57-70`) — tests inject a fake recording inputs. `submitRemove()` (`:462`) calls `client.removeMember(...)`; `applyResult()` (`:491`) routes `ok`→`enterDone`, `4eyes_required`→`enterFourEyes`, `last_co_chair`→`enterLastCoChair`, else→`enterFailed`. Phase (`:104`) = `'form'|'submitting'|'done'|'fourEyes'|'lastCoChair'|'failed'`. The card holds **no crypto deps** — no holder, no localIdentity, no t07 client, no `actor_public_key`.
+- **The roster already threads the crypto deps for the SIBLING grant card** (`CommitteeRoster.svelte:81-85` `grantClient:SupabaseT07Client` / `grantHolder:CommitteeKeyHolder` / `grantLocalIdentity:LocalIdentityStore`), and wraps the manage ops in `this`-preserving arrows in the attach block (`:504-520`, the ADV-1 pattern). `currentUserId` (`:102`) and `eligibleApprovers` (`:103-105`) are computed once for the whole roster from the already-fetched `rows`. **`remaining_members` is a pure derivation over `rows` — no new fetch.**
+- **`actor_public_key` is a NEW dependency the grant card never needed.** `wrapMemberInViaProduction` (the grant path) derives its seal target from the DISCLOSED member pubkey; it never needs the actor's own pubkey. The rotation composition DOES — step-4 self-wrap seals a fresh key to `actor_public_key` (`production-flows.ts:1165`). `LocalIdentityStore` exposes only `getIdentityPrivateKey` (`key-store.ts:129`); the X25519 public half is `crypto_scalarmult_base(privateKey)` (the existing pattern at `recovery-blob.ts:232`). **This derivation touches the private key and MUST live in the crypto/orchestration layer, never in the Svelte component** (ADR-0003 Invariant 1 — key material stays out of presentational code).
+- **THE BLOCKER (a live contradiction, not a hypothetical).** The current F-182 honest copy is now FALSE. The card comment `:903-908` says removal "does NOT rotate the shared committee key." Worse, the **string test `apps/web/test/T21/committee-manage-i18n-catalog.test.ts` HARD-ASSERTS it**: `:231` requires `committee.remove.modal.limit` to match `/does not rotate the shared (committee )?key|not a cryptographic lockout/i` AND `/administrative step/i`; `:249-254` requires `committee.remove.done.body` to frame a membership grace. Under AUTO-ROTATE these assertions are now WRONG. **F182-6 MUST replace both the copy and those test assertions** with the F-189 forward-secrecy contract. This is called out loudly below and is AC-C12.
+- **F182-5 (`committee_rotation_state_for_cochair`) is NOT built.** Cross-session resume (a fresh co-chair detecting + resuming an abandoned rotation) is DEFERRED. F182-6 ships happy-path + in-session retry/resume + honest error surfacing; the copy must NOT promise cross-session resume yet.
+
+## Decision C1 — composition, ordering, and the atomicity model (resolves OPEN question 1)
+
+**Ordering inside the removal action (fixed by ADR-0030 Amendment B):** `client.removeMember(...)` (governance: membership flip + inline 4-eyes + last-co-chair guard) runs FIRST. The rotation runs **only** if `removeMember` returns `ok`. Confirmed guard: on `4eyes_required` / `last_co_chair` / any `failed`, **no member was removed**, so the rotation MUST NOT run — the card takes the existing `fourEyes` / `lastCoChair` / `failed` terminals unchanged (AC-C1). The rotation is invoked with `remaining_members` supplied by the caller (Decision C3), `removed_member_id = member.user_id`.
+
+**The atomicity model — say it plainly.** The removal is an **atomic, committed, server-truthed** fact the instant `removeMember` returns `ok`. The rotation is a **best-effort, resumable follow-through composed in the SAME user action but NOT the same transaction** (it cannot be — the re-wrap is a client-side seal; ADR-0003 keeps plaintext key material off the server). Therefore, once past `removeMember` ok, **"the member is removed" is ALWAYS true**, and the UI layers onto it exactly one of two claims about the crypto: **"…and their access to future data is cut"** (rotation reached `finalize`) or **"…but the key rotation is not yet complete — [resume/re-run]"** (it did not). The partial state is honestly representable: the governance outcome and the crypto outcome are two distinct, separately-surfaced truths. **No rotation terminal may imply the removal itself failed, and no incomplete/failed/orphaned rotation may claim future access is already cut.**
+
+Because the membership change is server-truth the moment `removeMember` returns ok, the roster refetch (`onChanged()`) fires when the card reaches ANY rotation terminal — success OR loud — so the roster shows the member removed (and the `has_live_wrap` badges for still-pending remaining members) regardless of the rotation outcome (AC-C10). It never fires mid-flight (F-181 anti-optimism preserved).
+
+## Decision C2 — the extended Phase state machine (resolves OPEN question 2)
+
+Extend `Phase` with a `rotating` submitting sub-phase and five rotation terminals. The five existing phases are unchanged; the removal path forks after `removeMember` ok.
+
+```
+Phase =
+  | 'form' | 'submitting' | 'done' | 'fourEyes' | 'lastCoChair' | 'failed'   // existing
+  | 'rotating'              // submitting sub-phase: removeMember ok, rotation in flight
+  | 'rotationDone'          // SUCCESS terminal (ok | ok_with_pending)
+  | 'rotationIncomplete'    // LOUD terminal + Resume affordance (incomplete)
+  | 'rotationOrphaned'      // LOUD terminal + Re-run affordance (orphaned)
+  | 'rotationCannotResume'  // LOUD terminal, no in-session completion (cannot_resume_not_holder)
+  | 'rotationFailed'        // LOUD terminal + per-reason copy (failed{reason})
+```
+
+Transient state the card must carry across a resume/retry (server-truthed, F-181): `removalCommitted:boolean` (set true on `removeMember` ok — so retries never re-remove), `rotationResume:{rotation_id,new_key_id}|null` and `rotationPending:string[]` (carried from an `incomplete` result), and the mapped `rotationFailedBodyKey`.
+
+**Every union member → exact UI outcome, layered on a successful governance removal:**
+
+| Union return | Phase | LOUD / informational | Copy claim (layered on "member removed") | Affordances |
+|---|---|---|---|---|
+| `ok` | `rotationDone` | SUCCESS (`role="status"`, green) | "Member removed. The committee key was rotated — this cuts their access to committee data filed **from now on**." | Close. `onChanged()`. |
+| `ok_with_pending` | `rotationDone` | SUCCESS + **INFORMATIONAL** note (`role="status"`, green + blue info callout — **NOT an alert, NOT an error**) | Same success PLUS: "N remaining member(s) were skipped (offline or not yet enrolled). They keep access to earlier records and can be granted the current key later." (COUNT only, names no member — F-160.) | Close. `onChanged()`. |
+| `orphaned` | `rotationOrphaned` | **LOUD** (`role="alert"`, red) | "Member removed, but the key rotation did not complete and must be re-run. Their access to future data is **not yet cut**." | **Re-run rotation** (fresh: `resume` undefined, full `remaining_members`) + Close. `onChanged()`. |
+| `incomplete` | `rotationIncomplete` | **LOUD** (`role="alert"`, red/amber) | "Member removed. The key rotation is incomplete — some remaining members don't yet hold the new key. **Existing records are still readable.**" (Does NOT claim future access is cut.) | **Resume rotation** (`resume:{rotation_id,new_key_id}` + `remaining_members = pending_members` from the result) + Close. `onChanged()`. |
+| `cannot_resume_not_holder` | `rotationCannotResume` | **LOUD** (`role="alert"`, red) | "Member removed. This rotation can't be completed from here (its new key isn't held on this device). Another active co-chair who holds the new key must complete or abandon it." (F-187 fail-open, stated honestly.) | Close (primary). **No in-session completion promised.** `onChanged()`. |
+| `failed{reason}` | `rotationFailed` | **LOUD** (`role="alert"`, red) — **distinct from the governance `failed`** | "Member removed. The key rotation couldn't start/complete. Their access to future data is **not yet cut.**" + per-reason line (mapped, never the raw enum — F-176). | Per-reason (below). `onChanged()`. |
+
+**`rotationFailed` per-reason mapping (401-vs-403 split preserved, F-176 never echoes the enum):**
+- `session_expiry` / `http===401` → "Your session expired — sign in and finish the rotation." Route to `/sign-in`. NOT an in-place retry.
+- `rls_denied` / `http===403` → "You're no longer an active co-chair; another co-chair must finish the rotation." Close. (This is the self-removal-adjacent case; see Decision C6.)
+- `needs_recovery` / `no_wrap` → "Restore your own committee-key access first, then rotate." Route to recovery. NOT retryable in place (a retry re-hits the same precondition).
+- `invalid_input` (422, bad actor pubkey) → generic non-retryable "couldn't start — contact support"; Close (a retry re-seals the identical bytes → identical failure; mirrors the grant card's `invalid_pubkey` non-retryable ruling).
+- `rotation_in_progress` / `decrypt_failed` / anything else → **Retry rotation** (fresh) enabled (transient).
+
+**`rotating` sub-phase** mirrors the existing `submitting` treatment: the affirmative CTA stays the SAME `<button>`, becomes `aria-busy`/`aria-disabled` naming the literal action ("Removing member and rotating key…"), and — because removal is already committed — its live-region announce states "Member removed. Rotating committee key…". Escape stays PROTECTED throughout `rotating` and through all five loud/`rotationDone` terminals (they require an explicit Close), extending the existing `onKeyDown` protected-modal set (`:575-588`). One deliberate focus move per state to the new terminal heading (mirrors `enterDone`/`enterFailed`). All of the existing a11y packet — portaled modal, focus trap, inert background, `onDestroy` background-unlock, server-truthed terminals — is preserved unchanged (AC-C11).
+
+## Decision C3 — `remaining_members` computation + deps threading (resolves OPEN question 3)
+
+**`remaining_members` = the roster's already-fetched `rows`, filtered to the active members who currently hold committee-key access, minus the removed member:**
+
+```
+remainingMembers = rows.filter(r =>
+  r.active && r.has_live_wrap && r.user_id !== <removed row user_id>
+).map(r => ({ user_id: r.user_id }))
+```
+
+Computed by the **roster** (it owns `rows`), passed to the card as a new prop `remainingMembers: ReadonlyArray<{user_id:string}> = []` (a sibling of `eligibleApprovers`). Rationale for the `has_live_wrap` gate (a deliberate design choice, flagged for threat-modeler): the re-wrap uses `wrapMemberInViaProduction`'s **machine-only** self-consistency assert (no fresh HUMAN fingerprint confirm — the human act was the removal, per ADR-0030 Amendment B). That is safe for members who were **already granted** (their original grant was human-confirmed once). A `pending_grant` / `awaiting_identity` member (`has_live_wrap===false`) was **never** granted — silently sealing the new key to them during a rotation would be granting committee access **without any human fingerprint confirm ever happening**. So they are EXCLUDED; they simply remain `pending_grant` for the new epoch and get the ordinary F-172 confirmed grant later. The composition still defensively classifies a stale `member_not_enrolled` into `pending_members` (AC-C15). Identity keys don't rotate, so `has_live_wrap===true ⟹ enrolled` — no separate `has_identity_key` filter needed.
+
+**Deps threading — do NOT put crypto deps on the presentational card.** The card must NOT receive `holder` / `localIdentity` / t07 client / `actor_public_key` as raw props (that leaks the crypto boundary into the Svelte component and bloats its test surface). Instead the roster threads them into a thin orchestration behind a **structural method on the injected `ManageClient`** (Decision C4). `actor_public_key` is derived **inside the crypto/orchestration layer** from `grantLocalIdentity.getIdentityPrivateKey(user_id)` → `crypto_scalarmult_base(priv)` (a small exported crypto helper, unit-tested in the crypto suite; the private buffer is `.fill(0)`'d after derivation) — **never in the component** (AC-C13). The rotation-capable manage card mounts ONLY when the three crypto deps are present (mirrors the grant-card `grantClient && grantHolder && grantLocalIdentity` attach guard, `:488`).
+
+## Decision C4 — the call seam (resolves OPEN question 4): a new structural `rotateOnRemoval` method on the injected client
+
+**Chosen:** add ONE method to the card's injected `ManageClient` structural type:
+
+```
+rotateOnRemoval: (input: {
+  removed_member_id: string;
+  remaining_members: ReadonlyArray<{ user_id: string }>;
+  resume?: { rotation_id: string; new_key_id: string };
+}) => Promise<RotateCommitteeKeyOnRemovalResult>;
+```
+
+`submitRemove()` becomes: `removeMember(...)` → on `ok`, set `removalCommitted=true`, `phase='rotating'`, then `client.rotateOnRemoval({ removed_member_id: member.user_id, remaining_members })` → map the union to the Decision-C2 terminal. The roster wires `rotateOnRemoval` in its attach block (`:504-520`) to a thin production orchestration `removeRotationOrchestration(deps)` that closes over `grantClient` / `grantHolder` / `grantLocalIdentity` / `currentUserId`, derives `actor_public_key`, and calls `rotateCommitteeKeyOnRemovalViaProduction`.
+
+- **Rejected: run the rotation inline in `submitRemove()` importing the composition + crypto deps into the card.** It would drag `holder` / `localIdentity` / `actor_public_key` derivation into a presentational Svelte component (ADR-0003 Invariant-1 smell), and every card test would have to stand up a full crypto-holder fake instead of a one-line union stub. Rejected.
+- **Rejected: fold rotation into `removeMember` (one client method).** It would hide the two distinct server truths (governance vs crypto) behind one return, defeating the honest partial-state surfacing of Decision C1/C2, and would break the existing `removeMember` contract (bare grace-ISO scalar) that the `done` copy interpolates. Rejected.
+- **Chosen seam wins because:** the card stays a pure structural-client consumer (tests inject `rotateOnRemoval: async () => ({ status:'incomplete', … })` and assert the terminal — no crypto in the card suite); all crypto-dep threading + pubkey derivation lives in the roster/orchestration (already the home of the grant deps + the ADV-1 arrow-wrap); and it mirrors the pattern the codebase already uses. **Reversibility: easy** (additive method + additive orchestration).
+
+## Decision C5 — retry/resume semantics honoring F-187 fail-open + the deferred F182-5 (resolves OPEN question 5)
+
+- **In-session, same co-chair (v1 scope):** `incomplete` → **Resume** re-invokes `rotateOnRemoval` with `resume:{rotation_id,new_key_id}` + `remaining_members = pending_members`; the composition continues from step-5 install and is idempotent (`ON CONFLICT DO NOTHING`) so re-running over already-wrapped members is a safe no-op. `orphaned` / retryable `failed` → **Re-run** re-invokes `rotateOnRemoval` FRESH (no `resume`, full `remaining_members`); a fresh `rotate` abandons the zero-wrap orphan epoch by minting the next epoch (ADR-0030 Decision 1; NEVER re-generate under the orphan `new_key_id`). **Every retry/resume path calls `rotateOnRemoval` ONLY — never `removeMember` again** (guarded by `removalCommitted`; AC-C5/C6/C8).
+- **F-187 fail-open, honestly bounded.** The rotation "fails open" toward completion — any active co-chair can complete it, and no single co-chair can veto/block it. But the ACTIONABLE affordance in v1 is **in-session** resume/retry. The `cannot_resume_not_holder` terminal states the fail-open principle ("another active co-chair who holds the new key must complete or abandon") but **does NOT wire a cross-session resume control** — that requires F182-5's `committee_rotation_state_for_cochair` read (detect an unfinalized rotation on a fresh co-chair session + its missing-wrap set), which is **NOT built**. The copy therefore must NOT promise "another co-chair will pick this up automatically" or "resume from your other device" — it states the fact and stops. When F182-5 lands, a `/committee`-level "a rotation is in progress — complete it" affordance is added (tracked to F182-5); F182-6 leaves the seam (the composition already accepts `resume`) without promising it (AC-C7).
+
+## Decision C6 — self-removal skips the in-session rotation (a discovered edge; flagged for threat-modeler + designer)
+
+A co-chair can self-remove (`isSelf` remove, `confirm_self`, `:227`). **The leaver's client CANNOT run the rotation**: after self-removal they are no longer an active member, so `rotate_committee_data_key`'s `_t07_gate_active_member` and `revoke_committee_member`'s self-revoke `4eyes_required` block both fire — the composition would return `failed{rls_denied,403}` / never revoke self. So on `isSelf` removal, the card **does NOT call `rotateOnRemoval`**; it surfaces the membership-removed terminal (the existing `done`) with copy that the committee key **still needs to be rotated by a remaining co-chair** to complete the revocation (the actionable surfacing of this for the remaining co-chair is F182-5, deferred). The existing `onDestroy` background-unlock already covers the self-removal case where the success refetch 403s and unmounts the card mid-modal (`:336-338`). This keeps the auto-rotate default honest (it applies to the dominant other-member removal) without shipping a structurally-impossible self-rotation. **Designer/threat-modeler decision flagged:** exact self-removal copy, and whether v1 shows any "rotation still pending" hint before F182-5.
+
+## Honest-copy contract (F-189) + the T21 test reconciliation (LOUD)
+
+New/edited `committee.*` i18n keys (via `$lib/i18n`, no hardcoded strings; en-CA only, fr-CA deferred). Proposed key namespace, mirroring the existing `committee.remove.*` / `committee.manage.*` convention:
+- `committee.remove.modal.limit` — **REWRITE.** Must now convey forward-secrecy: removing the member **rotates the committee key so it cuts their access to committee data filed FROM NOW ON; it cannot retroactively protect earlier records from someone who already had the key** (F-189 REQUIRED phrasing, threat-model §3.18 `:4249`). FORBIDDEN: "revokes access to committee data", "can no longer decrypt", "removes access to [existing/all] committee data" (`:4250`).
+- New rotation-terminal keys: `committee.remove.rotating.*`, `committee.remove.rotationDone.{heading,body}`, `committee.remove.rotationDone.pending_note` (count-interpolated), `committee.remove.rotationIncomplete.*` + `.resume_cta`, `committee.remove.rotationOrphaned.*` + `.rerun_cta`, `committee.remove.rotationCannotResume.*`, `committee.remove.rotationFailed.{heading, session_body, co_chair_body, needs_recovery_body, generic_body}` + `.retry_cta`, and the matching `a11y.committee.remove.rotation.*` live-region announces. All error/blocking copy names no member (F-160); `rotation_id`/`new_key_id` are opaque resume handles — never rendered, never logged (F-176).
+
+**The blocker, stated for the test-writer:** `apps/web/test/T21/committee-manage-i18n-catalog.test.ts:228-254` currently REQUIRES the remove copy to say "does not rotate the shared key" (`:231`) and frames `done.body` as a pure membership grace (`:249-254`). **Under AUTO-ROTATE these assertions are now false and MUST be replaced** with the F-189 forward-secrecy assertions (CONTAINS "from now on" / "cannot retroactively protect earlier records"; does NOT CONTAIN the forbidden absolute-revocation phrases). The `FORBIDDEN_REVOCATION` regex (`:224-225`) stays and still passes — "cuts access to committee data filed from now on" trips none of its alternatives. This is a **test-writer + designer coordination point**, not a silent edit; it is AC-C12. (Reactivate copy is OUT of F182-6 scope — F182-7 — but note the current `committee.reactivate.modal.wrap` retained-wrap copy is separately contradicted by the ADR-0030 Decision 5 purge and must be handled there.)
+
+## Acceptance criteria (test-writer consumes — RED-first)
+
+- **AC-C1 (guard — rotation never runs without a removal):** `removeMember` returning `4eyes_required` / `last_co_chair` / any `failed` → `rotateOnRemoval` is NEVER called (spy asserts zero calls); the card enters `fourEyes` / `lastCoChair` / `failed` exactly as today.
+- **AC-C2 (ordering + args):** `removeMember` `ok` (other-member) → `rotateOnRemoval` called EXACTLY ONCE, after `removeMember`, with `{ removed_member_id: member.user_id, remaining_members: <injected remainingMembers>, resume: undefined }`.
+- **AC-C3 (`ok` success):** rotation `ok` → `rotationDone` (`role="status"`); copy CONTAINS "from now on" and NO forbidden absolute-revocation phrase; `onChanged` fired exactly once; no optimistic flip before the union returns (F-181).
+- **AC-C4 (`ok_with_pending` is informational, not error):** rotation `ok_with_pending` → `rotationDone` with a `role="status"` pending note (count-based, no member name — F-160); the node is NOT `role="alert"`; `onChanged` fired.
+- **AC-C5 (`incomplete` LOUD + resume):** rotation `incomplete` → `rotationIncomplete` (`role="alert"`); a Resume control that calls `rotateOnRemoval` with `resume:{rotation_id,new_key_id}` and `remaining_members === pending_members` from the result; `removeMember` NOT called again; copy states existing records are still readable and does NOT claim future access is cut.
+- **AC-C6 (`orphaned` LOUD + re-run):** rotation `orphaned` → `rotationOrphaned` (`role="alert"`); a Re-run control that calls `rotateOnRemoval` FRESH (`resume` undefined, full `remaining_members`); `removeMember` NOT called again.
+- **AC-C7 (`cannot_resume_not_holder` LOUD, no completion promised):** → `rotationCannotResume` (`role="alert"`); copy states another active co-chair holding the new key must complete or abandon; NO cross-session-resume control is rendered (F182-5 deferred); Close primary; `removeMember` NOT called again.
+- **AC-C8 (`failed{reason}` LOUD, reason-mapped, 401/403 split):** rotation `failed` → `rotationFailed`, VISUALLY/copy DISTINCT from the governance `failed`; reason mapped to copy (raw enum never rendered — F-176); `session_expiry`/401 → sign-in route (not in-place retry); `rls_denied`/403 → co-chair-lost copy; `needs_recovery`/`no_wrap`/`invalid_input` → non-retryable recovery/close; `rotation_in_progress`/`decrypt_failed`/other → Retry-rotation (fresh) enabled; copy states the member IS removed and future access is not yet cut.
+- **AC-C9 (self-removal skips rotation):** `isSelf` remove `ok` → `rotateOnRemoval` NOT called; the terminal states a remaining co-chair must rotate the key; the `onDestroy` background-unlock still fires when the self-removal refetch 403s and unmounts the card.
+- **AC-C10 (server-truthed, refetch timing):** the row badge never flips before BOTH `removeMember` AND the rotation union return; `onChanged` fires only on reaching a terminal (governance terminal for non-ok removal; rotation terminal for every union member), never mid-flight.
+- **AC-C11 (a11y packet preserved):** `rotating` + every new terminal preserve the portaled modal, focus trap, protected-Escape (all loud/`rotationDone` terminals Escape-protected), one deliberate focus move to the new terminal heading, inert background, and the `rotating` CTA `aria-busy`; no regression to the P1-8e packet.
+- **AC-C12 (honest-copy contract + T21 reconciliation):** `committee.remove.modal.limit` + rotation-terminal keys CONTAIN "from now on" and the "cannot retroactively protect earlier records" sense; contain NONE of {"revokes access", "can no longer decrypt", "removes access to existing/all committee data"}; the stale T21 assertions requiring "does not rotate the shared key" / "administrative step" / membership-grace framing are REPLACED; all strings resolve via `committee.*` keys (no hardcoded strings, no `[[miss-marker]]`).
+- **AC-C13 (no key material / derivation in the component):** the union carries `{rotation_id,new_key_id,pending_members}` only (no key BYTES); `rotation_id`/`new_key_id` are never rendered and never logged; `actor_public_key` is derived in the crypto/orchestration layer (a crypto-suite unit test), never in the card; no `console.*`.
+- **AC-C14 (no silent no-rotate removal):** the remove CTA is offered ONLY when the injected `ManageClient` carries `rotateOnRemoval` (crypto deps wired); absent it, remove is not offered — never a silent membership-only removal under the old dishonest copy.
+- **AC-C15 (`remaining_members` set):** the roster-computed `remainingMembers` = active + `has_live_wrap` members EXCLUDING the removed member; a `pending_grant`/`awaiting_identity` (never-granted) row is EXCLUDED (not silently granted); the removed member is never in the set.
+
+## Reversibility
+
+- New `rotateOnRemoval` structural method + `removeRotationOrchestration` wrapper + `remainingMembers` prop: **easy** (additive; delete-to-revert).
+- Phase-machine extension (5 terminals + `rotating`): **easy** (additive states over the existing switch).
+- The honest-copy rewrite + T21 test reconciliation: **medium** (a string-tested contract change; the copy is directional — reverting to "does not rotate" would re-introduce the F-189 dishonesty, so it should not be reverted).
+- No new subprocessor, no new region (ca-central-1, ADR-0001), no new PI field, no ciphertext schema change, no new migration (F182-6 is UI-only; it consumes the already-built composition).
+
+## Compliance check
+
+- [x] ca-central-1 only; no new subprocessor / region / PI field / retention class (this is a UI seam over existing RPCs + the existing composition).
+- [x] ADR-0003 Invariants 1/4/5/6 — plaintext key material stays out of the Svelte component; `actor_public_key` derivation + the seal live in the crypto/orchestration layer; the card only ever handles opaque `rotation_id`/`new_key_id` handles + a status union.
+- [x] F-176 — raw reason enums mapped to copy (never echoed); no member PI / uid / key material in URL / storage / log; no `console.*`.
+- [x] F-189 honest-copy bound — removal copy states forward-secrecy-only ("cuts access from now on"), never absolute/retroactive revocation; the T21 string test is updated to enforce the NEW contract (AC-C12).
+- [x] F-181 anti-optimism — every terminal renders only from a server return (governance result, then rotation union); no optimistic badge flip; roster refetch is server-truthed.
+- [x] F-187 fail-open — resume/re-run affordances never let a single co-chair block completion; `cannot_resume_not_holder` routes to "another co-chair completes/abandons," honestly bounded to what v1 can deliver (no cross-session promise pre-F182-5).
+- [x] No edit to `.context/constraints.md`.
+- [ ] **HG-KEY-ROTATION** — security-reviewer + threat-modeler co-sign the F182-6 PR; never auto-merge (auth/PI path; changes removal's confidentiality posture + the honest-copy contract).
+
+## Designer decisions flagged (needs a designer + string ownership pass)
+
+1. Exact en-CA copy for the `committee.remove.modal.limit` rewrite + all rotation-terminal keys (must satisfy the F-189 CONTAINS/FORBIDDEN string tests verbatim).
+2. Self-removal terminal copy (Decision C6) — how loudly to state "a remaining co-chair must still rotate the key" before F182-5 provides the actionable surfacing.
+3. Visual differentiation of the governance `failed` vs the crypto `rotationFailed` (both red alerts) so the co-chair's next action is unambiguous.
+4. Whether the `ok_with_pending` pending note names members (co-chair is managing them) or stays count-only — recommend count-only (F-160 conservative); designer to confirm.
+5. The two design-tokens.json ambiguity (agent-os canonical vs jhsc-app copy) noted for the implementer; it does not block this design — the card consumes CSS custom properties from the app.html boot sheet, not the JSON (mirror `CommitteeManageMemberCard.svelte` exactly: `var(--color-…)`, `var(--radius-…)`, `var(--border-width-…)` + rem literals).
+
+## Human-gate items (loud)
+
+- **HG-KEY-ROTATION** — F182-6 co-signed by security-reviewer + threat-modeler; never auto-merge. This PR changes member-removal's confidentiality posture at the UI and edits the honest-copy contract a string test pins.
+- **Forward-secrecy-only residual (F-189)** — already ACCEPT-WITH-CONDITIONS; F182-6's copy is the surface where that acceptance becomes user-visible. No new user risk-gate this tranche, but the copy is threat-modeler-load-bearing.
+- **Deferred cross-session resume (F182-5)** — F182-6 must NOT ship copy promising cross-session resume; the affordance is in-session only until F182-5 lands.
+
+## Threat-modeler handoff (MANDATED — route BEFORE the F182-6 PR merges)
+
+F182-6 is an HG-KEY-ROTATION PR; it MUST route to the **threat-modeler** (with security-reviewer). STRIDE-model at least:
+
+- **The partial-removal window (Decision C1 atomicity model) — the core new surface.** Between `removeMember` ok and rotation `finalize`, the member is administratively removed but the epoch is not (fully) rotated → they retain FUTURE crypto access until the rotation completes. Confirm: (a) the UI never claims future access is cut in `incomplete`/`orphaned`/`failed`/`cannot_resume` (Tampering/Info-disclosure via dishonest signage); (b) the window is bounded/recoverable (the removed member's server-side wraps are purged at step-3 revoke BEFORE the self-wrap, so they can fetch no NEW wrap even mid-window — verify the revoke-early ordering closes the F-186 reactivation window here too); (c) `remaining_members` excluding never-granted `pending_grant` members (Decision C3) does not create an Elevation path (a member gaining access without a human confirm).
+- **F-187 fail-open at the UI (Decision C5) — Denial-of-service / repudiation.** Confirm the resume/re-run affordances cannot be used by a single hostile co-chair to BLOCK completion, and that `cannot_resume_not_holder` honestly routes to "another co-chair completes/abandons" without promising a cross-session resume F182-5 hasn't built. Confirm re-run of an `orphaned` rotation abandons (never re-generates under the orphan `new_key_id`, F-137) and that retries call `rotateOnRemoval` ONLY, never re-removing (no double-governance).
+- **Honest-copy compliance (F-189) — Information disclosure / repudiation.** Verify the rewritten `committee.remove.modal.limit` + all rotation-terminal copy satisfy the F-189 CONTAINS ("from now on"; "cannot retroactively protect earlier records") / FORBIDDEN ("revokes access", "can no longer decrypt", "removes access to existing/all committee data") contract, and that the T21 string test is updated to ENFORCE the new contract rather than the stale "does not rotate" one. Confirm blocking/error copy names no member (F-160).
+- **No key material in UI / logs (Decision C4/C13) — Information disclosure.** Confirm `actor_public_key` derivation (and the private-key touch) live in the crypto/orchestration layer, never the component; that the card handles only opaque `rotation_id`/`new_key_id` handles (never rendered/logged) + the status union; no `console.*`; no key bytes cross the card boundary.
+- **Self-removal (Decision C6) — availability / correctness.** Confirm skipping the in-session rotation on self-removal is correct (the leaver cannot run it) and that the "remaining co-chair must still rotate" state does not itself leak a hostile-co-chair block or a dishonest "already secured" claim.
+- **New re-pass triggers to pin:** (1) any path that runs `rotateOnRemoval` when `removeMember` did NOT return ok (removal-less rotation); (2) a retry/resume path that re-invokes `removeMember` (double-governance); (3) the card gaining raw crypto deps / deriving `actor_public_key` in-component; (4) `remaining_members` starting to include never-granted `pending_grant` members (silent grant without human confirm); (5) rotation-terminal copy claiming future access is cut on any non-`ok`/`ok_with_pending` union member; (6) cross-session-resume copy shipped before F182-5.
+
+Continue threat-model.md §3.18 (F-185/F-187/F-189 family). F-182 RETIRE stays at F182-8. The orchestrator routes from here.
+
+---

@@ -102,6 +102,7 @@ export type {
 } from './committee-key-holder';
 export { ARGON2_OPS, ARGON2_MEM_BYTES, KDF_PARAMS } from './recovery-blob';
 export { generateIdentityKeypair, selfTestKeypair, pubkeyFingerprint } from './identity-keys';
+export { deriveActorPublicKey } from './actor-pubkey';
 export {
   createShowAgainController,
   MAX_REVEALS_PER_SESSION,

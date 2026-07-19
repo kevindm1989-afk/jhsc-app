@@ -33,9 +33,14 @@
    *   - F-160 — the `4eyes_required` / `last_co_chair` / `failed` blocking copy
    *     names NO member (generic phrasing only). Confirm copy MAY name the member
    *     being acted on (the co-chair chose that target).
-   *   - F-182 HONEST COPY — the remove-confirm copy states the non-cryptographic
-   *     limit and carries NO data-access-revocation claim; the reactivate-confirm
-   *     copy states access returns via the RETAINED wrap, not a fresh grant.
+   *   - F-182 HONEST COPY — under auto-rotate (ADR-0030 Amendment C) the
+   *     remove-confirm copy states the removal ROTATES the committee key (forward
+   *     secrecy: it cuts access to committee data filed from now on, and cannot
+   *     reach records the member already opened); it carries NO absolute/
+   *     retroactive data-access-revocation claim. Self-removal is the exception —
+   *     the leaver can't run the rotation, so the self variant says a remaining
+   *     worker co-chair must still rotate the key. The reactivate-confirm copy
+   *     states access returns via the RETAINED wrap, not a fresh grant.
    *
    * No member PI / raw uid is written to a URL / storage / log here (F-176); the
    * raw `reason` enum is mapped to copy, never echoed. No `console.*`.
@@ -52,8 +57,42 @@
   type RemoveResult = CommitteeOpResult<string>;
   type ReactivateResult = CommitteeOpResult<null>;
 
-  /** The three governance-op methods this card drives (structural subset of
-   *  SupabaseCommitteeClient — tests inject a fake that records inputs). */
+  // F182-6 / ADR-0030 Amendment C — the rotation status union (a structural
+  // MIRROR of production-flows.ts `RotateCommitteeKeyOnRemovalResult`, declared
+  // LOCALLY so the presentational card imports NO crypto module and never sees
+  // key bytes: it carries opaque `rotation_id` / `new_key_id` handles + a uid[]
+  // only — NEVER key material (AC-C13). Those handles are never rendered/logged.
+  type RotationResult =
+    | {
+        status: 'ok';
+        rotation_id: string;
+        new_key_id: string;
+        members_rewrapped_count: number;
+        pending_members: string[];
+      }
+    | {
+        status: 'ok_with_pending';
+        rotation_id: string;
+        new_key_id: string;
+        members_rewrapped_count: number;
+        pending_members: string[];
+      }
+    | { status: 'orphaned'; rotation_id: string; new_key_id: string }
+    | { status: 'incomplete'; rotation_id: string; new_key_id: string; pending_members: string[] }
+    | { status: 'cannot_resume_not_holder'; rotation_id: string; new_key_id: string }
+    | { status: 'failed'; reason: string; http?: number };
+
+  type RotateOnRemovalInput = {
+    removed_member_id: string;
+    remaining_members: ReadonlyArray<{ user_id: string }>;
+    resume?: { rotation_id: string; new_key_id: string };
+  };
+
+  /** The governance-op methods this card drives (structural subset of
+   *  SupabaseCommitteeClient — tests inject a fake that records inputs).
+   *  `rotateOnRemoval` (F182-6) is OPTIONAL: present only on a rotation-capable
+   *  mount (the roster threads it when the three crypto deps are wired). Its
+   *  ABSENCE gates the Remove CTA off in a rotation-aware mount (VC-1). */
   type ManageClient = {
     // `_input` is a TYPE-SIGNATURE label only (never a runtime binding); the
     // underscore keeps no-unused-vars quiet on the structural method shapes.
@@ -67,6 +106,7 @@
       second_approver_id?: string | null;
     }) => Promise<RemoveResult>;
     reactivateMember: (_input: { target_user_id: string }) => Promise<ReactivateResult>;
+    rotateOnRemoval?: (_input: RotateOnRemovalInput) => Promise<RotationResult>;
   };
 
   /** The roster row this card manages. */
@@ -79,7 +119,12 @@
    *  — keyed off the `active` boolean + role (NOT the badge), self already
    *  excluded. Empty ⟺ the actor is the only active worker co-chair. */
   export let eligibleApprovers: RosterRow[] = [];
-  /** The management client (the three governance ops). */
+  /** F182-6 (Decision C3) — the roster-derived rotation set: the active members
+   *  who currently hold committee-key access, minus the member being removed.
+   *  Threaded by the roster ONLY on a rotation-capable mount; forwarded verbatim
+   *  into `rotateOnRemoval` on a fresh run (AC-C15). */
+  export let remainingMembers: ReadonlyArray<{ user_id: string }> = [];
+  /** The management client (the governance ops + the optional rotation seam). */
   export let client: ManageClient;
   /** Parent callback — invoked on a clean server mutation so the roster re-fetches
    *  (server-truthed badge refresh; no optimistic flip). A `changed` event is also
@@ -101,7 +146,20 @@
 
   // ── State machine ──────────────────────────────────────────────────────────
   type OpKind = 'role' | 'remove' | 'reactivate';
-  type Phase = 'form' | 'submitting' | 'done' | 'fourEyes' | 'lastCoChair' | 'failed';
+  type Phase =
+    | 'form'
+    | 'submitting'
+    | 'done'
+    | 'fourEyes'
+    | 'lastCoChair'
+    | 'failed'
+    // F182-6 rotation sub-phase + five terminals (Decision C2).
+    | 'rotating'
+    | 'rotationDone'
+    | 'rotationIncomplete'
+    | 'rotationOrphaned'
+    | 'rotationCannotResume'
+    | 'rotationFailed';
 
   let openModal: OpKind | null = null;
   let phase: Phase = 'form';
@@ -123,6 +181,19 @@
   // The reason-mapped failed body key (never the raw enum — F-176).
   let failedBodyKey = 'committee.manage.failed.generic_body';
 
+  // F182-6 rotation transient state (server-truthed; carried across resume/retry).
+  // `removalCommitted` flips true the instant `removeMember` returns ok, so every
+  // Resume/Re-run/Retry calls `rotateOnRemoval` ONLY — never `removeMember` again
+  // (re-pass #27). The resume handle + pending set come from an `incomplete`.
+  let removalCommitted = false;
+  let rotationResume: { rotation_id: string; new_key_id: string } | null = null;
+  let rotationPending: string[] = [];
+  let rotationHasPending = false;
+  let rotationPendingCount = 0;
+  // The reason-mapped rotation-failed body key + affordance (never the raw enum).
+  let rotationFailedBodyKey = 'committee.remove.rotationFailed.generic_body';
+  let rotationFailedAffordance: 'retry' | 'signin' | 'recovery' | 'close' = 'close';
+
   // The card root — the stable anchor used to reach the enclosing roster subtree
   // (background-inert target + the A11Y-6 focus-return group when a CTA detaches).
   let mmRootEl: HTMLDivElement | null = null;
@@ -139,6 +210,15 @@
   let lastCoChairHeadingEl: HTMLHeadingElement | null = null;
   let failedHeadingEl: HTMLHeadingElement | null = null;
   let doneHeadingEl: HTMLHeadingElement | null = null;
+  // F182-6 — one deliberate focus move to each rotation terminal heading, plus
+  // the in-flight `rotating` sub-phase heading (it also carries the dialog name so
+  // aria-labelledby never dangles while the rotation is in flight).
+  let rotatingHeadingEl: HTMLHeadingElement | null = null;
+  let rotationDoneHeadingEl: HTMLHeadingElement | null = null;
+  let rotationIncompleteHeadingEl: HTMLHeadingElement | null = null;
+  let rotationOrphanedHeadingEl: HTMLHeadingElement | null = null;
+  let rotationCannotResumeHeadingEl: HTMLHeadingElement | null = null;
+  let rotationFailedHeadingEl: HTMLHeadingElement | null = null;
   // The per-row CTA that opened the modal — return-focus target on close.
   let roleCtaEl: HTMLButtonElement | null = null;
   let removeCtaEl: HTMLButtonElement | null = null;
@@ -172,6 +252,18 @@
   $: showPicker = selfDropsCoChair && eligibleApprovers.length > 0;
   $: emptyEligibleNote = selfDropsCoChair && eligibleApprovers.length === 0;
   $: approverGated = showPicker && selectedApprover === '';
+
+  // VC-1 / AC-C14 — the Remove CTA requires rotation capability, FULL STOP. Under
+  // auto-rotate (ADR-0030 Amendment C) removal ALWAYS rotates the committee key;
+  // a mount without `rotateOnRemoval` (the crypto deps are not wired) must NOT
+  // offer Remove at all — else a governance-only removal would run under the
+  // forward-secrecy copy that promises a rotation (the "silent no-rotate removal
+  // under false copy" VC-1 forbids). Change-role + Reactivate still render (they
+  // need no crypto). The gate is PURE presence — never keyed on member count or
+  // any other incidental signal, so a future route that wires governance ops
+  // without the crypto deps still cannot offer a dishonest removal (defense in
+  // depth: the invariant is enforced here, not assumed at the call site).
+  $: canOfferRemove = typeof client.rotateOnRemoval === 'function';
 
   // ADV-3 stale-roster dead-end recovery: the server returned `4eyes_required`
   // while the local snapshot shows NO eligible co-chair (a second co-chair was
@@ -397,6 +489,13 @@
     approverAnnounce = '';
     graceDate = '';
     failedBodyKey = 'committee.manage.failed.generic_body';
+    removalCommitted = false;
+    rotationResume = null;
+    rotationPending = [];
+    rotationHasPending = false;
+    rotationPendingCount = 0;
+    rotationFailedBodyKey = 'committee.remove.rotationFailed.generic_body';
+    rotationFailedAffordance = 'close';
   }
 
   async function closePanel(): Promise<void> {
@@ -472,7 +571,197 @@
       await enterFailed('unknown', 0);
       return;
     }
-    await applyResult(result);
+    if (!result.ok) {
+      // AC-C1 — a non-ok governance result removed NO member, so the rotation
+      // MUST NOT run: take the existing governance terminals unchanged.
+      await applyResult(result);
+      return;
+    }
+    // The membership removal is committed + server-truthed the instant this
+    // returns ok. `removalCommitted` guards every later retry/resume against a
+    // second `removeMember` (re-pass #27).
+    removalCommitted = true;
+    graceDate = isoDate(result.data);
+    if (!isSelf && typeof client.rotateOnRemoval === 'function') {
+      // AC-C2 — an other-member removal AUTO-RUNS the forward-secrecy rotation
+      // in the same action (ADR-0030 Amendment C).
+      await runRotationFresh();
+    } else if (isSelf) {
+      // Self-removal (the leaver cannot run the rotation — AC-C9/C6) → the
+      // membership terminal; the reconciled self-removal copy states a remaining
+      // co-chair must still rotate the key. This non-rotate `done` path is for
+      // `isSelf` ONLY.
+      await enterDone(result.data);
+    } else {
+      // Defense-in-depth: a NON-self removal that reached here without a rotation
+      // seam is unreachable given the Remove CTA is gated on `rotateOnRemoval`
+      // presence (VC-1 / canOfferRemove). Make the invariant explicit — never
+      // silently show the self-removal copy + skip the forward-secrecy rotation;
+      // fail LOUD into an unrecoverable rotation terminal instead.
+      await enterRotationFailed('invalid_input', undefined);
+    }
+  }
+
+  // ── F182-6 rotation follow-through (Decision C1/C2) ──────────────────────────
+  async function runRotation(input: RotateOnRemovalInput): Promise<void> {
+    phase = 'rotating';
+    await tick();
+    // AC-C11 / Accessibility F2 — one deliberate focus move onto the rotating
+    // heading (it carries the dialog name), so focus never strands on <body> when
+    // the submitting Confirm unmounts (mirrors enterRotationDone's focus move).
+    focusEl(rotatingHeadingEl);
+    const rotate = client.rotateOnRemoval;
+    if (typeof rotate !== 'function') {
+      // Defensive: the Remove CTA is gated on presence, so this never fires.
+      await enterRotationFailed('unknown', undefined);
+      return;
+    }
+    let res: RotationResult;
+    try {
+      res = await rotate(input);
+    } catch {
+      // A thrown rotation is a failure, never a false success (AC-C8).
+      await enterRotationFailed('unknown', undefined);
+      return;
+    }
+    await applyRotationResult(res);
+  }
+
+  /** A FRESH rotation (resume undefined, full injected remaining set) — the
+   *  initial submit, an orphaned Re-run, and a transient failed Retry. A fresh
+   *  run of an orphan mints the NEXT epoch (never resumes the orphan — F-137). */
+  async function runRotationFresh(): Promise<void> {
+    rotationResume = null;
+    await runRotation({
+      removed_member_id: member.user_id,
+      remaining_members: remainingMembers
+    });
+  }
+
+  /** A RESUME (Decision C5) — carries the incomplete result's resume handle +
+   *  `remaining_members = pending_members`; continues from the step-5 install so
+   *  only the still-missing set is re-wrapped. */
+  async function runRotationResume(): Promise<void> {
+    await runRotation({
+      removed_member_id: member.user_id,
+      remaining_members: rotationPending.map((user_id) => ({ user_id })),
+      // `exactOptionalPropertyTypes`: only carry `resume` when it exists.
+      ...(rotationResume ? { resume: rotationResume } : {})
+    });
+  }
+
+  async function applyRotationResult(res: RotationResult): Promise<void> {
+    switch (res.status) {
+      case 'ok':
+        rotationHasPending = false;
+        rotationPendingCount = 0;
+        await enterRotationDone();
+        return;
+      case 'ok_with_pending':
+        // Informational, NOT an error (AC-C4): success terminal + a count-only
+        // pending note.
+        rotationHasPending = true;
+        rotationPendingCount = res.pending_members.length;
+        await enterRotationDone();
+        return;
+      case 'incomplete':
+        rotationResume = { rotation_id: res.rotation_id, new_key_id: res.new_key_id };
+        rotationPending = [...res.pending_members];
+        await enterRotationTerminal('rotationIncomplete');
+        return;
+      case 'orphaned':
+        await enterRotationTerminal('rotationOrphaned');
+        return;
+      case 'cannot_resume_not_holder':
+        await enterRotationTerminal('rotationCannotResume');
+        return;
+      case 'failed':
+        await enterRotationFailed(res.reason, res.http);
+        return;
+    }
+  }
+
+  async function enterRotationDone(): Promise<void> {
+    phase = 'rotationDone';
+    await tick();
+    focusEl(rotationDoneHeadingEl);
+    signalRotationChanged();
+  }
+
+  async function enterRotationTerminal(
+    next: 'rotationIncomplete' | 'rotationOrphaned' | 'rotationCannotResume'
+  ): Promise<void> {
+    phase = next;
+    await tick();
+    focusEl(
+      next === 'rotationIncomplete'
+        ? rotationIncompleteHeadingEl
+        : next === 'rotationOrphaned'
+          ? rotationOrphanedHeadingEl
+          : rotationCannotResumeHeadingEl
+    );
+    signalRotationChanged();
+  }
+
+  async function enterRotationFailed(reason: string, http: number | undefined): Promise<void> {
+    const mapped = rotationFailedMapping(reason, http);
+    rotationFailedBodyKey = mapped.bodyKey;
+    rotationFailedAffordance = mapped.affordance;
+    phase = 'rotationFailed';
+    await tick();
+    focusEl(rotationFailedHeadingEl);
+    signalRotationChanged();
+  }
+
+  /** The removal is server-truth the instant `removeMember` returned ok, so the
+   *  roster refetch fires when the card reaches ANY rotation terminal (success OR
+   *  loud) — never mid-flight (F-181 / AC-C10). */
+  function signalRotationChanged(): void {
+    onChanged();
+    dispatch('changed');
+  }
+
+  /** Map a rotation `failed{reason}` (+ optional HTTP) onto its body key +
+   *  affordance — NEVER the raw enum (F-176). The 401/403 split is preserved. */
+  function rotationFailedMapping(
+    reason: string,
+    http: number | undefined
+  ): { bodyKey: string; affordance: 'retry' | 'signin' | 'recovery' | 'close' } {
+    if (reason === 'session_expiry' || http === 401) {
+      return { bodyKey: 'committee.remove.rotationFailed.session_body', affordance: 'signin' };
+    }
+    if (reason === 'rls_denied' || http === 403) {
+      return { bodyKey: 'committee.remove.rotationFailed.co_chair_body', affordance: 'close' };
+    }
+    if (reason === 'needs_recovery' || reason === 'no_wrap') {
+      // VC-2 — a Resume that yields needs_recovery routes to recovery here too,
+      // never the cannot_resume dead-end.
+      return {
+        bodyKey: 'committee.remove.rotationFailed.needs_recovery_body',
+        affordance: 'recovery'
+      };
+    }
+    if (reason === 'invalid_input' || http === 422) {
+      // A retry re-seals identical bytes → identical failure: unrecoverable, Close.
+      return { bodyKey: 'committee.remove.rotationFailed.unrecoverable_body', affordance: 'close' };
+    }
+    // rotation_in_progress / decrypt_failed / anything else → transient retry.
+    return { bodyKey: 'committee.remove.rotationFailed.generic_body', affordance: 'retry' };
+  }
+
+  // Resume / Re-run / Retry — every path re-invokes `rotateOnRemoval` ONLY,
+  // guarded by `removalCommitted` so `removeMember` is never re-run (re-pass #27).
+  async function onResume(): Promise<void> {
+    if (!removalCommitted || phase !== 'rotationIncomplete') return;
+    await runRotationResume();
+  }
+  async function onRerun(): Promise<void> {
+    if (!removalCommitted || phase !== 'rotationOrphaned') return;
+    await runRotationFresh();
+  }
+  async function onRotationRetry(): Promise<void> {
+    if (!removalCommitted || phase !== 'rotationFailed') return;
+    await runRotationFresh();
   }
 
   async function submitReactivate(): Promise<void> {
@@ -575,9 +864,18 @@
   function onKeyDown(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       // Never dismissable while submitting; remove is always protected; role is
-      // protected while the 4-eyes picker is showing.
+      // protected while the 4-eyes picker is showing. F182-6 (AC-C11): the
+      // `rotating` sub-phase and all five rotation terminals require an explicit
+      // Close — Escape is swallowed (they already sit under `openModal==='remove'`,
+      // but the extension is spelled out for clarity).
       const protectedModal =
         phase === 'submitting' ||
+        phase === 'rotating' ||
+        phase === 'rotationDone' ||
+        phase === 'rotationIncomplete' ||
+        phase === 'rotationOrphaned' ||
+        phase === 'rotationCannotResume' ||
+        phase === 'rotationFailed' ||
         openModal === 'remove' ||
         (openModal === 'role' && showPicker) ||
         phase === 'fourEyes';
@@ -648,35 +946,37 @@
         </svg>
         {t('committee.role.row.cta')}
       </button>
-      <button
-        type="button"
-        class="btn-destructive mm-cta"
-        data-testid={`committee-manage-remove-cta-${member.user_id}`}
-        aria-haspopup="dialog"
-        aria-label={t('committee.remove.row.cta_aria', { name: nameForCopy })}
-        bind:this={removeCtaEl}
-        on:click={openRemove}
-      >
-        <svg class="mm-cta-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <circle cx="9" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="2" />
-          <path
-            d="m17 8 5 5m0-5-5 5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-          />
-        </svg>
-        {t('committee.remove.row.cta')}
-      </button>
+      {#if canOfferRemove}
+        <button
+          type="button"
+          class="btn-destructive mm-cta"
+          data-testid={`committee-manage-remove-cta-${member.user_id}`}
+          aria-haspopup="dialog"
+          aria-label={t('committee.remove.row.cta_aria', { name: nameForCopy })}
+          bind:this={removeCtaEl}
+          on:click={openRemove}
+        >
+          <svg class="mm-cta-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <circle cx="9" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="2" />
+            <path
+              d="m17 8 5 5m0-5-5 5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+          {t('committee.remove.row.cta')}
+        </button>
+      {/if}
     </div>
   {:else if isRemoved}
     <div class="mm-actions-row">
@@ -750,6 +1050,312 @@
               <button type="button" class="btn-outline" on:click={closePanel}>
                 {t('committee.manage.close')}
               </button>
+            </div>
+          </div>
+        {:else if phase === 'rotating'}
+          <!-- F182-6 rotating sub-phase: the membership removal is committed +
+               server-truthed; the forward-secrecy rotation is in flight. The
+               busy CTA owns aria-busy (mirrors the `submitting` treatment). -->
+          <div class="mm-rotating">
+            <p class="mm-eyebrow">{t('committee.remove.rotation.status_removed')}</p>
+            <!-- The rotating sub-phase carries the dialog name (id={dialogHeadingId})
+                 so aria-labelledby never dangles in flight, and is the one
+                 deliberate focus target when this phase is entered (Accessibility
+                 F2 / AC-C11). -->
+            <h2
+              id={dialogHeadingId}
+              class="mm-heading"
+              tabindex="-1"
+              bind:this={rotatingHeadingEl}
+              data-testid="committee-manage-rotating-heading"
+            >
+              {t('committee.remove.rotating.status')}
+            </h2>
+            <div class="mm-actions">
+              <button
+                type="button"
+                class="mm-confirm btn-destructive"
+                data-testid="committee-manage-rotating"
+                aria-busy="true"
+                aria-disabled="true"
+              >
+                {t('committee.remove.rotating.cta')}
+              </button>
+            </div>
+            <span class="mm-sr" role="status" aria-live="polite">
+              {t('a11y.committee.remove.rotation.rotating')}
+            </span>
+          </div>
+        {:else if phase === 'rotationDone'}
+          <!-- SUCCESS terminal (ok | ok_with_pending). role="status", green. -->
+          <div
+            class="mm-terminal mm-success"
+            role="status"
+            data-testid="committee-manage-rotation-done"
+          >
+            <svg class="mm-terminal-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                d="m8.5 12 2.5 2.5 4.5-5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <div>
+              <p class="mm-eyebrow">{t('committee.remove.rotation.status_removed')}</p>
+              <h2
+                id={dialogHeadingId}
+                class="mm-terminal-heading"
+                tabindex="-1"
+                bind:this={rotationDoneHeadingEl}
+              >
+                {t('committee.remove.rotationDone.heading')}
+              </h2>
+              <p class="mm-terminal-body">{t('committee.remove.rotationDone.body')}</p>
+              {#if rotationHasPending}
+                <!-- AC-C4: informational, NOT an alert. Count-only (F-160). -->
+                <div
+                  class="mm-callout mm-callout-info"
+                  role="status"
+                  data-testid="committee-manage-rotation-pending-note"
+                >
+                  <svg class="mm-callout-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="9"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    />
+                    <path
+                      d="M12 11v5"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                    <path
+                      d="M12 8h.01"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                  <div>
+                    <p class="mm-callout-body">
+                      {t('committee.remove.rotationDone.pending_note', {
+                        count: rotationPendingCount
+                      })}
+                    </p>
+                  </div>
+                </div>
+              {/if}
+              <span class="mm-sr">
+                {#if rotationHasPending}{t('a11y.committee.remove.rotation.done_pending', {
+                    count: rotationPendingCount
+                  })}{:else}{t('a11y.committee.remove.rotation.done')}{/if}
+              </span>
+              <button type="button" class="btn-outline" on:click={closePanel}>
+                {t('committee.manage.close')}
+              </button>
+            </div>
+          </div>
+        {:else if phase === 'rotationIncomplete'}
+          <!-- LOUD terminal (role="alert", amber) + Resume. Does NOT claim future
+               access is cut; existing records are still readable. -->
+          <div
+            class="mm-alert mm-alert-warning"
+            role="alert"
+            data-testid="committee-manage-rotation-incomplete"
+          >
+            <svg class="mm-alert-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M12 9v4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+              <circle cx="12" cy="17" r="1" fill="currentColor" />
+            </svg>
+            <div>
+              <p class="mm-eyebrow">{t('committee.remove.rotation.status_removed')}</p>
+              <h2
+                id={dialogHeadingId}
+                class="mm-alert-heading"
+                tabindex="-1"
+                bind:this={rotationIncompleteHeadingEl}
+              >
+                {t('committee.remove.rotationIncomplete.heading')}
+              </h2>
+              <p class="mm-alert-body">{t('committee.remove.rotationIncomplete.body')}</p>
+              <span class="mm-sr">{t('a11y.committee.remove.rotation.incomplete')}</span>
+              <div class="mm-actions">
+                <button
+                  type="button"
+                  class="mm-confirm"
+                  data-testid="committee-manage-rotation-resume"
+                  on:click={onResume}
+                >
+                  {t('committee.remove.rotationIncomplete.resume_cta')}
+                </button>
+                <button type="button" class="btn-outline" on:click={closePanel}>
+                  {t('committee.manage.close')}
+                </button>
+              </div>
+            </div>
+          </div>
+        {:else if phase === 'rotationOrphaned'}
+          <!-- LOUD terminal (role="alert", red) + Re-run FRESH. -->
+          <div
+            class="mm-alert mm-alert-danger"
+            role="alert"
+            data-testid="committee-manage-rotation-orphaned"
+          >
+            <svg class="mm-alert-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                d="m15 9-6 6m0-6 6 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+            <div>
+              <p class="mm-eyebrow">{t('committee.remove.rotation.status_removed')}</p>
+              <h2
+                id={dialogHeadingId}
+                class="mm-alert-heading"
+                tabindex="-1"
+                bind:this={rotationOrphanedHeadingEl}
+              >
+                {t('committee.remove.rotationOrphaned.heading')}
+              </h2>
+              <p class="mm-alert-body">{t('committee.remove.rotationOrphaned.body')}</p>
+              <span class="mm-sr">{t('a11y.committee.remove.rotation.orphaned')}</span>
+              <div class="mm-actions">
+                <button
+                  type="button"
+                  class="mm-confirm"
+                  data-testid="committee-manage-rotation-rerun"
+                  on:click={onRerun}
+                >
+                  {t('committee.remove.rotationOrphaned.rerun_cta')}
+                </button>
+                <button type="button" class="btn-outline" on:click={closePanel}>
+                  {t('committee.manage.close')}
+                </button>
+              </div>
+            </div>
+          </div>
+        {:else if phase === 'rotationCannotResume'}
+          <!-- LOUD terminal (role="alert", red). No in-session completion is
+               offered (F182-5 deferred): Close only, NO cross-session control. -->
+          <div
+            class="mm-alert mm-alert-danger"
+            role="alert"
+            data-testid="committee-manage-rotation-cannot-resume"
+          >
+            <svg class="mm-alert-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                d="m15 9-6 6m0-6 6 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+            <div>
+              <p class="mm-eyebrow">{t('committee.remove.rotation.status_removed')}</p>
+              <h2
+                id={dialogHeadingId}
+                class="mm-alert-heading"
+                tabindex="-1"
+                bind:this={rotationCannotResumeHeadingEl}
+              >
+                {t('committee.remove.rotationCannotResume.heading')}
+              </h2>
+              <p class="mm-alert-body">{t('committee.remove.rotationCannotResume.body')}</p>
+              <span class="mm-sr">{t('a11y.committee.remove.rotation.cannotResume')}</span>
+              <button type="button" class="btn-outline" on:click={closePanel}>
+                {t('committee.manage.close')}
+              </button>
+            </div>
+          </div>
+        {:else if phase === 'rotationFailed'}
+          <!-- LOUD terminal (role="alert", red) — DISTINCT from the governance
+               `failed` terminal. Per-reason affordance (raw enum never rendered,
+               F-176). -->
+          <div
+            class="mm-alert mm-alert-danger"
+            role="alert"
+            data-testid="committee-manage-rotation-failed"
+          >
+            <svg class="mm-alert-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                d="m15 9-6 6m0-6 6 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+            <div>
+              <p class="mm-eyebrow">{t('committee.remove.rotation.status_removed')}</p>
+              <h2
+                id={dialogHeadingId}
+                class="mm-alert-heading"
+                tabindex="-1"
+                bind:this={rotationFailedHeadingEl}
+              >
+                {t('committee.remove.rotationFailed.heading')}
+              </h2>
+              <p class="mm-alert-body">{t(rotationFailedBodyKey)}</p>
+              <span class="mm-sr">{t('a11y.committee.remove.rotation.failed')}</span>
+              <div class="mm-actions">
+                {#if rotationFailedAffordance === 'retry'}
+                  <button
+                    type="button"
+                    class="mm-confirm"
+                    data-testid="committee-manage-rotation-retry"
+                    on:click={onRotationRetry}
+                  >
+                    {t('committee.remove.rotationFailed.retry_cta')}
+                  </button>
+                {:else if rotationFailedAffordance === 'signin'}
+                  <a
+                    class="mm-confirm mm-confirm-link"
+                    href="/sign-in"
+                    data-testid="committee-manage-rotation-signin"
+                  >
+                    {t('committee.remove.rotationFailed.signin_cta')}
+                  </a>
+                {/if}
+                <!-- Adversarial F1: the needs_recovery / no_wrap recovery path is
+                     MESSAGE-ONLY (mirrors the app's Concern/Reprisal needs_recovery
+                     pattern) — the body already tells the user to restore committee-
+                     key access on this device. It renders NO affordance beyond
+                     Close; a /sign-in link belongs only to the session_expiry path
+                     above (a different destination). -->
+                <button type="button" class="btn-outline" on:click={closePanel}>
+                  {t('committee.manage.close')}
+                </button>
+              </div>
             </div>
           </div>
         {:else if phase === 'lastCoChair'}
@@ -900,11 +1506,20 @@
             {/if}
           {:else if openModal === 'remove'}
             <p class="mm-body">{t('committee.remove.modal.what', { name: nameForCopy })}</p>
-            <!-- F-182 honest limit: removal is administrative, not a crypto lockout;
-                 it does NOT rotate the shared committee key. NO data-access-
-                 revocation claim (a string test forbids it). -->
+            <!-- F-182 honest limit: removal AUTO-ROTATES the committee key (forward
+                 secrecy — it cuts access to committee data filed from now on, and
+                 cannot reach records the member already opened). NO absolute/
+                 retroactive data-access-revocation claim (a string test forbids it).
+                 Self-removal is the exception: the leaver can't run the rotation from
+                 this device, so the self variant states a remaining worker co-chair
+                 must still rotate the key (F-189 / Adversarial F2 — it must not
+                 promise a rotation the self path skips). -->
             <p class="mm-body mm-limit">
-              {t('committee.remove.modal.limit', { name: nameForCopy })}
+              {#if isSelf}
+                {t('committee.remove.modal.limit_self', { name: nameForCopy })}
+              {:else}
+                {t('committee.remove.modal.limit', { name: nameForCopy })}
+              {/if}
             </p>
             {#if isSelf}
               <p class="mm-note">{t('committee.remove.modal.self_note')}</p>
@@ -1404,6 +2019,41 @@
     background: var(--color-tint-green-bg);
     color: var(--color-tint-green-fg);
     border-color: var(--color-tint-green-border);
+  }
+
+  /* F182-6 — the neutral "Membership: removed" eyebrow above each rotation
+     terminal heading (the governance fact is separate from the crypto outcome). */
+  .mm-eyebrow {
+    margin: 0 0 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    /* On the plain card surface (the `rotating` sub-phase) the muted-fg pairing IS
+       audited. */
+    color: var(--color-fg-muted);
+  }
+  /* WCAG 1.4.3 — on a tinted terminal/alert background the muted grey drops below
+     4.5:1; inherit the audited tint foreground (currentColor === the tint fg the
+     container sets) instead. */
+  .mm-alert .mm-eyebrow,
+  .mm-terminal .mm-eyebrow {
+    color: currentColor;
+  }
+  .mm-rotating {
+    display: grid;
+    gap: 0.5rem;
+  }
+  /* Anchor styled as the affirmative CTA (sign-in route). Unlike <button>/.btn it
+     does not match the global button base, so it carries the ≥44px touch target +
+     inline padding itself (matches the app.css button/cta convention). */
+  .mm-confirm-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding-inline: 1rem;
+    text-decoration: none;
   }
 
   .mm-sr {

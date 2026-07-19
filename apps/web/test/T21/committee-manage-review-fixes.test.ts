@@ -59,6 +59,15 @@ type SetRolesResult = OpOk<null> | OpErr;
 type RemoveResult = OpOk<string> | OpErr;
 type ReactivateResult = OpOk<null> | OpErr;
 
+// F182-6 / ADR-0030 Amendment C — the rotation status union. The card only reads
+// `.status` on the `ok` case, so the handle/count fields are optional here. Its
+// PRESENCE on the client un-gates the Remove CTA (VC-1 pure-presence gate); the
+// /committee route ALWAYS wires the crypto deps in production, so this sibling fake
+// is rotation-capable too.
+type RotationResult =
+  | { status: 'ok'; rotation_id?: string; new_key_id?: string; members_rewrapped_count?: number; pending_members?: string[] }
+  | { status: 'failed'; reason: string; http?: number };
+
 const ACTOR = 'aaaa1111-0000-4000-8000-00000000self';
 const OTHER = 'bbbb2222-0000-4000-8000-0000000other';
 const APPROVER_B = 'dddd4444-0000-4000-8000-0approverbbb';
@@ -103,20 +112,36 @@ interface ManageCalls {
   setRoles: Array<{ target_user_id: string; roles: string[]; second_approver_id?: string | null }>;
   removeMember: Array<{ target_user_id: string; second_approver_id?: string | null }>;
   reactivateMember: Array<{ target_user_id: string }>;
+  rotateOnRemoval: Array<{
+    removed_member_id: string;
+    remaining_members: ReadonlyArray<{ user_id: string }>;
+    resume?: { rotation_id: string; new_key_id: string };
+  }>;
 }
 
 function fakeClient(opts: {
   setRoles?: Array<SetRolesResult | Promise<SetRolesResult>>;
   remove?: Array<RemoveResult | Promise<RemoveResult>>;
   reactivate?: Array<ReactivateResult | Promise<ReactivateResult>>;
+  rotate?: Array<RotationResult | Promise<RotationResult>>;
 }) {
-  const calls: ManageCalls = { setRoles: [], removeMember: [], reactivateMember: [] };
+  const calls: ManageCalls = {
+    setRoles: [],
+    removeMember: [],
+    reactivateMember: [],
+    rotateOnRemoval: []
+  };
   let si = 0;
   let ri = 0;
   let ai = 0;
+  let roti = 0;
   const setQ = opts.setRoles ?? [{ ok: true, data: null }];
   const remQ = opts.remove ?? [{ ok: true, data: GRACE_ISO }];
   const reaQ = opts.reactivate ?? [{ ok: true, data: null }];
+  // F182-6 (VC-1) — a rotation-capable client: its presence un-gates the Remove
+  // CTA (matches production). Default: a clean `{ status: 'ok' }` so a successful
+  // NON-SELF removal auto-rotates and reaches `committee-manage-rotation-done`.
+  const rotQ = opts.rotate ?? [{ status: 'ok' } as RotationResult];
   const client = {
     setRoles: async (input: ManageCalls['setRoles'][number]) => {
       calls.setRoles.push(input);
@@ -129,6 +154,10 @@ function fakeClient(opts: {
     reactivateMember: async (input: ManageCalls['reactivateMember'][number]) => {
       calls.reactivateMember.push(input);
       return reaQ[Math.min(ai++, reaQ.length - 1)];
+    },
+    rotateOnRemoval: async (input: ManageCalls['rotateOnRemoval'][number]) => {
+      calls.rotateOnRemoval.push(input);
+      return rotQ[Math.min(roti++, rotQ.length - 1)];
     }
   };
   return { client, calls };
@@ -450,6 +479,8 @@ describe('P1-8e review-fix [A11Y-4] submitting live region sits outside the aria
     ).toBeNull();
 
     d.resolve({ ok: true, data: GRACE_ISO });
-    await screen.findByTestId('committee-manage-done');
+    // F182-6: a NON-SELF removal auto-rotates in the same action, so the clean
+    // terminal is the rotation-done state (not the governance `done`).
+    await screen.findByTestId('committee-manage-rotation-done');
   });
 });

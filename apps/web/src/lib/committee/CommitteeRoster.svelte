@@ -37,8 +37,15 @@
   import { getCurrentUserId } from '$lib/auth/jwt-claims';
   import CommitteeGrantCard from './CommitteeGrantCard.svelte';
   import CommitteeManageMemberCard from './CommitteeManageMemberCard.svelte';
+  import { deriveRemainingMembers } from './supabase-committee-client';
+  import { makeRemoveRotationOrchestration } from './remove-rotation-orchestration';
   import type { RosterRow, CommitteeOpResult } from './supabase-committee-client';
-  import type { SupabaseT07Client, CommitteeKeyHolder, LocalIdentityStore } from '$lib/crypto';
+  import type {
+    SupabaseT07Client,
+    CommitteeKeyHolder,
+    LocalIdentityStore,
+    RotateCommitteeKeyOnRemovalResult
+  } from '$lib/crypto';
 
   /**
    * The committee-op client. `listRoster` is always required; the three
@@ -110,6 +117,61 @@
     typeof client.setRoles === 'function' &&
     typeof client.removeMember === 'function' &&
     typeof client.reactivateMember === 'function';
+
+  // ── F182-6 rotation seam (ADR-0030 Amendment C, Decision C4) ──────────────
+  // The `rotateOnRemoval` orchestration is threaded ONLY when the three crypto
+  // deps are present (mirrors the grant-card attach guard). A governance-only
+  // mount threads NO rotation capability, so the card's Remove-CTA gate stays
+  // honest (VC-1). The orchestration derives `actor_public_key` in the crypto
+  // layer, never in the card (AC-C13); the card sees only opaque handles + a
+  // status union.
+  type CardRotateInput = {
+    removed_member_id: string;
+    remaining_members: ReadonlyArray<{ user_id: string }>;
+    resume?: { rotation_id: string; new_key_id: string };
+  };
+  type ManageCardClient = {
+    // `_i` are TYPE-SIGNATURE labels only (never a runtime binding); the leading
+    // underscore keeps no-unused-vars quiet on the structural method shapes.
+    setRoles: (_i: {
+      target_user_id: string;
+      roles: string[];
+      second_approver_id?: string | null;
+    }) => Promise<CommitteeOpResult<null>>;
+    removeMember: (_i: {
+      target_user_id: string;
+      second_approver_id?: string | null;
+    }) => Promise<CommitteeOpResult<string>>;
+    reactivateMember: (_i: { target_user_id: string }) => Promise<CommitteeOpResult<null>>;
+    rotateOnRemoval?: (_i: CardRotateInput) => Promise<RotateCommitteeKeyOnRemovalResult>;
+  };
+
+  $: rotateOnRemovalFn =
+    grantClient && grantHolder && grantLocalIdentity && currentUserId
+      ? makeRemoveRotationOrchestration({
+          client: grantClient,
+          holder: grantHolder,
+          localIdentity: grantLocalIdentity,
+          user_id: currentUserId
+        })
+      : null;
+
+  $: manageCardClient = buildManageCardClient(rotateOnRemovalFn);
+
+  function buildManageCardClient(
+    rotate: ((_i: CardRotateInput) => Promise<RotateCommitteeKeyOnRemovalResult>) | null
+  ): ManageCardClient {
+    const base: ManageCardClient = {
+      // ADV-1: wrap each op in an arrow so the ORIGINAL SupabaseCommitteeClient
+      // instance stays `this` at call time (pulling the bare prototype methods
+      // onto a literal would detach `this` and throw before the transport).
+      setRoles: (i) => client.setRoles!(i),
+      removeMember: (i) => client.removeMember!(i),
+      reactivateMember: (i) => client.reactivateMember!(i)
+    };
+    if (rotate) base.rotateOnRemoval = rotate;
+    return base;
+  }
 
   // Surface-K state machine (signed-out is derived from $isSignedIn, ahead of
   // these phases). 'loading' is the initial phase for a signed-in mount.
@@ -506,15 +568,10 @@
                 member={row}
                 isSelf={row.user_id === currentUserId}
                 {eligibleApprovers}
-                client={{
-                  // ADV-1: wrap each op in an arrow so the ORIGINAL
-                  // SupabaseCommitteeClient instance stays `this` at call time.
-                  // Pulling the bare prototype methods onto a literal detaches
-                  // `this`, so every op would throw before reaching the transport.
-                  setRoles: (i) => client.setRoles!(i),
-                  removeMember: (i) => client.removeMember!(i),
-                  reactivateMember: (i) => client.reactivateMember!(i)
-                }}
+                remainingMembers={rotateOnRemovalFn
+                  ? deriveRemainingMembers(rows, row.user_id)
+                  : []}
+                client={manageCardClient}
                 onChanged={load}
               />
             {/if}
