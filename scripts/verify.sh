@@ -101,15 +101,20 @@ run_advisory() {
 run_gate_shell() {
   local name="$1"
   local cmd="$2"
+  # Optional per-gate timeout override (3rd arg). Defaults to the generic
+  # GATE_TIMEOUT. Used to give a legitimately long-running gate (the full
+  # vitest suite) more wall-clock than the tight default fast-gate budget,
+  # WITHOUT slackening every other gate.
+  local gate_timeout="${3:-$GATE_TIMEOUT}"
   echo "  [run]  $name"
   gates_run=$((gates_run+1))
-  if timeout "$GATE_TIMEOUT" bash -c "$cmd"; then
+  if timeout "$gate_timeout" bash -c "$cmd"; then
     echo "  [pass] $name"
     gates_passed=$((gates_passed+1))
   else
     local code=$?
     if [ "$code" -eq 124 ]; then
-      echo "  [FAIL] $name (timed out after ${GATE_TIMEOUT}s)"
+      echo "  [FAIL] $name (timed out after ${gate_timeout}s)"
     else
       echo "  [FAIL] $name (exit $code)"
     fi
@@ -214,7 +219,17 @@ run_gate_shell "onboarding no-passphrase-leak lint" "bash scripts/check-onboardi
 section "Tier 3: Tests"
 
 if [ -d "apps/web/node_modules" ]; then
-  run_gate_shell "vitest (apps/web)" "pnpm -C apps/web test"
+  # The full vitest suite (260+ files, 4100+ tests) is dominated by per-file
+  # jsdom environment setup (~220s of a ~380s wall run; actual test execution
+  # is ~30s), and it grows with the project. The generic 300s GATE_TIMEOUT is
+  # an anti-hang watchdog sized for FAST gates, not for the whole suite — which
+  # the dedicated "Build, typecheck & tests" CI job also runs green. In the
+  # contended hardening-gates job (sharing the runner with semgrep/deno/gitleaks)
+  # the suite exceeds 300s purely on wall clock. Give the vitest gate its own,
+  # realistic budget so a legitimately-green suite is never failed on duration
+  # alone; 900s still catches a genuine hang. Override via VITEST_GATE_TIMEOUT.
+  VITEST_GATE_TIMEOUT="${VITEST_GATE_TIMEOUT:-900}"
+  run_gate_shell "vitest (apps/web)" "pnpm -C apps/web test" "$VITEST_GATE_TIMEOUT"
 else
   echo "  [skip] vitest — install dependencies first"
   gates_skipped=$((gates_skipped+1))
