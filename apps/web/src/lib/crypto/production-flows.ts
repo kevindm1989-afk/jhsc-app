@@ -714,7 +714,8 @@ export type WrapMemberInResult =
  *          `crypto_box_seal` (sender-anonymous; sealed-box, not secretbox —
  *          Decision 5 step 3).
  * Step 4 — POST `client.wrapCommitteeDataKeyForMember(...)` with the sealed
- *          bytes. `rotation_id` is null (non-rotation grant).
+ *          bytes. `rotation_id` is threaded from opts (B1 — associate a re-wrap
+ *          with its rotation event); omitted → null (byte-identical grant).
  * Step 5 — The composition does NOT zeroize `holder.data_key` (Decision 5
  *          step 5: the co-chair still needs key access; the holder owns its
  *          own lifecycle).
@@ -725,10 +726,11 @@ export type WrapMemberInResult =
  * the fingerprint NEVER appear in any logger / sessionStorage / localStorage
  * / URL. No `console.*` calls in this composition.
  *
- * F-172 attempted-bypass: only the six named fields cross into the
- * composition; any OTHER smuggled pubkey field in opts is dropped by the
- * destructure. The seal target is always `disclosed.public_key`, which is
- * re-checked against its own confirmed fingerprint before it is used.
+ * F-172 attempted-bypass: only the named fields cross into the composition;
+ * any OTHER smuggled pubkey field in opts is dropped by the destructure. The
+ * seal target is always `disclosed.public_key`, which is re-checked against its
+ * own confirmed fingerprint before it is used. B1 threads a `rotation_id`
+ * (audit-association metadata only) — it never influences the seal target.
  */
 export async function wrapMemberInViaProduction(opts: {
   client: SupabaseT07Client;
@@ -737,13 +739,18 @@ export async function wrapMemberInViaProduction(opts: {
   user_id: string;
   target_user_id: string;
   disclosed: { public_key: Uint8Array; fingerprint: string };
+  // B1 — thread rotation_id so a re-wrap can be associated with its rotation
+  // event. Optional; omitted → null (byte-identical grant, unchanged wire).
+  rotation_id?: string | null;
 }): Promise<WrapMemberInResult> {
   // A-8.6 single-disclosure: the caller (the F-172 confirm screen) disclosed the
   // target pubkey ONCE and hands the confirmed `{public_key, fingerprint}` down
   // as `disclosed`. The composition no longer reads `getMemberPubkey` itself — so
   // the human-compared bytes ARE the bytes we seal to (TOCTOU closed). Only the
-  // six named fields cross in; any other smuggled pubkey field is dropped here.
-  const { client, holder, localIdentity, user_id, target_user_id, disclosed } = opts;
+  // named fields cross in; any other smuggled pubkey field is dropped here.
+  // B1 — `rotation_id` also crosses in (default null) so a re-wrap can be
+  // associated with its rotation event; it never re-points the seal target.
+  const { client, holder, localIdentity, user_id, target_user_id, disclosed, rotation_id } = opts;
 
   // Step 1 — ensure the holder holds a LIVE key to seal with. The unwrap
   // composition is the single source of truth for the probe + disclosure +
@@ -895,9 +902,11 @@ export async function wrapMemberInViaProduction(opts: {
     return { status: 'failed', reason: 'invalid_pubkey' };
   }
 
-  // Step 4 — POST the wrap. `rotation_id` is null (non-rotation grant);
-  // the existing wrap_committee_data_key_for_member RPC re-asserts active-
-  // member on the target (F-172 mitigation #2; the :502-503 contract).
+  // Step 4 — POST the wrap. `rotation_id` is threaded from opts (B1 — associate
+  // a re-wrap with its rotation event); omitted → null (byte-identical non-
+  // rotation grant). The existing wrap_committee_data_key_for_member RPC
+  // re-asserts active-member on the target (F-172 mitigation #2; the :502-503
+  // contract).
   let wrap: Awaited<ReturnType<typeof client.wrapCommitteeDataKeyForMember>>;
   try {
     wrap = await client.wrapCommitteeDataKeyForMember({
@@ -907,7 +916,10 @@ export async function wrapMemberInViaProduction(opts: {
       // stale, pre-rotation epoch under a mid-seal self-heal.
       key_id: freshKeyId,
       wrapped_ciphertext: sealed,
-      rotation_id: null
+      // B1 — thread the caller-supplied rotation_id so a re-wrap can be
+      // associated with its rotation event; omitted → null (byte-identical).
+      // F182-4a threads the id ONLY — the sealed key stays the LIVE data key.
+      rotation_id: rotation_id ?? null
     });
   } catch {
     // F-148 / F-176: a transport throw (network blow-up). NEVER propagate
