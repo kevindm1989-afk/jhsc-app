@@ -33,9 +33,14 @@
    *   - F-160 — the `4eyes_required` / `last_co_chair` / `failed` blocking copy
    *     names NO member (generic phrasing only). Confirm copy MAY name the member
    *     being acted on (the co-chair chose that target).
-   *   - F-182 HONEST COPY — the remove-confirm copy states the non-cryptographic
-   *     limit and carries NO data-access-revocation claim; the reactivate-confirm
-   *     copy states access returns via the RETAINED wrap, not a fresh grant.
+   *   - F-182 HONEST COPY — under auto-rotate (ADR-0030 Amendment C) the
+   *     remove-confirm copy states the removal ROTATES the committee key (forward
+   *     secrecy: it cuts access to committee data filed from now on, and cannot
+   *     reach records the member already opened); it carries NO absolute/
+   *     retroactive data-access-revocation claim. Self-removal is the exception —
+   *     the leaver can't run the rotation, so the self variant says a remaining
+   *     worker co-chair must still rotate the key. The reactivate-confirm copy
+   *     states access returns via the RETAINED wrap, not a fresh grant.
    *
    * No member PI / raw uid is written to a URL / storage / log here (F-176); the
    * raw `reason` enum is mapped to copy, never echoed. No `console.*`.
@@ -205,7 +210,10 @@
   let lastCoChairHeadingEl: HTMLHeadingElement | null = null;
   let failedHeadingEl: HTMLHeadingElement | null = null;
   let doneHeadingEl: HTMLHeadingElement | null = null;
-  // F182-6 — one deliberate focus move to each rotation terminal heading.
+  // F182-6 — one deliberate focus move to each rotation terminal heading, plus
+  // the in-flight `rotating` sub-phase heading (it also carries the dialog name so
+  // aria-labelledby never dangles while the rotation is in flight).
+  let rotatingHeadingEl: HTMLHeadingElement | null = null;
   let rotationDoneHeadingEl: HTMLHeadingElement | null = null;
   let rotationIncompleteHeadingEl: HTMLHeadingElement | null = null;
   let rotationOrphanedHeadingEl: HTMLHeadingElement | null = null;
@@ -578,12 +586,19 @@
       // AC-C2 — an other-member removal AUTO-RUNS the forward-secrecy rotation
       // in the same action (ADR-0030 Amendment C).
       await runRotationFresh();
-    } else {
-      // Self-removal (the leaver cannot run the rotation — AC-C9/C6), or a legacy
-      // governance-only mount with no rotation capability → the membership
-      // terminal (the reconciled self-removal copy states a remaining co-chair
-      // must still rotate the key).
+    } else if (isSelf) {
+      // Self-removal (the leaver cannot run the rotation — AC-C9/C6) → the
+      // membership terminal; the reconciled self-removal copy states a remaining
+      // co-chair must still rotate the key. This non-rotate `done` path is for
+      // `isSelf` ONLY.
       await enterDone(result.data);
+    } else {
+      // Defense-in-depth: a NON-self removal that reached here without a rotation
+      // seam is unreachable given the Remove CTA is gated on `rotateOnRemoval`
+      // presence (VC-1 / canOfferRemove). Make the invariant explicit — never
+      // silently show the self-removal copy + skip the forward-secrecy rotation;
+      // fail LOUD into an unrecoverable rotation terminal instead.
+      await enterRotationFailed('invalid_input', undefined);
     }
   }
 
@@ -591,6 +606,10 @@
   async function runRotation(input: RotateOnRemovalInput): Promise<void> {
     phase = 'rotating';
     await tick();
+    // AC-C11 / Accessibility F2 — one deliberate focus move onto the rotating
+    // heading (it carries the dialog name), so focus never strands on <body> when
+    // the submitting Confirm unmounts (mirrors enterRotationDone's focus move).
+    focusEl(rotatingHeadingEl);
     const rotate = client.rotateOnRemoval;
     if (typeof rotate !== 'function') {
       // Defensive: the Remove CTA is gated on presence, so this never fires.
@@ -1039,6 +1058,19 @@
                busy CTA owns aria-busy (mirrors the `submitting` treatment). -->
           <div class="mm-rotating">
             <p class="mm-eyebrow">{t('committee.remove.rotation.status_removed')}</p>
+            <!-- The rotating sub-phase carries the dialog name (id={dialogHeadingId})
+                 so aria-labelledby never dangles in flight, and is the one
+                 deliberate focus target when this phase is entered (Accessibility
+                 F2 / AC-C11). -->
+            <h2
+              id={dialogHeadingId}
+              class="mm-heading"
+              tabindex="-1"
+              bind:this={rotatingHeadingEl}
+              data-testid="committee-manage-rotating-heading"
+            >
+              {t('committee.remove.rotating.status')}
+            </h2>
             <div class="mm-actions">
               <button
                 type="button"
@@ -1313,15 +1345,13 @@
                   >
                     {t('committee.remove.rotationFailed.signin_cta')}
                   </a>
-                {:else if rotationFailedAffordance === 'recovery'}
-                  <a
-                    class="mm-confirm mm-confirm-link"
-                    href="/sign-in"
-                    data-testid="committee-manage-rotation-recovery"
-                  >
-                    {t('committee.remove.rotationFailed.recovery_cta')}
-                  </a>
                 {/if}
+                <!-- Adversarial F1: the needs_recovery / no_wrap recovery path is
+                     MESSAGE-ONLY (mirrors the app's Concern/Reprisal needs_recovery
+                     pattern) — the body already tells the user to restore committee-
+                     key access on this device. It renders NO affordance beyond
+                     Close; a /sign-in link belongs only to the session_expiry path
+                     above (a different destination). -->
                 <button type="button" class="btn-outline" on:click={closePanel}>
                   {t('committee.manage.close')}
                 </button>
@@ -1476,11 +1506,20 @@
             {/if}
           {:else if openModal === 'remove'}
             <p class="mm-body">{t('committee.remove.modal.what', { name: nameForCopy })}</p>
-            <!-- F-182 honest limit: removal is administrative, not a crypto lockout;
-                 it does NOT rotate the shared committee key. NO data-access-
-                 revocation claim (a string test forbids it). -->
+            <!-- F-182 honest limit: removal AUTO-ROTATES the committee key (forward
+                 secrecy — it cuts access to committee data filed from now on, and
+                 cannot reach records the member already opened). NO absolute/
+                 retroactive data-access-revocation claim (a string test forbids it).
+                 Self-removal is the exception: the leaver can't run the rotation from
+                 this device, so the self variant states a remaining worker co-chair
+                 must still rotate the key (F-189 / Adversarial F2 — it must not
+                 promise a rotation the self path skips). -->
             <p class="mm-body mm-limit">
-              {t('committee.remove.modal.limit', { name: nameForCopy })}
+              {#if isSelf}
+                {t('committee.remove.modal.limit_self', { name: nameForCopy })}
+              {:else}
+                {t('committee.remove.modal.limit', { name: nameForCopy })}
+              {/if}
             </p>
             {#if isSelf}
               <p class="mm-note">{t('committee.remove.modal.self_note')}</p>
@@ -1990,17 +2029,30 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    /* On the plain card surface (the `rotating` sub-phase) the muted-fg pairing IS
+       audited. */
     color: var(--color-fg-muted);
+  }
+  /* WCAG 1.4.3 — on a tinted terminal/alert background the muted grey drops below
+     4.5:1; inherit the audited tint foreground (currentColor === the tint fg the
+     container sets) instead. */
+  .mm-alert .mm-eyebrow,
+  .mm-terminal .mm-eyebrow {
+    color: currentColor;
   }
   .mm-rotating {
     display: grid;
     gap: 0.5rem;
   }
-  /* Anchor styled as the affirmative CTA (sign-in / restore-access routes). */
+  /* Anchor styled as the affirmative CTA (sign-in route). Unlike <button>/.btn it
+     does not match the global button base, so it carries the ≥44px touch target +
+     inline padding itself (matches the app.css button/cta convention). */
   .mm-confirm-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-height: 2.75rem;
+    padding-inline: 1rem;
     text-decoration: none;
   }
 

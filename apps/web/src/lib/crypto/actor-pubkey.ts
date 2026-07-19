@@ -23,9 +23,13 @@ import { ready } from './sodium';
  */
 export async function deriveActorPublicKey(privateKey: Uint8Array): Promise<Uint8Array> {
   const s = await ready();
-  // Derive the public half BEFORE wiping the input buffer.
-  const publicKey = s.crypto_scalarmult_base(privateKey);
-  // AC-C13: zeroize the private-key buffer in place; it is not needed again.
-  privateKey.fill(0);
-  return publicKey;
+  try {
+    // Derive the public half; a malformed (wrong-length) scalar makes libsodium
+    // throw BEFORE returning.
+    return s.crypto_scalarmult_base(privateKey);
+  } finally {
+    // AC-C13: zeroize the private-key buffer in place on BOTH the success and the
+    // throw path (mirrors recovery-blob.ts) — the private half never lingers.
+    privateKey.fill(0);
+  }
 }

@@ -1277,6 +1277,7 @@
         "heading": "Remove {name} from the committee?",
         "what": "This removes {name}'s committee membership and starts a 90-day grace period. Their committee role is cleared and their status here changes to 'Removed'.",
         "limit": "Removing {name} rotates the committee key, so committee data filed from now on is protected from them. Rotation cannot retroactively protect earlier records: if {name} kept a copy of committee data they already opened, rotating the key does not reach that copy.",
+        "limit_self": "Removing your own membership does not rotate the committee key from this device. A remaining worker co-chair must rotate it so committee data filed later is out of reach of any device you keep.",
         "self_note": "You are removing your own membership.",
         "confirm": "Remove member",
         "confirm_self": "Remove myself",

@@ -823,6 +823,57 @@ describe('P1-8e [F-189/AC-C12] remove-confirm copy states forward-secrecy ("from
 });
 
 // ===========================================================================
+// Adversarial F2 (F-189 honest-copy BLOCKER, round-1 closure fix). `submitRemove`
+// SKIPS the key rotation for a SELF removal (the leaver cannot run it), yet the
+// remove-confirm modal renders `committee.remove.modal.limit` ("Removing {name}
+// rotates the committee key … from now on …") UNCONDITIONALLY — promising a
+// rotation the self path never performs. The fix renders a self variant
+// `committee.remove.modal.limit_self` when `isSelf` (key NOT rotated from this
+// device; a remaining worker co-chair must rotate it). RED today: the isSelf=true
+// modal still renders the forward-secrecy `modal.limit`, so the "rotates the
+// committee key" / "from now on" / "protected from" claims are present.
+//
+// This is the RENDER-level check the context-free i18n-catalog test cannot make.
+// ===========================================================================
+
+describe('P1-8e [Adversarial F2/F-189] self-removal confirm copy does not over-claim a rotation the self path skips', () => {
+  // A self member (worker_member only) — a self-remove of a non-co-chair reveals no
+  // 4-eyes picker, keeping the modal copy under test uncluttered. This describe owns
+  // this fixture.
+  const ROW_SELF_MEMBER = makeRow({ user_id: ACTOR, roles: ['worker_member'], display_name: NAME_SELF });
+
+  it('isSelf=true remove-confirm copy makes NO rotation claim, and says a remaining co-chair must rotate', async () => {
+    renderCard({ member: ROW_SELF_MEMBER, isSelf: true });
+    const modal = await openRemoveModal(ACTOR);
+    const text = modal.textContent ?? '';
+    // The self path rotates nothing from this device — the confirm step must not promise it.
+    expect(text, 'self-confirm must not claim the removal rotates the key').not.toMatch(
+      /rotates the committee key/i
+    );
+    expect(text, 'self-confirm must not claim a forward-secrecy cutover ("from now on")').not.toMatch(
+      /from now on/i
+    );
+    expect(text, 'self-confirm must not claim the removed device is "protected from" anything').not.toMatch(
+      /protected from/i
+    );
+    // It DOES convey a remaining worker co-chair must still rotate the key.
+    expect(text, 'self-confirm must say a remaining co-chair still needs to rotate').toMatch(
+      /remaining .*co-?chair.*rotate|co-?chair.*must .*rotate/i
+    );
+  });
+
+  it('CONTROL — isSelf=false remove-confirm copy is UNCHANGED (still states the "from now on" forward-secrecy cutover)', async () => {
+    renderCard({ member: ROW_OTHER_MEMBER, isSelf: false });
+    const modal = await openRemoveModal(OTHER);
+    const text = modal.textContent ?? '';
+    expect(text, 'the non-self path still gets the forward-secrecy modal.limit copy').toMatch(/from now on/i);
+    expect(text, 'the non-self path still frames the removal as rotating the committee key').toMatch(
+      /rotates the committee key/i
+    );
+  });
+});
+
+// ===========================================================================
 // FINDING 7 (F-182 :4092) — reactivate copy states RETAINED-wrap honesty.
 // ===========================================================================
 

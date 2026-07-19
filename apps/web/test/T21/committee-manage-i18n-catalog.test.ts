@@ -66,6 +66,9 @@ const REMOVE_KEYS: readonly string[] = [
   'committee.remove.modal.heading',
   'committee.remove.modal.what',
   'committee.remove.modal.limit',
+  // Adversarial F2 (round-1 closure fix) — the self-variant confirm copy shown when
+  // isSelf: it must NOT promise a rotation the self path skips.
+  'committee.remove.modal.limit_self',
   'committee.remove.modal.self_note',
   'committee.remove.modal.confirm',
   'committee.remove.modal.confirm_self',
@@ -317,6 +320,47 @@ describe('P1-8e [F-189/AC-C12] modal.limit + rotationDone.body state forward-sec
     const s = t('committee.remove.modal.what');
     expect(s).toMatch(/membership/i);
     expect(s).not.toMatch(FORBIDDEN_REVOCATION);
+  });
+});
+
+// ===========================================================================
+// Adversarial F2 (F-189 honest-copy BLOCKING / AC-C9, round-1 closure fix). The
+// non-self `modal.limit` claims "Removing {name} rotates the committee key … from
+// now on …" — but `submitRemove` SKIPS rotation for a SELF removal. Rendering that
+// claim on the self-confirm step is a live contradiction. A self variant
+// `committee.remove.modal.limit_self` states the key is NOT rotated from this device
+// and a remaining worker co-chair must rotate it (mirrors done.body / the a11y self
+// copy). It must NOT carry "from now on" or "rotates the committee key", and passes
+// the FORBIDDEN sweep. RED today: the key does not exist (hasKey guards fail first).
+// The existing `modal.limit` (non-self) assertions above are UNCHANGED.
+// ===========================================================================
+
+describe('P1-8e [Adversarial F2/F-189/AC-C9] committee.remove.modal.limit_self — self-confirm copy does not over-claim a skipped rotation', () => {
+  it('states a remaining worker co-chair must still rotate the committee key', () => {
+    expect(
+      hasKey('committee.remove.modal.limit_self'),
+      'committee.remove.modal.limit_self must be wired (Adversarial F2 self-variant confirm copy)'
+    ).toBe(true);
+    const s = t('committee.remove.modal.limit_self', { name: 'X' });
+    expect(s, 'the self-confirm copy must say a remaining co-chair still needs to rotate').toMatch(
+      /remaining .*co-?chair.*rotate|co-?chair.*must .*rotate/i
+    );
+  });
+
+  it('does NOT claim the removal rotates the key, nor a forward-secrecy "from now on" cutover', () => {
+    expect(hasKey('committee.remove.modal.limit_self')).toBe(true);
+    const s = t('committee.remove.modal.limit_self', { name: 'X' });
+    expect(s, 'self-removal does NOT rotate from this device — it must not claim it does').not.toMatch(
+      /rotates the committee key/i
+    );
+    expect(s, 'the self path performs no rotation — no "from now on" forward-secrecy claim').not.toMatch(
+      /from now on/i
+    );
+  });
+
+  it('contains NO absolute/retroactive-revocation phrase (FORBIDDEN sweep)', () => {
+    expect(hasKey('committee.remove.modal.limit_self')).toBe(true);
+    expect(t('committee.remove.modal.limit_self', { name: 'X' })).not.toMatch(FORBIDDEN_REVOCATION);
   });
 });
 

@@ -104,6 +104,31 @@ describe('F182-6 [AC-C13] deriveActorPublicKey — crypto-layer X25519 derivatio
     ).toBe(true);
   });
 
+  // ── Adversarial F3 / AC-C13 (round-1 closure fix) ──────────────────────────
+  // The zeroize must run on the THROW path too. libsodium's crypto_scalarmult_base
+  // rejects a wrong-length scalar (it requires EXACTLY crypto_scalarmult_SCALARBYTES
+  // = 32 bytes) by THROWING a TypeError. RED today: the impl runs `.fill(0)` AFTER
+  // `crypto_scalarmult_base(priv)`, so a throw skips the wipe and the private bytes
+  // linger in the caller-owned buffer. Fix: wrap the derivation in try { … } finally
+  // { priv.fill(0) } so the buffer is zeroed on BOTH success and throw.
+  it('zeroizes the private-key buffer even when the derivation THROWS (try/finally, AC-C13)', async () => {
+    const derive = helper();
+    // 16 ≠ 32 → crypto_scalarmult_base throws "invalid privateKey length" BEFORE
+    // returning; the input buffer is left untouched (still 0xAB) by libsodium.
+    const malformed = new Uint8Array(16).fill(0xab);
+    expect(malformed.some((b) => b !== 0), 'precondition: malformed buffer is non-zero').toBe(true);
+
+    await expect(
+      (async () => derive(malformed))(),
+      'a malformed scalar must reject/throw — never a silent success'
+    ).rejects.toBeInstanceOf(Error);
+
+    expect(
+      Array.from(malformed).every((b) => b === 0),
+      'AC-C13: the private-key buffer MUST be wiped even on the throw path (try/finally)'
+    ).toBe(true);
+  });
+
   it('does not smuggle the private key out through the return value (returns a distinct pubkey buffer)', async () => {
     const derive = helper();
     const kp = sodium.crypto_box_keypair();

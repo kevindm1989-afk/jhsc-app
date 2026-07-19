@@ -131,17 +131,19 @@
     resume?: { rotation_id: string; new_key_id: string };
   };
   type ManageCardClient = {
-    setRoles: (i: {
+    // `_i` are TYPE-SIGNATURE labels only (never a runtime binding); the leading
+    // underscore keeps no-unused-vars quiet on the structural method shapes.
+    setRoles: (_i: {
       target_user_id: string;
       roles: string[];
       second_approver_id?: string | null;
     }) => Promise<CommitteeOpResult<null>>;
-    removeMember: (i: {
+    removeMember: (_i: {
       target_user_id: string;
       second_approver_id?: string | null;
     }) => Promise<CommitteeOpResult<string>>;
-    reactivateMember: (i: { target_user_id: string }) => Promise<CommitteeOpResult<null>>;
-    rotateOnRemoval?: (i: CardRotateInput) => Promise<RotateCommitteeKeyOnRemovalResult>;
+    reactivateMember: (_i: { target_user_id: string }) => Promise<CommitteeOpResult<null>>;
+    rotateOnRemoval?: (_i: CardRotateInput) => Promise<RotateCommitteeKeyOnRemovalResult>;
   };
 
   $: rotateOnRemovalFn =
@@ -157,7 +159,7 @@
   $: manageCardClient = buildManageCardClient(rotateOnRemovalFn);
 
   function buildManageCardClient(
-    rotate: ((i: CardRotateInput) => Promise<RotateCommitteeKeyOnRemovalResult>) | null
+    rotate: ((_i: CardRotateInput) => Promise<RotateCommitteeKeyOnRemovalResult>) | null
   ): ManageCardClient {
     const base: ManageCardClient = {
       // ADV-1: wrap each op in an arrow so the ORIGINAL SupabaseCommitteeClient

@@ -550,9 +550,23 @@ describe('F182-6 [AC-C8] failed{reason} → rotationFailed, reason-mapped afford
   });
 
   for (const reason of ['needs_recovery', 'no_wrap']) {
-    it(`${reason} → non-retryable recovery route (Restore access), NOT an in-place retry`, async () => {
+    it(`${reason} → MESSAGE-ONLY recovery terminal (body + Close), NO mis-targeted /sign-in link, NOT an in-place retry`, async () => {
       const { term } = await toFailed(reason);
-      expect(within(term).getByTestId('committee-manage-rotation-recovery')).not.toBeNull();
+      // Adversarial F1 (round-1 closure fix): the recovery affordance is MESSAGE-ONLY,
+      // mirroring the app's Concern/Reprisal needs_recovery pattern — the body already
+      // tells the user to restore committee-key access on this device. It must NOT be
+      // an `<a href="/sign-in">` (that destination belongs to the session_expiry
+      // sign-in affordance, NOT recovery). RED today: the recovery affordance renders
+      // `<a href="/sign-in" data-testid="committee-manage-rotation-recovery">`.
+      const signinLinks = within(term)
+        .queryAllByRole('link')
+        .filter((a) => (a.getAttribute('href') ?? '').includes('/sign-in'));
+      expect(signinLinks, 'the recovery terminal must render NO /sign-in link (message-only)').toHaveLength(0);
+      // The needs_recovery body message is shown; Close is the affordance — not a retry.
+      expect(term.textContent ?? '', 'the recovery terminal shows its body message').toContain(
+        t('committee.remove.rotationFailed.needs_recovery_body')
+      );
+      expect(within(term).queryByRole('button', { name: t('committee.manage.close') })).not.toBeNull();
       expect(within(term).queryByTestId('committee-manage-rotation-retry')).toBeNull();
     });
   }
@@ -610,6 +624,49 @@ describe('F182-6 [AC-C8] failed{reason} → rotationFailed, reason-mapped afford
 });
 
 // ===========================================================================
+// Adversarial F1 (round-1 closure fix) — the sign-in and recovery affordances must
+// point at DIFFERENT destinations. session_expiry/401 → the correct <a href="/sign-in">
+// (UNCHANGED — that one is right). needs_recovery/no_wrap → message-only, NO /sign-in
+// link (the mis-targeted link is removed; the body already says "restore your access").
+// This pins that the two affordances no longer share the /sign-in destination.
+// ===========================================================================
+
+describe('F182-6 [Adversarial F1] sign-in and recovery affordances resolve to DIFFERENT destinations', () => {
+  async function failedTerm(reason: string, http?: number): Promise<HTMLElement> {
+    const built = fakeClient({
+      remove: [{ ok: true, data: GRACE_ISO }],
+      rotate: [{ status: 'failed', reason, http }]
+    });
+    renderCard({ member: ROW_OTHER_MEMBER, isSelf: false, client: built.client, calls: built.calls, order: built.order });
+    await removeToRotating(OTHER);
+    return screen.findByTestId('committee-manage-rotation-failed');
+  }
+
+  it('session_expiry/401 keeps the correct <a href="/sign-in"> sign-in affordance (unchanged, correct)', async () => {
+    const term = await failedTerm('session_expiry', 401);
+    const signin = within(term).getByTestId('committee-manage-rotation-signin');
+    expect(signin.tagName.toLowerCase(), 'the sign-in affordance is an anchor').toBe('a');
+    expect(signin.getAttribute('href') ?? '', 'the sign-in affordance routes to /sign-in').toContain('/sign-in');
+  });
+
+  it('needs_recovery does NOT reuse the /sign-in destination (message-only recovery affordance)', async () => {
+    const term = await failedTerm('needs_recovery');
+    // If a recovery testid survives the message-only rewrite, it must NOT be an
+    // <a href="/sign-in">. Either shape is acceptable; borrowing /sign-in is not.
+    const recovery = within(term).queryByTestId('committee-manage-rotation-recovery');
+    if (recovery) {
+      const isSigninAnchor =
+        recovery.tagName.toLowerCase() === 'a' && (recovery.getAttribute('href') ?? '').includes('/sign-in');
+      expect(isSigninAnchor, 'the recovery affordance must not borrow the /sign-in destination').toBe(false);
+    }
+    const signinLinks = within(term)
+      .queryAllByRole('link')
+      .filter((a) => (a.getAttribute('href') ?? '').includes('/sign-in'));
+    expect(signinLinks, 'the recovery terminal is message-only — no /sign-in link').toHaveLength(0);
+  });
+});
+
+// ===========================================================================
 // VC-2 (threat-model refinement) — a RESUME that returns failed{needs_recovery}
 // routes to restore-from-recovery, NOT the cannot_resume dead-end.
 // RED: the resume path + needs_recovery→recovery branch do not exist yet.
@@ -629,7 +686,16 @@ describe('F182-6 [VC-2] a Resume that yields failed{needs_recovery} routes to re
     await screen.findByTestId('committee-manage-rotation-incomplete');
     await fireEvent.click(await screen.findByTestId('committee-manage-rotation-resume'));
     const failed = await screen.findByTestId('committee-manage-rotation-failed');
-    expect(within(failed).getByTestId('committee-manage-rotation-recovery')).not.toBeNull();
+    // Routed to the needs_recovery MESSAGE-ONLY terminal (Adversarial F1): the body
+    // says to restore committee-key access on this device — no mis-targeted /sign-in
+    // link. RED today: the recovery affordance renders `<a href="/sign-in">`.
+    expect(failed.textContent ?? '', 'the resumed recovery terminal shows its body message').toContain(
+      t('committee.remove.rotationFailed.needs_recovery_body')
+    );
+    const signinLinks = within(failed)
+      .queryAllByRole('link')
+      .filter((a) => (a.getAttribute('href') ?? '').includes('/sign-in'));
+    expect(signinLinks, 'the resumed recovery terminal must render NO /sign-in link').toHaveLength(0);
     // The needs_recovery resumer must NOT be dead-ended into the cannot-resume copy.
     expect(screen.queryByTestId('committee-manage-rotation-cannot-resume')).toBeNull();
   });
@@ -776,6 +842,72 @@ describe('F182-6 [AC-C11] a11y packet — protected Escape, portal, aria-busy, f
       await waitFor(() => expect(document.activeElement).toBe(heading));
     });
   }
+});
+
+// ===========================================================================
+// Accessibility F2 (round-1 closure fix) / AC-C11 — the `rotating` SUB-PHASE must
+// (a) keep the dialog NAMED and (b) move focus off <body>. Today the rotating block
+// carries NO element with id={dialogHeadingId}, so the dialog's aria-labelledby
+// dangles (transiently unnamed), and runRotation() moves NO focus, so focus strands
+// on <body> when the submitting Confirm unmounts. The fix adds a heading to the
+// rotating block: id={dialogHeadingId} + tabindex="-1" + bind:this={rotatingHeadingEl}
+// (suggested data-testid="committee-manage-rotating-heading"), focused in
+// runRotation() after the tick (mirrors enterRotationDone's focusEl move).
+//
+// RED today: (a) no element carries the aria-labelledby id during rotating;
+//            (b) document.activeElement is <body> (no focus move on entering rotating).
+// ===========================================================================
+
+describe('F182-6 [AC-C11 / Accessibility F2] the rotating sub-phase names the dialog and moves focus off <body>', () => {
+  /** Render + drive to a HELD `rotating` phase (deferred rotation stays in flight). */
+  function toHeldRotating() {
+    const d = deferred<RotateResult>();
+    const built = fakeClient({ remove: [{ ok: true, data: GRACE_ISO }], rotate: [d.promise] });
+    renderCard({ member: ROW_OTHER_MEMBER, isSelf: false, client: built.client, calls: built.calls, order: built.order });
+    return d;
+  }
+  const RESOLVE_OK: RotateResult = {
+    status: 'ok',
+    rotation_id: ROTID,
+    new_key_id: NEWKID,
+    members_rewrapped_count: 2,
+    pending_members: []
+  };
+
+  it('the dialog stays NAMED during rotating (an element carries the aria-labelledby id)', async () => {
+    const d = toHeldRotating();
+    await removeToRotating(OTHER);
+    await screen.findByTestId('committee-manage-rotating');
+    const modal = screen.getByTestId('committee-remove-modal');
+    const labelledBy = modal.getAttribute('aria-labelledby');
+    expect(labelledBy, 'the rotating dialog must keep an aria-labelledby target').toBeTruthy();
+    const named = labelledBy ? document.getElementById(labelledBy) : null;
+    expect(
+      named,
+      'an element with id === aria-labelledby must exist during rotating — the dialog must not be transiently unnamed (Accessibility F2)'
+    ).not.toBeNull();
+    expect(modal.contains(named), 'the naming element lives inside the dialog').toBe(true);
+    d.resolve(RESOLVE_OK);
+    await screen.findByTestId('committee-manage-rotation-done');
+  });
+
+  it('entering rotating moves focus to the rotating heading, NOT stranded on <body>', async () => {
+    const d = toHeldRotating();
+    await removeToRotating(OTHER);
+    await screen.findByTestId('committee-manage-rotating');
+    const modal = screen.getByTestId('committee-remove-modal');
+    const labelledBy = modal.getAttribute('aria-labelledby') ?? '';
+    await waitFor(() =>
+      expect(document.activeElement, 'focus must not strand on <body> when rotation begins').not.toBe(
+        document.body
+      )
+    );
+    expect(document.activeElement, 'focus lands on the rotating heading (id === aria-labelledby)').toBe(
+      document.getElementById(labelledBy)
+    );
+    d.resolve(RESOLVE_OK);
+    await screen.findByTestId('committee-manage-rotation-done');
+  });
 });
 
 // ===========================================================================
