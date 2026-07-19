@@ -57,7 +57,9 @@ const ROLE_KEYS: readonly string[] = [
   'committee.role.failed.invalid_role.body'
 ];
 
-// committee.remove.* — the remove flow (F-182 honest-limit copy).
+// committee.remove.* — the remove flow. F182-6 (ADR-0030 Amd C): removal now
+// AUTO-RUNS the forward-secrecy rotation, so the honest-limit copy is REWRITTEN
+// and the rotation-terminal keys are ADDED (Decision C2 union→copy table).
 const REMOVE_KEYS: readonly string[] = [
   'committee.remove.row.cta',
   'committee.remove.row.cta_aria',
@@ -71,7 +73,61 @@ const REMOVE_KEYS: readonly string[] = [
   'committee.remove.submitting',
   'committee.remove.done.heading',
   'committee.remove.done.body',
-  'committee.remove.done.toast'
+  'committee.remove.done.toast',
+  // F182-6 rotation `rotating` sub-phase + terminal keys.
+  'committee.remove.rotating.cta',
+  'committee.remove.rotating.status',
+  'committee.remove.rotationDone.heading',
+  'committee.remove.rotationDone.body',
+  'committee.remove.rotationDone.pending_note',
+  'committee.remove.rotationDone.toast',
+  'committee.remove.rotationIncomplete.heading',
+  'committee.remove.rotationIncomplete.body',
+  'committee.remove.rotationIncomplete.resume_cta',
+  'committee.remove.rotationOrphaned.heading',
+  'committee.remove.rotationOrphaned.body',
+  'committee.remove.rotationOrphaned.rerun_cta',
+  'committee.remove.rotationCannotResume.heading',
+  'committee.remove.rotationCannotResume.body',
+  'committee.remove.rotationFailed.heading',
+  'committee.remove.rotationFailed.session_body',
+  'committee.remove.rotationFailed.co_chair_body',
+  'committee.remove.rotationFailed.needs_recovery_body',
+  'committee.remove.rotationFailed.generic_body',
+  'committee.remove.rotationFailed.unrecoverable_body',
+  'committee.remove.rotationFailed.retry_cta',
+  'committee.remove.rotationFailed.signin_cta',
+  'committee.remove.rotationFailed.recovery_cta',
+  'committee.remove.rotation.status_removed'
+];
+
+// F182-6 rotation-terminal BODY keys grouped by honesty class (AC-C12 / re-pass #30).
+// Claim-making keys MAY assert forward-secrecy ("from now on"); LOUD terminals must
+// NOT ("not yet cut" / "still readable" only). None may carry a FORBIDDEN phrase.
+const ROTATION_CLAIM_KEYS: readonly string[] = [
+  'committee.remove.modal.limit',
+  'committee.remove.rotationDone.body'
+  // committee.remove.done.body (self-removal) is asserted separately (VC-3) —
+  // it is claim-making AND names the actor via {name}.
+];
+const ROTATION_LOUD_BODY_KEYS: readonly string[] = [
+  'committee.remove.rotationIncomplete.body',
+  'committee.remove.rotationOrphaned.body',
+  'committee.remove.rotationCannotResume.body',
+  'committee.remove.rotationFailed.session_body',
+  'committee.remove.rotationFailed.co_chair_body',
+  'committee.remove.rotationFailed.needs_recovery_body',
+  'committee.remove.rotationFailed.generic_body',
+  'committee.remove.rotationFailed.unrecoverable_body'
+];
+// Every committee.remove.rotat* key that carries a claim about access — the full
+// FORBIDDEN sweep runs over ALL of these plus modal.limit + done.body.
+const ROTATION_ALL_COPY_KEYS: readonly string[] = [
+  ...ROTATION_CLAIM_KEYS,
+  ...ROTATION_LOUD_BODY_KEYS,
+  'committee.remove.rotating.status',
+  'committee.remove.rotationDone.pending_note',
+  'committee.remove.done.body'
 ];
 
 // committee.reactivate.* — the reactivate flow (F-182 retained-wrap copy).
@@ -130,7 +186,15 @@ const A11Y_KEYS: readonly string[] = [
   'a11y.committee.approver.selected',
   'a11y.committee.manage.fourEyes',
   'a11y.committee.manage.lastCoChair',
-  'a11y.committee.manage.failed'
+  'a11y.committee.manage.failed',
+  // F182-6 rotation live-region announces (Decision C2 a11y packet).
+  'a11y.committee.remove.rotation.rotating',
+  'a11y.committee.remove.rotation.done',
+  'a11y.committee.remove.rotation.done_pending',
+  'a11y.committee.remove.rotation.incomplete',
+  'a11y.committee.remove.rotation.orphaned',
+  'a11y.committee.remove.rotation.cannotResume',
+  'a11y.committee.remove.rotation.failed'
 ];
 
 const COPY_KEYS = [...ROLE_KEYS, ...REMOVE_KEYS, ...REACTIVATE_KEYS, ...APPROVER_KEYS, ...MANAGE_KEYS];
@@ -221,36 +285,140 @@ describe('P1-8e — interpolation contracts', () => {
 // carries NO data-access-revocation claim (catalog-string discipline).
 // ===========================================================================
 
+// F-189 FORBIDDEN absolute/retroactive-revocation set — EXTENDED for F182-6
+// (AC-C12 / re-pass #30): adds "removes access to [existing|all] committee data"
+// (the phrase the original regex missed). "cuts access to committee data filed
+// from now on" trips none of these alternatives (forward-secrecy is honest).
 const FORBIDDEN_REVOCATION =
-  /revokes? access to committee data|revoke access|can no longer decrypt|no longer read|loses? access to (the )?(committee )?data|cryptographically remove/i;
+  /revokes? access to committee data|revoke access|can no longer decrypt|no longer read|loses? access to (the )?(committee )?data|cryptographically remove|removes? access to (existing|all) committee data/i;
 
-describe('P1-8e [F-182] remove i18n states the non-crypto limit, never a data-access-revocation claim', () => {
-  it('committee.remove.modal.limit contains the honest non-cryptographic limit', () => {
-    expect(hasKey('committee.remove.modal.limit')).toBe(true);
-    const s = t('committee.remove.modal.limit');
-    expect(s).toMatch(/does not rotate the shared (committee )?key|not a cryptographic lockout/i);
-    expect(s).toMatch(/administrative step/i);
-  });
+// ===========================================================================
+// AC-C12 (F-189 honest-copy contract + T21 reconciliation). The STALE assertions
+// (removal "does not rotate the shared key" / "administrative step" / a pure
+// membership-grace done.body) are REPLACED: under AUTO-ROTATE they are now FALSE.
+// The rewritten copy states forward-secrecy ("from now on" / "cannot retroactively
+// protect earlier records") and the FORBIDDEN sweep runs over ALL rotation keys.
+// ===========================================================================
 
-  it('committee.remove.modal.limit does NOT claim data-access / crypto revocation', () => {
-    // hasKey guards so this fails RED until the real copy exists (the
-    // [[committee.remove.modal.limit]] miss-marker would trivially pass /not/).
-    expect(hasKey('committee.remove.modal.limit')).toBe(true);
-    expect(t('committee.remove.modal.limit')).not.toMatch(FORBIDDEN_REVOCATION);
-  });
+describe('P1-8e [F-189/AC-C12] modal.limit + rotationDone.body state forward-secrecy ("from now on"), not absolute revocation', () => {
+  for (const key of ROTATION_CLAIM_KEYS) {
+    it(`${key} states the forward-secrecy cutover ("from now on") and the retroactive limit`, () => {
+      expect(hasKey(key), `${key} must be wired for F182-6`).toBe(true);
+      const s = t(key, { name: 'X' });
+      expect(s, `${key} must convey the "from now on" cutover`).toMatch(/from now on/i);
+      expect(s, `${key} must state rotation cannot retroactively protect earlier records`).toMatch(
+        /cannot retroactively protect earlier records/i
+      );
+    });
+  }
 
-  it('committee.remove.modal.what frames a MEMBERSHIP removal, no data-access claim', () => {
+  it('committee.remove.modal.what still frames a MEMBERSHIP removal, no data-access claim', () => {
     expect(hasKey('committee.remove.modal.what')).toBe(true);
     const s = t('committee.remove.modal.what');
     expect(s).toMatch(/membership/i);
     expect(s).not.toMatch(FORBIDDEN_REVOCATION);
   });
+});
 
-  it('committee.remove.done.body + a11y.committee.remove.done frame a MEMBERSHIP grace, not a crypto cutoff', () => {
+describe('P1-8e [F-189/AC-C12/re-pass #30] the FORBIDDEN revocation set is barred across ALL rotation-terminal keys', () => {
+  for (const key of ROTATION_ALL_COPY_KEYS) {
+    it(`${key} contains NO absolute/retroactive-revocation phrase`, () => {
+      // hasKey guards so this fails RED until the real copy exists (the
+      // [[...]] miss-marker would trivially pass the /not/ assertion).
+      expect(hasKey(key), `${key} must be wired for F182-6`).toBe(true);
+      expect(t(key, { name: 'X', count: 2, date: '2026-10-12' })).not.toMatch(FORBIDDEN_REVOCATION);
+    });
+  }
+});
+
+describe('P1-8e [F-189/AC-C12/re-pass #30] LOUD rotation terminals never claim future access is cut', () => {
+  // The honest under-claim per terminal (Decision C2): orphaned/cannot_resume/
+  // failed → "not yet cut"; incomplete → "still readable". None may say "from now on".
+  const NOT_YET_CUT = /not yet cut/i;
+  const STILL_READABLE = /still readable|stay readable|existing records/i;
+
+  for (const key of ROTATION_LOUD_BODY_KEYS) {
+    it(`${key} does NOT contain the forward-secrecy "from now on" claim`, () => {
+      expect(hasKey(key), `${key} must be wired for F182-6`).toBe(true);
+      expect(t(key), `${key} is a LOUD terminal — it must NOT over-claim "from now on"`).not.toMatch(
+        /from now on/i
+      );
+    });
+  }
+
+  it('committee.remove.rotationIncomplete.body states existing records are still readable (no future-cut claim)', () => {
+    expect(hasKey('committee.remove.rotationIncomplete.body')).toBe(true);
+    expect(t('committee.remove.rotationIncomplete.body')).toMatch(STILL_READABLE);
+  });
+
+  for (const key of [
+    'committee.remove.rotationOrphaned.body',
+    'committee.remove.rotationCannotResume.body',
+    'committee.remove.rotationFailed.session_body',
+    'committee.remove.rotationFailed.co_chair_body',
+    'committee.remove.rotationFailed.needs_recovery_body',
+    'committee.remove.rotationFailed.generic_body',
+    'committee.remove.rotationFailed.unrecoverable_body'
+  ]) {
+    it(`${key} states the member's future access is NOT YET CUT`, () => {
+      expect(hasKey(key), `${key} must be wired for F182-6`).toBe(true);
+      expect(t(key)).toMatch(NOT_YET_CUT);
+    });
+  }
+});
+
+describe('P1-8e [F-160/AC-C4] rotation-terminal copy names no member; pending_note is count-only', () => {
+  for (const key of ROTATION_LOUD_BODY_KEYS) {
+    it(`${key} carries no {name} placeholder (F-160 — LOUD copy names no member)`, () => {
+      expect(hasKey(key), `${key} must be wired for F182-6`).toBe(true);
+      expect(leaf(JSON.parse(readFileSync(CATALOG_PATH, 'utf8')), key)).not.toContain('{name}');
+    });
+  }
+
+  it('committee.remove.rotationDone.pending_note consumes {count}, NOT {name} (count-only, F-160)', () => {
+    expect(hasKey('committee.remove.rotationDone.pending_note')).toBe(true);
+    const raw = leaf(JSON.parse(readFileSync(CATALOG_PATH, 'utf8')), 'committee.remove.rotationDone.pending_note') as string;
+    expect(raw, 'the pending note is count-based').toContain('{count}');
+    expect(raw, 'the pending note names no member (F-160)').not.toContain('{name}');
+    const out = t('committee.remove.rotationDone.pending_note', { count: 2 });
+    expect(out).toContain('2');
+    expect(out).not.toContain('{count}');
+  });
+});
+
+// ===========================================================================
+// VC-3 — committee.remove.done.body is REPURPOSED to the self-removal terminal
+// (Decision C6): its MEANING changes from a pure membership grace to "a remaining
+// co-chair must still rotate the key". Reconciled (not merely deleted).
+// ===========================================================================
+
+describe('P1-8e [VC-3/AC-C9] committee.remove.done.body reconciled to the self-removal "remaining co-chair must rotate" semantics', () => {
+  it('states a remaining worker co-chair must still rotate the committee key', () => {
+    expect(hasKey('committee.remove.done.body')).toBe(true);
+    const s = t('committee.remove.done.body', { name: 'X', date: '2026-10-12' });
+    expect(s, 'the self-removal copy must say a remaining co-chair still needs to rotate').toMatch(
+      /remaining .*co-?chair.*rotate|co-?chair.*must .*rotate/i
+    );
+  });
+
+  it('is claim-making ("from now on") but makes NO absolute-revocation / "already secured" claim', () => {
+    expect(hasKey('committee.remove.done.body')).toBe(true);
+    const s = t('committee.remove.done.body', { name: 'X', date: '2026-10-12' });
+    expect(s).toMatch(/from now on/i);
+    expect(s).not.toMatch(FORBIDDEN_REVOCATION);
+    expect(s, 'self-removal did NOT rotate — it must not claim the key was already rotated here').not.toMatch(
+      /already (secured|rotated|protected)/i
+    );
+  });
+
+  it('still frames the reactivation grace (the membership fact is unchanged)', () => {
+    expect(hasKey('committee.remove.done.body')).toBe(true);
+    expect(t('committee.remove.done.body', { name: 'X', date: '2026-10-12' })).toMatch(/grace period|reactivate/i);
+  });
+
+  it('a11y.committee.remove.done + done.body carry NO absolute-revocation phrase', () => {
     const combined = `${t('committee.remove.done.body', { name: 'X', date: '2026-10-12' })} ${t('a11y.committee.remove.done', { date: '2026-10-12' })}`;
     expect(combined).not.toMatch(FORBIDDEN_REVOCATION);
-    // Membership framing — the grace is about reactivation, not "access ends".
-    expect(t('committee.remove.done.body', { name: 'X', date: '2026-10-12' })).toMatch(/grace period|reactivate/i);
   });
 });
 

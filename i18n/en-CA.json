@@ -1276,17 +1276,55 @@
       "modal": {
         "heading": "Remove {name} from the committee?",
         "what": "This removes {name}'s committee membership and starts a 90-day grace period. Their committee role is cleared and their status here changes to 'Removed'.",
-        "limit": "Removing a member does not rotate the shared committee key or re-encrypt existing records. If {name} still has a device that already opened committee data, that device can keep opening it until the key is rotated in a future update. Removal is an administrative step, not a cryptographic lockout.",
+        "limit": "Removing {name} rotates the committee key, so committee data filed from now on is protected from them. Rotation cannot retroactively protect earlier records: if {name} kept a copy of committee data they already opened, rotating the key does not reach that copy.",
         "self_note": "You are removing your own membership.",
         "confirm": "Remove member",
         "confirm_self": "Remove myself",
         "cancel": "Cancel"
       },
       "submitting": "Removing member…",
+      "rotating": {
+        "cta": "Rotating the committee key…",
+        "status": "The member has been removed. Rotating the committee key…"
+      },
+      "rotationDone": {
+        "heading": "Member removed and key rotated",
+        "body": "The committee key was rotated, so committee data filed from now on is protected from the removed member. Rotation cannot retroactively protect earlier records they already opened.",
+        "pending_note": "Remaining members still to receive the new key: {count}. They were offline or haven’t finished setting up encryption. They keep access to earlier records and can be granted the current key later.",
+        "toast": "Member removed and committee key rotated."
+      },
+      "rotationIncomplete": {
+        "heading": "Member removed — key rotation unfinished",
+        "body": "The member has been removed, but the key rotation didn’t finish: some remaining members don’t hold the new key yet. Existing records stay readable for everyone who had access. Resume the rotation to finish giving remaining members the new key.",
+        "resume_cta": "Resume rotation"
+      },
+      "rotationOrphaned": {
+        "heading": "Member removed — key rotation did not complete",
+        "body": "The member has been removed, but the key rotation did not complete and must be run again. Until it does, the member’s access to committee data filed later is not yet cut. Existing records are unaffected.",
+        "rerun_cta": "Run rotation again"
+      },
+      "rotationCannotResume": {
+        "heading": "Member removed — key rotation can’t finish on this device",
+        "body": "The member has been removed, but this key rotation can’t be finished here — the new key isn’t held on this device. Another active worker co-chair who holds the new key must finish or abandon it. The member’s access to committee data filed later is not yet cut."
+      },
+      "rotationFailed": {
+        "heading": "Member removed — key rotation failed",
+        "session_body": "The member has been removed, but the key rotation couldn’t finish because your session ended. The member’s access to committee data filed later is not yet cut. Sign in again, then finish the rotation.",
+        "co_chair_body": "The member has been removed, but the key rotation couldn’t finish because you’re no longer an active worker co-chair. The member’s access to committee data filed later is not yet cut. Another active worker co-chair must finish the rotation.",
+        "needs_recovery_body": "The member has been removed, but the key rotation couldn’t finish because this device can’t open the committee key. The member’s access to committee data filed later is not yet cut. Restore your committee-key access on this device, then run the rotation again.",
+        "generic_body": "The member has been removed, but the key rotation couldn’t finish. The member’s access to committee data filed later is not yet cut. Try running the rotation again.",
+        "unrecoverable_body": "The member has been removed, but the key rotation couldn’t start. The member’s access to committee data filed later is not yet cut. This needs support to resolve — contact support and mention that a removal still needs its key rotation finished.",
+        "retry_cta": "Run rotation again",
+        "signin_cta": "Sign in and finish",
+        "recovery_cta": "Restore my access"
+      },
+      "rotation": {
+        "status_removed": "Membership: removed"
+      },
       "done": {
-        "heading": "Member removed",
-        "body": "{name}'s membership is removed. You can still reactivate them during the 90-day grace period, which ends {date}.",
-        "toast": "Member removed."
+        "heading": "You’ve removed your own membership",
+        "body": "Your membership is removed, {name}. A 90-day grace period has started, ending {date}, during which you can be reactivated. Because you removed yourself, the committee key was not rotated from this device — a remaining worker co-chair must still rotate it so committee data filed from now on is protected from any device you keep.",
+        "toast": "You removed your own membership."
       }
     },
     "reactivate": {
@@ -1954,7 +1992,16 @@
       },
       "remove": {
         "submitting": "Removing member…",
-        "done": "Member removed. Grace period ends {date}."
+        "done": "You have removed your own membership. A remaining worker co-chair must still rotate the committee key. Reactivation is available until {date}.",
+        "rotation": {
+          "rotating": "The member has been removed. Rotating the committee key now.",
+          "done": "The member has been removed and the committee key has been rotated. Committee data filed from now on is protected from them.",
+          "done_pending": "The member has been removed and the committee key has been rotated. {count} remaining members still need the new key and can be granted it later.",
+          "incomplete": "The member has been removed, but the key rotation is not finished. Some remaining members do not have the new key yet. Resume the rotation to finish.",
+          "orphaned": "The member has been removed, but the key rotation did not complete. Their access to later committee data is not yet cut. Run the rotation again to finish.",
+          "cannotResume": "The member has been removed, but this key rotation can’t be finished on this device. Another active worker co-chair who holds the new key must finish or abandon it.",
+          "failed": "The member has been removed, but the key rotation failed. Their access to later committee data is not yet cut."
+        }
       },
       "reactivate": {
         "submitting": "Reactivating member…",

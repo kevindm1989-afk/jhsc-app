@@ -148,6 +148,30 @@ export interface PendingInvite {
   expires_at: string;
 }
 
+/**
+ * F182-6 / ADR-0030 Amendment C, Decision C3 — the pure predicate the roster's
+ * reactive block calls to derive the rotation's `remaining_members` set: the
+ * active members who currently hold committee-key access (a live wrap), minus
+ * the removed member.
+ *
+ * `pending_grant` (`has_live_wrap === false`) and `awaiting_identity`
+ * (`!has_identity_key`, so also `!has_live_wrap`) rows are EXCLUDED — they were
+ * never granted, so silently sealing the new epoch to them during a rotation
+ * would grant committee access without any human fingerprint confirm ever
+ * happening (re-pass #29). Identity keys don't rotate, so
+ * `has_live_wrap === true ⟹ enrolled` — no separate `has_identity_key` filter
+ * is needed. Exported so the Decision-C3 predicate is unit-testable off the
+ * render tree (AC-C15).
+ */
+export function deriveRemainingMembers(
+  rows: RosterRow[],
+  removed_user_id: string
+): ReadonlyArray<{ user_id: string }> {
+  return rows
+    .filter((r) => r.active && r.has_live_wrap && r.user_id !== removed_user_id)
+    .map((r) => ({ user_id: r.user_id }));
+}
+
 export class SupabaseCommitteeClient {
   constructor(private opts: SupabaseCommitteeClientOptions) {}
 

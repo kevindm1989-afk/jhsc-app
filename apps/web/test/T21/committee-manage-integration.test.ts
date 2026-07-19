@@ -54,6 +54,31 @@ import {
 import CommitteeRoster from '../../src/lib/committee/CommitteeRoster.svelte';
 
 // ---------------------------------------------------------------------------
+// F182-6 / ADR-0030 Amendment C — mock the crypto ROTATION BOUNDARY only.
+//
+// Under AUTO-ROTATE the roster threads `rotateOnRemoval` onto the manage card
+// ONLY when the three crypto deps are wired, and the card's Remove CTA is gated on
+// that method's presence (VC-1). This integration suite pins the roster↔card
+// WIRING (ADV-1 this-binding of the GOVERNANCE ops, ADV-2 success-terminal refresh
+// survival + focus, A11Y-1 inert background) — NOT crypto correctness (owned by
+// T07 f182-4b) nor the card's terminal mapping (owned by
+// committee-manage-rotate-on-removal). So we replace the REAL crypto orchestration
+// builder with a deterministic clean-ok rotate: the roster still derives a non-null
+// `rotateOnRemovalFn` (→ Remove CTA renders, `remainingMembers` threads, the
+// rotation-done terminal + server-truthed refetch fire) with NO real RNG/keys and
+// without loading libsodium. The governance client (SupabaseCommitteeClient) is
+// NOT mocked, so ADV-1's this-binding proof stays real.
+vi.mock('../../src/lib/committee/remove-rotation-orchestration', () => ({
+  makeRemoveRotationOrchestration: () => async () => ({
+    status: 'ok',
+    rotation_id: 'rot-int-test',
+    new_key_id: 'key-int-test',
+    members_rewrapped_count: 1,
+    pending_members: []
+  })
+}));
+
+// ---------------------------------------------------------------------------
 // Fixtures (this file owns them). Synthetic — no real PII.
 // ---------------------------------------------------------------------------
 
@@ -185,12 +210,25 @@ function makeJwt(sub: string): string {
 }
 
 /** Mount the roster with manage enabled + a signed-in ACTOR (so isSelf/eligible
- *  derivations run). The card mounts per active/removed row. */
+ *  derivations run). The card mounts per active/removed row.
+ *
+ *  F182-6 (VC-1): the Remove CTA is gated on the card's `rotateOnRemoval`, which
+ *  the roster threads ONLY when the three crypto deps are present (mirrors
+ *  production — the /committee route ALWAYS wires them). We pass truthy crypto-dep
+ *  stubs so the roster derives a non-null `rotateOnRemovalFn`; the mocked
+ *  orchestration above ignores the stubs' contents (their PRESENCE is the whole
+ *  point), so removal exercises the real roster→card rotation path deterministically. */
 function renderManagedRoster(client: unknown) {
   __resetForTest();
   setJwt(makeJwt(ACTOR)); // getCurrentUserId() === ACTOR, $isSignedIn === true
   return render(CommitteeRoster, {
-    props: { client: client as never, manageEnabled: true as never }
+    props: {
+      client: client as never,
+      manageEnabled: true as never,
+      grantClient: {} as never,
+      grantHolder: {} as never,
+      grantLocalIdentity: {} as never
+    }
   });
 }
 
@@ -239,7 +277,7 @@ describe('P1-8e review-fix [integration] manage card mounts on a real-client ros
 // ===========================================================================
 
 describe('P1-8e review-fix [ADV-1] manage ops reach the transport when wired with a real class instance', () => {
-  it('REMOVE via the roster posts the `remove` op to the real transport and reaches `done` (proves `this` is bound)', async () => {
+  it('REMOVE via the roster posts the `remove` op to the real transport and reaches the rotation-done terminal (proves `this` is bound)', async () => {
     const h = realClientHarness({ roster: [[ROW_OTHER_ACTIVE]] });
     renderManagedRoster(h.client);
     await screen.findByTestId('committee-roster-list');
@@ -257,7 +295,9 @@ describe('P1-8e review-fix [ADV-1] manage ops reach the transport when wired wit
     expect(h.opsFor('remove')[0]!.target_user_id).toBe(OTHER);
 
     // And the server-truthed terminal renders — never the swallowed generic fail.
-    await screen.findByTestId('committee-manage-done');
+    // F182-6: a NON-SELF removal auto-rotates in the same action, so the clean
+    // terminal is `committee-manage-rotation-done` (not the governance `done`).
+    await screen.findByTestId('committee-manage-rotation-done');
     expect(screen.queryByTestId('committee-manage-failed')).toBeNull();
   });
 
@@ -325,12 +365,13 @@ describe('P1-8e review-fix [ADV-2] the success terminal survives the server-trut
     return { calls };
   }
 
-  it('the done modal is STILL present after the refetch resolves (it does not flash away)', async () => {
+  it('the success (rotation-done) terminal is STILL present after the refetch resolves (it does not flash away)', async () => {
     await removeThroughRoster();
     // RED at 0e2045e: load() drops to phase='loading', unmounting the list (and
-    // the done modal); the refetched list remounts FRESH cards with no modal.
+    // the terminal modal); the refetched list remounts FRESH cards with no modal.
+    // F182-6: a NON-SELF removal's success terminal is `committee-manage-rotation-done`.
     expect(
-      screen.queryByTestId('committee-manage-done'),
+      screen.queryByTestId('committee-manage-rotation-done'),
       'the success terminal must survive the roster refetch'
     ).not.toBeNull();
   });
