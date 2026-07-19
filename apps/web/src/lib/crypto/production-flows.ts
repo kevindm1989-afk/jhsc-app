@@ -938,6 +938,458 @@ export async function wrapMemberInViaProduction(opts: {
   return { status: 'ok' };
 }
 
+// ---------------------------------------------------------------------------
+// F182-4b / ADR-0030 Amendment B — `rotateCommitteeKeyOnRemovalViaProduction`,
+// the client-side key-rotation-on-removal composition (Decisions B2–B6;
+// threat-model §3.18 F-185 + the F182-4 DESIGN VALIDATION TM-1…TM-13 / R1/R2/R3
+// / re-pass triggers #21–#25). Pure ADDITIVE composition over already-co-signed
+// primitives — invents NO new crypto (ADR-0030 "no new grant crypto").
+// ---------------------------------------------------------------------------
+
+/**
+ * The fail-LOUD discriminated union (Decision B5). NEVER `ok` unless BOTH the
+ * co-chair self-wrap landed AND `finalize` succeeded — no silent dead key, no
+ * silent half-rotation (F-138 NO-GO; re-pass trigger #22).
+ *
+ *   ok                       — self-wrap + every remaining member re-wrapped +
+ *                              `finalize` OK; `pending_members: []`.
+ *   ok_with_pending          — finalized, but ≥1 remaining member was offline /
+ *                              `member_not_enrolled` → SKIPPED into
+ *                              `pending_members` (honest edge; they keep
+ *                              historical reads via their retained old-epoch wrap
+ *                              and are grantable later — NOT an error; AC-B11).
+ *   orphaned                 — `rotate` landed but the self-wrap did NOT (the new
+ *                              epoch has zero wraps) → LOUD; route to abandon via
+ *                              `rotate('incident')` + re-drive; NEVER re-generate
+ *                              under `new_key_id` (F-137). Zero data beneath it.
+ *   incomplete               — self-wrap OK but a re-wrap / `finalize` failed, or
+ *                              a session-end wipe abandoned the step-5 install →
+ *                              LOUD "resume"; carries `{rotation_id, new_key_id}` +
+ *                              the still-missing member set. Existing data stays
+ *                              readable (old wraps retained + trial-decrypt).
+ *   cannot_resume_not_holder — a resumer who holds NO new-epoch wrap: after the
+ *                              step-5 `populate()` the holder has no live key, so
+ *                              there is no key to seal under → route to
+ *                              abandon+re-drive (Decision B5; TM-5; re-pass #24).
+ *   failed                   — precondition / rotate-denied / revoke-denied, with
+ *                              `reason` + `http`.
+ */
+export type RotateCommitteeKeyOnRemovalResult =
+  | {
+      status: 'ok';
+      rotation_id: string;
+      new_key_id: string;
+      members_rewrapped_count: number;
+      pending_members: string[];
+    }
+  | {
+      status: 'ok_with_pending';
+      rotation_id: string;
+      new_key_id: string;
+      members_rewrapped_count: number;
+      pending_members: string[];
+    }
+  | { status: 'orphaned'; rotation_id: string; new_key_id: string }
+  | { status: 'incomplete'; rotation_id: string; new_key_id: string; pending_members: string[] }
+  | { status: 'cannot_resume_not_holder'; rotation_id: string; new_key_id: string }
+  | {
+      status: 'failed';
+      reason: T07OpReason | 'no_wrap' | 'needs_recovery' | 'session_expiry' | 'decrypt_failed';
+      http?: number;
+    };
+
+/**
+ * ADR-0030 Amendment B — the `rotate → revoke → self-wrap-FIRST → populate →
+ * re-wrap → finalize → zeroize` composition (Decision B3). The removal DECISION
+ * (the `committee_remove_member` membership flip + its 4-eyes / last-co-chair
+ * governance) is OUTSIDE this composition — it is F182-6, run BEFORE this, which
+ * supplies the `remaining_members` roster. F182-4 fetches no roster (hermetic).
+ *
+ * The concrete sequence (fresh path):
+ *   1. Precondition (fail-FAST). If `!holder.hasLiveKey()`, a latch-guarded
+ *      single-live `unwrapCommitteeDataKeyViaProduction` + `holder.set(...)`.
+ *      `no_wrap` / `needs_recovery` / `failed` → typed `failed` BEFORE any
+ *      state-mutating RPC (a co-chair who cannot recover a key must not open a
+ *      rotation they cannot complete/read).
+ *   2. Rotate — `rotate_committee_data_key('member_removal')` → `{rotation_id,
+ *      new_key_id}`. `rotation_in_progress` (55P03) → typed `failed` retry/resume
+ *      signal (AC-B12); `no_active_members` (P0001) / 401 / 403 surfaced.
+ *   3. Revoke (purge-EARLY, Ordering-A / re-pass #21) — BEFORE any wrap so the
+ *      removed member's F-186 reactivation window closes immediately.
+ *   4. Self-wrap FIRST (the no-orphan pin, F-185 (i)) — generate `newKey =
+ *      randombytes_buf(32)`, `crypto_box_seal(newKey, actor_public_key)`, POST it
+ *      as the actor's own wrap under `new_key_id`. The instant it lands the new
+ *      epoch has ≥1 wrap → never a zero-wrap orphan. `.fill(0)` `newKey` in a
+ *      `finally` immediately (it is re-derived from the server wrap in step 5).
+ *      A self-wrap that does NOT land → `orphaned` (NO finalize; F-137).
+ *   5. Install new epoch as LIVE (Decision B2, latch-guarded) — reuse the merged
+ *      `unwrapAllCommitteeKeysViaProduction` → `holder.populate(...)`. The new row
+ *      is `is_live:true` (`rotated_at IS NULL`); the old row is retired but
+ *      RETAINED for reads (anti-lockout). This fetch-then-install site carries the
+ *      F-VAL-1(b) latch + F-196 zeroize-on-abandon (Decision B4). R3/F-192 diag:
+ *      the new epoch MUST be the holder's live key after populate, else LOUD.
+ *   6. Re-wrap loop (fan-out, F-188) — per `remaining_members` entry: ONE
+ *      `getMemberPubkey` disclosure → `wrapMemberInViaProduction({…, rotation_id})`
+ *      (B1; seals the NEW live key via its own F-190 re-read guard).
+ *      `member_not_enrolled` → SKIP into `pending_members` (AC-B11). A hard
+ *      failure → `incomplete` (resumable).
+ *   7. Finalize — `finalize_committee_data_key_rotation(rotation_id, new_key_id,
+ *      count = 1 self + re-wrapped)`. A concurrent rotation that retired this
+ *      epoch mid-tail (R1) → `invalid_new_key` → `incomplete`, never a wrong-key
+ *      open.
+ *   8. Zeroize / dwell — `newKey` already zeroized (step-4 finally); the holder
+ *      RETAINS {old:retired, new:live} per the dwell policy.
+ *
+ * Resume path (`resume:{rotation_id,new_key_id}`, Decision B5): skip steps 2–4
+ * and continue from step 5. A resumer can only complete if they ALREADY hold a
+ * wrap on the new epoch (the new key is random + unrecoverable without a wrap):
+ * if the step-5 `populate()` leaves no live `new_key_id`, return
+ * `cannot_resume_not_holder` (never a seal-under-absent-key; re-pass #24). Idempotent
+ * (`ON CONFLICT DO NOTHING`) so re-running over already-wrapped members is a no-op.
+ *
+ * F-148: every wire error is typed-failed (no raw throw); NO key material is ever
+ * logged (no `console.*`, no structured log, no serializing store).
+ */
+export async function rotateCommitteeKeyOnRemovalViaProduction(opts: {
+  client: SupabaseT07Client;
+  holder: CommitteeKeyHolder;
+  localIdentity: LocalIdentityStore;
+  user_id: string;
+  actor_public_key: Uint8Array;
+  removed_member_id: string;
+  remaining_members: ReadonlyArray<{ user_id: string }>;
+  resume?: { rotation_id: string; new_key_id: string };
+}): Promise<RotateCommitteeKeyOnRemovalResult> {
+  const {
+    client,
+    holder,
+    localIdentity,
+    user_id,
+    actor_public_key,
+    removed_member_id,
+    remaining_members,
+    resume
+  } = opts;
+
+  // F-138 (fail-before-mutate) — a non-32-byte actor pubkey can NEVER be sealed
+  // by `crypto_box_seal`; it would throw only AFTER the step-2 `rotate` + step-3
+  // `revoke` already landed, minting + stranding a fresh orphan epoch on EVERY
+  // re-drive (a persistent bad pubkey is an epoch-churn livelock). Validate at
+  // composition ENTRY — for BOTH the fresh and resume paths — BEFORE any
+  // state-mutating RPC, mirroring the sibling init's F-138 guard (:277/:328/:397).
+  if (actor_public_key.length !== 32) {
+    return { status: 'failed', reason: 'invalid_input', http: 422 };
+  }
+
+  // F-VAL-1(b) / F-195 — snapshot the wipe-generation baseline at composition
+  // ENTRY (before any `await`) so a session-end wipe during an earlier await is
+  // never absorbed into the step-1 baseline.
+  const entryGen = holder.wipeGeneration();
+  const s = await ready();
+
+  let rotation_id: string;
+  let new_key_id: string;
+  // The self-wrap (fresh path) / the resumer's own held new-epoch wrap counts as
+  // 1 toward `finalize`'s `members_rewrapped_count`.
+  let count = 1;
+
+  if (resume) {
+    rotation_id = resume.rotation_id;
+    new_key_id = resume.new_key_id;
+  } else {
+    // Step 1 — precondition (fail-FAST, BEFORE any state-mutating RPC).
+    if (!holder.hasLiveKey()) {
+      let unwrapped: UnwrapCommitteeDataKeyResult;
+      try {
+        unwrapped = await unwrapCommitteeDataKeyViaProduction({ client, localIdentity, user_id });
+      } catch {
+        // F-148 — the unwrap composition should never throw; a hostile transport
+        // could. Fail-fast typed, never propagate.
+        return { status: 'failed', reason: 'decrypt_failed' };
+      }
+      if (unwrapped.status === 'no_wrap') return { status: 'failed', reason: 'no_wrap' };
+      if (unwrapped.status === 'needs_recovery') {
+        return { status: 'failed', reason: 'needs_recovery' };
+      }
+      if (unwrapped.status === 'failed') {
+        return { status: 'failed', reason: unwrapped.reason, http: unwrapped.http };
+      }
+      // F-VAL-1(b) — re-check the latch immediately before `set()` (NO `await`
+      // between). A session-end wipe landed mid-unwrap → resurrecting the key map
+      // would seal + POST a just-wiped key. Fail closed + F-196 zeroize the
+      // in-flight buffer the fetch handed back.
+      if (holder.wipeGeneration() !== entryGen) {
+        unwrapped.data_key.fill(0);
+        return { status: 'failed', reason: 'session_expiry' };
+      }
+      holder.set({
+        data_key: unwrapped.data_key,
+        key_id: unwrapped.key_id,
+        epoch: unwrapped.epoch
+      });
+    }
+
+    // Step 2 — rotate (the first state-mutating RPC).
+    const rot = await client.rotateCommitteeDataKey({ trigger: 'member_removal' });
+    if (!rot.ok) {
+      // `rotation_in_progress` (55P03) → typed retry/resume; `no_active_members`
+      // (P0001) / 401 / 403 surfaced verbatim. No epoch minted by the loser.
+      return { status: 'failed', reason: rot.reason, http: rot.status };
+    }
+    rotation_id = rot.data.rotation_id;
+    new_key_id = rot.data.new_key_id;
+
+    // Step 3 — revoke (purge-EARLY; Ordering-A, re-pass #21). Runs BEFORE any
+    // wrap so the removed member's reactivation window closes at once (F-186).
+    const rev = await client.revokeCommitteeMember({ removed_member_id, rotation_id });
+    if (!rev.ok) {
+      // Step 2 already minted a live zero-wrap epoch → the exact `orphaned`
+      // state, and this failed revoke did NOT purge the removed member's
+      // old-epoch wraps (the F-186 window is still open). Carry the orphan
+      // context (rotation_id + new_key_id) so the caller can abandon+re-drive —
+      // which re-runs the revoke — instead of a bare `failed` that strands the
+      // zero-wrap epoch. Matches the self-wrap-failure `orphaned` shape below
+      // (F-137).
+      return { status: 'orphaned', rotation_id, new_key_id };
+    }
+
+    // Step 4 — self-wrap FIRST (the no-orphan pin). Seal a LOCAL fresh 32-byte key
+    // to the actor's own pubkey and POST it as the actor's wrap under
+    // `new_key_id`. `newKey` is a local buffer (NOT holder-managed) → outside the
+    // F-190 holder-seal class; `.fill(0)` it in a `finally` on EVERY exit
+    // (AC-B9 / re-pass #25).
+    const newKey = s.randombytes_buf(s.crypto_secretbox_KEYBYTES);
+    try {
+      let sealed: Uint8Array;
+      try {
+        sealed = s.crypto_box_seal(newKey, actor_public_key);
+      } catch {
+        // A malformed actor pubkey after a landed `rotate` leaves a zero-wrap
+        // epoch → LOUD `orphaned`, NEVER a finalize (F-137/F-138).
+        return { status: 'orphaned', rotation_id, new_key_id };
+      }
+      const selfWrap = await client.wrapCommitteeDataKeyForMember({
+        member_user_id: user_id,
+        key_id: new_key_id,
+        wrapped_ciphertext: sealed,
+        rotation_id
+      });
+      if (!selfWrap.ok) {
+        // Self-wrap did NOT land → zero-wrap orphan epoch → LOUD `orphaned`; no
+        // finalize, no remaining re-wrap; route to abandon+re-drive (F-137).
+        return { status: 'orphaned', rotation_id, new_key_id };
+      }
+    } finally {
+      newKey.fill(0);
+    }
+  }
+
+  // Step 5 — install the new epoch as the holder's LIVE key (Decision B2),
+  // latch-guarded against the composition-ENTRY baseline (F-VAL-1(b)) + F-196
+  // zeroize-on-abandon. The latch re-checks `entryGen` (:1077), NOT a fresh
+  // post-steps-2-4 snapshot: a session-end wipe landing DURING the steps-2-4
+  // (rotate/revoke/self-wrap) awaits advances `#wipeGeneration` BEFORE a fresh
+  // snapshot would be read, so it would be absorbed and missed. Only `wipe()`
+  // advances `#wipeGeneration` (the composition's own set()/populate() never
+  // move it), so `entryGen` detects a wipe at ANY point in the ceremony —
+  // provided EVERY post-install async boundary re-checks it too. It does: the
+  // step-1 latch re-checks `entryGen` before its `set()`, and the same baseline
+  // is re-checked inside the step-6 re-wrap loop (after each `getMemberPubkey`
+  // disclosure, before delegating to `wrapMemberInViaProduction`) and once more
+  // immediately before the step-7 `finalize`. So a session-end wipe at ANY
+  // ceremony point — pre-step-1, mid-steps-2-4, mid-loop, or pre-finalize — is
+  // caught and fails LOUD, never resurrected into a post-wipe seal/POST/finalize.
+  const all = await unwrapAllCommitteeKeysViaProduction({ client, localIdentity, user_id });
+  if (all.status === 'needs_recovery') {
+    // The actor's wraps exist server-side but this device has no identity
+    // privkey to open them. On the FRESH path the rotation has already landed
+    // (rotate+revoke+self-wrap committed) → `incomplete` is resumable. On the
+    // RESUME path there is NOTHING to resume into for THIS device: the honest
+    // surface is `needs_recovery` (restore-from-recovery, ADR-0026 AC-7),
+    // mirroring the step-1 fresh-path handling (:1111-1113). `cannot_resume_not_holder`
+    // would be a MISROUTE — its "abandon + re-drive" guidance ALSO needs a
+    // privkey to open a wrap and is equally impossible here, so the actionable
+    // recovery signal would be lost (adversarial Finding 1, round 3).
+    return resume
+      ? { status: 'failed', reason: 'needs_recovery' }
+      : {
+          status: 'incomplete',
+          rotation_id,
+          new_key_id,
+          pending_members: missingIds(remaining_members)
+        };
+  }
+  if (all.status === 'failed') {
+    return resume
+      ? { status: 'failed', reason: all.reason, http: all.http }
+      : {
+          status: 'incomplete',
+          rotation_id,
+          new_key_id,
+          pending_members: missingIds(remaining_members)
+        };
+  }
+  // F-VAL-1(b) — re-check the latch (vs. the composition-ENTRY `entryGen`)
+  // immediately before `populate()` (NO `await` between). On mismatch a
+  // session-end wipe landed at SOME point in the ceremony → abandon the install
+  // (do NOT resurrect the map) + F-196 zeroize the in-flight buffers.
+  if (holder.wipeGeneration() !== entryGen) {
+    for (const e of all.entries) e.data_key.fill(0);
+    return resume
+      ? { status: 'failed', reason: 'session_expiry' }
+      : {
+          status: 'incomplete',
+          rotation_id,
+          new_key_id,
+          pending_members: missingIds(remaining_members)
+        };
+  }
+  holder.populate(all.entries);
+
+  // R3 / F-192 (re-pass trigger #20 / #21(a)) — the step-5 install MUST make
+  // `new_key_id` the holder's live sealing key BEFORE the re-wrap loop, else a
+  // re-wrap would seal under the WRONG (retired) epoch. A lying/inconsistent
+  // all-wraps set that dropped `new_key_id` leaves the holder retired-only → fail
+  // LOUD (never a silent wrong-epoch wrap). For a resumer this is precisely the
+  // "holds no new-epoch wrap" case → `cannot_resume_not_holder`.
+  if (holder.getKeyId() !== new_key_id) {
+    return resume
+      ? { status: 'cannot_resume_not_holder', rotation_id, new_key_id }
+      : {
+          status: 'incomplete',
+          rotation_id,
+          new_key_id,
+          pending_members: missingIds(remaining_members)
+        };
+  }
+
+  // Step 6 — re-wrap loop (fan-out, F-188). One disclosure per remaining member,
+  // then reuse `wrapMemberInViaProduction` (B1 threads `rotation_id`; its F-190
+  // re-read of `getDataKey()`/`getKeyId()` seals the NEW live key under
+  // `new_key_id`). `member_not_enrolled` → SKIP into pending (not an error).
+  const pending: string[] = [];
+  for (const [i, member] of remaining_members.entries()) {
+    const target = member.user_id;
+
+    const disc = await client.getMemberPubkey({ target_user_id: target });
+    if (!disc.ok) {
+      if (disc.reason === 'member_not_enrolled') {
+        pending.push(target);
+        continue;
+      }
+      // A hard disclosure failure (rls_denied / dead session) → LOUD `incomplete`
+      // (resumable); existing data stays readable.
+      return {
+        status: 'incomplete',
+        rotation_id,
+        new_key_id,
+        pending_members: [...pending, ...restIds(remaining_members, i)]
+      };
+    }
+
+    // F-VAL-1(b) / RE-REVIEW A — re-check the composition-ENTRY latch AFTER the
+    // disclosure `await` and BEFORE delegating to `wrapMemberInViaProduction`. A
+    // session-end wipe landing during this loop's `getMemberPubkey` await empties
+    // the holder; delegating anyway would let that helper's empty-holder re-fetch
+    // (:762) RESURRECT the just-wiped key — its OWN latch snapshots a POST-wipe
+    // baseline (:769) so it cannot see THIS earlier wipe, and it would seal + POST
+    // a member wrap off-device after the wipe. Abandon LOUD instead: the current +
+    // unprocessed members stay pending. This guarantees `wrapMemberInViaProduction`
+    // is only ever entered with a LIVE holder, so its F-190 / F-VAL-1(b) guards
+    // cover only a wipe landing DURING its own execution.
+    if (holder.wipeGeneration() !== entryGen) {
+      return resume
+        ? { status: 'failed', reason: 'session_expiry' }
+        : {
+            status: 'incomplete',
+            rotation_id,
+            new_key_id,
+            pending_members: [...pending, ...restIds(remaining_members, i)]
+          };
+    }
+
+    const rewrap = await wrapMemberInViaProduction({
+      client,
+      holder,
+      localIdentity,
+      user_id,
+      target_user_id: target,
+      disclosed: { public_key: disc.data.public_key, fingerprint: disc.data.fingerprint },
+      rotation_id
+    });
+    if (rewrap.status === 'ok') {
+      count += 1;
+      continue;
+    }
+    if (rewrap.status === 'member_not_enrolled') {
+      pending.push(target);
+      continue;
+    }
+    // A hard re-wrap failure (wrap_post_failed / data_key_unwrap_failed) → LOUD
+    // `incomplete` (resumable). NEVER a silent `ok` on a failed re-wrap.
+    return {
+      status: 'incomplete',
+      rotation_id,
+      new_key_id,
+      pending_members: [...pending, ...restIds(remaining_members, i)]
+    };
+  }
+
+  // F-VAL-1(b) / RE-REVIEW B — re-check the composition-ENTRY latch immediately
+  // BEFORE `finalize` (NO `await` between). A session-end wipe landing in the
+  // post-last-re-wrap / pre-finalize window would otherwise never be detected, so
+  // a wiped ceremony would finalize and return a clean `ok`. Abandon LOUD instead:
+  // do NOT finalize a wiped ceremony. (A wipe DURING the finalize RPC await itself
+  // is acceptable-honest — the rotation completed server-side — so it is NOT
+  // guarded here; only the before-finalize window is.)
+  if (holder.wipeGeneration() !== entryGen) {
+    return resume
+      ? { status: 'failed', reason: 'session_expiry' }
+      : { status: 'incomplete', rotation_id, new_key_id, pending_members: pending };
+  }
+
+  // Step 7 — finalize with count = 1 (self) + re-wrapped members.
+  const fin = await client.finalizeCommitteeDataKeyRotation({
+    rotation_id,
+    new_key_id,
+    members_rewrapped_count: count
+  });
+  if (!fin.ok) {
+    // A benign finalize fault OR the R1 concurrent-retire `invalid_new_key` →
+    // LOUD `incomplete`, never a wrong-key `ok` (fail-loud invariant, TM-6/R1).
+    return { status: 'incomplete', rotation_id, new_key_id, pending_members: pending };
+  }
+
+  // Step 8 — success. `newKey` already zeroized (step-4 finally); the holder
+  // RETAINS {old:retired, new:live} per the dwell policy.
+  if (pending.length > 0) {
+    return {
+      status: 'ok_with_pending',
+      rotation_id,
+      new_key_id,
+      members_rewrapped_count: count,
+      pending_members: pending
+    };
+  }
+  return {
+    status: 'ok',
+    rotation_id,
+    new_key_id,
+    members_rewrapped_count: count,
+    pending_members: []
+  };
+}
+
+/** The user_ids of every remaining member (all still-missing on an early abort). */
+function missingIds(members: ReadonlyArray<{ user_id: string }>): string[] {
+  return members.map((m) => m.user_id);
+}
+
+/** The user_ids from index `from` onward (the current + unprocessed members). */
+function restIds(members: ReadonlyArray<{ user_id: string }>, from: number): string[] {
+  return members.slice(from).map((m) => m.user_id);
+}
+
 // Re-export the KDF_PARAMS so callers can label persisted blobs without
 // importing from `./recovery-blob` directly.
 export { KDF_PARAMS };

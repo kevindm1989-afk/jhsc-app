@@ -76,7 +76,8 @@ export {
   initCommitteeDataKeyViaProduction,
   unwrapCommitteeDataKeyViaProduction,
   unwrapAllCommitteeKeysViaProduction,
-  wrapMemberInViaProduction
+  wrapMemberInViaProduction,
+  rotateCommitteeKeyOnRemovalViaProduction
 } from './production-flows';
 export type {
   EnrollProductionResult,
@@ -86,7 +87,8 @@ export type {
   UnwrapCommitteeDataKeyResult,
   UnwrapAllCommitteeKeysResult,
   UnwrapAllCommitteeKeyEntry,
-  WrapMemberInResult
+  WrapMemberInResult,
+  RotateCommitteeKeyOnRemovalResult
 } from './production-flows';
 export {
   CommitteeKeyHolder,
