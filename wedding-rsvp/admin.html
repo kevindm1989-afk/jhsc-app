@@ -148,9 +148,48 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 1rem 1.2rem;
+  display: flex; flex-direction: column; gap: 0.75rem;
+  position: relative; overflow: hidden;
+}
+.card-head {
   display: flex; align-items: center;
   justify-content: space-between; gap: 1rem;
-  position: relative; overflow: hidden;
+}
+
+/* every submitted field, laid out on the card itself */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.4rem 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.d-row { display: contents; }
+.d-lbl {
+  font-size: 0.5rem; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--muted);
+  padding-top: 0.18rem;
+}
+.d-val {
+  font-size: 0.78rem; font-weight: 300;
+  color: var(--ivory); min-width: 0; word-break: break-word;
+}
+.d-meal {
+  display: inline-block; margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem; border-radius: 20px;
+  background: rgba(255,255,255,0.05);
+  font-size: 0.55rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.d-meal.veg { background: rgba(201,169,110,0.16); color: var(--gold); }
+.d-no   { color: var(--red); }
+.d-note { font-family: 'Playfair Display', serif; font-style: italic; color: rgba(245,237,224,0.72); }
+.d-mail { color: var(--gold-dim); text-decoration: none; }
+.d-mail:hover { color: var(--gold); text-decoration: underline; }
+
+@media (max-width: 520px) {
+  .detail-grid { grid-template-columns: 1fr; gap: 0.15rem; }
+  .d-row + .d-row .d-lbl { padding-top: 0.55rem; }
 }
 .guest-card::before {
   content: ''; position: absolute; top: 0; left: 0;
@@ -200,6 +239,7 @@ body {
 .badge-yes { background: rgba(74,158,110,0.15); color: var(--green); }
 .badge-no  { background: rgba(158,74,74,0.15); color: var(--red); }
 .badge-new { background: var(--gold); color: #000; }
+.badge-count { background: rgba(255,255,255,0.06); color: var(--muted); }
 
 /* EMPTY */
 .empty { text-align: center; padding: 4rem 1rem; color: var(--muted); }
@@ -299,7 +339,6 @@ body {
 <div class="actions">
   <button class="btn btn-gold" onclick="emailAll()">✉ Email All Guests</button>
   <button class="btn btn-outline" onclick="emailAttending()">✉ Email Attending Only</button>
-  <button class="btn btn-outline" onclick="exportCSV()">↓ Export CSV</button>
 </div>
 
 <!-- FILTER TABS -->
@@ -311,7 +350,7 @@ body {
 
 <!-- SEARCH -->
 <div class="search-wrap">
-  <input class="search-input" id="search" placeholder="Search guests…" oninput="renderGuests()">
+  <input class="search-input" id="search" placeholder="Search names, emails, meals, messages…" oninput="renderGuests()">
 </div>
 
 <!-- GUEST LIST -->
@@ -600,15 +639,37 @@ function setFilter(f, btn) {
   renderGuests();
 }
 
+/* A response may cover a party of two: "Ana Silva & Bo Tran" with meals
+   "Standard / Vegetarian". Split it back out so each person is listed with
+   their own meal, and fall back gracefully when the two do not line up. */
+function partyMembers(g) {
+  const names = String(g.name || '').split(/\s*(?:&|\+)\s*|\s+and\s+/i)
+                  .map(s => s.trim()).filter(Boolean);
+  const meals = String(g.meal || '').split(/\s*[\/,;]\s*/)
+                  .map(s => s.trim()).filter(Boolean);
+  if (names.length > 1) {
+    return names.map((n, i) => ({ name: n, meal: meals.length === names.length ? meals[i] : '' }));
+  }
+  return [{ name: names[0] || String(g.name || ''), meal: meals.join(' / ') }];
+}
+
+function isVeg(meal) { return String(meal).toLowerCase().indexOf('veg') !== -1; }
+
+function detailRow(label, value) {
+  return '<div class="d-row"><span class="d-lbl">' + label + '</span>' +
+         '<span class="d-val">' + value + '</span></div>';
+}
+
 function renderGuests() {
   const search = document.getElementById('search').value.toLowerCase();
   const filtered = allGuests.filter(g => {
     const yes = isAttending(g.attending);
     if (currentFilter === 'yes' && !yes) return false;
     if (currentFilter === 'no'  &&  yes) return false;
-    if (search &&
-        g.name.toLowerCase().indexOf(search) === -1 &&
-        g.email.toLowerCase().indexOf(search) === -1) return false;
+    if (search) {
+      const haystack = [g.name, g.email, g.meal, g.message].join(' ').toLowerCase();
+      if (haystack.indexOf(search) === -1) return false;
+    }
     return true;
   });
 
@@ -621,25 +682,53 @@ function renderGuests() {
   }
 
   list.innerHTML = filtered.map(g => {
-    const yes    = isAttending(g.attending);
-    const seats  = partySize(g);
-    const isNew  = newKeys.has(guestKey(g));
+    const yes     = isAttending(g.attending);
+    const seats   = partySize(g);
+    const isNew   = newKeys.has(guestKey(g));
+    const members = partyMembers(g);
+    const rows    = [];
+
+    // Everyone in the party, each with their own meal.
+    members.forEach((m, i) => {
+      const label = !yes ? 'Name'
+                  : members.length > 1 ? 'Guest ' + (i + 1)
+                  : 'Guest';
+      let val = esc(m.name);
+      if (yes && m.meal) {
+        val += '<span class="d-meal' + (isVeg(m.meal) ? ' veg' : '') + '">' + esc(m.meal) + '</span>';
+      }
+      rows.push(detailRow(label, val));
+    });
+
+    // A meal string we could not split per person — show it whole.
+    if (yes && g.meal && members.every(m => !m.meal)) {
+      rows.push(detailRow('Meal', esc(g.meal)));
+    }
+
+    rows.push(detailRow('Attending', yes
+      ? 'Yes &nbsp;·&nbsp; ' + seats + ' guest' + (seats === 1 ? '' : 's')
+      : '<span class="d-no">No — regretfully declines</span>'));
+
+    if (g.email) {
+      rows.push(detailRow('Email',
+        '<a class="d-mail" href="mailto:' + esc(g.email) + '">' + esc(g.email) + '</a>'));
+    }
+    if (g.message) {
+      rows.push(detailRow('Message', '<span class="d-note">“' + esc(g.message) + '”</span>'));
+    }
+    if (g.timestamp) rows.push(detailRow('Submitted', esc(prettyTime(g.timestamp))));
+
     return '' +
     '<div class="guest-card ' + (yes ? 'attending' : 'declining') + (isNew ? ' is-new' : '') + '">' +
-      '<div class="guest-info">' +
+      '<div class="card-head">' +
         '<div class="guest-name">' + esc(g.name) + '</div>' +
-        '<div class="guest-meta">' +
-          (yes ? seats + ' guest' + (seats === 1 ? '' : 's') : 'Declining') +
-          (yes && g.meal ? ' &nbsp;·&nbsp; ' + esc(g.meal) : '') +
-          (g.timestamp ? ' &nbsp;·&nbsp; ' + esc(prettyTime(g.timestamp)) : '') +
+        '<div class="guest-actions">' +
+          (isNew ? '<span class="badge-sm badge-new">New</span>' : '') +
+          (yes ? '<span class="badge-sm badge-count">' + seats + ' guest' + (seats === 1 ? '' : 's') + '</span>' : '') +
+          '<span class="badge-sm ' + (yes ? 'badge-yes' : 'badge-no') + '">' + (yes ? 'Yes' : 'No') + '</span>' +
         '</div>' +
-        (g.email ? '<div class="guest-email">' + esc(g.email) + '</div>' : '') +
-        (g.message ? '<div class="guest-meta" style="margin-top:0.3rem;font-style:italic;">“' + esc(g.message) + '”</div>' : '') +
       '</div>' +
-      '<div class="guest-actions">' +
-        (isNew ? '<span class="badge-sm badge-new">New</span>' : '') +
-        '<span class="badge-sm ' + (yes ? 'badge-yes' : 'badge-no') + '">' + (yes ? 'Yes' : 'No') + '</span>' +
-      '</div>' +
+      '<div class="detail-grid">' + rows.join('') + '</div>' +
     '</div>';
   }).join('');
 }
@@ -673,21 +762,6 @@ function sendEmail() {
   window.location.href = isSingle
     ? 'mailto:' + to + '?subject=' + subject + '&body=' + body
     : 'mailto:?bcc=' + encodeURIComponent(to) + '&subject=' + subject + '&body=' + body;
-}
-
-/* ─── EXPORT ────────────────────────────────────────────────────────────── */
-function exportCSV() {
-  if (!allGuests.length) { showToast('No responses to export yet.'); return; }
-  const rows = [['Name','Attending','Guests','Meal','Message','Email','Submitted']];
-  allGuests.forEach(g => rows.push([
-    g.name, isAttending(g.attending) ? 'Yes' : 'No', partySize(g),
-    g.meal, g.message, g.email, g.timestamp
-  ]));
-  const csv = rows.map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = 'Rudy-Sarah-Wedding-Guests.csv';
-  a.click();
 }
 
 /* ─── HELPERS ───────────────────────────────────────────────────────────── */

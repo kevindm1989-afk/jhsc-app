@@ -7,7 +7,7 @@ The admin page now updates by itself when someone RSVPs. No refresh needed.
 | File | What it is |
 |---|---|
 | `rsvp.html` | The guest-facing invitation and RSVP form |
-| `admin.html` | Your private admin page — live guest list, stats, email, CSV |
+| `admin.html` | Your private admin page — live guest list, full details, stats, email |
 | `Code.gs` | The Google Apps Script backend (paste into your existing script project) |
 
 ## Setup — about two minutes
@@ -57,6 +57,12 @@ Script has a daily quota.
   If the response is unreadable it re-reads the sheet to check rather than
   re-posting, so a guest never ends up in the list twice.
 - **Double-clicking Confirm submits once.** The button locks while sending.
+- **Every submitted field is on the card.** No export needed — each response
+  lists both guests by name with their own meal choice (vegetarian highlighted
+  in gold), the party size, the email as a click-to-send link, the message and
+  the time it came in.
+- **Search covers everything**, not just names — type "vegetarian" to pull up
+  every veg meal, or search inside guests' messages.
 - **Vegetarian count counts meals, not responses.** A couple who chose
   "Standard / Vegetarian" counts as one vegetarian meal, which is the number
   the caterer actually needs.

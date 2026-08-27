@@ -417,16 +417,6 @@ nav button.active, nav button:hover {
   font-size: 0.53rem; letter-spacing: 0.2em;
   text-transform: uppercase; color: var(--muted);
 }
-.export-btn {
-  padding: 0.6rem 1.3rem;
-  background: none; border: 1px solid var(--gold-dim);
-  border-radius: 3px;
-  font-family: 'Raleway', sans-serif;
-  font-size: 0.57rem; letter-spacing: 0.18em;
-  text-transform: uppercase; color: var(--gold-dim);
-  cursor: pointer; transition: all .2s; align-self: flex-start;
-}
-.export-btn:hover { border-color: var(--gold); color: var(--gold); }
 
 .cards { display: flex; flex-direction: column; gap: 0.85rem; }
 .rsvp-card {
@@ -960,24 +950,6 @@ function renderResponses(){
       empty.style.display='block';
       empty.querySelector('h3').textContent='Could not load responses. Try again.';
     });
-}
-
-function exportCSV(){
-  fetch(SHEET_URL + '?t=' + Date.now(), {cache:'no-store'})
-    .then(r=>r.json())
-    .then(payload=>{
-      const list = normalizeResponses(payload);
-      if(!list.length){showToast('No responses to export yet.');return;}
-      const rows=[['Name','Attending','Guests','Meal','Message','Email','Submitted']];
-      list.forEach(g=>rows.push([g.name, isAttending(g.attending)?'Yes':'No', partySize(g), g.meal, g.message, g.email, g.timestamp]));
-      const csv=rows.map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
-      const a=document.createElement('a');
-      a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-      a.download='Rudy-Sarah-Wedding-RSVPs.csv';
-      a.click();
-      showToast('Guest list exported.');
-    })
-    .catch(()=>showToast('Could not export right now.'));
 }
 
 function showToast(msg){
