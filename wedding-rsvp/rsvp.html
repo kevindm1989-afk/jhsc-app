@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rudy Azevedo & Sarah Petersen — December 26, 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Playfair+Display:ital,wght@0,400;0,500;1,400;1,500&family=Raleway:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --night:    #000000;
+  --deep:     #13131a;
+  --panel:    #1a1a24;
+  --border:   rgba(255,255,255,0.08);
+  --gold:     #c9a96e;
+  --gold-dim: #8a6f42;
+  --gold-glow:rgba(201,169,110,0.15);
+  --ivory:    #f5ede0;
+  --muted:    #8b8699;
+  --white:    #ffffff;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Raleway', sans-serif;
+  background: #000000;
+  color: var(--ivory);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* STARFIELD */
+.stars {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 0; overflow: hidden;
+}
+.star {
+  position: absolute;
+  font-size: var(--size, 5px);
+  color: white;
+  background: none;
+  border-radius: 0;
+  line-height: 1;
+  user-select: none;
+  animation: twinkle var(--d, 4s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+  opacity: var(--op, 0.4);
+  pointer-events: none;
+}
+@keyframes twinkle {
+  0%,100% { opacity: var(--op, 0.4); transform: scale(1); }
+  50%      { opacity: 1; transform: scale(1.15); }
+}
+
+/* NAV */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+  display: flex; justify-content: center; gap: 2.5rem;
+  padding: 1.2rem 2rem;
+  background: rgba(13,13,15,0.88);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+nav button {
+  background: none; border: none;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.62rem; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--muted); cursor: pointer;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid transparent;
+  transition: color .25s, border-color .25s;
+}
+nav button.active, nav button:hover {
+  color: var(--gold); border-bottom-color: var(--gold);
+}
+
+/* PAGES */
+.page { display: none; }
+.page.active { display: block; animation: fadeUp .45s ease; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* HERO */
+.hero {
+  position: relative; z-index: 1;
+  text-align: center;
+  padding: 6rem 1.5rem 2rem;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+
+.monogram-ring {
+  width: 88px; height: 88px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 2rem;
+  position: relative;
+  animation: rotateSlow 10s linear infinite;
+}
+@keyframes rotateSlow {
+  from { transform: rotate(0deg); } to { transform: rotate(360deg); }
+}
+.monogram-ring::before {
+  content: '';
+  position: absolute; inset: 4px;
+  border: 1px solid rgba(201,169,110,0.2);
+  border-radius: 50%;
+}
+.ring-star {
+  position: absolute;
+  top: -7px; left: 50%; transform: translateX(-50%);
+  font-size: 0.75rem;
+  color: var(--gold);
+  line-height: 1;
+  filter: drop-shadow(0 0 4px rgba(201,169,110,0.8));
+}
+.monogram-inner {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.5rem; font-style: italic;
+  color: var(--gold);
+  animation: rotateSlow 10s linear infinite reverse;
+}
+
+.together {
+  font-size: 0.59rem; letter-spacing: 0.35em;
+  text-transform: uppercase; color: var(--gold-dim);
+  margin-bottom: 1.5rem;
+}
+
+.names {
+  font-family: 'Great Vibes', cursive;
+  font-size: clamp(3.5rem, 11vw, 7rem);
+  font-weight: 400; line-height: 0.95;
+  color: var(--gold);
+  text-shadow: 0 0 40px rgba(201,169,110,0.25), 0 2px 8px rgba(0,0,0,0.5);
+}
+.names .amp {
+  font-style: italic;
+  color: rgba(201,169,110,0.55);
+  display: block; font-size: 0.58em; line-height: 1.5;
+}
+
+.event-details {
+  margin-top: 2rem;
+  display: flex; flex-direction: column; align-items: center; gap: 0.55rem;
+}
+.event-date {
+  font-size: 0.67rem; letter-spacing: 0.28em;
+  text-transform: uppercase; color: var(--gold);
+}
+.event-time {
+  font-size: 0.6rem; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted);
+}
+
+.rule {
+  display: flex; align-items: center; gap: 1rem;
+  margin: 2rem auto; max-width: 340px; width: 100%;
+}
+.rule::before, .rule::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+}
+.rule-diamond {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--gold);
+  filter: drop-shadow(0 0 4px rgba(201,169,110,0.7));
+}
+
+/* COUNTDOWN */
+.countdown {
+  position: relative; z-index: 1;
+  display: flex; justify-content: center; align-items: center; gap: 0;
+  padding: 1.5rem 1.5rem 0.5rem; flex-wrap: nowrap;
+}
+.cd-unit { text-align: center; min-width: 70px; }
+.cd-num {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  font-weight: 500; color: var(--white); display: block; line-height: 1;
+}
+.cd-label {
+  font-size: 0.53rem; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted);
+  margin-top: 0.3rem; display: block;
+}
+.cd-sep {
+  align-self: center; padding: 0 0.5rem;
+  font-family: 'Playfair Display', serif;
+  font-size: 1.8rem; color: var(--white); line-height: 1;
+  margin-bottom: 1.2rem;
+}
+
+/* FORM SECTION */
+.form-section {
+  position: relative; z-index: 1;
+  max-width: 520px; margin: 0 auto;
+  padding: 2rem 1.5rem 5rem;
+  width: 100%;
+}
+.section-heading { text-align: center; margin-bottom: 2rem; }
+.section-heading h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: 2rem; font-weight: 400; font-style: italic; color: var(--ivory);
+}
+.section-heading p {
+  font-size: 0.65rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--muted); margin-top: 0.5rem;
+}
+
+.field { margin-bottom: 1.6rem; }
+.field label {
+  display: block;
+  font-size: 0.57rem; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 0.55rem;
+}
+.field input, .field textarea {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.9rem 1.1rem;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.88rem; font-weight: 300;
+  color: var(--ivory); outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.field input::placeholder, .field textarea::placeholder {
+  color: rgba(139,134,153,0.45);
+}
+.field input:focus, .field textarea:focus {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 3px var(--gold-glow);
+}
+.field textarea { resize: vertical; min-height: 96px; }
+.field select {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.9rem 1.1rem;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.88rem; font-weight: 300;
+  color: var(--ivory);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238a6f42' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s;
+}
+.field select:focus {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 3px var(--gold-glow);
+}
+.field select option {
+  background: var(--panel);
+  color: var(--ivory);
+}
+
+.custom-select {
+  position: relative;
+  user-select: none;
+}
+.cs-selected {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.9rem 1.1rem;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.88rem; font-weight: 300;
+  color: var(--ivory);
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s;
+}
+.custom-select.open .cs-selected {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 3px var(--gold-glow);
+}
+.cs-selected svg { transition: transform .2s; flex-shrink: 0; }
+.custom-select.open .cs-selected svg { transform: rotate(180deg); }
+.cs-options {
+  display: none;
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--panel);
+  border: 1px solid var(--gold-dim);
+  border-radius: 3px;
+  overflow: hidden;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.custom-select.open .cs-options { display: block; }
+.cs-option {
+  padding: 0.9rem 1.1rem;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.88rem; font-weight: 300;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  border-bottom: 1px solid var(--border);
+}
+.cs-option:last-child { border-bottom: none; }
+.cs-option:hover { background: rgba(201,169,110,0.08); color: var(--ivory); }
+.cs-option.selected { color: var(--gold); }
+
+.attend-toggle {
+  display: flex; border: 1px solid var(--border);
+  border-radius: 3px; overflow: hidden;
+}
+.attend-toggle label { flex: 1; }
+.attend-toggle input[type=radio] { display: none; }
+.tog-inner {
+  display: block; text-align: center;
+  padding: 0.9rem;
+  font-size: 0.59rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--muted);
+  background: var(--panel); cursor: pointer;
+  transition: background .2s, color .2s;
+  border-right: 1px solid var(--border);
+}
+.attend-toggle label:last-child .tog-inner { border-right: none; }
+.attend-toggle input:checked + .tog-inner {
+  background: var(--gold); color: var(--night); font-weight: 600;
+}
+
+.guests-input {
+  display: flex; align-items: center; gap: 1rem;
+}
+.guests-input input { width: 80px; text-align: center; flex-shrink: 0; }
+.guests-input span { font-size: 0.73rem; color: var(--muted); font-weight: 300; }
+
+.submit-btn {
+  width: 100%; margin-top: 0.5rem; padding: 1rem 1.5rem;
+  background: transparent; border: 1px solid var(--gold);
+  border-radius: 3px;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.63rem; font-weight: 600;
+  letter-spacing: 0.28em; text-transform: uppercase;
+  color: var(--gold); cursor: pointer;
+  position: relative; overflow: hidden; transition: color .3s;
+}
+.submit-btn::before {
+  content: ''; position: absolute; inset: 0;
+  background: var(--gold); transform: translateX(-101%);
+  transition: transform .3s ease; z-index: 0;
+}
+.submit-btn span { position: relative; z-index: 1; }
+.submit-btn:hover { color: var(--night); }
+.submit-btn:hover::before { transform: translateX(0); }
+
+.success-card {
+  display: none; text-align: center;
+  padding: 3rem 2rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  position: relative; overflow: hidden;
+}
+.success-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+.success-icon { font-size: 2.5rem; margin-bottom: 1rem; }
+.success-card h3 {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.8rem; font-style: italic;
+  color: var(--gold); margin-bottom: 0.5rem;
+}
+.success-card p {
+  font-size: 0.78rem; color: var(--muted);
+  font-weight: 300; line-height: 1.8; margin-bottom: 1.5rem;
+}
+.link-btn {
+  background: none; border: 1px solid var(--border);
+  border-radius: 3px; padding: 0.6rem 1.5rem;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.57rem; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted);
+  cursor: pointer; transition: color .2s, border-color .2s;
+}
+.link-btn:hover { color: var(--gold); border-color: var(--gold-dim); }
+
+/* RESPONSES PAGE */
+.resp-page {
+  position: relative; z-index: 1;
+  max-width: 720px; margin: 0 auto;
+  padding: 5.5rem 1.5rem 6rem;
+}
+.resp-header {
+  display: flex; justify-content: space-between;
+  align-items: flex-start; flex-wrap: wrap; gap: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+.resp-header h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: 2rem; font-weight: 400; font-style: italic;
+}
+.stats-row { display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.stat-box { text-align: center; }
+.stat-num {
+  display: block;
+  font-family: 'Playfair Display', serif;
+  font-size: 2rem; color: var(--gold); line-height: 1;
+}
+.stat-lbl {
+  font-size: 0.53rem; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted);
+}
+.export-btn {
+  padding: 0.6rem 1.3rem;
+  background: none; border: 1px solid var(--gold-dim);
+  border-radius: 3px;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.57rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--gold-dim);
+  cursor: pointer; transition: all .2s; align-self: flex-start;
+}
+.export-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+.cards { display: flex; flex-direction: column; gap: 0.85rem; }
+.rsvp-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px; padding: 1.2rem 1.4rem;
+  display: flex; flex-wrap: wrap;
+  align-items: center; gap: 0.4rem 1rem;
+  position: relative; overflow: hidden;
+  animation: slideIn .3s ease;
+}
+.rsvp-card::before {
+  content: ''; position: absolute; top: 0; left: 0;
+  width: 3px; height: 100%; background: var(--gold-dim);
+}
+.rsvp-card.declining::before { background: rgba(255,255,255,0.07); }
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.card-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.1rem; font-style: italic; color: var(--ivory);
+}
+.badge {
+  padding: 0.22rem 0.65rem; border-radius: 20px;
+  font-size: 0.53rem; letter-spacing: 0.12em;
+  text-transform: uppercase; font-weight: 600;
+  flex-shrink: 0;
+}
+.badge-yes { background: rgba(201,169,110,0.14); color: var(--gold); }
+.badge-no  { background: rgba(255,255,255,0.05); color: var(--muted); }
+.card-meta { font-size: 0.67rem; color: var(--muted); font-weight: 300; width: 100%; }
+.card-note {
+  width: 100%;
+  font-size: 0.78rem; font-style: italic;
+  color: rgba(245,237,224,0.5);
+  margin-top: 0.75rem; padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-family: 'Playfair Display', serif;
+}
+
+.empty {
+  text-align: center; padding: 5rem 1rem;
+}
+.empty h3 {
+  font-family: 'Playfair Display', serif;
+  font-style: italic; font-weight: 400;
+  color: var(--muted); font-size: 1.3rem;
+}
+
+/* TOAST */
+.toast {
+  position: fixed; bottom: 2rem; left: 50%;
+  transform: translateX(-50%) translateY(16px);
+  background: var(--panel); border: 1px solid var(--gold-dim);
+  color: var(--ivory); padding: 0.7rem 1.6rem;
+  border-radius: 3px; font-size: 0.68rem; letter-spacing: 0.1em;
+  opacity: 0; pointer-events: none;
+  transition: opacity .3s, transform .3s; z-index: 999;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="stars" id="stars"></div>
+
+
+<nav>
+  <button class="active" onclick="showPage('rsvp',this)">RSVP</button>
+  <button onclick="showPage('responses',this)">Guest List</button>
+</nav>
+
+<!-- RSVP PAGE -->
+<div id="page-rsvp" class="page active">
+
+  <div class="hero">
+    <div class="monogram-ring"><span class="ring-star">✦</span><span class="monogram-inner">R&amp;S</span></div>
+    <p class="together">Together With Their Families</p>
+    <h1 class="names">
+      Rudy Azevedo<br>
+      <span class="amp">&amp;</span>
+      Sarah Petersen
+    </h1>
+    <div class="event-details">
+      <span class="event-date" style="font-size:0.85rem;letter-spacing:0.3em;color:var(--gold-dim);margin-bottom:0.2rem;">WHEN</span>
+      <span class="event-date" style="color:var(--white);">Saturday &nbsp;·&nbsp; December 26, 2026</span>
+      <span class="event-time" style="color:var(--gold);">5:00 PM — 1:00 AM</span>
+      <span class="event-time" style="margin-top:0.4rem;color:var(--gold);">Cocktail Reception 5:00 PM &nbsp;·&nbsp; Ceremony 5:30 PM</span>
+      <span class="event-date" style="font-size:0.85rem;letter-spacing:0.3em;color:var(--gold-dim);margin-top:1.2rem;margin-bottom:0.2rem;">WHERE</span>
+      <span class="event-time" style="color:var(--white);letter-spacing:0.18em;">The Eglinton Grand</span>
+      <span class="event-time" style="color:var(--gold);">400 Eglinton Avenue West, Toronto, ON M5N 1A2</span>
+      <a href="#" onclick="getDirections(event)" style="margin-top:0.75rem;display:inline-block;padding:0.55rem 1.4rem;border:1px solid var(--gold);border-radius:3px;font-family:'Raleway',sans-serif;font-size:0.58rem;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:var(--gold);text-decoration:none;transition:background 0.3s,color 0.3s;" onmouseover="this.style.background='#c9a96e';this.style.color='#000';" onmouseout="this.style.background='transparent';this.style.color='#c9a96e';">Get Directions</a>
+    </div>
+  </div>
+
+  <div style="position:relative;z-index:1;">
+    <div class="rule" style="margin:1.5rem auto;"><span class="rule-diamond">✦</span></div>
+  </div>
+
+  <div class="countdown">
+    <div class="cd-unit"><span class="cd-num" id="cd-days">—</span><span class="cd-label">Days</span></div>
+    <span class="cd-sep">·</span>
+    <div class="cd-unit"><span class="cd-num" id="cd-hours">—</span><span class="cd-label">Hours</span></div>
+    <span class="cd-sep">·</span>
+    <div class="cd-unit"><span class="cd-num" id="cd-mins">—</span><span class="cd-label">Minutes</span></div>
+    <span class="cd-sep">·</span>
+    <div class="cd-unit"><span class="cd-num" id="cd-secs">—</span><span class="cd-label">Seconds</span></div>
+  </div>
+
+  <div class="form-section">
+    <div style="text-align:center;margin-bottom:2rem;">
+      <h2 style="font-family:'Great Vibes',cursive;font-size:clamp(1.8rem,5vw,3rem);color:var(--gold);text-shadow:0 0 30px rgba(201,169,110,0.25);">Until We Say I Do</h2>
+      <div class="rule" style="margin:1.5rem auto;"><span class="rule-diamond">✦</span></div>
+      <h2 style="font-family:'Playfair Display',serif;font-size:2rem;font-weight:400;font-style:italic;color:var(--ivory);">Kindly Reply</h2>
+      <p style="font-size:0.62rem;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold);margin-top:0.6rem;">Please RSVP by December 1st</p>
+    </div>
+
+    <div style="height:1.5rem;"></div>
+
+    <div id="rsvp-form">
+      <div class="field">
+        <label>Guest 1 — Full Name <span style="color:var(--gold);font-size:0.7rem;">*</span></label>
+        <input type="text" id="f-name" placeholder="Your full name" required>
+      </div>
+
+      <div class="field" id="guest2-field" style="display:none;">
+        <label>Guest 2 — Full Name <span style="color:var(--gold);font-size:0.7rem;">*</span></label>
+        <input type="text" id="f-name2" placeholder="Guest's full name">
+      </div>
+
+      <div class="field">
+        <label>Will You Be Attending?</label>
+        <div class="attend-toggle">
+          <label><input type="radio" name="att" value="yes" checked><span class="tog-inner">Joyfully Accepts</span></label>
+          <label><input type="radio" name="att" value="no"><span class="tog-inner">Regretfully Declines</span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Email Address <span style="color:var(--gold);font-size:0.7rem;">*</span></label>
+        <input type="email" id="f-email" placeholder="your@email.com" required>
+      </div>
+
+      <div class="field" id="guests-field">
+        <label>Number of Guests (including yourself)</label>
+        <div class="custom-select" id="guests-select">
+          <div class="cs-selected" onclick="toggleDropdown()">
+            <span id="cs-label">1 Guest</span>
+            <svg width="12" height="8" viewBox="0 0 12 8" fill="none"><path d="M1 1l5 5 5-5" stroke="#8a6f42" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </div>
+          <div class="cs-options" id="cs-options">
+            <div class="cs-option selected" onclick="selectGuests(1,'1 Guest')">1 Guest</div>
+            <div class="cs-option" onclick="selectGuests(2,'2 Guests')">2 Guests</div>
+          </div>
+        </div>
+        <input type="hidden" id="f-guests" value="1">
+        <div style="margin-top:0.65rem;padding:0.6rem 0.9rem;background:rgba(201,169,110,0.07);border:1px solid rgba(201,169,110,0.2);border-radius:3px;font-size:0.61rem;letter-spacing:0.13em;color:var(--gold-dim);display:flex;align-items:center;gap:0.5rem;">
+          <span>&#128286;</span>
+          <span>Adults-only celebration &nbsp;&middot;&nbsp; 19+ years of age or older</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Meal Preference</label>
+        <div class="attend-toggle">
+          <label><input type="radio" name="meal" value="Standard" checked><span class="tog-inner">Standard</span></label>
+          <label><input type="radio" name="meal" value="Vegetarian"><span class="tog-inner">Vegetarian</span></label>
+        </div>
+      </div>
+
+      <div class="field" id="guest2-meal-field" style="display:none;">
+        <label>Guest 2 — Meal Preference</label>
+        <div class="attend-toggle">
+          <label><input type="radio" name="meal2" value="Standard" checked><span class="tog-inner">Standard</span></label>
+          <label><input type="radio" name="meal2" value="Vegetarian"><span class="tog-inner">Vegetarian</span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Message to the Happy Couple &nbsp;<span style="opacity:.45">— Optional</span></label>
+        <textarea id="f-note" placeholder="Share your wishes for Rudy &amp; Sarah Azevedo-Petersen…"></textarea>
+      </div>
+
+      <button class="submit-btn" onclick="submitRSVP()"><span>Confirm My RSVP</span></button>
+    </div>
+
+    <div class="success-card" id="success-card">
+      <div class="success-icon">💌</div>
+      <h3>With Gratitude</h3>
+      <p>Your RSVP has been received.<br>Rudy Azevedo &amp; Sarah Petersen look forward to celebrating with you<br>on December 26th.</p>
+      <button class="link-btn" onclick="resetForm()">Submit Another Response</button>
+    </div>
+  </div>
+</div>
+
+<!-- RESPONSES PAGE -->
+<div id="page-responses" class="page">
+  <div class="resp-page">
+    <div class="resp-header">
+      <div>
+        <h2>Guest Responses</h2>
+        <div class="stats-row">
+          <div class="stat-box"><span class="stat-num" id="s-total">0</span><span class="stat-lbl">Responses</span></div>
+          <div class="stat-box"><span class="stat-num" id="s-yes">0</span><span class="stat-lbl">Attending</span></div>
+          <div class="stat-box"><span class="stat-num" id="s-guests">0</span><span class="stat-lbl">Total Guests</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="empty" id="empty"><h3>No responses yet — be the first.</h3></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// Stars
+(function(){
+  const c = document.getElementById('stars');
+
+
+  // Night sky — subtle and elegant
+  const starChars = ['·','·','·','·','⋆','✧','✦'];
+  const starCount = window.innerWidth < 768 ? 200 : 550;
+  for(let i=0;i<starCount;i++){
+    const s = document.createElement('span');
+    s.className = 'star';
+    const rand = Math.random();
+    let char, size, op, speed;
+    if(rand < 0.70)      { char='·';  size='7px';  op=0.08+Math.random()*0.18; speed=4+Math.random()*6; }
+    else if(rand < 0.90) { char='⋆';  size='8px';  op=0.15+Math.random()*0.2;  speed=3+Math.random()*4; }
+    else if(rand < 0.97) { char='✧';  size='10px';  op=0.2+Math.random()*0.25;  speed=2+Math.random()*3; }
+    else                 { char='✦';  size='12px'; op=0.35+Math.random()*0.3;  speed=2+Math.random()*2; }
+    s.textContent = char;
+    s.style.cssText = `left:${Math.random()*100}%;top:${Math.random()*100}%;--d:${speed}s;--delay:${Math.random()*9}s;--op:${op};--size:${size};`;
+    c.appendChild(s);
+  }
+})();
+
+// Countdown
+(function tick(){
+  const target = new Date('2026-12-26T17:00:00');
+  const diff = target - new Date();
+  if(diff<=0){['cd-days','cd-hours','cd-mins','cd-secs'].forEach(id=>document.getElementById(id).textContent='0');return;}
+  document.getElementById('cd-days').textContent  = String(Math.floor(diff/86400000)).padStart(2,'0');
+  document.getElementById('cd-hours').textContent = String(Math.floor(diff%86400000/3600000)).padStart(2,'0');
+  document.getElementById('cd-mins').textContent  = String(Math.floor(diff%3600000/60000)).padStart(2,'0');
+  document.getElementById('cd-secs').textContent  = String(Math.floor(diff%60000/1000)).padStart(2,'0');
+  setTimeout(tick,1000);
+})();
+
+// Google Sheets backend
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbzST-AxWvAnoEImTau4aw4-1mOGZ1VcW7R4xX4djEQnkvXwCqL-UFdSkapJRMqQT_Mg/exec';
+
+/* ─── SHARED RESPONSE NORMALISER (identical to admin.html) ──────────────────
+   Accepts an array of objects, or rows-with-header, or rows-without-header,
+   optionally wrapped in {data:[...]}, and matches columns by header name.  */
+const FIELD_ALIASES = {
+  timestamp: ['timestamp','time','date','submitted','submittedat','datetime','when'],
+  name:      ['name','fullname','guest','guestname','names','guests1','guest1'],
+  attending: ['attending','rsvp','response','status','willattend','coming','reply'],
+  guests:    ['guests','numguests','guestcount','partysize','numberofguests','count','seats'],
+  message:   ['message','note','notes','comment','comments','wishes','messagetothecouple'],
+  meal:      ['meal','mealpreference','mealchoice','food','diet','dietary','dietaryrestrictions'],
+  email:     ['email','emailaddress','mail','e-mail','contact','contactemail']
+};
+const POSITIONAL = ['timestamp','name','attending','guests','message','meal','email'];
+
+function canon(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+function fieldFor(header){
+  const c = canon(header);
+  if(!c) return null;
+  for(const field in FIELD_ALIASES){
+    if(FIELD_ALIASES[field].indexOf(c) !== -1) return field;
+  }
+  return null;
+}
+
+function blankGuest(){
+  return {timestamp:'',name:'',attending:'',guests:'',message:'',meal:'',email:''};
+}
+
+function looksLikeHeaderRow(row){
+  let hits = 0;
+  for(const cell of row) if(fieldFor(cell)) hits++;
+  return hits >= 2;
+}
+
+function guestFromObject(obj){
+  const g = blankGuest();
+  for(const key in obj){
+    const f = fieldFor(key);
+    if(f && !g[f]) g[f] = obj[key]==null ? '' : String(obj[key]).trim();
+  }
+  return g;
+}
+
+function guestFromRow(row, headerFields){
+  const g = blankGuest();
+  row.forEach((cell,i)=>{
+    const f = headerFields ? headerFields[i] : POSITIONAL[i];
+    if(f && !g[f]) g[f] = cell==null ? '' : String(cell).trim();
+  });
+  return g;
+}
+
+function normalizeResponses(payload){
+  let data = payload;
+  if(data && !Array.isArray(data) && typeof data === 'object'){
+    for(const key of ['data','rows','records','result','results','values','responses','guests']){
+      if(Array.isArray(data[key])){ data = data[key]; break; }
+    }
+  }
+  if(!Array.isArray(data) || !data.length) return [];
+  const first = data[0];
+  if(Array.isArray(first)){
+    let headerFields = null, rows = data;
+    if(looksLikeHeaderRow(first)){ headerFields = first.map(fieldFor); rows = data.slice(1); }
+    return rows.filter(Array.isArray).map(r=>guestFromRow(r,headerFields)).filter(g=>g.name);
+  }
+  if(first && typeof first === 'object'){
+    return data.filter(o=>o && typeof o==='object').map(guestFromObject).filter(g=>g.name);
+  }
+  return [];
+}
+
+function isAttending(value){
+  const c = canon(value);
+  return c==='yes' || c==='y' || c==='true' || c==='1' ||
+         c==='attending' || c==='accept' || c==='accepts' || c.indexOf('joyfully')===0;
+}
+
+function partySize(g){
+  const n = parseInt(g.guests,10);
+  if(!isNaN(n) && n > 0) return n;
+  return isAttending(g.attending) ? 1 : 0;
+}
+
+function prettyTime(value){
+  if(!value) return '';
+  const d = new Date(value);
+  if(isNaN(d.getTime())) return String(value);
+  return d.toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+}
+
+/* Tells any open admin tab on this site to refresh straight away. */
+const RSVP_CHANNEL = 'rudy-sarah-rsvp';
+function broadcastRSVP(){
+  try {
+    if('BroadcastChannel' in window){
+      new BroadcastChannel(RSVP_CHANNEL).postMessage({type:'rsvp-submitted', at: Date.now()});
+    }
+    localStorage.setItem(RSVP_CHANNEL + ':ping', String(Date.now()));
+  } catch(e) { /* private browsing — the admin page still polls every 15s */ }
+}
+
+function showPage(id,btn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  btn.classList.add('active');
+  if(id==='responses') renderResponses();
+}
+
+function submitRSVP(){
+  const name = document.getElementById('f-name').value.trim();
+  if(!name){showToast('Please enter your name.');return;}
+  const att = document.querySelector('input[name=att]:checked').value;
+  const guests = att==='yes'?(parseInt(document.getElementById('f-guests').value)||1):0;
+  const name2 = document.getElementById('f-name2').value.trim();
+  if(guests === 2 && att === 'yes' && !name2){showToast('Please enter your guest\'s name.');return;}
+  const email = document.getElementById('f-email').value.trim();
+  if(!email){showToast('Please enter your email address.');return;}
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){showToast('Please check your email address.');return;}
+  const meal = document.querySelector('input[name=meal]:checked').value;
+  const meal2 = document.querySelector('input[name=meal2]:checked') ? document.querySelector('input[name=meal2]:checked').value : '';
+  const note = document.getElementById('f-note').value.trim();
+  const attending = att==='yes'?'Yes':'No';
+  const fullName = guests === 2 && name2 ? `${name} & ${name2}` : name;
+
+  const payload = {
+    name: fullName,
+    attending,
+    guests,
+    meal: guests === 2 && meal2 ? `${meal} / ${meal2}` : meal,
+    message: note,
+    email
+  };
+
+  const btnEl = document.querySelector('.submit-btn');
+  const btn   = btnEl.querySelector('span');
+  if(btnEl.disabled) return;              // no double-submits
+  btnEl.disabled = true;
+  btn.textContent = 'Sending…';
+
+  sendRSVP(payload)
+    .then(()=>{
+      broadcastRSVP();                    // wake any open admin tab immediately
+      document.getElementById('rsvp-form').style.display='none';
+      document.getElementById('success-card').style.display='block';
+    })
+    .catch(()=>{
+      showToast('We could not save your RSVP. Please try again.');
+    })
+    .finally(()=>{
+      btnEl.disabled = false;
+      btn.textContent = 'Confirm My RSVP';
+    });
+}
+
+/* Posts as text/plain so the browser sends it without a CORS preflight —
+   Apps Script does not answer OPTIONS, and a preflight would kill the request.
+   If the response cannot be read (deployment without CORS headers) we do NOT
+   blindly re-post, because the row may already have been written; instead we
+   read the sheet back and look for the row we just submitted. */
+function sendRSVP(payload){
+  return fetch(SHEET_URL, {
+    method: 'POST',
+    headers: {'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(payload)
+  })
+  .then(res=>{
+    if(!res.ok) throw new Error('http');
+    return res.text();
+  })
+  .then(text=>{
+    let out = null;
+    try { out = JSON.parse(text); } catch(e) { out = null; }
+    if(out && (out.result === 'error' || out.error)) throw new Error('server');
+    return true;                          // response readable and healthy
+  })
+  .catch(err=>{
+    // An explicit server-side error means nothing was written — report it.
+    if(err && err.message === 'server') throw err;
+    // Otherwise the request may well have landed but the response was not
+    // readable (no CORS headers). Never re-post; read the sheet back instead.
+    return confirmWritten(payload);
+  });
+}
+
+/* Re-reads the sheet and checks whether this submission landed. */
+function confirmWritten(payload, attempt){
+  attempt = attempt || 1;
+  const wantName  = canon(payload.name);
+  const wantEmail = canon(payload.email);
+  return new Promise((resolve,reject)=>{
+    setTimeout(()=>{
+      fetch(SHEET_URL + '?t=' + Date.now(), {cache:'no-store'})
+        .then(r=>r.json())
+        .then(data=>{
+          const found = normalizeResponses(data).some(g=>
+            canon(g.name) === wantName && (!wantEmail || canon(g.email) === wantEmail)
+          );
+          if(found) return resolve(true);
+          if(attempt >= 3) return reject(new Error('not found'));
+          confirmWritten(payload, attempt + 1).then(resolve, reject);
+        })
+        .catch(()=>{
+          if(attempt >= 3) return reject(new Error('unreachable'));
+          confirmWritten(payload, attempt + 1).then(resolve, reject);
+        });
+    }, attempt * 1200);
+  });
+}
+
+function resetForm(){
+  document.getElementById('f-name').value='';
+  document.getElementById('f-name2').value='';
+  document.getElementById('f-note').value='';
+  document.getElementById('f-guests').value=1;
+  document.getElementById('f-email').value='';
+  document.getElementById('guest2-field').style.display='none';
+  document.getElementById('guest2-meal-field').style.display='none';
+  document.querySelector('input[name=meal][value=Standard]').checked=true;
+  document.querySelector('input[name=meal2][value=Standard]').checked=true;
+  document.getElementById('cs-label').textContent='1 Guest';
+  document.querySelectorAll('.cs-option').forEach((o,i)=>{o.classList.toggle('selected',i===0);});
+  document.querySelector('input[name=att][value=yes]').checked=true;
+  document.getElementById('guests-field').style.display='block';
+  document.getElementById('rsvp-form').style.display='block';
+  document.getElementById('success-card').style.display='none';
+}
+
+document.querySelectorAll('input[name=att]').forEach(r=>
+  r.addEventListener('change',()=>{
+    document.getElementById('guests-field').style.display=r.value==='yes'?'block':'none';
+  })
+);
+
+function renderResponses(){
+  const cards=document.getElementById('cards');
+  const empty=document.getElementById('empty');
+  cards.innerHTML='';
+  empty.style.display='none';
+  document.getElementById('s-total').textContent='…';
+  document.getElementById('s-yes').textContent='…';
+  document.getElementById('s-guests').textContent='…';
+
+  fetch(SHEET_URL + '?t=' + Date.now(), {cache:'no-store'})
+    .then(r=>r.json())
+    .then(payload=>{
+      const list = normalizeResponses(payload);
+      if(!list.length){
+        empty.style.display='block';
+        empty.querySelector('h3').textContent='No responses yet — be the first.';
+        document.getElementById('s-total').textContent=0;
+        document.getElementById('s-yes').textContent=0;
+        document.getElementById('s-guests').textContent=0;
+        return;
+      }
+      const yes = list.filter(g=>isAttending(g.attending));
+      document.getElementById('s-total').textContent = list.length;
+      document.getElementById('s-yes').textContent   = yes.length;
+      document.getElementById('s-guests').textContent= yes.reduce((s,g)=>s+partySize(g),0);
+      cards.innerHTML = list.map(g=>{
+        const going = isAttending(g.attending);
+        const seats = partySize(g);
+        return `
+        <div class="rsvp-card ${going?'':'declining'}">
+          <div class="card-name">${esc(g.name)}</div>
+          <div class="badge ${going?'badge-yes':'badge-no'}">${going?'Attending':'Declining'}</div>
+          <div class="card-meta">${going?`${seats} guest${seats===1?'':'s'} &nbsp;·&nbsp; `:''}${esc(prettyTime(g.timestamp))}</div>
+          ${g.message?`<div class="card-note">${esc(g.message)}</div>`:''}
+        </div>`;
+      }).join('');
+    })
+    .catch(()=>{
+      empty.style.display='block';
+      empty.querySelector('h3').textContent='Could not load responses. Try again.';
+    });
+}
+
+function exportCSV(){
+  fetch(SHEET_URL + '?t=' + Date.now(), {cache:'no-store'})
+    .then(r=>r.json())
+    .then(payload=>{
+      const list = normalizeResponses(payload);
+      if(!list.length){showToast('No responses to export yet.');return;}
+      const rows=[['Name','Attending','Guests','Meal','Message','Email','Submitted']];
+      list.forEach(g=>rows.push([g.name, isAttending(g.attending)?'Yes':'No', partySize(g), g.meal, g.message, g.email, g.timestamp]));
+      const csv=rows.map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+      a.download='Rudy-Sarah-Wedding-RSVPs.csv';
+      a.click();
+      showToast('Guest list exported.');
+    })
+    .catch(()=>showToast('Could not export right now.'));
+}
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+function toggleDropdown() {
+  const sel = document.getElementById('guests-select');
+  sel.classList.toggle('open');
+}
+function selectGuests(val, label) {
+  document.getElementById('f-guests').value = val;
+  document.getElementById('cs-label').textContent = label;
+  document.querySelectorAll('.cs-option').forEach(o => o.classList.remove('selected'));
+  event.target.classList.add('selected');
+  document.getElementById('guests-select').classList.remove('open');
+  document.getElementById('guest2-field').style.display = val === 2 ? 'block' : 'none';
+  document.getElementById('guest2-meal-field').style.display = val === 2 ? 'block' : 'none';
+}
+document.addEventListener('click', function(e) {
+  const sel = document.getElementById('guests-select');
+  if (sel && !sel.contains(e.target)) sel.classList.remove('open');
+});
+
+function getDirections(e) {
+  e.preventDefault();
+  const address = '400 Eglinton Avenue West, Toronto, ON M5N 1A2';
+  const encoded = encodeURIComponent(address);
+  const ua = navigator.userAgent;
+  // iOS — Apple Maps
+  if (/iPhone|iPad|iPod/i.test(ua)) {
+    window.open('maps://?daddr=' + encoded, '_blank');
+  }
+  // Android — Google Maps app
+  else if (/Android/i.test(ua)) {
+    window.open('geo:0,0?q=' + encoded, '_blank');
+  }
+  // Desktop — Google Maps in browser
+  else {
+    window.open('https://www.google.com/maps/dir/?api=1&destination=' + encoded, '_blank');
+  }
+}
+
+function esc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Rudy &amp; Sarah Wedding</title>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Playfair+Display:ital,wght@0,400;1,400&family=Raleway:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --black:    #000000;
+  --panel:    #0f0f0f;
+  --panel2:   #161616;
+  --border:   rgba(255,255,255,0.08);
+  --gold:     #c9a96e;
+  --gold-dim: #8a6f42;
+  --ivory:    #f5ede0;
+  --muted:    #8b8699;
+  --green:    #4a9e6e;
+  --red:      #9e4a4a;
+}
+body {
+  font-family: 'Raleway', sans-serif;
+  background: var(--black);
+  color: var(--ivory);
+  min-height: 100vh;
+}
+
+/* HEADER */
+.header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 1.2rem 1.5rem;
+  display: flex; align-items: center;
+  justify-content: space-between; flex-wrap: wrap; gap: 1rem;
+  position: sticky; top: 0; z-index: 100;
+}
+.header-title {
+  font-family: 'Great Vibes', cursive;
+  font-size: 1.6rem; color: var(--gold);
+}
+.header-sub {
+  font-size: 0.55rem; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted);
+}
+.header-right { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+
+/* LIVE INDICATOR */
+.live {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.55rem; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--muted);
+  white-space: nowrap;
+}
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green); flex-shrink: 0;
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.live[data-state="paused"] .live-dot { background: var(--gold-dim); animation: none; }
+.live[data-state="error"]  .live-dot { background: var(--red);      animation: none; }
+@keyframes pulse {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 rgba(74,158,110,0.5); }
+  50%      { opacity: 0.5; box-shadow: 0 0 0 5px rgba(74,158,110,0); }
+}
+
+/* STATS */
+.stats-bar {
+  display: flex; gap: 1.5rem; flex-wrap: wrap;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.stat { text-align: center; }
+.stat-num {
+  display: block;
+  font-family: 'Playfair Display', serif;
+  font-size: 1.8rem; color: var(--gold); line-height: 1;
+  transition: color .3s;
+}
+.stat-num.bumped { color: var(--green); }
+.stat-lbl {
+  font-size: 0.52rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--muted);
+}
+
+/* ACTION BUTTONS */
+.actions {
+  display: flex; gap: 0.75rem; flex-wrap: wrap;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.btn {
+  padding: 0.65rem 1.2rem;
+  border-radius: 3px;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.6rem; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  cursor: pointer; transition: all .2s;
+}
+.btn-gold {
+  background: var(--gold); color: #000; border: none;
+}
+.btn-gold:hover { background: #b8975a; }
+.btn-outline {
+  background: none; border: 1px solid var(--gold-dim); color: var(--gold-dim);
+}
+.btn-outline:hover { border-color: var(--gold); color: var(--gold); }
+
+/* FILTER TABS */
+.filter-tabs {
+  display: flex; gap: 0;
+  padding: 1rem 1.5rem 0;
+}
+.tab {
+  padding: 0.5rem 1rem;
+  font-size: 0.58rem; letter-spacing: 0.15em;
+  text-transform: uppercase; color: var(--muted);
+  cursor: pointer; border-bottom: 2px solid transparent;
+  transition: all .2s;
+  background: none; border-top: none; border-left: none; border-right: none;
+  font-family: 'Raleway', sans-serif;
+}
+.tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+/* SEARCH */
+.search-wrap { padding: 1rem 1.5rem 0; }
+.search-input {
+  width: 100%;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.75rem 1rem;
+  font-family: 'Raleway', sans-serif;
+  font-size: 0.82rem; font-weight: 300;
+  color: var(--ivory); outline: none;
+}
+.search-input::placeholder { color: rgba(139,134,153,0.4); }
+.search-input:focus { border-color: var(--gold-dim); }
+
+/* GUEST LIST */
+.guest-list {
+  padding: 1rem 1.5rem 4rem;
+  display: flex; flex-direction: column; gap: 0.7rem;
+}
+
+.guest-card {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1rem 1.2rem;
+  display: flex; align-items: center;
+  justify-content: space-between; gap: 1rem;
+  position: relative; overflow: hidden;
+}
+.guest-card::before {
+  content: ''; position: absolute; top: 0; left: 0;
+  width: 3px; height: 100%;
+}
+.guest-card.attending::before { background: var(--green); }
+.guest-card.declining::before { background: var(--red); }
+
+.guest-card.is-new {
+  border-color: var(--gold);
+  animation: arrive .5s ease;
+}
+@keyframes arrive {
+  from { opacity: 0; transform: translateY(-8px); background: rgba(201,169,110,0.12); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.guest-info { flex: 1; min-width: 0; }
+.guest-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1rem; font-style: italic; color: var(--ivory);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.guest-meta {
+  font-size: 0.62rem; color: var(--muted); margin-top: 0.2rem;
+}
+.guest-email {
+  font-size: 0.65rem; color: var(--gold-dim); margin-top: 0.15rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.guest-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.icon-btn {
+  width: 34px; height: 34px;
+  border-radius: 3px; border: 1px solid var(--border);
+  background: none; color: var(--muted);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 0.9rem; transition: all .2s;
+}
+.icon-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+.badge-sm {
+  padding: 0.18rem 0.55rem; border-radius: 20px;
+  font-size: 0.5rem; letter-spacing: 0.1em;
+  text-transform: uppercase; font-weight: 600; flex-shrink: 0;
+}
+.badge-yes { background: rgba(74,158,110,0.15); color: var(--green); }
+.badge-no  { background: rgba(158,74,74,0.15); color: var(--red); }
+.badge-new { background: var(--gold); color: #000; }
+
+/* EMPTY */
+.empty { text-align: center; padding: 4rem 1rem; color: var(--muted); }
+.empty p { font-family: 'Playfair Display', serif; font-style: italic; font-size: 1.2rem; }
+.empty small {
+  display: block; margin-top: 0.75rem;
+  font-family: 'Raleway', sans-serif; font-style: normal;
+  font-size: 0.62rem; letter-spacing: 0.1em; color: var(--gold-dim);
+}
+
+/* LOADING */
+.loading {
+  text-align: center; padding: 3rem;
+  font-size: 0.65rem; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--muted);
+}
+
+/* TOAST */
+.toast {
+  position: fixed; bottom: 2rem; left: 50%;
+  transform: translateX(-50%) translateY(16px);
+  background: var(--panel); border: 1px solid var(--gold);
+  color: var(--ivory); padding: 0.7rem 1.6rem;
+  border-radius: 3px; font-size: 0.68rem; letter-spacing: 0.1em;
+  opacity: 0; pointer-events: none;
+  transition: opacity .3s, transform .3s; z-index: 999;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* EMAIL MODAL */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85); z-index: 500;
+  align-items: center; justify-content: center; padding: 1.5rem;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--gold-dim);
+  border-radius: 3px; padding: 2rem;
+  width: 100%; max-width: 500px;
+  position: relative;
+}
+.modal h3 {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.4rem; font-style: italic;
+  color: var(--gold); margin-bottom: 1rem;
+}
+.modal-field { margin-bottom: 1rem; }
+.modal-field label {
+  display: block; font-size: 0.55rem;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 0.4rem;
+}
+.modal-field input, .modal-field textarea {
+  width: 100%; background: var(--panel2);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0.75rem 1rem; font-family: 'Raleway', sans-serif;
+  font-size: 0.82rem; color: var(--ivory); outline: none;
+}
+.modal-field textarea { min-height: 100px; resize: vertical; }
+.modal-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+.modal-close {
+  position: absolute; top: 1rem; right: 1rem;
+  background: none; border: none; color: var(--muted);
+  font-size: 1.2rem; cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div>
+    <div class="header-title">Rudy &amp; Sarah</div>
+    <div class="header-sub">Wedding Admin · December 26, 2026</div>
+  </div>
+  <div class="header-right">
+    <div class="live" id="live" data-state="live">
+      <span class="live-dot"></span>
+      <span id="live-text">Connecting…</span>
+    </div>
+    <button class="btn btn-outline" onclick="loadGuests({manual:true})">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- STATS -->
+<div class="stats-bar">
+  <div class="stat"><span class="stat-num" id="s-total">—</span><span class="stat-lbl">Responses</span></div>
+  <div class="stat"><span class="stat-num" id="s-yes">—</span><span class="stat-lbl">Attending</span></div>
+  <div class="stat"><span class="stat-num" id="s-no">—</span><span class="stat-lbl">Declining</span></div>
+  <div class="stat"><span class="stat-num" id="s-guests">—</span><span class="stat-lbl">Total Guests</span></div>
+  <div class="stat"><span class="stat-num" id="s-veg">—</span><span class="stat-lbl">Vegetarian</span></div>
+</div>
+
+<!-- ACTIONS -->
+<div class="actions">
+  <button class="btn btn-gold" onclick="emailAll()">✉ Email All Guests</button>
+  <button class="btn btn-outline" onclick="emailAttending()">✉ Email Attending Only</button>
+  <button class="btn btn-outline" onclick="exportCSV()">↓ Export CSV</button>
+</div>
+
+<!-- FILTER TABS -->
+<div class="filter-tabs">
+  <button class="tab active" onclick="setFilter('all', this)">All</button>
+  <button class="tab" onclick="setFilter('yes', this)">Attending</button>
+  <button class="tab" onclick="setFilter('no', this)">Declining</button>
+</div>
+
+<!-- SEARCH -->
+<div class="search-wrap">
+  <input class="search-input" id="search" placeholder="Search guests…" oninput="renderGuests()">
+</div>
+
+<!-- GUEST LIST -->
+<div class="guest-list" id="guest-list">
+  <div class="loading">Loading guest list…</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- EMAIL MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <h3 id="modal-title">Compose Email</h3>
+    <div class="modal-field">
+      <label>To</label>
+      <input type="text" id="modal-to" readonly>
+    </div>
+    <div class="modal-field">
+      <label>Subject</label>
+      <input type="text" id="modal-subject" value="Rudy &amp; Sarah's Wedding — December 26, 2026">
+    </div>
+    <div class="modal-field">
+      <label>Message</label>
+      <textarea id="modal-body" placeholder="Write your message…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-gold" onclick="sendEmail()">Open in Mail App</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ─── CONFIG ────────────────────────────────────────────────────────────── */
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbzST-AxWvAnoEImTau4aw4-1mOGZ1VcW7R4xX4djEQnkvXwCqL-UFdSkapJRMqQT_Mg/exec';
+const POLL_MS   = 15000;   // how often to check the sheet for new RSVPs
+const CHANNEL   = 'rudy-sarah-rsvp';
+
+/* ─── RESPONSE NORMALISER ───────────────────────────────────────────────────
+   The Apps Script endpoint may return either
+     a) [{Timestamp, Name, Attending, ...}, ...]        (array of objects)
+     b) [['Timestamp','Name',...], ['...','...'], ...]  (rows, header first)
+     c) [['...','...'], ...]                            (rows, no header)
+   or any of those wrapped in {data:[...]}. We accept all of them, and match
+   columns by header name whenever names are available so a re-ordered sheet
+   cannot silently swap Meal with Message.                                   */
+
+const FIELD_ALIASES = {
+  timestamp: ['timestamp','time','date','submitted','submittedat','datetime','when'],
+  name:      ['name','fullname','guest','guestname','names','guests1','guest1'],
+  attending: ['attending','rsvp','response','status','willattend','coming','reply'],
+  guests:    ['guests','numguests','guestcount','partysize','numberofguests','count','seats'],
+  message:   ['message','note','notes','comment','comments','wishes','messagetothecouple'],
+  meal:      ['meal','mealpreference','mealchoice','food','diet','dietary','dietaryrestrictions'],
+  email:     ['email','emailaddress','mail','e-mail','contact','contactemail']
+};
+// Fallback order, used only when the payload carries no usable header row.
+const POSITIONAL = ['timestamp','name','attending','guests','message','meal','email'];
+
+function canon(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+function fieldFor(header) {
+  const c = canon(header);
+  if (!c) return null;
+  for (const field in FIELD_ALIASES) {
+    if (FIELD_ALIASES[field].indexOf(c) !== -1) return field;
+  }
+  return null;
+}
+
+function blankGuest() {
+  return { timestamp:'', name:'', attending:'', guests:'', message:'', meal:'', email:'' };
+}
+
+function looksLikeHeaderRow(row) {
+  let hits = 0;
+  for (const cell of row) if (fieldFor(cell)) hits++;
+  return hits >= 2;
+}
+
+function guestFromObject(obj) {
+  const g = blankGuest();
+  for (const key in obj) {
+    const f = fieldFor(key);
+    if (f && !g[f]) g[f] = obj[key] == null ? '' : String(obj[key]).trim();
+  }
+  return g;
+}
+
+function guestFromRow(row, headerFields) {
+  const g = blankGuest();
+  row.forEach((cell, i) => {
+    const f = headerFields ? headerFields[i] : POSITIONAL[i];
+    if (f && !g[f]) g[f] = cell == null ? '' : String(cell).trim();
+  });
+  return g;
+}
+
+function normalizeResponses(payload) {
+  let data = payload;
+  if (data && !Array.isArray(data) && typeof data === 'object') {
+    for (const key of ['data','rows','records','result','results','values','responses','guests']) {
+      if (Array.isArray(data[key])) { data = data[key]; break; }
+    }
+  }
+  if (!Array.isArray(data) || !data.length) return [];
+
+  const first = data[0];
+
+  if (Array.isArray(first)) {
+    let headerFields = null;
+    let rows = data;
+    if (looksLikeHeaderRow(first)) {
+      headerFields = first.map(fieldFor);
+      rows = data.slice(1);
+    }
+    return rows.filter(Array.isArray).map(r => guestFromRow(r, headerFields)).filter(g => g.name);
+  }
+
+  if (first && typeof first === 'object') {
+    return data.filter(o => o && typeof o === 'object').map(guestFromObject).filter(g => g.name);
+  }
+
+  return [];
+}
+
+/* Values in the Attending column vary by how the sheet was filled in. */
+function isAttending(value) {
+  const c = canon(value);
+  return c === 'yes' || c === 'y' || c === 'true' || c === '1' ||
+         c === 'attending' || c === 'accept' || c === 'accepts' ||
+         c.indexOf('joyfully') === 0;
+}
+
+/* A stable identity for a response, so we can tell new ones from old ones. */
+function guestKey(g) {
+  return [canon(g.timestamp), canon(g.name), canon(g.email)].join('|');
+}
+
+function partySize(g) {
+  const n = parseInt(g.guests, 10);
+  if (!isNaN(n) && n > 0) return n;
+  return isAttending(g.attending) ? 1 : 0;   // blank guest count still means 1 seat
+}
+
+/* "Standard / Vegetarian" for a party of two = one vegetarian meal. */
+function vegMeals(g) {
+  if (!isAttending(g.attending) || !g.meal) return 0;
+  return g.meal.split(/[\/,;+&]| and /i).filter(p => p.toLowerCase().indexOf('veg') !== -1).length;
+}
+
+function prettyTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+}
+
+/* ─── STATE ─────────────────────────────────────────────────────────────── */
+let allGuests    = [];
+let currentFilter = 'all';
+let seenKeys     = null;      // null until the first successful load
+let newKeys      = new Set(); // highlighted on the next render
+let lastSuccess  = 0;
+let unseenCount  = 0;         // arrivals while the tab was in the background
+let pollTimer    = null;
+let clockTimer   = null;
+let inFlight     = false;
+let newFlagTimer = null;
+
+/* ─── LOADING ───────────────────────────────────────────────────────────── */
+async function loadGuests(opts) {
+  opts = opts || {};
+  if (inFlight) return;
+  inFlight = true;
+
+  const firstEver = seenKeys === null;
+  if (firstEver || opts.manual) {
+    setLive('live', firstEver ? 'Connecting…' : 'Refreshing…');
+  }
+  if (firstEver) {
+    document.getElementById('guest-list').innerHTML =
+      '<div class="loading">Loading guest list…</div>';
+  }
+
+  try {
+    const res  = await fetch(SHEET_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const guests = normalizeResponses(data);
+
+    // Work out what is new since the last successful poll.
+    const keysNow = new Set(guests.map(guestKey));
+    let arrivals = 0;
+    if (seenKeys === null) {
+      newKeys = new Set();
+    } else {
+      const fresh = [];
+      keysNow.forEach(k => { if (!seenKeys.has(k)) fresh.push(k); });
+      arrivals = fresh.length;
+      if (arrivals) newKeys = new Set(fresh);
+    }
+    seenKeys    = keysNow;
+    allGuests   = guests;
+    lastSuccess = Date.now();
+
+    updateStats(arrivals > 0);
+    renderGuests();
+    announceArrivals(arrivals);
+    setLive('live', '');
+  } catch (e) {
+    if (seenKeys === null) {
+      document.getElementById('guest-list').innerHTML =
+        '<div class="empty"><p>Could not load guests.</p>' +
+        '<small>Check the Apps Script deployment is set to “Anyone”.</small></div>';
+    }
+    setLive('error', 'Offline — retrying');
+  } finally {
+    inFlight = false;
+  }
+}
+
+function announceArrivals(count) {
+  if (!count) return;
+  const word = count === 1 ? 'RSVP' : 'RSVPs';
+  showToast('✦  ' + count + ' new ' + word);
+  if (document.hidden) {
+    unseenCount += count;
+    document.title = '(' + unseenCount + ') Admin — Rudy & Sarah Wedding';
+  }
+  // Clear the "new" highlight after a while so the list settles down.
+  clearTimeout(newFlagTimer);
+  newFlagTimer = setTimeout(() => { newKeys = new Set(); renderGuests(); }, 30000);
+}
+
+/* ─── LIVE INDICATOR ────────────────────────────────────────────────────── */
+function setLive(state, textOverride) {
+  const el = document.getElementById('live');
+  el.setAttribute('data-state', state);
+  if (textOverride) {
+    document.getElementById('live-text').textContent = textOverride;
+  } else {
+    tickClock();
+  }
+}
+
+function tickClock() {
+  const el   = document.getElementById('live');
+  const text = document.getElementById('live-text');
+  if (el.getAttribute('data-state') === 'error') return;
+  if (!lastSuccess) return;
+  const secs = Math.round((Date.now() - lastSuccess) / 1000);
+  if (document.hidden) { text.textContent = 'Paused'; return; }
+  text.textContent = secs < 5    ? 'Live · just now'
+                   : secs < 60   ? 'Live · ' + secs + 's ago'
+                   : 'Live · ' + Math.round(secs / 60) + 'm ago';
+}
+
+/* ─── STATS ─────────────────────────────────────────────────────────────── */
+function updateStats(bump) {
+  const yes = allGuests.filter(g => isAttending(g.attending));
+  const no  = allGuests.filter(g => !isAttending(g.attending));
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    el.textContent = val;
+    if (bump) {
+      el.classList.add('bumped');
+      setTimeout(() => el.classList.remove('bumped'), 1200);
+    }
+  };
+  set('s-total',  allGuests.length);
+  set('s-yes',    yes.length);
+  set('s-no',     no.length);
+  set('s-guests', yes.reduce((s, g) => s + partySize(g), 0));
+  set('s-veg',    allGuests.reduce((s, g) => s + vegMeals(g), 0));
+}
+
+/* ─── RENDERING ─────────────────────────────────────────────────────────── */
+function setFilter(f, btn) {
+  currentFilter = f;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderGuests();
+}
+
+function renderGuests() {
+  const search = document.getElementById('search').value.toLowerCase();
+  const filtered = allGuests.filter(g => {
+    const yes = isAttending(g.attending);
+    if (currentFilter === 'yes' && !yes) return false;
+    if (currentFilter === 'no'  &&  yes) return false;
+    if (search &&
+        g.name.toLowerCase().indexOf(search) === -1 &&
+        g.email.toLowerCase().indexOf(search) === -1) return false;
+    return true;
+  });
+
+  const list = document.getElementById('guest-list');
+  if (!filtered.length) {
+    list.innerHTML = allGuests.length
+      ? '<div class="empty"><p>No guests match this filter.</p></div>'
+      : '<div class="empty"><p>No responses yet.</p><small>This page updates on its own as they come in.</small></div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(g => {
+    const yes    = isAttending(g.attending);
+    const seats  = partySize(g);
+    const isNew  = newKeys.has(guestKey(g));
+    return '' +
+    '<div class="guest-card ' + (yes ? 'attending' : 'declining') + (isNew ? ' is-new' : '') + '">' +
+      '<div class="guest-info">' +
+        '<div class="guest-name">' + esc(g.name) + '</div>' +
+        '<div class="guest-meta">' +
+          (yes ? seats + ' guest' + (seats === 1 ? '' : 's') : 'Declining') +
+          (yes && g.meal ? ' &nbsp;·&nbsp; ' + esc(g.meal) : '') +
+          (g.timestamp ? ' &nbsp;·&nbsp; ' + esc(prettyTime(g.timestamp)) : '') +
+        '</div>' +
+        (g.email ? '<div class="guest-email">' + esc(g.email) + '</div>' : '') +
+        (g.message ? '<div class="guest-meta" style="margin-top:0.3rem;font-style:italic;">“' + esc(g.message) + '”</div>' : '') +
+      '</div>' +
+      '<div class="guest-actions">' +
+        (isNew ? '<span class="badge-sm badge-new">New</span>' : '') +
+        '<span class="badge-sm ' + (yes ? 'badge-yes' : 'badge-no') + '">' + (yes ? 'Yes' : 'No') + '</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+/* ─── EMAIL ─────────────────────────────────────────────────────────────── */
+function emailAll() {
+  openModal('Email All Guests', allGuests.filter(g => g.email).map(g => g.email).join(','));
+}
+
+function emailAttending() {
+  openModal('Email Attending Guests',
+    allGuests.filter(g => isAttending(g.attending) && g.email).map(g => g.email).join(','));
+}
+
+function openModal(title, to) {
+  if (!to) { showToast('No email addresses on file yet.'); return; }
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-to').value = to;
+  document.getElementById('modal-body').value = '';
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function sendEmail() {
+  const to      = document.getElementById('modal-to').value;
+  const subject = encodeURIComponent(document.getElementById('modal-subject').value);
+  const body    = encodeURIComponent(document.getElementById('modal-body').value);
+  // Use bcc for group emails to protect privacy
+  const isSingle = !to.includes(',');
+  window.location.href = isSingle
+    ? 'mailto:' + to + '?subject=' + subject + '&body=' + body
+    : 'mailto:?bcc=' + encodeURIComponent(to) + '&subject=' + subject + '&body=' + body;
+}
+
+/* ─── EXPORT ────────────────────────────────────────────────────────────── */
+function exportCSV() {
+  if (!allGuests.length) { showToast('No responses to export yet.'); return; }
+  const rows = [['Name','Attending','Guests','Meal','Message','Email','Submitted']];
+  allGuests.forEach(g => rows.push([
+    g.name, isAttending(g.attending) ? 'Yes' : 'No', partySize(g),
+    g.meal, g.message, g.email, g.timestamp
+  ]));
+  const csv = rows.map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'Rudy-Sarah-Wedding-Guests.csv';
+  a.click();
+}
+
+/* ─── HELPERS ───────────────────────────────────────────────────────────── */
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+/* ─── POLLING / WAKE-UPS ────────────────────────────────────────────────── */
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(() => { if (!document.hidden) loadGuests(); }, POLL_MS);
+}
+function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    setLive('paused', 'Paused');
+  } else {
+    unseenCount = 0;
+    document.title = 'Admin — Rudy & Sarah Wedding';
+    setLive('live', '');
+    loadGuests();          // catch up immediately on return
+  }
+});
+
+window.addEventListener('online',  () => loadGuests());
+window.addEventListener('offline', () => setLive('error', 'Offline'));
+
+/* Instant update when an RSVP is submitted from the same site in another tab. */
+if ('BroadcastChannel' in window) {
+  const bc = new BroadcastChannel(CHANNEL);
+  bc.onmessage = ev => { if (ev.data && ev.data.type === 'rsvp-submitted') setTimeout(loadGuests, 1200); };
+}
+window.addEventListener('storage', ev => {
+  if (ev.key === CHANNEL + ':ping') setTimeout(loadGuests, 1200);
+});
+
+/* ─── GO ────────────────────────────────────────────────────────────────── */
+loadGuests();
+startPolling();
+clockTimer = setInterval(tickClock, 1000);
+</script>
+</body>
+</html>
