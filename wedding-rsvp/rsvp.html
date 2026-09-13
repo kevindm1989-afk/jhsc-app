@@ -333,6 +333,12 @@ nav button.active, nav button:hover {
   background: var(--gold); color: var(--night); font-weight: 600;
 }
 
+/* three-up meal toggle — keep it legible on a narrow phone */
+.meal-toggle .tog-inner { padding: 0.9rem 0.4rem; letter-spacing: 0.12em; }
+@media (max-width: 400px) {
+  .meal-toggle .tog-inner { font-size: 0.52rem; letter-spacing: 0.06em; padding: 0.85rem 0.25rem; }
+}
+
 .guests-input {
   display: flex; align-items: center; gap: 1rem;
 }
@@ -506,7 +512,7 @@ nav button.active, nav button:hover {
       <span class="event-date" style="font-size:0.85rem;letter-spacing:0.3em;color:var(--gold-dim);margin-bottom:0.2rem;">WHEN</span>
       <span class="event-date" style="color:var(--white);">Saturday &nbsp;·&nbsp; December 26, 2026</span>
       <span class="event-time" style="color:var(--gold);">5:00 PM — 1:00 AM</span>
-      <span class="event-time" style="margin-top:0.4rem;color:var(--gold);">Cocktail Reception 5:00 PM &nbsp;·&nbsp; Ceremony 5:30 PM</span>
+      <span class="event-time" style="margin-top:0.4rem;color:var(--gold);">Doors Open at 5:00 PM &nbsp;·&nbsp; Ceremony 5:30 PM</span>
       <span class="event-date" style="font-size:0.85rem;letter-spacing:0.3em;color:var(--gold-dim);margin-top:1.2rem;margin-bottom:0.2rem;">WHERE</span>
       <span class="event-time" style="color:var(--white);letter-spacing:0.18em;">The Eglinton Grand</span>
       <span class="event-time" style="color:var(--gold);">400 Eglinton Avenue West, Toronto, ON M5N 1A2</span>
@@ -583,17 +589,19 @@ nav button.active, nav button:hover {
 
       <div class="field">
         <label>Meal Preference</label>
-        <div class="attend-toggle">
+        <div class="attend-toggle meal-toggle">
           <label><input type="radio" name="meal" value="Standard" checked><span class="tog-inner">Standard</span></label>
           <label><input type="radio" name="meal" value="Vegetarian"><span class="tog-inner">Vegetarian</span></label>
+          <label><input type="radio" name="meal" value="Vegan"><span class="tog-inner">Vegan</span></label>
         </div>
       </div>
 
       <div class="field" id="guest2-meal-field" style="display:none;">
         <label>Guest 2 — Meal Preference</label>
-        <div class="attend-toggle">
+        <div class="attend-toggle meal-toggle">
           <label><input type="radio" name="meal2" value="Standard" checked><span class="tog-inner">Standard</span></label>
           <label><input type="radio" name="meal2" value="Vegetarian"><span class="tog-inner">Vegetarian</span></label>
+          <label><input type="radio" name="meal2" value="Vegan"><span class="tog-inner">Vegan</span></label>
         </div>
       </div>
 

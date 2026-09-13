@@ -181,7 +181,8 @@ body {
   font-size: 0.55rem; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--muted);
 }
-.d-meal.veg { background: rgba(201,169,110,0.16); color: var(--gold); }
+.d-meal.vegetarian { background: rgba(201,169,110,0.16); color: var(--gold); }
+.d-meal.vegan      { background: rgba(74,158,110,0.18);  color: var(--green); }
 .d-no   { color: var(--red); }
 .d-note { font-family: 'Playfair Display', serif; font-style: italic; color: rgba(245,237,224,0.72); }
 .d-mail { color: var(--gold-dim); text-decoration: none; }
@@ -333,6 +334,7 @@ body {
   <div class="stat"><span class="stat-num" id="s-no">—</span><span class="stat-lbl">Declining</span></div>
   <div class="stat"><span class="stat-num" id="s-guests">—</span><span class="stat-lbl">Total Guests</span></div>
   <div class="stat"><span class="stat-num" id="s-veg">—</span><span class="stat-lbl">Vegetarian</span></div>
+  <div class="stat"><span class="stat-num" id="s-vegan">—</span><span class="stat-lbl">Vegan</span></div>
 </div>
 
 <!-- ACTIONS -->
@@ -497,10 +499,20 @@ function partySize(g) {
   return isAttending(g.attending) ? 1 : 0;   // blank guest count still means 1 seat
 }
 
-/* "Standard / Vegetarian" for a party of two = one vegetarian meal. */
-function vegMeals(g) {
+/* Which meal a single choice is. Vegan is checked first — it contains "veg". */
+function mealKind(meal) {
+  const c = canon(meal);
+  if (!c) return '';
+  if (c.indexOf('vegan') !== -1) return 'vegan';
+  if (c.indexOf('veg')   !== -1) return 'vegetarian';
+  return 'standard';
+}
+
+/* "Standard / Vegan" for a party of two = one standard and one vegan meal,
+   so the caterer gets a head count per meal rather than per response. */
+function countMeals(g, kind) {
   if (!isAttending(g.attending) || !g.meal) return 0;
-  return g.meal.split(/[\/,;+&]| and /i).filter(p => p.toLowerCase().indexOf('veg') !== -1).length;
+  return g.meal.split(/[\/,;+&]| and /i).filter(p => mealKind(p) === kind).length;
 }
 
 function prettyTime(value) {
@@ -628,7 +640,8 @@ function updateStats(bump) {
   set('s-yes',    yes.length);
   set('s-no',     no.length);
   set('s-guests', yes.reduce((s, g) => s + partySize(g), 0));
-  set('s-veg',    allGuests.reduce((s, g) => s + vegMeals(g), 0));
+  set('s-veg',    allGuests.reduce((s, g) => s + countMeals(g, 'vegetarian'), 0));
+  set('s-vegan',  allGuests.reduce((s, g) => s + countMeals(g, 'vegan'), 0));
 }
 
 /* ─── RENDERING ─────────────────────────────────────────────────────────── */
@@ -653,7 +666,7 @@ function partyMembers(g) {
   return [{ name: names[0] || String(g.name || ''), meal: meals.join(' / ') }];
 }
 
-function isVeg(meal) { return String(meal).toLowerCase().indexOf('veg') !== -1; }
+
 
 function detailRow(label, value) {
   return '<div class="d-row"><span class="d-lbl">' + label + '</span>' +
@@ -695,7 +708,8 @@ function renderGuests() {
                   : 'Guest';
       let val = esc(m.name);
       if (yes && m.meal) {
-        val += '<span class="d-meal' + (isVeg(m.meal) ? ' veg' : '') + '">' + esc(m.meal) + '</span>';
+        const kind = mealKind(m.meal);
+        val += '<span class="d-meal' + (kind === 'standard' ? '' : ' ' + kind) + '">' + esc(m.meal) + '</span>';
       }
       rows.push(detailRow(label, val));
     });

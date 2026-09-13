@@ -63,9 +63,11 @@ Script has a daily quota.
   the time it came in.
 - **Search covers everything**, not just names — type "vegetarian" to pull up
   every veg meal, or search inside guests' messages.
-- **Vegetarian count counts meals, not responses.** A couple who chose
-  "Standard / Vegetarian" counts as one vegetarian meal, which is the number
-  the caterer actually needs.
+- **Meal counts count meals, not responses.** A couple who chose
+  "Standard / Vegan" counts as one standard and one vegan meal, which is the
+  number the caterer actually needs. Vegetarian and vegan are counted
+  separately — a naive "contains veg" test would swallow vegan into the
+  vegetarian total, so vegan is matched first.
 - A blank guest count on an attending response now counts as 1 seat instead of 0.
 - The public guest list shows names, attendance and messages only — never email
   addresses. Those stay on the admin page.
